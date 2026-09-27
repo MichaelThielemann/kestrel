@@ -96,31 +96,23 @@ describe("site/default routed paths: uniqueness", () => {
 });
 
 describe("site/default routed paths: shadowing", () => {
-  it("a draft with its own slug leaves the fallback page served; publishing it takes the fallback page offline in that locale", async () => {
+  it("a translation reaches a path only through a slug of its own, and only once it is published", async () => {
     const { site, content, emitted } = await routedSite({ model: MODEL });
-    const fallback = expectOk(await content.create("pages", { slug: "x", title: "X", status: "published" }));
-    expectOk(await content.update("pages", fallback.id, { title: "X EN", status: "published" }, { locale: "en" }));
+    const other = expectOk(await content.create("pages", { slug: "x", title: "X", status: "published" }));
     const draft = expectOk(await content.create("pages", { slug: "anders", title: "Anders", status: "draft" }));
     emitted.length = 0;
     expectOk(await content.update("pages", draft.id, { slug: "x", title: "Other", status: "draft" }, { locale: "en" }));
 
-    expect(expectOk(await site.resolve("pages", "en/x", { rules: published }))).toMatchObject({ id: fallback.id, _paths: { de: "/x", en: "/en/x" } });
-    expect(expectOk(await site.resolve("pages", "anders", { rules: { home: "home" } }))).toMatchObject({ id: draft.id, _paths: { de: null, en: null } });
+    expect(expectOk(await site.resolve("pages", "en/x", { rules: published }))).toBeNull();
+    expect(expectOk(await site.resolve("pages", "x", { rules: published }))).toMatchObject({ id: other.id, _paths: { de: "/x", en: null } });
     expect(emitted.flat()).toEqual([]);
 
     expectOk(await content.update("pages", draft.id, { status: "published" }, { locale: "en" }));
     expect(expectOk(await site.resolve("pages", "en/x", { rules: published }))).toMatchObject({ id: draft.id });
-    const moves = emitted.flat();
-    expect(moves.map(({ id, locale, from, to }) => ({ id, locale, from, to }))).toEqual(
-      expect.arrayContaining([
-        { id: fallback.id, locale: "en", from: "/en/x", to: null },
-        { id: draft.id, locale: "en", from: null, to: "/en/x" },
-      ]),
-    );
-    expect(moves).toHaveLength(2);
+    expect(emitted.flat().map(({ id, locale, from, to }) => ({ id, locale, from, to }))).toEqual([{ id: draft.id, locale: "en", from: null, to: "/en/x" }]);
 
     expectOk(await content.update("pages", draft.id, { status: "draft" }, { locale: "en" }));
-    expect(expectOk(await site.resolve("pages", "en/x", { rules: published }))).toMatchObject({ id: fallback.id });
+    expect(expectOk(await site.resolve("pages", "en/x", { rules: published }))).toBeNull();
   });
 
   it("with an empty filter a draft's own path finds it, and the configured filter does not", async () => {
@@ -128,16 +120,6 @@ describe("site/default routed paths: shadowing", () => {
     const draft = expectOk(await content.create("pages", { slug: "entwurf", title: "Entwurf", status: "draft" }));
     expect(expectOk(await site.resolve("pages", "entwurf", { rules: { home: "home" } }))).toMatchObject({ id: draft.id });
     expect(expectOk(await site.resolve("pages", "entwurf", { rules: published }))).toBeNull();
-  });
-
-  it("links to a shadowed fallback path are broken", async () => {
-    const { site, content } = await routedSite({ model: MODEL });
-    const fallback = expectOk(await content.create("pages", { slug: "x", title: "X", status: "published" }));
-    expectOk(await content.update("pages", fallback.id, { title: "X EN", status: "published" }, { locale: "en" }));
-    const owner = expectOk(await content.create("pages", { slug: "y", title: "Y", status: "published" }));
-    expectOk(await content.update("pages", owner.id, { slug: "x", title: "Y EN", status: "published" }, { locale: "en" }));
-    const linked = expectOk(await site.resolveLinks("pages", { id: "l", createdAt: 0, updatedAt: 0, ref: `kestrel:pages:${fallback.id}` }, { locale: "en", rules: published }));
-    expect(linked._links).toEqual({ [fallback.id]: { broken: true } });
   });
 
   it("rejects a per-call slug field or home that contradicts the route", async () => {
@@ -148,20 +130,17 @@ describe("site/default routed paths: shadowing", () => {
 });
 
 describe("site/default routed paths: moves and runs", () => {
-  it("a slug rename records one move per locale and one run", async () => {
+  it("a slug rename records one move per locale it changes and one run", async () => {
     const { content, db, emitted } = await routedSite({ model: MODEL });
     const page = expectOk(await content.create("pages", { slug: "alt", title: "Alt", status: "published" }));
-    expectOk(await content.update("pages", page.id, { title: "Old", status: "published" }, { locale: "en" }));
+    expectOk(await content.update("pages", page.id, { slug: "old", title: "Old", status: "published" }, { locale: "en" }));
     const before = (await runs(db)).length;
     emitted.length = 0;
     expectOk(await content.update("pages", page.id, { slug: "neu" }));
     const after = await runs(db);
     expect(after).toHaveLength(before + 1);
     const run = after[after.length - 1]!;
-    expect(run.moves.map(({ locale, from, to }) => ({ locale, from, to }))).toEqual([
-      { locale: "de", from: "/alt", to: "/neu" },
-      { locale: "en", from: "/en/alt", to: "/en/neu" },
-    ]);
+    expect(run.moves.map(({ locale, from, to }) => ({ locale, from, to }))).toEqual([{ locale: "de", from: "/alt", to: "/neu" }]);
     expect(run.announced).toBe(true);
     expect(emitted).toEqual([run.moves]);
   });
@@ -175,14 +154,14 @@ describe("site/default routed paths: moves and runs", () => {
     expect(expectOk(await site.resolve("pages", "weg", { rules: { home: "home" } }))).toBeNull();
   });
 
-  it("removing a translation whose slug equals the default slug keeps the path as a fallback, unreachable until the locale is published again", async () => {
+  it("removing a translation whose slug equals the default slug leaves the locale without a path", async () => {
     const { content, emitted, site } = await routedSite({ model: MODEL });
     const page = expectOk(await content.create("pages", { slug: "gleich", title: "Gleich", status: "published" }));
     expectOk(await content.update("pages", page.id, { slug: "gleich", title: "Same", status: "published" }, { locale: "en" }));
     emitted.length = 0;
     expectOk(await content.removeTranslation("pages", page.id, "en"));
     expect(emitted.flat().map(({ locale, from, to }) => ({ locale, from, to }))).toEqual([{ locale: "en", from: "/en/gleich", to: null }]);
-    expect(site.pathOf("pages", expectOk(await content.get("pages", page.id))!, { locale: "en", rules: { home: "home" } })).toBe("/en/gleich");
+    expect(site.pathOf("pages", expectOk(await content.get("pages", page.id))!, { locale: "en", rules: { home: "home" } })).toBeNull();
   });
 
   it("a removed translation falls back to the default locale's slug", async () => {
@@ -221,20 +200,7 @@ describe("site/default routed paths: runs", () => {
   });
 });
 
-describe("site/default routed paths: weak claims under a live strong claim", () => {
-  it("a new document whose fallback path is held by a live page gets no path there, no move and a broken link", async () => {
-    const { content, paths, site, emitted } = await routedSite({ model: MODEL });
-    const strong = expectOk(await content.create("pages", { slug: "s", title: "S", status: "published" }));
-    expectOk(await content.update("pages", strong.id, { slug: "x", title: "S en", status: "published" }, { locale: "en" }));
-    emitted.length = 0;
-    const weak = expectOk(await content.create("pages", { slug: "x", title: "W", status: "published" }));
-    expectOk(await content.update("pages", weak.id, { title: "W en", status: "published" }, { locale: "en" }));
-    expect(paths.pathsOf("pages", weak.id, "reachable")).toEqual({ de: "/x", en: null });
-    expect(emitted.flat().filter((m) => m.to === "/en/x")).toEqual([]);
-    const linked = expectOk(await site.resolveLinks("pages", { id: "l", createdAt: 0, updatedAt: 0, ref: `kestrel:pages:${weak.id}` }, { locale: "en", rules: published }));
-    expect(linked._links).toEqual({ [weak.id]: { broken: true } });
-  });
-
+describe("site/default routed paths: pathOf", () => {
   it("pathOf of a draft under a non-empty filter is null", async () => {
     const { content, site } = await routedSite({ model: MODEL });
     const draft = expectOk(await content.create("pages", { slug: "entwurf", title: "E", status: "draft" }));
@@ -362,13 +328,15 @@ describe("site/default routed paths: rebuild", () => {
     expect(expectOk(await site.resolve("pages", "d", { rules: published }))).toBeNull();
   });
 
-  it("adding a locale and rebooting makes the new locale resolve", async () => {
+  it("adding a locale and rebooting lets a translation with its own slug resolve there", async () => {
     const db = createFakePersistence();
     const deOnly: ContentModel = { ...MODEL, locales: ["de"] };
     const first = await routedSite({ model: deOnly, db });
     const page = expectOk(await first.content.create("pages", { slug: "x", title: "X", status: "published" }));
-    const { site } = await routedSite({ model: MODEL, db });
-    expect(expectOk(await site.resolve("pages", "en/x", { rules: { home: "home", fallback: true } }))).toMatchObject({ id: page.id, _locale: "en" });
+    const { site, content } = await routedSite({ model: MODEL, db });
+    expect(expectOk(await site.resolve("pages", "en/x", { rules: { home: "home", fallback: true } }))).toBeNull();
+    expectOk(await content.update("pages", page.id, { slug: "x", title: "X EN", status: "published" }, { locale: "en" }));
+    expect(expectOk(await site.resolve("pages", "en/x", { rules: published }))).toMatchObject({ id: page.id, _locale: "en" });
   });
 
   it("a direct write followed by an ordinary save of another page is picked up at the next boot", async () => {
@@ -398,13 +366,12 @@ describe("site/default routed paths: rebuild", () => {
 });
 
 describe("site/default routed paths: preview", () => {
-  it("names the occupant, the locale and the fallback page a save would shadow", async () => {
+  it("names the occupant and the locale of a taken path, and a page without a slug in a locale takes nothing there", async () => {
     const { content, paths } = await routedSite({ model: MODEL });
     const occupant = expectOk(await content.create("pages", { slug: "x", title: "Occupant", status: "published" }));
-    expectOk(await content.update("pages", occupant.id, { title: "Occupant EN", status: "published" }, { locale: "en" }));
     const mine = expectOk(await content.create("pages", { slug: "mine", title: "Mine", status: "published" }));
     expect(expectOk(await paths.preview("pages", { id: mine.id, slug: "x" }))).toMatchObject({ path: "/x", reachable: false, conflict: { path: "/x", locale: "de", type: "pages", id: occupant.id, label: "Occupant" } });
-    expect(expectOk(await paths.preview("pages", { id: mine.id, locale: "en", slug: "x" }))).toMatchObject({ path: "/en/x", conflict: null, shadows: [{ type: "pages", id: occupant.id, label: "Occupant EN", path: "/en/x" }] });
+    expect(expectOk(await paths.preview("pages", { id: mine.id, locale: "en", slug: "x" }))).toMatchObject({ path: "/en/x", conflict: null, shadows: [] });
     expect(expectOk(await paths.preview("pages", { id: mine.id, slug: "neu" }))).toMatchObject({ path: "/neu", reachable: true, reason: null });
   });
 });
@@ -436,5 +403,64 @@ describe("site/default routed paths: memory", () => {
     const content = routedContent(raw, paths, db);
     expectOk(await content.create("posts", { permalink: "p", title: "P", status: "published" }));
     expect(emitted).toEqual([]);
+  });
+});
+
+describe("site/default routed paths: a translation without a slug of its own", () => {
+  it("refuses to save a published translation without its own slug and names the slug field", async () => {
+    const { content } = await routedSite({ model: MODEL });
+    const page = expectOk(await content.create("pages", { slug: "sommerfest", title: "Sommerfest", status: "draft" }));
+    const error = expectErr(await content.update("pages", page.id, { title: "Summer party", status: "published" }, { locale: "en" }), "VALIDATION");
+    expect(error.details?.fields).toEqual([{ field: "slug", message: expect.stringContaining("en") as unknown }]);
+  });
+
+  it("refuses to clear the slug of a published translation", async () => {
+    const { content, site } = await routedSite({ model: MODEL });
+    const page = expectOk(await content.create("pages", { slug: "fest", title: "Fest", status: "published" }));
+    expectOk(await content.update("pages", page.id, { slug: "party", title: "Party", status: "published" }, { locale: "en" }));
+    expectErr(await content.update("pages", page.id, { slug: null }, { locale: "en" }), "VALIDATION");
+    expect(expectOk(await site.resolve("pages", "en/party", { rules: published }))).toMatchObject({ id: page.id });
+  });
+
+  it("saves a draft translation without its own slug, and refuses to publish it until it has one", async () => {
+    const { content, site } = await routedSite({ model: MODEL });
+    const page = expectOk(await content.create("pages", { slug: "herbst", title: "Herbst", status: "published" }));
+    expectOk(await content.update("pages", page.id, { title: "Autumn", status: "draft" }, { locale: "en" }));
+    expectErr(await content.update("pages", page.id, { status: "published" }, { locale: "en" }), "VALIDATION");
+    expectOk(await content.update("pages", page.id, { slug: "autumn", status: "published" }, { locale: "en" }));
+    expect(expectOk(await site.resolve("pages", "en/autumn", { rules: published }))).toMatchObject({ id: page.id });
+  });
+
+  it("refuses to publish the default locale without a slug", async () => {
+    const { content } = await routedSite({ model: MODEL });
+    expectErr(await content.create("pages", { title: "Ohne", status: "published" }), "VALIDATION");
+  });
+
+  it("keeps a stored published translation without a slug unreachable, with no path, no move and no refusal of unrelated saves", async () => {
+    const db = createFakePersistence();
+    const raw = await createContentDefault(MODEL, db);
+    const page = expectOk(await raw.create("pages", { slug: "geheim", title: "Geheim", status: "draft" }));
+    expectOk(await raw.update("pages", page.id, { title: "Press release", status: "published" }, { locale: "en" }));
+    const { content, paths, site, emitted } = await routedSite({ model: MODEL, db });
+    expect(paths.pathsOf("pages", page.id, "reachable")).toEqual({ de: null, en: null });
+    expect(expectOk(await site.resolve("pages", "en/geheim", { rules: published }))).toBeNull();
+    expectOk(await content.update("pages", page.id, { title: "Geheim 2" }));
+    expectOk(await content.update("pages", page.id, { status: "published" }));
+    expect(emitted.flat().map(({ locale, to }) => ({ locale, to }))).toEqual([{ locale: "de", to: "/geheim" }]);
+    expect(paths.pathsOf("pages", page.id, "reachable")).toEqual({ de: "/geheim", en: null });
+    const linked = expectOk(await site.resolveLinks("pages", { id: "l", createdAt: 0, updatedAt: 0, ref: `kestrel:pages:${page.id}` }, { locale: "en", rules: published }));
+    expect(linked._links).toEqual({ [page.id]: { broken: true } });
+  });
+
+  it("does not refuse to publish the default locale while a shared status meets a locale that has no translation", async () => {
+    const shared: ContentModel = {
+      locales: ["de", "en"],
+      defaultLocale: "de",
+      types: { pages: { kind: "multi", fields: { slug: { type: "slug", required: true, localized: true }, title: { type: "text", required: true, localized: true }, status: { type: "enum", options: ["draft", "published"] } } } },
+    };
+    const { content, paths } = await routedSite({ model: shared });
+    const page = expectOk(await content.create("pages", { slug: "nur-de", title: "Nur DE", status: "published" }));
+    expect(paths.pathsOf("pages", page.id, "reachable")).toEqual({ de: "/nur-de", en: null });
+    expectErr(await content.update("pages", page.id, { title: "Only DE" }, { locale: "en" }), "VALIDATION");
   });
 });

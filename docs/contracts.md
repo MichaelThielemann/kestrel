@@ -30,7 +30,9 @@ may define its own contracts with the same `defineContract`; the core treats the
   meaning only in a major release of the contracts package, and only to close a leak of
   unpublished data; it never weakens one. `site@1`'s suite did so in 6.0.0: a provider falls back
   only from a published default locale, narrows `_translations` to the locales that pass the
-  filter, and answers 404 for a path reachable only through a draft slug. One deliberate exception,
+  filter, and finds a locale only by its own slug there: a translation without a slug of its own is
+  never served, and no path, link or answer uses another locale's slug for it. A provider may refuse
+  to save such a translation as published (`site-default`'s routed mode does). One deliberate exception,
   outside the contract: in `site-default`'s routed mode a published document keeps its path under an
   ancestor that is not published, so the ancestor's slug — and only its slug — appears as a segment
   of that path; no other field of the ancestor is served. Boot cannot tell a

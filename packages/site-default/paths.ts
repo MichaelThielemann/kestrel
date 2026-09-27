@@ -88,8 +88,12 @@ export interface SitePaths {
   route(type: string): Route | undefined;
   /** Locale key → path of `type/id`, reachable paths only or every valid path (drafts included). */
   pathsOf(type: string, id: string, mode: "reachable" | "valid"): Record<string, string | null>;
-  /** Recomputes `type/id` and every document whose path depends on it, inside the caller's atomic group. */
-  index(type: string, id: string, runId: string): Promise<Result<{ moves: Move[] }, PathsError>>;
+  /**
+   * Recomputes `type/id` and every document whose path depends on it, inside the caller's atomic group. `locale` is the
+   * locale the write changed (the default locale when absent): a `VALIDATION` error on the slug field refuses the save
+   * when the document passes `liveWhen` there, has a translation there and no slug of its own.
+   */
+  index(type: string, id: string, runId: string, locale?: string): Promise<Result<{ moves: Move[] }, PathsError>>;
   /** Patches memory from committed rows and raises the run's moves; never fails. */
   announce(runId: string | null): Promise<void>;
   resume(): Promise<Result<{ announced: number; pruned: number }, PathsError>>;
@@ -441,12 +445,34 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     const change = diff(current, current.flatMap((r) => claimOf(r) ?? []), rows);
     if (change.changed.length > config.maxCascade) {
       const stall = `this change moves ${change.changed.length} paths (documents × locales), more than the limit of ${config.maxCascade} (config key maxCascade, preset option paths.maxCascade); a larger change blocks every request while it runs`;
-      throw fieldError(cascade.field, cascade.publishing ? `${stall}. Publishing or unpublishing moves another page here: this page takes over or gives back a path that page reaches through its default-locale slug` : stall);
+      throw fieldError(cascade.field, stall);
     }
     return apply(change, runId, true);
   }
 
-  async function index(type: string, id: string, runId: string): Promise<{ moves: Move[] }> {
+  async function hasTranslation(type: string, id: string, locale: string): Promise<boolean> {
+    if (locale === defaultLocale) return true;
+    const fields = model.types[type]?.fields ?? {};
+    const localized = Object.keys(fields).filter((name) => {
+      const field = fields[name];
+      return typeof field === "object" && field.localized === true;
+    });
+    const doc = need(await content.get(type, id, localeOption(locale)), "content@1");
+    return localized.some((name) => {
+      const value = doc?.[name];
+      return value !== null && value !== undefined && value !== "";
+    });
+  }
+
+  async function refuseLiveWithoutSlug(type: string, id: string, fresh: readonly Base[], written: string, route: Route): Promise<void> {
+    const base = fresh.find((b) => b.locale === written);
+    if (!base || !base.live || base.own !== null) return;
+    if (!(await hasTranslation(type, id, base.locale))) return;
+    const where = base.locale === "" ? "" : ` in "${base.locale}"`;
+    throw fieldError(route.slugField, `publishing${where} needs a slug of its own${base.locale === "" ? "" : " in that locale"}`);
+  }
+
+  async function index(type: string, id: string, runId: string, written: string): Promise<{ moves: Move[] }> {
     const route = routeOf(type);
     const fresh = await readBases(type, id);
     const current = await all<DocRow>(DOCS, {});
@@ -479,6 +505,8 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
         if (++depth > config.maxDepth) throw fieldError(field, `the parent chain would be deeper than ${config.maxDepth} (maxDepth)`);
       }
     }
+
+    if (fresh) await refuseLiveWithoutSlug(type, id, fresh, written, route);
 
     const bases = [...baseOfRows(current.filter((r) => docKey(r.type, r.docId) !== key), defaultLocale), ...(fresh ?? [])];
     const moving = fresh ? descendants(bases, mounts, [key]) : new Set<string>();
@@ -659,7 +687,7 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
       return out;
     },
 
-    index: (type, id, runId) => guarded(() => index(type, id, runId)),
+    index: (type, id, runId, locale) => guarded(() => index(type, id, runId, locale !== undefined && locales.includes(locale) ? locale : defaultLocale)),
 
     async announce(runId) {
       try {

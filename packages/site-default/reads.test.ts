@@ -15,7 +15,7 @@ async function seeded() {
   const site = createSiteDefault(content);
   const home = expectOk(await content.create("pages", { slug: "home", title: "Start", status: "published" }));
   const kontakt = expectOk(await content.create("pages", { slug: "kontakt", title: "Kontakt", status: "published" }));
-  expectOk(await content.update("pages", kontakt.id, { status: "published" }, { locale: "en" }));
+  expectOk(await content.update("pages", kontakt.id, { slug: "contact", status: "published" }, { locale: "en" }));
   const entwurf = expectOk(await content.create("pages", { slug: "entwurf", title: "Entwurf", status: "draft" }));
   return { content, site, ids: { home: home.id, kontakt: kontakt.id, entwurf: entwurf.id } };
 }
@@ -37,28 +37,15 @@ describe("site/default notes what it answers inside a read scope", () => {
     expect(reads).toEqual([{ kind: "query", type: "pages", filter: { status: "published", slug: "neu" }, locale: "de" }]);
   });
 
-  it("resolve through the default locale's slug notes the locale's own lookup too", async () => {
+  it("resolve in a locale notes that locale's own lookup and never one through the default locale's slug", async () => {
     const { site, ids } = await seeded();
     const { reads } = await observeReads(async () => {
-      expect(expectOk(await site.resolve("pages", "en/kontakt", { rules }))).toMatchObject({ id: ids.kontakt });
-      expect(expectOk(await site.resolve("pages", "en/entwurf", { rules }))).toBeNull();
+      expect(expectOk(await site.resolve("pages", "en/contact", { rules }))).toMatchObject({ id: ids.kontakt });
+      expect(expectOk(await site.resolve("pages", "en/kontakt", { rules }))).toBeNull();
     });
     expect(reads).toEqual([
-      { kind: "query", type: "pages", filter: { status: "published", slug: "kontakt" }, locale: "en" },
       { kind: "document", type: "pages", id: ids.kontakt, locale: "en" },
-      { kind: "query", type: "pages", filter: { status: "published", slug: "entwurf" }, locale: "en" },
-      { kind: "document", type: "pages", id: ids.entwurf, locale: "en" },
-    ]);
-  });
-
-  it("resolve with no page at the default locale's slug either notes that lookup with only the filter's locale-independent fields", async () => {
-    const { site } = await seeded();
-    const { reads } = await observeReads(async () => {
-      expect(expectOk(await site.resolve("pages", "en/neu", { rules }))).toBeNull();
-    });
-    expect(reads).toEqual([
-      { kind: "query", type: "pages", filter: { status: "published", slug: "neu" }, locale: "en" },
-      { kind: "query", type: "pages", filter: { slug: "neu" }, locale: "de" },
+      { kind: "query", type: "pages", filter: { status: "published", slug: "kontakt" }, locale: "en" },
     ]);
   });
 
@@ -70,7 +57,7 @@ describe("site/default notes what it answers inside a read scope", () => {
       expectOk(await site.resolveLinks("pages", { ...page, _locale: "de" }, { rules: { filter: { status: "published" } } }));
     });
     expect(reads).toEqual([
-      { kind: "path", type: "pages", id: ids.kontakt, locale: "en", rules: normalized, path: "/en/kontakt" },
+      { kind: "path", type: "pages", id: ids.kontakt, locale: "en", rules: normalized, path: "/en/contact" },
       { kind: "path", type: "pages", id: ids.entwurf, locale: "en", rules: normalized, path: null },
       { kind: "path", type: "pages", id: ids.kontakt, locale: "de", rules: { ...normalized, fallback: false }, path: "/kontakt" },
       { kind: "path", type: "pages", id: ids.entwurf, locale: "de", rules: { ...normalized, fallback: false }, path: null },

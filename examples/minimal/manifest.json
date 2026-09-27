@@ -7993,11 +7993,18 @@
         "summary": "Recompute the public paths of the saved <arg> (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group",
         "reads": [
           "result.id?",
-          "params.id?"
+          "params.id?",
+          "params.locale?",
+          "payload.locale?"
         ],
         "writes": [],
+        "query": {
+          "locale": {
+            "type": "string"
+          }
+        },
         "errors": {
-          "400": "the path is reserved or starts with a locale code",
+          "400": "the path is reserved or starts with a locale code, or the written locale is published without a slug of its own",
           "409": "another document holds the path",
           "503": "the store is unavailable"
         },
@@ -12816,11 +12823,18 @@
             "summary": "Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group",
             "reads": [
               "result.id?",
-              "params.id?"
+              "params.id?",
+              "params.locale?",
+              "payload.locale?"
             ],
             "writes": [],
+            "query": {
+              "locale": {
+                "type": "string"
+              }
+            },
             "errors": {
-              "400": "the path is reserved or starts with a locale code",
+              "400": "the path is reserved or starts with a locale code, or the written locale is published without a slug of its own",
               "409": "another document holds the path",
               "503": "the store is unavailable"
             },
@@ -13887,11 +13901,18 @@
             "summary": "Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group",
             "reads": [
               "result.id?",
-              "params.id?"
+              "params.id?",
+              "params.locale?",
+              "payload.locale?"
             ],
             "writes": [],
+            "query": {
+              "locale": {
+                "type": "string"
+              }
+            },
             "errors": {
-              "400": "the path is reserved or starts with a locale code",
+              "400": "the path is reserved or starts with a locale code, or the written locale is published without a slug of its own",
               "409": "another document holds the path",
               "503": "the store is unavailable"
             },
@@ -14235,11 +14256,18 @@
             "summary": "Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group",
             "reads": [
               "result.id?",
-              "params.id?"
+              "params.id?",
+              "params.locale?",
+              "payload.locale?"
             ],
             "writes": [],
+            "query": {
+              "locale": {
+                "type": "string"
+              }
+            },
             "errors": {
-              "400": "the path is reserved or starts with a locale code",
+              "400": "the path is reserved or starts with a locale code, or the written locale is published without a slug of its own",
               "409": "another document holds the path",
               "503": "the store is unavailable"
             },
@@ -23217,11 +23245,18 @@
             "summary": "Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group",
             "reads": [
               "result.id?",
-              "params.id?"
+              "params.id?",
+              "params.locale?",
+              "payload.locale?"
             ],
             "writes": [],
+            "query": {
+              "locale": {
+                "type": "string"
+              }
+            },
             "errors": {
-              "400": "the path is reserved or starts with a locale code",
+              "400": "the path is reserved or starts with a locale code, or the written locale is published without a slug of its own",
               "409": "another document holds the path",
               "503": "the store is unavailable"
             },
@@ -25656,11 +25691,18 @@
             "summary": "Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group",
             "reads": [
               "result.id?",
-              "params.id?"
+              "params.id?",
+              "params.locale?",
+              "payload.locale?"
             ],
             "writes": [],
+            "query": {
+              "locale": {
+                "type": "string"
+              }
+            },
             "errors": {
-              "400": "the path is reserved or starts with a locale code",
+              "400": "the path is reserved or starts with a locale code, or the written locale is published without a slug of its own",
               "409": "another document holds the path",
               "503": "the store is unavailable"
             },

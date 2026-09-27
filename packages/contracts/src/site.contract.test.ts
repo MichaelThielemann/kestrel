@@ -40,7 +40,7 @@ export function siteContractTests(make: () => Promise<{ site: Site; content: Con
       const home = expectOk(await content.create("pages", { slug: "home", title: "Start", status: "published" }));
       expectOk(await content.update("pages", home.id, { slug: "home", title: "Home", status: "published" }, { locale: "en" }));
       const kontakt = expectOk(await content.create("pages", { slug: "kontakt", title: "Kontakt", status: "published" }));
-      expectOk(await content.update("pages", kontakt.id, { status: "published" }, { locale: "en" }));
+      expectOk(await content.update("pages", kontakt.id, { slug: "kontakt", status: "published" }, { locale: "en" }));
       const team = expectOk(await content.create("pages", { slug: "team", title: "Team", status: "published" }));
       expectOk(await content.update("pages", team.id, { slug: "team", title: "Team EN", status: "draft" }, { locale: "en" }));
       const entwurf = expectOk(await content.create("pages", { slug: "entwurf", title: "Entwurf", status: "draft" }));
@@ -48,6 +48,11 @@ export function siteContractTests(make: () => Promise<{ site: Site; content: Con
     });
 
     const resolve = async (path: string, extra: SiteRules = {}) => expectOk(await site.resolve("pages", path, { rules: { ...rules, ...extra } }));
+
+    const translateWithoutSlug = async (id: string, data: Record<string, unknown>): Promise<void> => {
+      const written = await content.update("pages", id, data, { locale: "en" });
+      if (!written.ok) expect(written.error.code).toBe("VALIDATION");
+    };
 
     describe("resolve", () => {
       it("maps /, /<slug>, /<locale> and /<locale>/<slug> onto a document and reports the locale", async () => {
@@ -73,8 +78,8 @@ export function siteContractTests(make: () => Promise<{ site: Site; content: Con
         expect(await resolve("en/team")).toBeNull();
       });
 
-      it("without fallback a missing translation is not found", async () => {
-        expect(await resolve("en/kontakt", { fallback: false })).toBeNull();
+      it("without fallback a translation's empty fields stay empty", async () => {
+        expect(await resolve("en/kontakt", { fallback: false })).toMatchObject({ slug: "kontakt", title: null });
         expect(await resolve("en", { fallback: false })).toMatchObject({ title: "Home" });
       });
 
@@ -113,11 +118,25 @@ export function siteContractTests(make: () => Promise<{ site: Site; content: Con
         expect(await resolve("en/launch")).toMatchObject({ title: "Launch EN" });
       });
 
-      it("finds a published locale without its own slug through the default locale's slug, even while the default locale is only a draft", async () => {
+      it("never serves a published locale without its own slug through the default locale's slug while the default locale is only a draft", async () => {
         const doc = expectOk(await content.create("pages", { slug: "sommerfest", title: "Sommerfest", status: "draft", body: "Text DE" }));
-        expectOk(await content.update("pages", doc.id, { title: "Summer party", status: "published" }, { locale: "en" }));
-        expect(await resolve("en/sommerfest")).toMatchObject({ id: doc.id, title: "Summer party", slug: null, body: null, _locale: "en" });
+        await translateWithoutSlug(doc.id, { title: "Summer party", status: "published" });
+        expect(await resolve("en/sommerfest")).toBeNull();
         expect(await resolve("sommerfest")).toBeNull();
+      });
+
+      it("never serves a published locale without its own slug through the default locale's slug, even while the default locale is published", async () => {
+        const doc = expectOk(await content.create("pages", { slug: "winterfest", title: "Winterfest", status: "published" }));
+        await translateWithoutSlug(doc.id, { title: "Winter party", status: "published" });
+        expect(await resolve("en/winterfest")).toBeNull();
+        expect(await resolve("winterfest")).toMatchObject({ title: "Winterfest" });
+      });
+
+      it("never serves a translation under the default locale's slug when it has a slug of its own", async () => {
+        const doc = expectOk(await content.create("pages", { slug: "fruehling", title: "Frühling", status: "published" }));
+        expectOk(await content.update("pages", doc.id, { slug: "spring", title: "Spring", status: "published" }, { locale: "en" }));
+        expect(await resolve("en/fruehling")).toBeNull();
+        expect(await resolve("en/spring")).toMatchObject({ title: "Spring" });
       });
 
       it("never serves a locale without its own slug through the default locale's slug while that locale is only a draft", async () => {
@@ -152,7 +171,8 @@ export function siteContractTests(make: () => Promise<{ site: Site; content: Con
       });
 
       it("is null without a slug", async () => {
-        const strict = expectOk(await content.get("pages", ids.kontakt, { locale: "en" }));
+        expectOk(await content.update("pages", ids.entwurf, { title: "Draft" }, { locale: "en" }));
+        const strict = expectOk(await content.get("pages", ids.entwurf, { locale: "en" }));
         expect(strict?.slug).toBeNull();
         expect(site.pathOf("pages", strict!, { locale: "en", rules })).toBeNull();
       });
@@ -205,17 +225,17 @@ export function siteContractTests(make: () => Promise<{ site: Site; content: Con
         expect(en._links).toEqual({ [ids.home]: { path: "/en", locale: "en" }, [ids.entwurf]: { broken: true } });
       });
 
-      it("fills a linked page's missing slug from the default locale only when the default locale passes the filter too", async () => {
+      it("never fills a linked page's missing slug from the default locale, even while the default locale is published", async () => {
         const target = expectOk(await content.create("pages", { slug: "ziel-de", title: "Ziel DE", status: "published" }));
-        expectOk(await content.update("pages", target.id, { title: "Ziel EN", status: "published" }, { locale: "en" }));
+        await translateWithoutSlug(target.id, { title: "Ziel EN", status: "published" });
         const linker = expectOk(await content.create("pages", { slug: "linker-a", title: "Linker", status: "published", body: `<a href="kestrel:pages:${target.id}">Ziel</a>` }));
         const en = expectOk(await site.resolveLinks("pages", linker, { locale: "en", rules }));
-        expect(en._links).toEqual({ [target.id]: { path: "/en/ziel-de", locale: "en" } });
+        expect(en._links).toEqual({ [target.id]: { broken: true } });
       });
 
       it("never fills a linked page's missing slug from a default locale that is only a draft", async () => {
         const target = expectOk(await content.create("pages", { slug: "ziel-draft", title: "Ziel Draft", status: "draft" }));
-        expectOk(await content.update("pages", target.id, { title: "Ziel EN 2", status: "published" }, { locale: "en" }));
+        await translateWithoutSlug(target.id, { title: "Ziel EN 2", status: "published" });
         const linker = expectOk(await content.create("pages", { slug: "linker-b", title: "Linker", status: "published", body: `<a href="kestrel:pages:${target.id}">Ziel</a>` }));
         const en = expectOk(await site.resolveLinks("pages", linker, { locale: "en", rules }));
         expect(en._links).toEqual({ [target.id]: { broken: true } });

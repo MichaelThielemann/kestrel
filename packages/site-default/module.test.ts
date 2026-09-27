@@ -22,7 +22,7 @@ async function steps() {
   const home = expectOk(await content.create("pages", { slug: "home", title: "Start", status: "published" }));
   expectOk(await content.update("pages", home.id, { slug: "home", title: "Home", status: "published" }, { locale: "en" }));
   const kontakt = expectOk(await content.create("pages", { slug: "kontakt", title: "Kontakt", status: "published" }));
-  expectOk(await content.update("pages", kontakt.id, { status: "published" }, { locale: "en" }));
+  expectOk(await content.update("pages", kontakt.id, { slug: "kontakt", status: "published" }, { locale: "en" }));
   expectOk(
     await content.create("pages", {
       slug: "links",

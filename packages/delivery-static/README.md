@@ -12,9 +12,9 @@ which for a routed type in `site-default` is the route's `home`, possibly none);
 other locales are removed. Outcome per
 locale in `delivery_publish_status` (`live` | `error` | `draft`, `path`, `error`, `publishedAt`); a failed
 render keeps the previous live output, but a locale that is published yet has no public path
-(`state: "error"`, error `no public path`: it has no slug of its own or inherited, e.g. the default
-locale it inherited a slug from turned draft, or `site.pathOf` answers `null` because another
-document holds the path) removes its previous output instead — that content is no longer
+(`state: "error"`, error `no public path`: it has no slug of its own in that locale, since a locale
+never takes another locale's slug, or `site.pathOf` answers `null` because another document holds the
+path) removes its previous output instead — that content is no longer
 publishable, so it does not stay public.
 `delivery.unpublish:<type>` after remove, `delivery.readStatus:<type>`
 for the editor's second lamp, `delivery.publishAll:<type>` to re-render everything.

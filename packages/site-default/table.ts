@@ -142,8 +142,9 @@ interface Claim {
 /**
  * Every row the bases give. A document's tail is its prefix source's tail plus its slug. A tail already held keeps
  * its holder and an unheld one goes to its oldest claimant; every other claimant loses its claim. A row is valid when
- * its own claim serves (a weak claim yields to a live strong one) and it is placed: it holds its tail, and so does
- * every document its prefix comes from, whatever their publication or their claims' strength.
+ * it holds a strong claim (a slug of its own in its locale) and it is placed: it holds its tail, and so does every
+ * document its prefix comes from, whatever their publication or their claims' strength. A weak claim only places the
+ * rows below it and is never valid itself.
  */
 export function derive(f: Formatter, bases: readonly Base[], current: readonly DocRow[], mounts: Mounts): { rows: DocRow[]; conflicts: RebuildConflict[] } {
   const byRow = new Map<string, Base>();
@@ -230,8 +231,7 @@ export function derive(f: Formatter, bases: readonly Base[], current: readonly D
   const validFor = (row: DocRow): boolean => {
     if (row.tail === null) return false;
     const claim = claims.get(claimKey(row.locale, row.tail)) ?? {};
-    const serving = row.strong ? claim.strong === row : claim.weak === row && !(claim.strong?.live ?? false);
-    return serving && placed(row);
+    return row.strong && claim.strong === row && placed(row);
   };
   for (const row of rows.values()) row.valid = validFor(row);
   return { rows: [...rows.values()], conflicts };

@@ -6,6 +6,19 @@ Net changes since 5.8.1.
 
 ### Breaking
 
+- **A slug belongs to its locale; a translation without a slug of its own is never served.** `site@1`
+  finds a locale only by its own slug there: `site.resolve`, `pathOf`, `resolveLinks`, `_paths`,
+  `site.attachPaths`, the moves `site.pathsMoved` reports (and so the automatic redirects built from
+  them) and `delivery-static`'s export no longer use the default locale's slug for a locale that has
+  none, whether the default locale is published or not, in routed and unrouted mode; such a locale
+  answers 404 and a link to it is broken. `/en/<default slug>` no longer finds a translation that has
+  a slug of its own either. In routed mode `site.indexPath` refuses a save (`VALIDATION` on the slug
+  field) that leaves the written locale published, translated and without a slug of its own; the
+  written locale is `params.locale`, else `payload.locale`, else the default locale, so a pipeline
+  writing a translation passes its locale that way. A page without a slug in a locale still gives
+  its subpages its default-locale slug as their segment there. The shared `site@1` suite tests it.
+  `kestrel upgrade data` reports stored translations that are published without a slug of their
+  own (`data/translation-slug`, an error).
 - One command, `kestrel`, from the new package `@michaelthielemann/kestrel-cli`, replaces the three
   binaries. `@michaelthielemann/kestrel` no longer ships the `kestrel` binary: add
   `@michaelthielemann/kestrel-cli` at the same version, in `dependencies` for a backend project,
@@ -274,13 +287,11 @@ Net changes since 5.8.1.
   move it into the step argument for the narrowing to see it. The narrowing applies to every fixed
   filter alike, not only a public one: an editorial step such as
   `content.list:pages?status=draft` now reports `_translations` as "complete and matching that
-  filter" too, not just "complete". `site-default`'s slug-through-the-default-locale lookup no longer routes
-  a locale that has a slug of its own through a draft default locale's slug: that path answers
-  404, the same as an unknown path, instead of 200.
+  filter" too, not just "complete".
   `delivery.exportLlms` re-checks a source locale's own current values instead of trusting its
   `delivery_publish_status` row being `live` (that row can lag one failed or queued publish behind).
   `delivery.publish` removes a locale's previous static output once it can no longer be published at
-  all (no slug of its own or inherited), instead of leaving the old file live at its old path. A step
+  all (no slug of its own), instead of leaving the old file live at its old path. A step
   argument may no longer combine a fixed filter with `fallback=true`; boot refuses it, naming the
   step and pointing at `site.resolve` — `fallback` is status-unaware by contract, so a filtered read
   must never use it. Every `site@1` implementation must follow the fallback/`_translations` rule now;
@@ -1184,12 +1195,6 @@ Net changes since 5.8.1.
   module had just created during this boot, with no rows in it, passed as real data and the restore
   over an intact replica was skipped silently. The check now looks at whether any table holds a
   row: an empty schema with a restore point in the replica fails the boot like any other fresh file.
-- `site-default`: with `fallback=true`, `site.resolve` finds a locale that has no slug of its own
-  through the default locale's slug again when the filter holds a localized field such as `status`
-  and the default locale fails it: a page published in one locale but still a draft in the default
-  locale is served there instead of answering 404. The default-locale lookup matches the slug and
-  only the filter's locale-independent fields; the requested locale must pass the whole filter
-  itself, and no field is filled from the draft default locale.
 - `delivery-static`: unpublish, a slug or locale change and the tombstone sweep derived the blob keys to remove
   from the format name (`html`, `pdf`, …) instead of the renderer's own `extension`, so a renderer whose extension
   differs from its format name left its files behind; `delivery.exportLlms`'s `llms-full.txt` made the same

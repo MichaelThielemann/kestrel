@@ -55,14 +55,14 @@ export function recordingEvents(emitted: Move[][]): Events & { failNext(): void 
 
 /** `content` whose writes to routed types run with the path index in one scope, then announce, as a routed pipeline does. */
 export function routedContent(raw: Content, paths: SitePaths, db: FakePersistence): Content {
-  const grouped = async (type: string, write: () => Promise<Result<ContentDocument, ContentError>>, idOf: (doc: ContentDocument) => string): Promise<Result<ContentDocument, ContentError>> => {
+  const grouped = async (type: string, write: () => Promise<Result<ContentDocument, ContentError>>, idOf: (doc: ContentDocument) => string, locale?: string): Promise<Result<ContentDocument, ContentError>> => {
     if (!paths.route(type)) return write();
     const runId = randomUUID();
     let answer: Result<ContentDocument, ContentError> | undefined;
     const outcome = await db.scope({ pipeline: "test", group: 1 }, async () => {
       answer = await write();
       if (isErr(answer)) return "rollback";
-      const indexed = await paths.index(type, idOf(answer.value), runId);
+      const indexed = await paths.index(type, idOf(answer.value), runId, locale);
       if (isErr(indexed)) {
         answer = err(indexed.error);
         return "rollback";
@@ -96,9 +96,9 @@ export function routedContent(raw: Content, paths: SitePaths, db: FakePersistenc
     get: (...args) => raw.get(...args),
     list: (...args) => raw.list(...args),
     set: (type, data, options) => (paths.config.mounts?.type === type ? mountsSet(type, data, options) : raw.set(type, data, options)),
-    create: (type, data, options) => grouped(type, () => raw.create(type, data, options), (d) => d.id),
-    update: (type, id, patch, options) => grouped(type, () => raw.update(type, id, patch, options), () => id),
-    removeTranslation: (type, id, locale) => grouped(type, () => raw.removeTranslation(type, id, locale), () => id),
+    create: (type, data, options) => grouped(type, () => raw.create(type, data, options), (d) => d.id, options?.locale),
+    update: (type, id, patch, options) => grouped(type, () => raw.update(type, id, patch, options), () => id, options?.locale),
+    removeTranslation: (type, id, locale) => grouped(type, () => raw.removeTranslation(type, id, locale), () => id, locale),
     async remove(type, id) {
       if (!paths.route(type)) return raw.remove(type, id);
       const runId = randomUUID();

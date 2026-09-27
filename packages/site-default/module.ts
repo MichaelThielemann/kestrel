@@ -109,9 +109,10 @@ function describeSite(site: SiteDefault) {
     }),
     indexPath: (arg: string) => ({
       summary: `Recompute the public paths of the saved ${arg} (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group`,
-      reads: ["result.id?", "params.id?"],
+      reads: ["result.id?", "params.id?", "params.locale?", "payload.locale?"],
       writes: [],
-      errors: { 400: "the path is reserved or starts with a locale code", 409: "another document holds the path", 503: "the store is unavailable" },
+      query: { locale: { type: "string" } },
+      errors: { 400: "the path is reserved or starts with a locale code, or the written locale is published without a slug of its own", 409: "another document holds the path", 503: "the store is unavailable" },
       atomicSafe: true,
     }),
     announcePaths: { summary: `After the write's atomic group: ${MOVES_SUMMARY}; never fails the run`, reads: [], writes: [] },
@@ -255,7 +256,7 @@ export default defineModule({
         const result = isRecord(ctx.result) ? ctx.result : {};
         const id = typeof result.id === "string" ? result.id : ctx.params.id;
         if (id === undefined || id === "") throw new Error(`site/default: site.indexPath:${type} found no document id in result.id or params.id`);
-        const indexed = await paths.index(type, id, ctx.runId);
+        const indexed = await paths.index(type, id, ctx.runId, ctx.params.locale ?? first(ctx.payload.locale));
         if (isErr(indexed)) return ctx.fail(indexed.error);
         return ok(ctx);
       };

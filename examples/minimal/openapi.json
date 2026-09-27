@@ -4640,7 +4640,7 @@
             }
           },
           "400": {
-            "description": "the path is reserved or starts with a locale code",
+            "description": "the path is reserved or starts with a locale code, or the written locale is published without a slug of its own",
             "content": {
               "application/json": {
                 "schema": {
@@ -10915,7 +10915,7 @@
             }
           },
           "400": {
-            "description": "the path is reserved or starts with a locale code",
+            "description": "the path is reserved or starts with a locale code, or the written locale is published without a slug of its own",
             "content": {
               "application/json": {
                 "schema": {
@@ -11097,6 +11097,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -11181,7 +11189,7 @@
             }
           },
           "400": {
-            "description": "the path is reserved or starts with a locale code",
+            "description": "the path is reserved or starts with a locale code, or the written locale is published without a slug of its own",
             "content": {
               "application/json": {
                 "schema": {
@@ -11607,7 +11615,7 @@
             }
           },
           "400": {
-            "description": "the path is reserved or starts with a locale code",
+            "description": "the path is reserved or starts with a locale code, or the written locale is published without a slug of its own",
             "content": {
               "application/json": {
                 "schema": {
@@ -12010,7 +12018,7 @@
             }
           },
           "400": {
-            "description": "the path is reserved or starts with a locale code",
+            "description": "the path is reserved or starts with a locale code, or the written locale is published without a slug of its own",
             "content": {
               "application/json": {
                 "schema": {

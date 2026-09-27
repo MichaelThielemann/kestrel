@@ -41,8 +41,8 @@ describe("site/default nested pages: paths", () => {
     const s = await site();
     const ueber = await s.page({ slug: "ueber-uns" }, { slug: "about-us" });
     const projekte = await s.page({ slug: "projekte" }, { slug: "projects" });
-    const teamA = await s.page({ slug: "team", parent: ueber }, {});
-    const teamB = await s.page({ slug: "team", parent: projekte }, {});
+    const teamA = await s.page({ slug: "team", parent: ueber }, { slug: "team" });
+    const teamB = await s.page({ slug: "team", parent: projekte }, { slug: "team" });
     expect(await s.resolve("ueber-uns/team")).toBe(teamA);
     expect(await s.resolve("projekte/team")).toBe(teamB);
     expect(await s.resolve("en/about-us/team")).toBe(teamA);
@@ -116,7 +116,7 @@ describe("site/default nested pages: moving a section", () => {
     const s = await site();
     const alt = await s.page({ slug: "alt" }, { slug: "old" });
     const kind = await s.page({ slug: "kind", parent: alt }, { slug: "child" });
-    const enkel = await s.page({ slug: "enkel", parent: kind }, {});
+    const enkel = await s.page({ slug: "enkel", parent: kind }, { slug: "enkel" });
     s.emitted.length = 0;
     expectOk(await s.content.update("pages", alt, { slug: "neu" }));
     expect(s.moves()).toEqual(
@@ -191,52 +191,53 @@ describe("site/default nested pages: independent reachability", () => {
   });
 });
 
-describe("site/default nested pages: fallback and shadowing", () => {
-  it("a child without its own slug resolves under its parent's own slug, and only a live strong claim shadows it", async () => {
+describe("site/default nested pages: a page without a slug in a locale", () => {
+  it("is not reachable there itself, and a rival with a slug of its own takes that path once it is live", async () => {
     const s = await site();
     const parent = await s.page({ slug: "eltern" }, { slug: "parent" });
-    const child = await s.page({ slug: "kind", parent }, {});
-    expect(await s.resolve("en/parent/kind")).toBe(child);
-    const rival = await s.page({ slug: "anderes", parent }, {});
-    expectOk(await s.content.update("pages", rival, { slug: "kind", status: "draft" }, { locale: "en" }));
-    expect(await s.resolve("en/parent/kind")).toBe(child);
+    const child = await s.page({ slug: "kind", parent });
+    expect(await s.resolve("kind", published)).toBeNull();
+    expect(await s.resolve("eltern/kind")).toBe(child);
+    expect(await s.resolve("en/parent/kind")).toBeNull();
+    const rival = await s.page({ slug: "anderes", parent });
+    expectOk(await s.content.update("pages", rival, { slug: "kind", title: "Rival", status: "draft" }, { locale: "en" }));
+    expect(await s.resolve("en/parent/kind")).toBeNull();
     expectOk(await s.content.update("pages", rival, { status: "published" }, { locale: "en" }));
     expect(await s.resolve("en/parent/kind")).toBe(rival);
   });
 
-  it("a draft translation of a parent moves its own subpages with it and leaves the other section alone", async () => {
+  it("gives its subpages its default-locale slug as their segment, and a rival's draft translation moves only the rival's own subpages", async () => {
     const s = await site();
-    const p = await s.page({ slug: "p" }, {});
+    const p = await s.page({ slug: "p" });
     const pChild = await s.page({ slug: "c", parent: p }, { slug: "c-en" });
     const q = expectOk(await s.content.create("pages", { slug: "q", title: "Q", status: "published" })).id;
     const qChild = await s.page({ slug: "d", parent: q }, { slug: "d-en" });
     s.emitted.length = 0;
     expectOk(await s.content.update("pages", q, { slug: "p", title: "Q en", status: "draft" }, { locale: "en" }));
     expect(s.moves()).toEqual([{ id: qChild, locale: "en", from: "/en/q/d-en", to: "/en/p/d-en" }]);
-    expect(await s.resolve("en/p")).toBe(p);
+    expect(await s.resolve("en/p")).toBeNull();
     expect(await s.resolve("en/p/c-en")).toBe(pChild);
     expect(await s.resolve("en/p/d-en")).toBe(qChild);
   });
 
-  it("publishing a page that takes a fallback page's path moves only that fallback page, not its subpages", async () => {
+  it("publishing a rival on that segment moves only the rival, never the page's subpages", async () => {
     const s = await site();
-    const p = await s.page({ slug: "p" }, {});
+    const p = await s.page({ slug: "p" });
     const pChild = await s.page({ slug: "c", parent: p }, { slug: "c-en" });
     const q = expectOk(await s.content.create("pages", { slug: "q", title: "Q", status: "published" })).id;
     const qChild = await s.page({ slug: "d", parent: q }, { slug: "d-en" });
     expectOk(await s.content.update("pages", q, { slug: "p", title: "Q en", status: "draft" }, { locale: "en" }));
     s.emitted.length = 0;
     expectOk(await s.content.update("pages", q, { status: "published" }, { locale: "en" }));
-    expect(s.moves()).toEqual(expect.arrayContaining([{ id: p, locale: "en", from: "/en/p", to: null }, { id: q, locale: "en", from: null, to: "/en/p" }]));
-    expect(s.moves()).toHaveLength(2);
+    expect(s.moves()).toEqual([{ id: q, locale: "en", from: null, to: "/en/p" }]);
     expect(await s.resolve("en/p")).toBe(q);
     expect(await s.resolve("en/p/c-en")).toBe(pChild);
     expect(await s.resolve("en/p/d-en")).toBe(qChild);
   });
 
-  it("a published grandchild under a shadowed fallback parent stays reachable", async () => {
+  it("keeps a published grandchild reachable under that segment while a rival holds the path", async () => {
     const s = await site();
-    const p = await s.page({ slug: "p" }, {});
+    const p = await s.page({ slug: "p" });
     const child = await s.page({ slug: "c", parent: p }, { slug: "c-en" });
     const grandchild = await s.page({ slug: "g", parent: child }, { slug: "g-en" });
     await s.page({ slug: "rival" }, { slug: "p" });
@@ -245,13 +246,14 @@ describe("site/default nested pages: fallback and shadowing", () => {
     expect(s.paths.pathsOf("pages", grandchild, "reachable")).toEqual({ de: "/p/c/g", en: "/en/p/c-en/g-en" });
   });
 
-  it("two children that fall onto one path under two holders of the parent's path conflict", async () => {
+  it("refuses two subpages with the same slug of their own under two holders of that segment", async () => {
     const s = await site();
-    const p = await s.page({ slug: "p" }, {});
+    const p = await s.page({ slug: "p" });
     const q = expectOk(await s.content.create("pages", { slug: "q", title: "Q", status: "draft" })).id;
     expectOk(await s.content.update("pages", q, { slug: "p", title: "Q en", status: "draft" }, { locale: "en" }));
-    await s.page({ slug: "c", parent: p }, {});
-    const error = expectErr(await s.content.create("pages", { slug: "c", title: "C", status: "published", parent: q }), "CONFLICT");
+    await s.page({ slug: "c", parent: p }, { slug: "c" });
+    const other = expectOk(await s.content.create("pages", { slug: "c", title: "C", status: "published", parent: q })).id;
+    const error = expectErr(await s.content.update("pages", other, { slug: "c", title: "C en", status: "draft" }, { locale: "en" }), "CONFLICT");
     expect(error.message).toContain("/en/p/c (en)");
   });
 });
@@ -262,7 +264,7 @@ describe("site/default nested pages: tree", () => {
     const parent = await s.page({ slug: "eltern" });
     const child = await s.page({ slug: "kind", parent });
     const tree = expectOk(await s.paths.tree("pages"));
-    expect(tree).toEqual(expect.arrayContaining([{ id: parent, parent: null, label: "eltern", paths: { de: "/eltern", en: "/en/eltern" }, live: { de: true, en: false } }, { id: child, parent, label: "kind", paths: { de: "/eltern/kind", en: "/en/eltern/kind" }, live: { de: true, en: false } }]));
+    expect(tree).toEqual(expect.arrayContaining([{ id: parent, parent: null, label: "eltern", paths: { de: "/eltern", en: null }, live: { de: true, en: false } }, { id: child, parent, label: "kind", paths: { de: "/eltern/kind", en: null }, live: { de: true, en: false } }]));
     const rows = expectOk(await s.db.findMany<DocRow>(DOCS, { docId: child }));
     expect(rows.items.every((r) => r.parent === parent)).toBe(true);
   });

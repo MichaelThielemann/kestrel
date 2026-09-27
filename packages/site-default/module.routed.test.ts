@@ -201,7 +201,7 @@ describe("site/default routed: pipelines", () => {
     const resolved = await kestrel.run("resolvePage", { trigger: http, params: { path: "b" } });
     expect(resolved.result).toMatchObject({ id, _paths: { de: "/b", en: null } });
     const admin = boundaryCast<{ items: Array<{ id: string; _paths: unknown }> }>((await kestrel.run("listAllPages", { trigger: http })).result, "json");
-    expect(admin.items.find((d) => d.id === draftId)?._paths).toEqual({ de: "/d", en: "/en/d" });
+    expect(admin.items.find((d) => d.id === draftId)?._paths).toEqual({ de: "/d", en: null });
     const anonymous = boundaryCast<{ items: Array<{ id: string; _paths: unknown }> }>((await kestrel.run("listPages", { trigger: http })).result, "json");
     expect(anonymous.items).toEqual([expect.objectContaining({ id, _paths: { de: "/b", en: null } })]);
     await kestrel.stop();

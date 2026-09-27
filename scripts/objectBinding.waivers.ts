@@ -37,6 +37,8 @@ export const OBJECT_BINDING_REGISTRY: Record<string, ObjectBindingDisposition> =
   [key("media/default", "renameFolder")]: { kind: "waiver", reason: "params.path names the folder itself; it is the resource being addressed, not a foreign object's id." },
   [key("media/default", "listFolderItems")]: { kind: "waiver", reason: "params.path names the folder itself; it is the resource being addressed, not a foreign object's id." },
 
+  [key("site/default", "indexPath")]: { kind: "waiver", reason: "the only request-controlled value beside params.id is the written locale, which picks the locale whose slug rule the save must meet, not an object id." },
+
   [key("persistence/sqlite", "updateOne")]: { kind: "waiver", reason: "a generic per-collection primitive of the persistence contract, not reachable from an HTTP route on its own; the collection/id pairing is enforced by the module that calls it." },
 
   [key("revisions/default", "list")]: { kind: "waiver", reason: "the only request-controlled values beside params.id are the query limit/offset, not object ids." },

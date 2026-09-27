@@ -62,7 +62,7 @@ describe("site/default mounted collections", () => {
   it("a collection mounted at a page resolves below that page's path in every locale", async () => {
     const s = await site();
     const blog = await s.create("pages", { slug: "blog" }, { slug: "news" });
-    const post = await s.create("posts", { slug: "hallo" }, {});
+    const post = await s.create("posts", { slug: "hallo" }, { slug: "hallo" });
     expectOk(await s.mount(blog));
     expect(await s.resolve("posts", "blog/hallo")).toBe(post);
     expect(await s.resolve("posts", "en/news/hallo")).toBe(post);

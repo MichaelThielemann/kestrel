@@ -82,24 +82,6 @@ function rewrite(value: unknown, paths: Map<string, string | null>): unknown {
   return value;
 }
 
-function localeIndependent(model: ContentModel, type: string, filter: Filter): Filter {
-  const fields = model.types[type]?.fields ?? {};
-  return Object.fromEntries(
-    Object.entries(filter).filter(([name]) => {
-      const field = fields[name];
-      return field === undefined || typeof field === "string" || field.localized !== true;
-    }),
-  );
-}
-
-async function routesThroughDefaultSlug(content: Content, type: string, id: string, locale: string, rules: Rules): Promise<Result<boolean, ContentError>> {
-  const own = await content.get(type, id, { locale });
-  if (isErr(own)) return own;
-  const slug = own.value?.[rules.slugField];
-  if (slug === null || slug === undefined || slug === "") return ok(true);
-  return satisfiesFilter(content, type, id, content.model().defaultLocale, rules.filter);
-}
-
 export interface SiteDefault extends Site {
   /** The model the paths are resolved against; the module describes its steps from it. */
   model(): ContentModel;
@@ -133,25 +115,13 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
     if (parsed.locale !== undefined) read.locale = parsed.locale;
     const slug = parsed.slug === "" ? (rules.home ?? "") : parsed.slug;
     const lookup = { ...rules.filter, [rules.slugField]: slug };
-    const defaultLookup = { ...localeIndependent(model, type, rules.filter), [rules.slugField]: slug };
     const effective = parsed.locale ?? model.defaultLocale;
     const missed: Array<{ locale: string | undefined; filter: Filter }> = [];
     const answered = await unobserved(async (): Promise<Result<{ candidate: string | null; doc: ContentDocument | null }, SiteError>> => {
       const page = await content.list(type, lookup, { ...read, limit: 1 });
       if (isErr(page)) return err(transientOnly(page.error));
-      let candidate: ContentDocument | undefined = page.value.items[0];
+      const candidate: ContentDocument | undefined = page.value.items[0];
       if (!candidate) missed.push({ locale: effective, filter: lookup });
-      if (!candidate && rules.fallback && read.locale !== undefined && read.locale !== model.defaultLocale) {
-        const viaDefaultPage = await content.list(type, defaultLookup, { limit: 1 });
-        if (isErr(viaDefaultPage)) return err(transientOnly(viaDefaultPage.error));
-        candidate = viaDefaultPage.value.items[0];
-        if (!candidate) missed.push({ locale: model.defaultLocale, filter: defaultLookup });
-        else {
-          const routes = await routesThroughDefaultSlug(content, type, candidate.id, read.locale, rules);
-          if (isErr(routes)) return err(transientOnly(routes.error));
-          if (!routes.value) return ok({ candidate: candidate.id, doc: null });
-        }
-      }
       if (!candidate) return ok({ candidate: null, doc: null });
       const viewResult = await publishedLocale(content, type, candidate.id, read.locale, rules.filter, { fallback: rules.fallback });
       if (isErr(viewResult)) return err(transientOnly(viewResult.error));
@@ -179,7 +149,6 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
         if (isErr(passes)) return err(transientOnly(passes.error));
         if (!passes.value) holder = undefined;
       }
-      if (!holder && rules.fallback && !(claim.strong?.live ?? false)) holder = claim.weak.find((w) => w.valid);
       if (!holder || holder.type !== type) return ok({ candidate: null, doc: null });
       const viewResult = await publishedLocale(content, type, holder.docId, readLocale, rules.filter, { fallback: rules.fallback });
       if (isErr(viewResult)) return err(transientOnly(viewResult.error));
@@ -224,13 +193,9 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
   async function linkedPathRouted(table: SitePaths, t: string, id: string, locale: string, rules: Rules): Promise<Result<string | null, SiteError>> {
     const row = table.table.row(t, id, locale);
     if (!row || row.tail === null || !row.valid) return ok(null);
-    if (!row.strong && !rules.fallback) return ok(null);
-    const checks = row.strong ? [locale] : [locale, content.model().defaultLocale ?? ""];
-    for (const l of checks) {
-      const passes = await unobserved(() => satisfiesFilter(content, t, id, l === "" ? undefined : l, rules.filter));
-      if (isErr(passes)) return err(transientOnly(passes.error));
-      if (!passes.value) return ok(null);
-    }
+    const passes = await unobserved(() => satisfiesFilter(content, t, id, locale === "" ? undefined : locale, rules.filter));
+    if (isErr(passes)) return err(transientOnly(passes.error));
+    if (!passes.value) return ok(null);
     return ok(pathOfTail(table.format, row.tail, locale, rules.prefixPrimary));
   }
 
@@ -278,7 +243,7 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
             if (isErr(linked)) return linked;
             path = linked.value;
           } else {
-            const viewResult = await unobserved(() => publishedLocale(content, t, id, locale, rules.filter, { fallback: rules.fallback, translations: false }));
+            const viewResult = await unobserved(() => publishedLocale(content, t, id, locale, rules.filter, { fallback: false, translations: false }));
             if (isErr(viewResult)) return err(transientOnly(viewResult.error));
             const slug = viewResult.value?.[rules.slugField];
             if (typeof slug === "string" && slug !== "") path = publicPath(slug, locale, model.defaultLocale, rules.home, rules.prefixPrimary);

@@ -5,14 +5,11 @@ default locale has no prefix unless `?prefixPrimary=true` – onto one document 
 `pathOf` is the inverse, `resolveLinks` rewrites internal references (`kestrel:<type>:<id>` in
 strings and richtext, `{ type: "internal", collection, id }` objects) to public paths in the
 document's locale; targets not served there become `href="#" data-kestrel-broken="…"` / `broken: true`,
-and `_links` maps every referenced id to its path. With `?fallback=true` a locale without its own
-slug is found by the same slug in the default locale; that lookup matches the slug and only the
-filter's locale-independent fields, and the requested locale must then pass the whole filter
-itself. A locale that is not published itself stays unserved and is never replaced by another
-locale's content (404). A locale with a slug of its own is reachable through the default locale's
-slug only while the default locale passes the filter too, so a draft default slug never becomes a
-second address for it. An empty field of a
-served locale — including a linked page's slug inside `resolveLinks` — is filled from the default
+and `_links` maps every referenced id to its path. A locale is found only by its own slug there: a
+locale without a slug of its own is never served, and never under another locale's slug (404), and a
+linked page without a slug of its own in the link's locale is broken there. A locale that is not
+published itself stays unserved and is never replaced by another locale's content (404). With
+`?fallback=true` an empty field of a served locale other than the slug is filled from the default
 locale only when the default locale's own values pass the filter too; with no such default the field
 stays empty. `_translations` lists only the locales that pass the filter themselves. Every `site@1`
 implementation must follow this rule; the shared contract suite
@@ -20,10 +17,7 @@ implementation must follow this rule; the shared contract suite
 Cost: with `?fallback=true` and N locales configured, resolving a non-default locale reads up to two
 `content.get` calls (the requested locale's own values, the merged fallback read) and up to N+2
 `content.list` calls (the slug lookup, a filter check each for the requested and the default locale,
-one per remaining locale to narrow `_translations`) — when the requested locale's own slug lookup
-finds nothing, the default-locale slug lookup adds one list call, plus one `content.get` (and one
-filter check if the requested locale has a slug of its own) to decide whether that slug routes
-there. Measured at 4 locales: 8 calls for `resolve`. Every locale's filter membership is decided fresh at read time, on the store itself,
+one per remaining locale to narrow `_translations`). Every locale's filter membership is decided fresh at read time, on the store itself,
 never cached or reused across these calls; that correctness is preferred over the read count.
 Steps: `site.resolve:<t>?home=home&status=published&fallback=true` (`NOT_FOUND` otherwise) and
 `site.resolveLinks:<t>?…` with the same arguments. With config `{}` every type resolves as described
@@ -56,8 +50,8 @@ at its own start.
 `mountTarget`, default `pages`) a document's path is its parent's path plus its own slug:
 `/ueber-uns/team`, `/en/about-us/team`. The slug is unique only where the whole path collides, so
 `/ueber-uns/team` and `/projekte/team` both save; a routed type with parents must not have a `unique`
-slug field, and setup fails if it does. In a locale where a page has no slug of its own, its segment is
-the default locale's slug. A parent that is the page itself or one of its subpages, a chain deeper
+slug field, and setup fails if it does. In a locale where a page has no slug of its own, the page itself
+has no path there, and its segment in its subpages' paths is its default-locale slug. A parent that is the page itself or one of its subpages, a chain deeper
 than `maxDepth`, a missing parent and the home page as a parent or with a parent are field errors on
 the parent field; deleting a page that still has subpages is a `CONFLICT` naming them. Renaming or
 re-parenting a page moves every subpage in every locale; a subpage whose new path is taken rejects the
@@ -89,25 +83,24 @@ also under a page that was never published, and unpublishing or republishing it 
 One deliberate consequence: the slug of an unpublished parent appears as a segment of its published
 subpages' paths. No other field of the parent is served: links to it are broken, it has no output, and
 a caller only learns its id through fields the caller is granted. `site.previewPath` reports such a
-parent as `exposesParentSlug`. A subpage is placed structurally: its path is valid when its own claim
-serves and every page above it holds its path, whatever those pages' publication or claim strength.
-So when a page reaches `/en/p` only through its default-locale slug and another page takes `/en/p`
-with a slug of its own, both pages' subpages keep their full paths below `/en/p/`; full paths stay
-unique, so two documents never answer one path. Publishing or unpublishing a page moves at most that
-page and a page whose fallback path it takes over or gives back, never their subpages.
+parent as `exposesParentSlug`. A subpage is placed structurally: its path is valid when it holds a slug
+of its own in the locale and every page above it holds its segment, whatever those pages' publication
+or claim strength. So when a page has no slug in `en` and its segment `/en/p` comes from its
+default-locale slug while another page takes `/en/p` with a slug of its own, both pages' subpages keep
+their full paths below `/en/p/`; full paths stay unique, so two documents never answer one path.
+Publishing or unpublishing a page moves only that page, never its subpages.
 
 **One path, one document.** The public path is unique per locale across every routed type; the slug
-alone need not be. A document's path in a locale is its own slug there (a strong claim), or else its
-default-locale slug (a weak claim). Two strong claims on one path conflict whatever either document's
-status, so drafts block each other. A strong claim meets a weak one without a conflict: while the
-strong holder is live it takes the path and the weak holder is unreachable in that locale; while it is
-a draft the weak holder keeps serving. A path equal to or below a `reservedPaths` entry, or starting
+alone need not be. A document's path in a locale comes from its own slug there (a strong claim); a
+document without one holds its default-locale slug only as the segment below which its subpages sit (a
+weak claim), which is never a path of its own. Two strong claims on one path conflict whatever either
+document's status, so drafts block each other, and so do two weak claims on one segment; a strong claim
+meets a weak one without a conflict. A path equal to or below a `reservedPaths` entry, or starting
 with a locale code, is a slug field error. A `unique` slug field is not needed and logs a warning at
 setup, because it rejects the same slug without naming the occupant.
 
 **Resolving.** `resolve` looks the path up in an in-memory table: the strong holder when it passes the
-call's filter (an empty filter always does), otherwise, with `fallback`, the weak holder unless a live
-strong holder shadows it. The answer is then read as described above and gains `_paths`: every locale's
+call's filter (an empty filter always does), otherwise nothing. The answer is then read as described above and gains `_paths`: every locale's
 reachable path, `null` where the document is not reachable. `pathOf` answers `null` for a document whose
 claim is not serving, and `resolveLinks` marks such a target as broken. A call naming a `slugField` or
 `home` other than the route's throws.
@@ -121,7 +114,11 @@ claim is not serving, and `resolveLinks` marks such a target as broken. A call n
 `site.indexPath:<t>` is the last step of the group. It recomputes the saved document and every document
 whose path depends on it, rejects a taken or reserved path (`CONFLICT` with `details.conflicts` naming
 path, locale and occupant, or `VALIDATION` with `details.fields`), writes the changed rows and records
-the run's moves. A rejection rolls the whole group back. `site.announcePaths` runs right after the
+the run's moves. It also rejects, with `VALIDATION` on the slug field, a save that leaves the written
+locale (`params.locale`, else `payload.locale`, else the default locale) passing `liveWhen` with a
+translation there but no slug of its own: a translation cannot be published without its own slug. A
+locale the save did not write is not checked, so a translation stored that way before keeps no path
+and does not block edits of the other locales. A rejection rolls the whole group back. `site.announcePaths` runs right after the
 group: it updates the in-memory table from the committed rows and raises `site.pathsMoved` with
 `{ moves: [{ type, id, locale, from, to, seq }] }`, one entry per document and locale whose reachable
 path changed (`null` for none). `seq` increases with every run. The announce never fails the run; what
@@ -132,8 +129,8 @@ reads it with a `home` or `slugField` the route does not have.
 `site.readTree:<t>` lists every document of the mount target type with its parent, label, valid
 paths and per-locale `live` state. `site.attachPaths:<t>?reachable` adds `_paths` to a list or read answer (reachable paths only; without
 `?reachable` every valid path, drafts included). `site.previewPath:<t>` answers, for a payload
-`{ id?, locale?, slug }`, the path a save would give, whether it would be reachable, the occupant of a
-taken path and the fallback pages it would shadow.
+`{ id?, locale?, slug }`, the path a save would give, whether it would be reachable and the occupant of a
+taken path; `shadows` stays empty, since no page serves a path it does not hold with its own slug.
 
 **Rebuilding.** The table is stored in `site_docs`, `site_paths`, `site_runs` and `site_meta`. Setup
 rebuilds it when the routes, the locales, `prefixPrimary`, `reservedPaths` or a routed slug field
@@ -185,7 +182,7 @@ persistence settings:
 |---|---|---|---|---|---|---|---|---|
 | `site.resolve:<arg>` | Resolve a site path to a <arg> document (default locale unprefixed) | `params.path` | `result` | – | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, _locale?: string, _links?: object, … } | 404 no page at this path | – | no |
 | `site.resolveLinks:<arg>` | Replace internal kestrel:<type>:<id> references in the <arg> document with public paths (_links map added) | `result` | `result` | ?locale: string | { _links?: object, … } | – | – | no |
-| `site.indexPath:<arg>` | Recompute the public paths of the saved <arg> (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group | `result.id?`, `params.id?` | – | – | – | 400 the path is reserved or starts with a locale code; 409 another document holds the path; 503 the store is unavailable | – | yes |
+| `site.indexPath:<arg>` | Recompute the public paths of the saved <arg> (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group | `result.id?`, `params.id?`, `params.locale?`, `payload.locale?` | – | ?locale: string | – | 400 the path is reserved or starts with a locale code, or the written locale is published without a slug of its own; 409 another document holds the path; 503 the store is unavailable | – | yes |
 | `site.announcePaths` | After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run | – | – | – | – | – | – | no |
 | `site.resumePaths` | Announce path changes a run left unannounced (patches the in-memory path table from the committed rows and raises site.pathsMoved) and prune announced ones older than 7 days | – | `result` | – | { announced: integer, pruned: integer, … } | 503 the store is unavailable | – | no |
 | `site.planRebuild` | Recompute every routed document's paths from content@1 outside any group (adds `rebuild` to the result) | – | `result.rebuild` | – | { rebuild: object, … } | 503 the store is unavailable | – | no |
