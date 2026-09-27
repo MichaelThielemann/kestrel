@@ -1,5 +1,5 @@
 import { eventHandler, getRequestHeaders, getRequestURL, readRawBody, setResponseHeaders, setResponseStatus, type EventHandler, type H3Event } from "h3";
-import { BodyTooLarge, clientIpResolver, errorResponse, hasDotSegment, matchRoute, multipartRefusal, parseQuery, parseRequestBody, readRequestBody, requestIdOf, responseForRun, type ClientIpOptions, type ContextInput, type MultipartLimits, type HttpResponse, type Kestrel } from "@michaelthielemann/kestrel";
+import { BodyTooLarge, UnsupportedMediaType, clientIpResolver, errorResponse, hasDotSegment, matchRoute, multipartRefusal, parseQuery, parseRequestBody, readRequestBody, requestIdOf, responseForRun, type ClientIpOptions, type ContextInput, type MultipartLimits, type HttpResponse, type Kestrel } from "@michaelthielemann/kestrel";
 
 export interface KestrelHandlerOptions extends ClientIpOptions {
   mountPath?: string;
@@ -75,6 +75,7 @@ export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHan
       parsed = await parseRequestBody(contentType, raw ?? new Uint8Array(), options.multipart);
     } catch (err) {
       if (err instanceof BodyTooLarge) return respond(event, errorResponse(413, err.message, requestId));
+      if (err instanceof UnsupportedMediaType) return respond(event, errorResponse(415, err.message, requestId));
       return respond(event, errorResponse(400, `invalid body: ${err instanceof Error ? err.message : String(err)}`, requestId));
     }
 

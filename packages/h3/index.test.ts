@@ -28,6 +28,7 @@ const store = defineModule({
   steps: (db) => ({
     echo: async (ctx: Context) => ok({ ...ctx, result: { payload: ctx.payload, params: ctx.params, ip: ctx.ip ?? null, auth: ctx.headers.authorization ?? null } }),
     fail: async (ctx: Context) => ctx.fail(customFailure("TEAPOT", 418, "teapot", { details: { pot: true } })),
+    greet: async (ctx: Context) => ok({ ...ctx, responseHeaders: { "set-cookie": "greeting=hello; HttpOnly; Path=/" }, result: { ok: true } }),
     upload: async (ctx: Context) => {
       const file = ctx.files[0];
       if (!file) return ctx.fail("VALIDATION", "no file");
@@ -43,6 +44,7 @@ const store = defineModule({
   describe: () => ({
     echo: { summary: "Echoes payload, params, ip and the authorization header.", reads: ["payload", "params", "ip", "headers.authorization"], writes: ["result"], output: { type: "object" } },
     fail: { summary: "Always fails with a teapot error.", reads: [], writes: [] },
+    greet: { summary: "Sets a cookie on the response.", reads: [], writes: ["responseHeaders", "result"], output: { type: "object" } },
     upload: { summary: "Stores an uploaded file.", reads: ["files", "payload.note"], writes: ["result"], output: { type: "object", properties: { filename: { type: "string" }, size: { type: "number" } }, required: ["filename", "size"] } },
     download: { summary: "Serves a stored file as a binary result.", reads: ["params.name"], writes: ["result"], binary: true },
   }),
@@ -54,6 +56,7 @@ const config = {
     { http: "GET /echo/:id", pipeline: "echo" },
     { http: "POST /echo", pipeline: "echo" },
     { http: "GET /fail", pipeline: "fail" },
+    { http: "POST /greet", pipeline: "greet" },
     { http: "POST /files", pipeline: "upload" },
     { http: "GET /files/:name", pipeline: "download" },
     { http: "GET /site/*path", pipeline: "echo" },
@@ -63,6 +66,7 @@ const config = {
 const pipelines = [
   definePipeline({ name: "echo", steps: ["store.echo"] }),
   definePipeline({ name: "fail", steps: ["store.fail"] }),
+  definePipeline({ name: "greet", steps: ["store.greet"] }),
   definePipeline({ name: "upload", steps: ["store.upload"] }),
   definePipeline({ name: "download", steps: ["store.download"] }),
 ];
@@ -193,6 +197,21 @@ describe("kestrel-h3", () => {
     const tooLarge = await fetch(`${big}/echo`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ a: "x".repeat(100) }) });
     expect(tooLarge.status).toBe(413);
     expect(await tooLarge.json()).toMatchObject({ code: "PAYLOAD_TOO_LARGE", retryable: false });
+  });
+
+  it("answers 415 to a body that is not declared as JSON", async () => {
+    const base = await serve();
+    const plain = await fetch(`${base}/echo`, { method: "POST", headers: { "content-type": "text/plain" }, body: JSON.stringify({ a: 1 }) });
+    expect(plain.status).toBe(415);
+    expect(await plain.json()).toMatchObject({ code: "UNSUPPORTED", retryable: false });
+  });
+
+  it("sends the response headers a pipeline sets", async () => {
+    const base = await serve();
+    const res = await fetch(`${base}/greet`, { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).toBe("greeting=hello; HttpOnly; Path=/");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
   it("handles multipart uploads and binary downloads", async () => {

@@ -3,7 +3,7 @@ import { afterEach, describe, it, expect } from "vitest";
 import { binaryResult } from "../context.ts";
 import { silentLogger } from "../logger.ts";
 import type { RunResult, Runner } from "../runner.ts";
-import { BodyTooLarge, buildResponse, clientIpResolver, forwardingWarner, createHttpServer, disposition, errorResponse, hasDotSegment, listen, matchRoute, parseQuery, parseRequestBody, parseRoute, readRequestBody, responseForRun, routePattern } from "./http.ts";
+import { BodyTooLarge, buildResponse, clientIpResolver, forwardingWarner, createHttpServer, disposition, errorResponse, hasDotSegment, listen, matchRoute, parseQuery, parseRequestBody, parseRoute, readRequestBody, responseForRun, routePattern, UnsupportedMediaType } from "./http.ts";
 
 describe("http routes", () => {
   const routes = [parseRoute("GET /pages/:id", "readPage"), parseRoute("POST /pages", "createPage"), parseRoute("GET /", "home")];
@@ -113,6 +113,47 @@ describe("http routes", () => {
     expect(parseQuery(new URLSearchParams("tag=a&tag=b"))).toEqual({ tag: ["a", "b"] });
     expect(parseQuery(new URLSearchParams("tag=a"))).toEqual({ tag: "a" });
     expect(parseQuery(new URLSearchParams("a=1&b=2"))).toEqual({ a: "1", b: "2" });
+  });
+});
+
+describe("http request bodies", () => {
+  const bytes = (text: string) => new TextEncoder().encode(text);
+
+  it("parses a JSON body only when it is declared as JSON", async () => {
+    expect((await parseRequestBody("application/json", bytes('{"a":1}'))).payload).toEqual({ a: 1 });
+    expect((await parseRequestBody("application/json; charset=utf-8", bytes('{"a":1}'))).payload).toEqual({ a: 1 });
+    expect((await parseRequestBody("Application/JSON", bytes('{"a":1}'))).payload).toEqual({ a: 1 });
+    expect((await parseRequestBody("application/merge-patch+json", bytes('{"a":1}'))).payload).toEqual({ a: 1 });
+  });
+
+  it("refuses a non-empty body of any other type as unsupported", async () => {
+    for (const type of ["text/plain", "text/plain;charset=UTF-8", "application/x-www-form-urlencoded", ""]) {
+      await expect(parseRequestBody(type, bytes('{"a":1}'))).rejects.toBeInstanceOf(UnsupportedMediaType);
+    }
+  });
+
+  it("accepts an empty body whatever its declared type", async () => {
+    expect((await parseRequestBody("text/plain", bytes(""))).payload).toEqual({});
+    expect((await parseRequestBody("", bytes(""))).payload).toEqual({});
+  });
+
+  it("answers 415 with the UNSUPPORTED code for an edge error of that status", () => {
+    expect(errorResponse(415, "unsupported").status).toBe(415);
+    expect(JSON.parse(String(errorResponse(415, "unsupported").body))).toMatchObject({ code: "UNSUPPORTED", retryable: false });
+  });
+});
+
+describe("http response headers from a run", () => {
+  it("adds the headers a run carries, without overriding the mandatory ones", () => {
+    const res = responseForRun({ runId: "run-1", status: 200, result: { ok: true }, headers: { "set-cookie": "a=b; HttpOnly", "cache-control": "public", "x-content-type-options": "none" } });
+    expect(res.headers["set-cookie"]).toBe("a=b; HttpOnly");
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+  });
+
+  it("adds them to an error response as well", () => {
+    const res = responseForRun({ runId: "run-2", status: 401, error: "no", code: "UNAUTHENTICATED", retryable: false, headers: { "set-cookie": "a=; Max-Age=0" } });
+    expect(res.headers["set-cookie"]).toBe("a=; Max-Age=0");
   });
 });
 
@@ -469,6 +510,19 @@ describe("http server", () => {
     await close?.();
     base = await serve(ok, { trustedHeader: "X-Real-IP", allow: ["10.0.0.0/8"] });
     expect((await fetch(`${base}/health`)).status).toBe(403);
+  });
+
+  it("answers 415 to a POST whose body is not JSON, before running the pipeline", async () => {
+    let ran = false;
+    const server = createHttpServer([parseRoute("POST /echo", "echo")], async () => { ran = true; return { runId: "run-1", status: 200, result: {} }; }, silentLogger);
+    const address = await listen(server, 0, "127.0.0.1");
+    close = () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
+    const base = `http://127.0.0.1:${address.port}`;
+    const plain = await fetch(`${base}/echo`, { method: "POST", headers: { "content-type": "text/plain" }, body: '{"a":1}' });
+    expect(plain.status).toBe(415);
+    expect(ran).toBe(false);
+    const json = await fetch(`${base}/echo`, { method: "POST", headers: { "content-type": "application/json" }, body: '{"a":1}' });
+    expect(json.status).toBe(200);
   });
 
   it("applies the configured server timeouts", async () => {

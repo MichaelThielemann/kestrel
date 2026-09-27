@@ -103,6 +103,11 @@ export function matchRoute(routes: readonly Route[], method: string, pathname: s
 
 export class BodyTooLarge extends Error {}
 
+/** A request body whose declared type is neither JSON nor multipart form data. */
+export class UnsupportedMediaType extends Error {}
+
+const JSON_TYPE = /^application\/(?:[\w.+-]+\+)?json$/;
+
 /**
  * Reads a request body into one buffer, throwing `BodyTooLarge` before the first chunk when the declared
  * `Content-Length` exceeds `maxBytes`, and otherwise as soon as the bytes read do; no chunk is pulled after that.
@@ -284,6 +289,8 @@ export async function parseRequestBody(contentType: string, body: Uint8Array, li
   if (isMultipart(contentType)) return parseMultipart(body, contentType, limits);
   const text = Buffer.from(body).toString("utf8");
   if (text.trim() === "") return { payload: {}, files: [] };
+  const mediaType = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (!JSON_TYPE.test(mediaType)) throw new UnsupportedMediaType(`content type "${mediaType}" is not supported; send application/json or multipart/form-data`);
   const parsed: unknown = JSON.parse(text);
   if (!isRecord(parsed)) throw new Error("body must be a JSON object");
   return { payload: parsed, files: [] };
@@ -309,8 +316,9 @@ function retryAfterSecondsOf(meta: ResponseMeta): number {
   return typeof seconds === "number" && Number.isInteger(seconds) && seconds > 0 ? seconds : DEFAULT_RETRY_AFTER_SECONDS;
 }
 
-export function buildResponse(status: number, body: unknown, meta: ResponseMeta = {}, extraInline: readonly string[] = []): HttpResponse {
-  const headers: Record<string, string> = { "x-content-type-options": "nosniff", "cache-control": "no-store" };
+export function buildResponse(status: number, body: unknown, meta: ResponseMeta = {}, extraInline: readonly string[] = [], extraHeaders: Record<string, string> = {}): HttpResponse {
+  const added = Object.fromEntries(Object.entries(extraHeaders).map(([k, v]) => [k.toLowerCase(), v]));
+  const headers: Record<string, string> = { ...added, "x-content-type-options": "nosniff", "cache-control": "no-store" };
   if (meta.runId !== undefined) headers["x-kestrel-run-id"] = meta.runId;
   if (meta.requestId !== undefined) headers["x-request-id"] = meta.requestId;
   if (meta.retryable === true && (status === 429 || status === 503)) headers["retry-after"] = String(retryAfterSecondsOf(meta));
@@ -351,8 +359,8 @@ function metaOf(result: RunResult): ResponseMeta {
 }
 
 export function responseForRun(result: RunResult, extraInline: readonly string[] = []): HttpResponse {
-  if (result.status >= 400) return buildResponse(result.status, errorBody(result), metaOf(result), extraInline);
-  return buildResponse(result.status, result.result, metaOf(result), extraInline);
+  if (result.status >= 400) return buildResponse(result.status, errorBody(result), metaOf(result), extraInline, result.headers);
+  return buildResponse(result.status, result.result, metaOf(result), extraInline, result.headers);
 }
 
 const EDGE_CODE_BY_STATUS: Readonly<Record<number, CoreCode>> = {
@@ -574,6 +582,7 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
       body = await parseRequestBody(contentType, await readRequestBody(req, options.maxBodyBytes ?? 10 * 1024 * 1024, req.headers["content-length"]), options.multipart);
     } catch (err) {
       if (err instanceof BodyTooLarge) return sendError(res, 413, err.message, requestId);
+      if (err instanceof UnsupportedMediaType) return sendError(res, 415, err.message, requestId);
       return sendError(res, 400, `invalid body: ${err instanceof Error ? err.message : String(err)}`, requestId);
     }
     const query = parseQuery(url.searchParams);

@@ -365,11 +365,11 @@ describe("boot", () => {
     const { http } = await kestrel.start();
     const base = `http://127.0.0.1:${http?.port ?? 0}`;
 
-    const unauth = await fetch(`${base}/pages`, { method: "POST", body: JSON.stringify({ title: "x" }) });
+    const unauth = await fetch(`${base}/pages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "x" }) });
     expect(unauth.status).toBe(401);
     expect(await unauth.json()).toMatchObject({ error: "not authenticated" });
 
-    const created = await fetch(`${base}/pages`, { method: "POST", headers: { authorization: "Bearer t-admin" }, body: JSON.stringify({ id: "p1", title: "x" }) });
+    const created = await fetch(`${base}/pages`, { method: "POST", headers: { authorization: "Bearer t-admin", "content-type": "application/json" }, body: JSON.stringify({ id: "p1", title: "x" }) });
     expect(created.status).toBe(200);
     expect(await created.json()).toEqual({ id: "p1", title: "x" });
 
@@ -378,7 +378,7 @@ describe("boot", () => {
     expect((await fetch(`${base}/pages/nope`)).status).toBe(404);
     expect((await fetch(`${base}/unknown`)).status).toBe(404);
 
-    const badJson = await fetch(`${base}/pages`, { method: "POST", headers: { cookie: "kestrel_token=t-admin" }, body: "{oops" });
+    const badJson = await fetch(`${base}/pages`, { method: "POST", headers: { cookie: "kestrel_token=t-admin", "content-type": "application/json" }, body: "{oops" });
     expect(badJson.status).toBe(400);
 
     const viaCookie = await fetch(`${base}/whoami`, { headers: { cookie: "kestrel_token=t-admin" } });

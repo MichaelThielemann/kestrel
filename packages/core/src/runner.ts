@@ -27,6 +27,8 @@ export interface RunResult {
   retryable?: boolean;
   step?: string;
   details?: Record<string, unknown>;
+  /** The `responseHeaders` the last step left on the context of a successful run. */
+  headers?: Record<string, string>;
 }
 
 export type Runner = (pipeline: string, input: ContextInput) => Promise<RunResult>;
@@ -288,7 +290,7 @@ async function runStep(
       }
     }
     log("ok", 200);
-    if (ended) return { kind: "done", result: { runId, status: 200, result: after.result } };
+    if (ended) return { kind: "done", result: { runId, status: 200, result: after.result, ...(after.responseHeaders === undefined ? {} : { headers: after.responseHeaders }) } };
     return { kind: "ok", ctx: after };
   } catch (caught) {
     log("error", 500);
@@ -436,6 +438,7 @@ export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInpu
 
   const done: RunResult = { runId, status: 200 };
   if (ctx.result !== undefined) done.result = ctx.result;
+  if (ctx.responseHeaders !== undefined) done.headers = ctx.responseHeaders;
   return finish(trace(done));
 }
 
