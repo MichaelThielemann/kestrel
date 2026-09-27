@@ -93,12 +93,13 @@ describe("release publish", () => {
     expect(result.stdout).toBe("publish @example/alpha@1.2.3\npublish @example/beta@1.2.3\n");
   }, 60000);
 
-  it("fails when a version of this release is already on the registry with other content", async () => {
+  it("fails before publishing anything when a later package of this release is already on the registry with other content", async () => {
     await run(["plan", "--tag", "v1.2.3", "--root", root, "--dir", out]);
     published.set("@example/beta/1.2.3", "sha512-somethingelse");
     const result = await run(["publish", "--tag", "v1.2.3", "--dir", out, "--dry-run"], { KESTREL_RELEASE_REGISTRY: await registry() });
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("@example/beta@1.2.3 is already on the registry with different content");
+    expect(result.stderr).toContain("already on the registry with different content: @example/beta@1.2.3; nothing of this release is published");
+    expect(result.stdout).toBe("");
   }, 60000);
 
   it("treats a version already published from this very artifact as done, so a failed publish can be re-run", async () => {

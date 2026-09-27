@@ -101,13 +101,20 @@ async function publish(options) {
     const file = join(dir, entry.file);
     if (sums.get(entry.file) !== sha512Hex(file) || integrityOf(file) !== entry.integrity) fail(`${entry.file} does not match its recorded checksum`);
   }
+  const decisions = [];
   for (const entry of release.packages) {
     const published = await publishedIntegrity(entry.name, entry.version);
-    if (published === entry.integrity) {
+    if (published === null) decisions.push({ entry, action: "publish" });
+    else if (published === entry.integrity) decisions.push({ entry, action: "done" });
+    else decisions.push({ entry, action: "conflict" });
+  }
+  const conflicts = decisions.filter((decision) => decision.action === "conflict").map((decision) => `${decision.entry.name}@${decision.entry.version}`);
+  if (conflicts.length > 0) fail(`already on the registry with different content: ${conflicts.join(", ")}; nothing of this release is published`);
+  for (const { entry, action } of decisions) {
+    if (action === "done") {
       process.stdout.write(`done    ${entry.name}@${entry.version} (this artifact is already on the registry)\n`);
       continue;
     }
-    if (published !== null) fail(`${entry.name}@${entry.version} is already on the registry with different content; nothing of this release is published after it`);
     process.stdout.write(`publish ${entry.name}@${entry.version}\n`);
     if (options.dryRun) continue;
     execFileSync("pnpm", ["publish", join(dir, entry.file), "--access", "public", "--provenance", "--no-git-checks"], { cwd: dir, stdio: "inherit" });

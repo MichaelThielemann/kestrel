@@ -22,16 +22,30 @@ All packages share one version and are published together from the workspace.
    - `publish` needs `build` and runs in the GitHub environment `release`, the only place with
      `id-token: write`. It installs nothing: it downloads the artifact, checks every tarball against
      its checksums and the tag, and `node scripts/release.mjs publish` runs `pnpm publish <tarball>
-     --provenance` for each one. A version that is already on the registry with different content
-     stops the job; one whose registry integrity equals the artifact's is left alone, so re-running a
-     failed `publish` job finishes the release.
+     --provenance` for each one. The registry is asked about every package first: a version that
+     is already on the registry with different content stops the job before anything is published;
+     one whose registry integrity equals the artifact's is left alone, so re-running a failed
+     `publish` job finishes the release.
 
    Trusted publishing (OIDC, no token): every package needs a trusted publisher on npmjs.com for this
    repository, the workflow file `release.yml` and the environment `release`. The environment has
    required reviewers and admits only `v*` tags, so a release waits for approval before anything is
-   published. A package that does not exist on npm yet cannot have a trusted publisher, so its first
-   version is published from the terminal (`pnpm build`, then
-   `pnpm --filter <name> publish --access public`) and the trusted publisher is added afterwards.
+   published. A package that does not exist on npm yet cannot have a trusted publisher, and the
+   release refuses a version that is already on npm with other content, so a new package is never
+   published at its release version from a terminal. Before the tag, publish a `0.0.0` placeholder of
+   it by hand and trust the workflow, then let the tag publish the real version with provenance:
+
+   ```
+   mkdir -p /tmp/placeholder && cd /tmp/placeholder
+   printf '%s\n' '{"name":"<name>","version":"0.0.0","description":"Placeholder; the first release is <version>"}' > package.json
+   printf '%s\n' 'Placeholder; the first release is <version>.' > README.md
+   npm publish --access public
+   npm trust github <name> --repo MichaelThielemann/kestrel --file release.yml --env release --allow-publish --yes
+   ```
+
+   The checksums in the artifact protect the hand-over from `build` to `publish`, not the build
+   itself: what `build` packs is what gets published, so the approval of the `release` environment is
+   the point to look at the run before anything reaches npm.
    A local dry run of the whole set is `node scripts/release.mjs plan --tag v<version> --dir /tmp/release`
    followed by `node scripts/release.mjs publish --tag v<version> --dir /tmp/release --dry-run`.
 
