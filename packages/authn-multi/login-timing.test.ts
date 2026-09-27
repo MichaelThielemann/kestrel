@@ -59,11 +59,11 @@ describe("authn/multi password checks", () => {
     const authn = await setup();
     const unknown: number[] = [];
     const known: number[] = [];
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 21; i++) {
       unknown.push(await timed(() => authn.login({ username: "nobody", password: "wrong-password" })));
       known.push(await timed(() => authn.login({ username: "bob", password: "wrong-password" })));
     }
-    expect(Math.abs(median(unknown) - median(known))).toBeLessThan(5);
+    expect(Math.abs(median(unknown.map((ms, i) => ms - (known[i] ?? 0))))).toBeLessThan(5);
   });
 
   it("keeps the event loop free while a password is checked", async () => {
