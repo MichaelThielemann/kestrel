@@ -566,6 +566,9 @@ importers:
       '@michaelthielemann/kestrel-authn-multi':
         specifier: workspace:*
         version: link:../authn-multi
+      '@michaelthielemann/kestrel-authz-roles':
+        specifier: workspace:*
+        version: link:../authz-roles
       '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../contracts

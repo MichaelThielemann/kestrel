@@ -82,7 +82,7 @@ export default defineModule({
       if (isErr(ended)) return ctx.fail(ended.error);
       const started = await mfa.startSetup(session.value.identity);
       if (isErr(started)) return ctx.fail(started.error);
-      return ok({ ...ctx, result: started.value });
+      return ok({ ...ctx, identity: session.value.identity, result: started.value });
     },
     reset: async (ctx: Context) => {
       const id = ctx.params.id;
@@ -116,9 +116,9 @@ export default defineModule({
       errors: { 401: "the code is wrong or used (`UNAUTHENTICATED`), a code is needed (`SECOND_FACTOR_REQUIRED`), or the account must set up a second factor first (`SECOND_FACTOR_SETUP_REQUIRED`)" },
     },
     startSetup: {
-      summary: "Check the password through authn@1 and start setting up a second factor: answers the new secret and its otpauth URI; the next login with a code for it confirms it",
+      summary: "Check the password through authn@1 and start setting up a second factor: answers the new secret and its otpauth URI to the caller it identified; the next login with a code for it confirms it",
       reads: [],
-      writes: ["result"],
+      writes: ["identity", "result"],
       input: CREDENTIALS_INPUT,
       output: { type: "object", properties: { secret: { type: "string" }, uri: { type: "string" } }, required: ["secret", "uri"] },
       errors: { 401: "invalid credentials", 409: "the account already has a second factor" },
