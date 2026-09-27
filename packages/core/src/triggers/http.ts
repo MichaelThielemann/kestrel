@@ -146,67 +146,142 @@ export const DEFAULT_MULTIPART_LIMITS: MultipartLimits = { maxParts: 120, maxFil
 
 /** Whether a `Content-Type` announces a `multipart/form-data` body. */
 export function isMultipart(contentType: string): boolean {
-  return contentType.trim().toLowerCase().startsWith("multipart/form-data");
+  return (contentType.split(";", 1)[0] ?? "").trim().toLowerCase() === "multipart/form-data";
 }
 
-function boundaryOf(contentType: string): string | undefined {
-  const match = /;\s*boundary\s*=\s*(?:"([^"]+)"|([^;\s]+))/i.exec(contentType);
-  return match?.[1] ?? match?.[2];
+class InvalidMultipart extends Error {
+  constructor(reason: string) {
+    super(`invalid multipart body: ${reason}`);
+  }
+}
+
+const TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+function mediaTypeParameters(contentType: string): Map<string, string> {
+  const params = new Map<string, string>();
+  let at = contentType.indexOf(";");
+  if (at === -1) return params;
+  while (at < contentType.length) {
+    at += 1;
+    while (contentType[at] === " " || contentType[at] === "\t") at += 1;
+    if (at >= contentType.length) break;
+    if (contentType[at] === ";") continue;
+    const eq = contentType.indexOf("=", at);
+    if (eq === -1) throw new InvalidMultipart("malformed Content-Type parameter");
+    const name = contentType.slice(at, eq).toLowerCase();
+    if (!TOKEN.test(name)) throw new InvalidMultipart("malformed Content-Type parameter");
+    let value = "";
+    at = eq + 1;
+    if (contentType[at] === '"') {
+      at += 1;
+      for (;;) {
+        const c = contentType[at];
+        if (c === undefined) throw new InvalidMultipart("unterminated quoted Content-Type parameter");
+        if (c === '"') break;
+        if (c === "\\") at += 1;
+        value += contentType[at] ?? "";
+        at += 1;
+      }
+      at += 1;
+    } else {
+      const stop = contentType.indexOf(";", at);
+      value = contentType.slice(at, stop === -1 ? contentType.length : stop).trimEnd();
+      if (!TOKEN.test(value)) throw new InvalidMultipart("malformed Content-Type parameter");
+      at = stop === -1 ? contentType.length : stop;
+    }
+    while (contentType[at] === " " || contentType[at] === "\t") at += 1;
+    if (at < contentType.length && contentType[at] !== ";") throw new InvalidMultipart("malformed Content-Type parameter");
+    if (params.has(name)) throw new InvalidMultipart(`duplicate Content-Type parameter "${name}"`);
+    params.set(name, value);
+  }
+  return params;
+}
+
+function boundaryOf(contentType: string): string {
+  const boundary = mediaTypeParameters(contentType).get("boundary");
+  if (boundary === undefined || boundary.length === 0 || boundary.length > 70) throw new InvalidMultipart("missing or malformed boundary");
+  return boundary;
 }
 
 function tooMany(count: number, limit: number, what: string): void {
   if (count > limit) throw new BodyTooLarge(`multipart body has more than ${limit} ${what}`);
 }
 
-function countParts(body: Uint8Array, contentType: string, limits: MultipartLimits): void {
+function formDataName(raw: string): string {
+  return raw.replace(/%0A/gi, "\n").replace(/%0D/gi, "\r").replace(/%22/gi, '"');
+}
+
+function dispositionOf(headers: string): { name: string; filename?: string } {
+  const line = headers.split("\r\n").find((l) => /^content-disposition\s*:/i.test(l));
+  if (line === undefined) throw new InvalidMultipart("part without Content-Disposition");
+  const value = line.slice(line.indexOf(":") + 1).trim();
+  if (!/^form-data\s*(;|$)/i.test(value)) throw new InvalidMultipart("part is not form-data");
+  const found: Record<string, string> = {};
+  for (const match of value.matchAll(/;\s*([!#$%&'*+.^_`|~0-9A-Za-z-]+)\s*=\s*(?:"([^"]*)"|([^;\s]*))/g)) {
+    const key = (match[1] ?? "").toLowerCase();
+    if (key !== "name" && key !== "filename") continue;
+    if (key in found) throw new InvalidMultipart(`duplicate ${key} in Content-Disposition`);
+    found[key] = formDataName(match[2] ?? match[3] ?? "");
+  }
+  if (found.name === undefined) throw new InvalidMultipart("part without a name");
+  return found.filename === undefined ? { name: found.name } : { name: found.name, filename: found.filename };
+}
+
+function partContentType(headers: string): string {
+  const line = headers.split("\r\n").find((l) => /^content-type\s*:/i.test(l));
+  const value = line === undefined ? "" : line.slice(line.indexOf(":") + 1).trim().toLowerCase();
+  return value === "" ? "application/octet-stream" : value;
+}
+
+const CRLF = Buffer.from("\r\n");
+const HEADERS_END = Buffer.from("\r\n\r\n");
+
+function parseMultipart(body: Uint8Array, contentType: string, limits: MultipartLimits): ParsedBody {
   const boundary = boundaryOf(contentType);
-  if (boundary === undefined) return;
   const buf = Buffer.from(body.buffer, body.byteOffset, body.byteLength);
   const opening = Buffer.from(`--${boundary}`);
   const delimiter = Buffer.from(`\r\n--${boundary}`);
+  const payload: Record<string, unknown> = {};
+  const files: UploadedFile[] = [];
+  let at = buf.subarray(0, opening.length).equals(opening) ? 0 : buf.indexOf(delimiter);
+  if (at === -1) throw new InvalidMultipart("no boundary delimiter");
+  if (at > 0) at += CRLF.length;
   let parts = 0;
-  let files = 0;
-  let at = buf.indexOf(opening);
-  let length = opening.length;
-  while (at !== -1) {
-    const start = at + length;
-    if (buf[start] === 0x2d && buf[start + 1] === 0x2d) return;
+  let fileCount = 0;
+  for (;;) {
+    let cursor = at + opening.length;
+    if (buf[cursor] === 0x2d && buf[cursor + 1] === 0x2d) return { payload, files };
+    while (buf[cursor] === 0x20 || buf[cursor] === 0x09) cursor += 1;
+    if (!buf.subarray(cursor, cursor + CRLF.length).equals(CRLF)) throw new InvalidMultipart("malformed boundary delimiter");
     parts += 1;
     tooMany(parts, limits.maxParts, "parts");
-    const headersEnd = buf.indexOf("\r\n\r\n", start);
-    const headers = buf.subarray(start, headersEnd === -1 ? buf.length : headersEnd).toString("latin1");
-    if (/;\s*filename\*?\s*=/i.test(headers)) files += 1;
-    tooMany(files, limits.maxFiles, "files");
-    tooMany(parts - files, limits.maxFields, "fields");
-    if (headersEnd === -1) return;
-    at = buf.indexOf(delimiter, headersEnd);
-    length = delimiter.length;
+    const headersStart = cursor + CRLF.length;
+    const emptyHeaders = buf.subarray(headersStart, headersStart + CRLF.length).equals(CRLF);
+    const headersEnd = emptyHeaders ? headersStart : buf.indexOf(HEADERS_END, headersStart);
+    if (headersEnd === -1) throw new InvalidMultipart("unterminated part headers");
+    const headers = buf.subarray(headersStart, headersEnd).toString("utf8");
+    const disposition = dispositionOf(headers);
+    if (disposition.filename !== undefined) fileCount += 1;
+    tooMany(fileCount, limits.maxFiles, "files");
+    tooMany(parts - fileCount, limits.maxFields, "fields");
+    const dataStart = headersEnd + (emptyHeaders ? CRLF.length : HEADERS_END.length);
+    const next = buf.indexOf(delimiter, dataStart);
+    if (next === -1) throw new InvalidMultipart("no closing boundary delimiter");
+    const data = buf.subarray(dataStart, next);
+    if (disposition.filename === undefined) payload[disposition.name] = data.toString("utf8");
+    else files.push({ field: disposition.name, filename: disposition.filename, contentType: partContentType(headers), data: Uint8Array.prototype.slice.call(data) });
+    at = next + CRLF.length;
   }
 }
 
 /**
- * Parses a JSON or `multipart/form-data` body. A multipart body is scanned part by part first and
- * rejected with `BodyTooLarge` at the first part past `limits`, before any part is decoded.
+ * Parses a JSON or `multipart/form-data` body. Multipart is parsed part by part against the one
+ * `boundary` of a well-formed `Content-Type` (a malformed or repeated parameter is refused), and the
+ * first part past `limits` throws `BodyTooLarge` before it is decoded; a body that never reaches its
+ * closing delimiter is refused.
  */
 export async function parseRequestBody(contentType: string, body: Uint8Array, limits: MultipartLimits = DEFAULT_MULTIPART_LIMITS): Promise<ParsedBody> {
-  if (isMultipart(contentType)) {
-    countParts(body, contentType, limits);
-    const copy = new Uint8Array(body.byteLength);
-    copy.set(body);
-    const form = await new Response(copy.buffer, { headers: { "content-type": contentType } }).formData();
-    const payload: Record<string, unknown> = {};
-    const files: UploadedFile[] = [];
-    const entries = [...form];
-    const fileCount = entries.filter(([, value]) => typeof value !== "string").length;
-    tooMany(entries.length, limits.maxParts, "parts");
-    tooMany(fileCount, limits.maxFiles, "files");
-    tooMany(entries.length - fileCount, limits.maxFields, "fields");
-    for (const [field, value] of entries) {
-      if (typeof value === "string") payload[field] = value;
-      else files.push({ field, filename: value.name, contentType: value.type || "application/octet-stream", data: new Uint8Array(await value.arrayBuffer()) });
-    }
-    return { payload, files };
-  }
+  if (isMultipart(contentType)) return parseMultipart(body, contentType, limits);
   const text = Buffer.from(body).toString("utf8");
   if (text.trim() === "") return { payload: {}, files: [] };
   const parsed: unknown = JSON.parse(text);

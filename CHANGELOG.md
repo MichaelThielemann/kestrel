@@ -581,8 +581,12 @@ Net changes since 5.8.1.
   absent for it. New exports: `clientIpResolver`, `LOOPBACK_PROXIES`, `ClientAddress`, `PeerRequest`;
   `clientIp` accepts any request with `headers` and `socket`.
 - A `multipart/form-data` body is limited per request by the new `http.multipart`
-  (`maxParts` 120, `maxFiles` 20, `maxFields` 100; the h3 adapter's `multipart` option): it is counted
-  part by part before any part is decoded, and the first part past a limit answers 413. A route whose
+  (`maxParts` 120, `maxFiles` 20, `maxFields` 100; the h3 adapter's `multipart` option): the core's own
+  multipart parser reads it part by part, and the first part past a limit answers 413 before it is
+  decoded. The `Content-Type` parameters are parsed per RFC 9110; a malformed or repeated parameter, a
+  missing `boundary` or a body without its closing delimiter answers 400. A file part's name follows
+  the HTML form encoding (`%22`, `%0D`, `%0A` decoded), its content type is lowercased and defaults to
+  `application/octet-stream`. A route whose
   pipeline has no step reading `files` answers 415 (`UNSUPPORTED`) to a multipart body without reading
   it. Boot marks each route with `files`; new exports `MultipartLimits`, `DEFAULT_MULTIPART_LIMITS`,
   `isMultipart`, `multipartRefusal`, and `parseRequestBody` takes the limits as a third argument.

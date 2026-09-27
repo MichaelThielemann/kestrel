@@ -214,6 +214,67 @@ describe("multipart parsing", () => {
     await expect(parseRequestBody(fields.contentType, fields.body)).rejects.toThrow(/more than 100 fields/);
   });
 
+  function manyParts(boundary: string, parts: number): Uint8Array {
+    const part = `--${boundary}\r\ncontent-disposition: form-data; name="f"; filename="f.txt"\r\n\r\n\r\n`;
+    return new TextEncoder().encode(`${part.repeat(parts)}--${boundary}--\r\n`);
+  }
+
+  it("counts parts against the boundary the parser uses, whatever other parameters say", async () => {
+    const body = manyParts("x", 20_000);
+    for (const contentType of [
+      'multipart/form-data; a="; boundary=q"; boundary=x',
+      'multipart/form-data; foo="a;boundary=zzz"; boundary=x',
+      "multipart/form-data; BOUNDARY=x",
+      'multipart/form-data; boundary="x"',
+    ]) {
+      const started = performance.now();
+      await expect(parseRequestBody(contentType, body), contentType).rejects.toThrow(/more than 20 files/);
+      expect(performance.now() - started, contentType).toBeLessThan(50);
+    }
+  });
+
+  it("refuses a Content-Type with a duplicate, malformed or missing boundary before reading any part", async () => {
+    const body = manyParts("x", 20_000);
+    for (const contentType of [
+      "multipart/form-data; boundary=x, boundary=zzz",
+      "multipart/form-data; boundary=zzz; boundary=x",
+      "multipart/form-data; boundary=x; Boundary=x",
+      'multipart/form-data; a="unterminated; boundary=x',
+      "multipart/form-data; boundary*=x",
+      "multipart/form-data",
+      "multipart/form-data; boundary=",
+    ]) {
+      const started = performance.now();
+      await expect(parseRequestBody(contentType, body), contentType).rejects.toThrow(/invalid multipart/);
+      expect(performance.now() - started, contentType).toBeLessThan(50);
+    }
+  });
+
+  it("refuses a body that never reaches its closing delimiter or holds no part", async () => {
+    const contentType = "multipart/form-data; boundary=x";
+    const open = new TextEncoder().encode('--x\r\ncontent-disposition: form-data; name="a"\r\n\r\nv\r\n');
+    await expect(parseRequestBody(contentType, open)).rejects.toThrow(/invalid multipart/);
+    await expect(parseRequestBody(contentType, new TextEncoder().encode("no delimiter at all"))).rejects.toThrow(/invalid multipart/);
+    const bareLf = new TextEncoder().encode('--x\ncontent-disposition: form-data; name="a"\n\nv\n--x--\n');
+    await expect(parseRequestBody(contentType, bareLf)).rejects.toThrow(/invalid multipart/);
+  });
+
+  it("decodes fields, files, quoted names and UTF-8 filenames", async () => {
+    const boundary = "----b";
+    const text = [
+      `--${boundary}\r\ncontent-disposition: form-data; name="note"\r\n\r\nhällo\r\nline two\r\n`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="Übersicht %221%22.png"\r\nContent-Type: image/PNG\r\n\r\n\u0000\u0001\r\n`,
+      `--${boundary}\r\ncontent-disposition: form-data; name="empty"; filename=""\r\n\r\n\r\n`,
+      `--${boundary}--\r\nepilogue`,
+    ].join("");
+    const parsed = await parseRequestBody(`multipart/form-data; boundary=${boundary}`, new TextEncoder().encode(`preamble\r\n${text}`));
+    expect(parsed.payload).toEqual({ note: "hällo\r\nline two" });
+    expect(parsed.files.map((f) => [f.field, f.filename, f.contentType, [...f.data]])).toEqual([
+      ["file", 'Übersicht "1".png', "image/png", [0, 1]],
+      ["empty", "", "application/octet-stream", []],
+    ]);
+  });
+
   it("refuses a body of many empty parts without decoding them", async () => {
     const many = multipart(0, 50_000);
     const started = performance.now();

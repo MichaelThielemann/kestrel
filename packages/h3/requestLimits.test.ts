@@ -199,6 +199,23 @@ describe.each([
     expect(answer.status).toBe(413);
   });
 
+  it("counts parts against the boundary it parses with, whatever other Content-Type parameters say", async () => {
+    served = await start();
+    const part = '--x\r\ncontent-disposition: form-data; name="f"\r\n\r\n\r\n';
+    const body = `${part.repeat(2000)}--x--\r\n`;
+    const answers: Array<[string, number]> = [];
+    for (const contentType of ['multipart/form-data; a="; boundary=q"; boundary=x', 'multipart/form-data; foo="a;boundary=zzz"; boundary=x', "multipart/form-data; boundary=x, boundary=zzz", "multipart/form-data; boundary=zzz; boundary=x"]) {
+      answers.push([contentType, (await fetch(`${served.base}/files`, { method: "POST", headers: { "content-type": contentType }, body })).status]);
+    }
+    expect(answers).toEqual([
+      ['multipart/form-data; a="; boundary=q"; boundary=x', 413],
+      ['multipart/form-data; foo="a;boundary=zzz"; boundary=x', 413],
+      ["multipart/form-data; boundary=x, boundary=zzz", 400],
+      ["multipart/form-data; boundary=zzz; boundary=x", 400],
+    ]);
+    expect(served.runs()).toBe(0);
+  });
+
   it("refuses a multipart body for a pipeline that reads no files, before reading it", async () => {
     served = await start();
     const answer = await fetch(`${served.base}/upload`, { method: "POST", body: form(1, 1) });
