@@ -17,6 +17,8 @@ export const configSchema = z
       .default("all")
       .describe("Who must set up a second factor before signing in: all, none, or { permissions } for the accounts holding one of them"),
     recoveryCodes: z.number().int().min(5).max(20).default(10),
+    maxFailures: z.number().int().min(3).max(100).default(10).describe("Wrong codes in a row after which the factor is locked"),
+    lockSeconds: z.number().int().positive().default(900).describe("How long the first lock lasts; each further one lasts twice as long, at most a day"),
   })
   .strict();
 
@@ -69,6 +71,7 @@ export default defineModule({
       const ended = await mfa.authn.logout(ctx.token);
       if (isErr(ended)) return ctx.fail(ended.error);
       const username = usernameOf(ctx);
+      if (outcome.reason === "locked") return ctx.fail("RATE_LIMITED", `too many wrong codes, retry in ${outcome.retryAfterSeconds}s`, { retryAfterSeconds: outcome.retryAfterSeconds, username });
       if (outcome.reason === "required") return ctx.fail(customFailure("SECOND_FACTOR_REQUIRED", SECOND_FACTOR_STATUS, "enter the code of your second factor", { details: { username } }));
       if (outcome.reason === "setup-required") return ctx.fail(customFailure("SECOND_FACTOR_SETUP_REQUIRED", SECOND_FACTOR_STATUS, "set up a second factor to sign in", { details: { username } }));
       return ctx.fail("UNAUTHENTICATED", "invalid credentials", { username });
@@ -113,7 +116,7 @@ export default defineModule({
       writes: ["result?"],
       input: { type: "object", properties: { code: { type: "string" } }, additionalProperties: true },
       extendsOutput: { type: "object", properties: { recoveryCodes: { type: "array", items: { type: "string" } } }, required: [] },
-      errors: { 401: "the code is wrong or used (`UNAUTHENTICATED`), a code is needed (`SECOND_FACTOR_REQUIRED`), or the account must set up a second factor first (`SECOND_FACTOR_SETUP_REQUIRED`)" },
+      errors: { 401: "the code is wrong or used (`UNAUTHENTICATED`), a code is needed (`SECOND_FACTOR_REQUIRED`), or the account must set up a second factor first (`SECOND_FACTOR_SETUP_REQUIRED`)", 429: "too many wrong codes in a row; the factor is locked for a while (`RATE_LIMITED`)" },
     },
     startSetup: {
       summary: "Check the password through authn@1 and start setting up a second factor: answers the new secret and its otpauth URI to the caller it identified; the next login with a code for it confirms it",

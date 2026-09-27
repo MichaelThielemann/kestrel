@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import type { Identity } from "@michaelthielemann/kestrel-contracts/authn";
 import type { Authz, AuthzError } from "@michaelthielemann/kestrel-contracts/authz";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
@@ -14,6 +14,10 @@ export interface Config {
   secretKey: string;
   enforce: Enforce;
   recoveryCodes: number;
+  /** Wrong codes in a row after which the factor is locked. */
+  maxFailures: number;
+  /** How long the first lock lasts; each further one lasts twice as long, at most a day. */
+  lockSeconds: number;
 }
 
 interface FactorRow extends Document {
@@ -23,10 +27,14 @@ interface FactorRow extends Document {
   lastStep: number;
   recovery: string[];
   createdAt: number;
+  failures: number;
+  locks: number;
+  lockedUntil: number;
+  rev: number;
 }
 
 /** The answer of a check: pass (with the recovery codes when the check confirmed a new factor), or why not. */
-export type Check = { kind: "pass"; recoveryCodes?: string[] } | { kind: "refuse"; reason: "required" | "setup-required" | "wrong" };
+export type Check = { kind: "pass"; recoveryCodes?: string[] } | { kind: "refuse"; reason: "required" | "setup-required" | "wrong" } | { kind: "refuse"; reason: "locked"; retryAfterSeconds: number };
 
 export interface Setup {
   secret: string;
@@ -115,13 +123,12 @@ function unseal(key: Buffer, sealed: string): Buffer {
   return Buffer.concat([decipher.update(Buffer.from(data, "base64url")), decipher.final()]);
 }
 
-function recoveryDigest(code: string): string {
-  return createHash("sha256").update(code.replace(/[\s-]/g, "").toUpperCase()).digest("hex");
-}
+const RECOVERY_GROUPS = 5;
+const MAX_LOCK_SECONDS = 86_400;
 
 function recoveryCode(): string {
-  const raw = Array.from({ length: 10 }, () => BASE32[randomInt(32)]).join("");
-  return `${raw.slice(0, 5)}-${raw.slice(5)}`;
+  const raw = Array.from({ length: RECOVERY_GROUPS * 5 }, () => BASE32[randomInt(32)]).join("");
+  return (raw.match(/.{5}/g) ?? []).join("-");
 }
 
 function sameText(a: string, b: string): boolean {
@@ -137,7 +144,9 @@ function labelOf(identity: Identity): string {
 
 export async function createMfaTotp(config: Config, db: Persistence, now: () => number = Date.now, authz?: Authz): Promise<MfaTotp> {
   const key = keyOf(config.secretKey);
-  const ready = await db.ensureCollection(FACTORS, { userId: { type: "string", unique: true }, secret: "string", confirmed: "boolean", lastStep: "number", recovery: "json", createdAt: "number" });
+  const recoveryKey = createHmac("sha256", key).update("mfa-totp recovery codes").digest();
+  const recoveryDigest = (code: string): string => createHmac("sha256", recoveryKey).update(code.replace(/[\s-]/g, "").toUpperCase()).digest("base64url");
+  const ready = await db.ensureCollection(FACTORS, { userId: { type: "string", unique: true }, secret: "string", confirmed: "boolean", lastStep: "number", recovery: "json", createdAt: "number", failures: "number", locks: "number", lockedUntil: "number", rev: "number" });
   if (isErr(ready)) throw new Error(`mfa/totp: setup failed: ${ready.error.message}`);
 
   const factorOf = (userId: string): Promise<Result<FactorRow | null, PersistenceError>> => db.findOne<FactorRow>(FACTORS, { userId });
@@ -166,6 +175,29 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
     return undefined;
   };
 
+  const change = async (row: FactorRow, patch: Partial<Omit<FactorRow, "id">>): Promise<Result<boolean, PersistenceError>> => {
+    const rev = row.rev ?? 0;
+    const changed = await db.updateMany<FactorRow>(FACTORS, { id: row.id, rev }, { ...patch, rev: rev + 1 });
+    if (isErr(changed)) return changed;
+    return ok(changed.value === 1);
+  };
+
+  const wrongCode = async (row: FactorRow): Promise<Result<Check, MfaError>> => {
+    const failures = (row.failures ?? 0) + 1;
+    const locking = failures >= config.maxFailures;
+    const locks = (row.locks ?? 0) + (locking ? 1 : 0);
+    const lockedUntil = locking ? now() + Math.min(config.lockSeconds * 2 ** (locks - 1), MAX_LOCK_SECONDS) * 1000 : (row.lockedUntil ?? 0);
+    const counted = await change(row, { failures: locking ? 0 : failures, locks, lockedUntil });
+    if (isErr(counted)) return counted;
+    return ok({ kind: "refuse", reason: "wrong" });
+  };
+
+  const passed = async (row: FactorRow, patch: Partial<Omit<FactorRow, "id">>, answer: Check): Promise<Result<Check, MfaError>> => {
+    const changed = await change(row, { ...patch, failures: 0, locks: 0, lockedUntil: 0 });
+    if (isErr(changed)) return changed;
+    return ok(changed.value ? answer : { kind: "refuse", reason: "wrong" });
+  };
+
   return {
     async check(identity, code) {
       const found = await factorOf(identity.id);
@@ -173,28 +205,24 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
       const row = found.value;
       const given = code?.trim() ?? "";
 
+      if (row !== null && given !== "" && (row.lockedUntil ?? 0) > now()) {
+        return ok({ kind: "refuse", reason: "locked", retryAfterSeconds: Math.ceil(((row.lockedUntil ?? 0) - now()) / 1000) });
+      }
+
       if (row !== null && row.confirmed) {
         if (given === "") return ok({ kind: "refuse", reason: "required" });
         const step = matchingStep(row, given);
-        if (step !== undefined) {
-          const updated = await db.updateOne<FactorRow>(FACTORS, row.id, { lastStep: step });
-          if (isErr(updated)) return updated;
-          return ok({ kind: "pass" });
-        }
+        if (step !== undefined) return passed(row, { lastStep: step }, { kind: "pass" });
         const hashed = recoveryDigest(given);
-        if (!row.recovery.some((stored) => sameText(stored, hashed))) return ok({ kind: "refuse", reason: "wrong" });
-        const updated = await db.updateOne<FactorRow>(FACTORS, row.id, { recovery: row.recovery.filter((stored) => stored !== hashed) });
-        if (isErr(updated)) return updated;
-        return ok({ kind: "pass" });
+        if (!row.recovery.some((stored) => sameText(stored, hashed))) return wrongCode(row);
+        return passed(row, { recovery: row.recovery.filter((stored) => stored !== hashed) }, { kind: "pass" });
       }
 
       if (row !== null && given !== "") {
         const step = matchingStep(row, given);
-        if (step === undefined) return ok({ kind: "refuse", reason: "wrong" });
+        if (step === undefined) return wrongCode(row);
         const recoveryCodes = Array.from({ length: config.recoveryCodes }, recoveryCode);
-        const updated = await db.updateOne<FactorRow>(FACTORS, row.id, { confirmed: true, lastStep: step, recovery: recoveryCodes.map(recoveryDigest) });
-        if (isErr(updated)) return updated;
-        return ok({ kind: "pass", recoveryCodes });
+        return passed(row, { confirmed: true, lastStep: step, recovery: recoveryCodes.map(recoveryDigest) }, { kind: "pass", recoveryCodes });
       }
 
       const needed = await required(identity);
@@ -209,8 +237,8 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
       const secret = randomBytes(20);
       const sealed = seal(key, secret);
       const stored = found.value === null
-        ? await db.createOne<FactorRow>(FACTORS, { userId: identity.id, secret: sealed, confirmed: false, lastStep: 0, recovery: [], createdAt: now() })
-        : await db.updateOne<FactorRow>(FACTORS, found.value.id, { secret: sealed, lastStep: 0, recovery: [] });
+        ? await db.createOne<FactorRow>(FACTORS, { userId: identity.id, secret: sealed, confirmed: false, lastStep: 0, recovery: [], createdAt: now(), failures: 0, locks: 0, lockedUntil: 0, rev: 0 })
+        : await db.updateOne<FactorRow>(FACTORS, found.value.id, { secret: sealed, lastStep: 0, recovery: [], rev: (found.value.rev ?? 0) + 1 });
       if (isErr(stored)) return stored;
       const encoded = base32Encode(secret);
       const issuer = encodeURIComponent(config.issuer);

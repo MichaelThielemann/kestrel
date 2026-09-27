@@ -4,6 +4,7 @@ import type { Authz } from "@michaelthielemann/kestrel-contracts/authz";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { ok } from "@michaelthielemann/kestrel/result";
+import { createHash } from "node:crypto";
 import { base32Decode, createMfaTotp, FACTORS, totp, type Config } from "./impl.ts";
 
 const KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -11,12 +12,11 @@ const ALICE: Identity = { id: "u-alice", claims: { username: "alice", roles: ["e
 const ROOT: Identity = { id: "u-root", claims: { username: "root", roles: ["admin"] } };
 
 function config(enforce: Config["enforce"] = "all"): Config {
-  return { issuer: "Example CMS", secretKey: KEY, enforce, recoveryCodes: 10 };
+  return { issuer: "Example CMS", secretKey: KEY, enforce, recoveryCodes: 10, maxFailures: 10, lockSeconds: 900 };
 }
 
-async function setup(enforce: Config["enforce"] = "all", authz?: Authz) {
+async function setup(enforce: Config["enforce"] = "all", authz?: Authz, db = createFakePersistence()) {
   let t = 1_800_000_000_000;
-  const db = createFakePersistence();
   const mfa = await createMfaTotp(config(enforce), db, () => t, authz);
   return { db, mfa, advance: (ms: number) => { t += ms; }, now: () => t };
 }
@@ -120,5 +120,64 @@ describe("mfa/totp checks", () => {
     await enroll(env);
     expectOk(await env.mfa.startSetup(ROOT));
     expect([...expectOk(await env.mfa.usersWithFactor())]).toEqual([ALICE.id]);
+  });
+
+  it("hands out recovery codes of at least 112 bits and keeps them only as keyed digests", async () => {
+    const env = await setup();
+    const { recoveryCodes } = await enroll(env);
+    for (const code of recoveryCodes) expect(code).toMatch(/^[A-Z2-7]{5}(-[A-Z2-7]{5}){4}$/);
+    const rows = JSON.stringify(expectOk(await env.db.findMany(FACTORS, {})).items);
+    for (const code of recoveryCodes) expect(rows).not.toContain(createHash("sha256").update(code.replaceAll("-", "")).digest("hex"));
+  });
+
+  it("locks the factor after ten wrong codes in a row, for longer each time, and lets the right code in again afterwards", async () => {
+    const env = await setup();
+    const { secret } = await enroll(env);
+    const wrong = () => (codeAt(secret, env.now()) === "000000" ? "111111" : "000000");
+    for (let i = 0; i < 10; i++) {
+      env.advance(30_000);
+      expect(expectOk(await env.mfa.check(ALICE, wrong()))).toEqual({ kind: "refuse", reason: "wrong" });
+    }
+    env.advance(30_000);
+    expect(expectOk(await env.mfa.check(ALICE, codeAt(secret, env.now())))).toEqual({ kind: "refuse", reason: "locked", retryAfterSeconds: 870 });
+    env.advance(870_000);
+    for (let i = 0; i < 10; i++) {
+      env.advance(30_000);
+      expectOk(await env.mfa.check(ALICE, wrong()));
+    }
+    env.advance(30_000);
+    expect(expectOk(await env.mfa.check(ALICE, codeAt(secret, env.now())))).toMatchObject({ kind: "refuse", reason: "locked", retryAfterSeconds: 1770 });
+    env.advance(1_770_000);
+    expect(expectOk(await env.mfa.check(ALICE, codeAt(secret, env.now())))).toEqual({ kind: "pass" });
+    for (let i = 0; i < 9; i++) {
+      env.advance(30_000);
+      expectOk(await env.mfa.check(ALICE, wrong()));
+    }
+    env.advance(30_000);
+    expect(expectOk(await env.mfa.check(ALICE, codeAt(secret, env.now())))).toEqual({ kind: "pass" });
+  });
+
+  it("keeps the count across a restart", async () => {
+    const db = createFakePersistence();
+    const env = await setup("all", undefined, db);
+    const { secret } = await enroll(env);
+    for (let i = 0; i < 10; i++) {
+      env.advance(30_000);
+      expectOk(await env.mfa.check(ALICE, codeAt(secret, env.now()) === "000000" ? "111111" : "000000"));
+    }
+    const again = await createMfaTotp(config(), db, env.now);
+    expect(expectOk(await again.check(ALICE, codeAt(secret, env.now())))).toMatchObject({ kind: "refuse", reason: "locked" });
+  });
+
+  it("lets one of two concurrent checks with the same code pass, and one recovery code sign in once", async () => {
+    const env = await setup();
+    const { secret, recoveryCodes } = await enroll(env);
+    env.advance(30_000);
+    const code = codeAt(secret, env.now());
+    const both = await Promise.all([env.mfa.check(ALICE, code), env.mfa.check(ALICE, code)]);
+    expect(both.map((r) => expectOk(r).kind).sort()).toEqual(["pass", "refuse"]);
+    const recovery = recoveryCodes[0] ?? "";
+    const twice = await Promise.all([env.mfa.check(ALICE, recovery), env.mfa.check(ALICE, recovery)]);
+    expect(twice.map((r) => expectOk(r).kind).sort()).toEqual(["pass", "refuse"]);
   });
 });

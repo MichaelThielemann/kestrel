@@ -128,3 +128,19 @@ describe("mfa/totp account names", () => {
     expect(await runPipeline(setup, { body: { username: "x".repeat(321), password: "long-enough" } }, options)).toMatchObject({ status: 400, code: "VALIDATION" });
   });
 });
+
+describe("mfa/totp lockout at sign-in", () => {
+  it("answers 429 with a retry time once ten wrong codes in a row locked the factor, even for the right code", async () => {
+    const { options } = await boot();
+    const started = await runPipeline(setup, { body: { username: "alice", password: "long-enough" } }, options);
+    const { secret } = boundaryCast<{ secret: string }>(started.result, "json");
+    const code = () => totp(base32Decode(secret), Math.floor(Date.now() / 30_000));
+    expect((await runPipeline(login, { body: { username: "alice", password: "long-enough", code: code() } }, options)).status).toBe(200);
+    const wrong = code() === "000000" ? "111111" : "000000";
+    for (let i = 0; i < 10; i++) expect((await runPipeline(login, { body: { username: "alice", password: "long-enough", code: wrong } }, options)).status).toBe(401);
+    const locked = await runPipeline(login, { body: { username: "alice", password: "long-enough", code: code() } }, options);
+    expect(locked).toMatchObject({ status: 429, code: "RATE_LIMITED", retryable: true });
+    expect(locked.headers).toBeUndefined();
+  });
+});
+
