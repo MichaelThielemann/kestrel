@@ -14,6 +14,15 @@ export interface Bucket {
   field?: "username" | "email" | undefined;
   /** `requests` counts every request the check lets through; `failures` counts only the runs that fail after it, and a successful run clears the key. */
   counts?: "requests" | "failures" | undefined;
+  /** For a `username` bucket: the budget of each device holding a valid device cookie for the account, counted in place of the account's budget. */
+  knownDevices?: DeviceBudget | undefined;
+}
+
+/** The limits of one known device's own budget; it counts the way its account bucket does. */
+export interface DeviceBudget {
+  limit: number;
+  windowSeconds: number;
+  maxBlockSeconds?: number | undefined;
 }
 
 export interface Config {
@@ -39,6 +48,13 @@ export interface RateLimit {
   sweep(): number;
   keyOf(bucket: string): BucketKey;
   bucketOf(bucket: string): Bucket;
+  /** The name under which the known devices of an account bucket are counted; `undefined` for a bucket without `knownDevices`. */
+  deviceBucketOf(bucket: string): string | undefined;
+}
+
+/** The name under which the known devices of the account bucket `bucket` are counted. */
+export function deviceBucketName(bucket: string): string {
+  return `${bucket}~devices`;
 }
 
 interface KeyState {
@@ -76,8 +92,16 @@ export function usernameKey(name: string | undefined): string {
 
 export function createRateLimitMemory(config: Config, now: () => number = Date.now): RateLimit {
   const states = new Map<string, KeyState>();
+  const buckets: Record<string, Bucket> = { ...config.buckets };
+  for (const [name, bucket] of Object.entries(config.buckets)) {
+    if (bucket.knownDevices === undefined) continue;
+    if ((bucket.key ?? "ip") !== "username") throw new Error(`ratelimit/memory: bucket "${name}" has knownDevices, which only a username bucket can have`);
+    const devices = deviceBucketName(name);
+    if (devices in config.buckets) throw new Error(`ratelimit/memory: bucket "${devices}" clashes with the known devices of bucket "${name}"`);
+    buckets[devices] = { ...bucket.knownDevices, key: "username", counts: bucket.counts };
+  }
   const bucketOf = (name: string): Bucket => {
-    const bucket = config.buckets[name];
+    const bucket = buckets[name];
     if (!bucket) throw new Error(`ratelimit/memory: unknown bucket "${name}"`);
     return bucket;
   };
@@ -159,6 +183,9 @@ export function createRateLimitMemory(config: Config, now: () => number = Date.n
     },
     keyOf(name) {
       return bucketOf(name).key ?? "ip";
+    },
+    deviceBucketOf(name) {
+      return bucketOf(name).knownDevices === undefined ? undefined : deviceBucketName(name);
     },
   };
 }

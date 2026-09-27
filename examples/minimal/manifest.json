@@ -3388,6 +3388,29 @@
                     ],
                     "default": "requests",
                     "description": "requests counts every request let through; failures counts only runs that fail after the check (400 or 401), and a successful run clears the key"
+                  },
+                  "knownDevices": {
+                    "type": "object",
+                    "properties": {
+                      "limit": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0
+                      },
+                      "windowSeconds": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0
+                      },
+                      "maxBlockSeconds": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0
+                      }
+                    },
+                    "required": [
+                      "limit",
+                      "windowSeconds"
+                    ],
+                    "additionalProperties": false,
+                    "description": "For a username bucket: the budget of each device with a valid device cookie for the account, counted in place of the account's budget; needs deviceCookies"
                   }
                 },
                 "required": [
@@ -3396,6 +3419,40 @@
                 ],
                 "additionalProperties": false
               }
+            },
+            "deviceCookies": {
+              "type": "object",
+              "properties": {
+                "secretKey": {
+                  "type": "string",
+                  "minLength": 1,
+                  "writeOnly": true
+                },
+                "previousSecretKeys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "writeOnly": true
+                },
+                "maxAgeSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "default": 2592000,
+                  "description": "How long a device cookie stays valid after the sign-in that issued it"
+                },
+                "secure": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Mark the device cookie Secure with the __Host- name; turn off only to sign in over plain HTTP during development"
+                }
+              },
+              "required": [
+                "secretKey"
+              ],
+              "additionalProperties": false,
+              "description": "How ratelimit.rememberDevice signs the device cookies that let a known device sign in past an account's block"
             }
           },
           "required": [
@@ -3421,11 +3478,64 @@
               }
             },
             "redacted": false
+          },
+          {
+            "path": "deviceCookies",
+            "type": "object",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "missing",
+            "value": null,
+            "redacted": false
+          },
+          {
+            "path": "deviceCookies.secretKey",
+            "type": "string",
+            "required": false,
+            "secret": true,
+            "set": false,
+            "status": "missing",
+            "value": null,
+            "redacted": true
+          },
+          {
+            "path": "deviceCookies.previousSecretKeys",
+            "type": "array",
+            "required": false,
+            "secret": true,
+            "set": false,
+            "status": "default",
+            "value": null,
+            "redacted": true
+          },
+          {
+            "path": "deviceCookies.maxAgeSeconds",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 2592000,
+            "redacted": false,
+            "default": 2592000
+          },
+          {
+            "path": "deviceCookies.secure",
+            "type": "boolean",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": true,
+            "redacted": false,
+            "default": true
           }
         ]
       },
       "steps": [
         "ratelimit.check",
+        "ratelimit.rememberDevice",
         "ratelimit.sweep"
       ],
       "eventHook": false,
@@ -11118,7 +11228,8 @@
         "reads": [
           "ip?",
           "payload.username?",
-          "payload.email?"
+          "payload.email?",
+          "headers.cookie?"
         ],
         "writes": [],
         "input": {
@@ -11138,6 +11249,36 @@
         "errors": {
           "400": "an account name longer than 320 characters",
           "429": "too many requests"
+        }
+      }
+    },
+    {
+      "name": "ratelimit.rememberDevice",
+      "module": "ratelimit/memory",
+      "factory": true,
+      "description": {
+        "summary": "After a successful sign-in: hand the device a signed device cookie bound to the account bucket <arg> counts by, so its next sign-ins count against the device's own budget",
+        "reads": [
+          "identity",
+          "payload.username?",
+          "payload.email?"
+        ],
+        "writes": [
+          "responseCookies?"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "username": {
+              "type": "string",
+              "maxLength": 320
+            },
+            "email": {
+              "type": "string",
+              "maxLength": 320
+            }
+          },
+          "additionalProperties": true
         }
       }
     },
@@ -19188,7 +19329,8 @@
             "reads": [
               "ip?",
               "payload.username?",
-              "payload.email?"
+              "payload.email?",
+              "headers.cookie?"
             ],
             "writes": [],
             "input": {

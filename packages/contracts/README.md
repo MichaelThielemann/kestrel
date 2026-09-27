@@ -72,7 +72,7 @@ Frozen means a `defineContract` interface and its own types — they do not chan
 change request goes to a human, never straight into the file. Concretely, this package's frozen
 surface is: every contract listed above; `query`'s shared vocabulary (`Condition`, `Filter`,
 `FindOptions`, `Page`); `links`'s `content@1` underpinning (`INTERNAL_REF`, `InternalRef`,
-`LinkTarget`); `verifiedUser`'s `Context` augmentation; `authn.steps`'s step-set declaration
+`LinkTarget`); `verifiedUser`'s and `knownDevice`'s `Context` augmentations; `authn.steps`'s step-set declaration
 (`AUTHN_STEPS`); `events.steps`'s step-set declaration and payload/status shapes
 (`EVENT_DELIVERY_STEPS`, `EventIdentity`, `EventEnvelope`, `DeliveryStatus`, `DELIVERY_STATUS_SCHEMA`,
 `RELAY_SCHEMA`, `RelayEntry`, `RelayReport`); and `stepSet`'s `StepSet` type, the shape of every

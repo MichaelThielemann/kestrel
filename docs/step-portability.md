@@ -156,6 +156,7 @@ prefix).
 | `audit.anonymize` | none |
 | `audit.prune` | none |
 | `ratelimit.check` | none |
+| `ratelimit.rememberDevice` | none |
 | `ratelimit.sweep` | none |
 | `insights.readManifest` | none |
 | `insights.readStats` | none |
