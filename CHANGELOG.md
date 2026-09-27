@@ -1251,6 +1251,11 @@ Net changes since 5.8.1.
   that ships its own upgrade command. That dependency is now detected generically — its own
   `package.json` declares a `bin` and depends on `@michaelthielemann/kestrel-upgrade` itself — and the
   suggestion names its command instead; a plugin already registered keeps the generic suggestion.
+- The h3 adapter enforces `maxBodyBytes` while reading, like the core server: a `Content-Length`
+  over the limit answers 413 before any byte of the body is read, and a body without one stops being
+  read once it passes the limit, instead of being buffered whole before the check. The core server
+  also answers 413 to an oversized `Content-Length` up front. Both use the new export
+  `readRequestBody`.
 
 ## 5.8.1 – 2026-09-22
 

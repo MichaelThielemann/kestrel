@@ -85,12 +85,17 @@ export function matchRoute(routes: readonly Route[], method: string, pathname: s
 
 export class BodyTooLarge extends Error {}
 
-async function readBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  const stream: AsyncIterable<Buffer> = req;
+/**
+ * Reads a request body into one buffer, throwing `BodyTooLarge` before the first chunk when the declared
+ * `Content-Length` exceeds `maxBytes`, and otherwise as soon as the bytes read do; no chunk is pulled after that.
+ */
+export async function readRequestBody(stream: AsyncIterable<Uint8Array> | Iterable<Uint8Array>, maxBytes: number, contentLength?: string): Promise<Buffer> {
+  const declared = contentLength === undefined || !/^\d+$/.test(contentLength.trim()) ? undefined : Number(contentLength.trim());
+  if (declared !== undefined && declared > maxBytes) throw new BodyTooLarge(`body exceeds ${maxBytes} bytes`);
+  const chunks: Uint8Array[] = [];
   let size = 0;
   for await (const chunk of stream) {
-    size += chunk.length;
+    size += chunk.byteLength;
     if (size > maxBytes) throw new BodyTooLarge(`body exceeds ${maxBytes} bytes`);
     chunks.push(chunk);
   }
@@ -364,7 +369,7 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
 
     let body: ParsedBody;
     try {
-      body = await parseRequestBody(req.headers["content-type"] ?? "", await readBody(req, options.maxBodyBytes ?? 10 * 1024 * 1024));
+      body = await parseRequestBody(req.headers["content-type"] ?? "", await readRequestBody(req, options.maxBodyBytes ?? 10 * 1024 * 1024, req.headers["content-length"]));
     } catch (err) {
       if (err instanceof BodyTooLarge) return sendError(res, 413, err.message, requestId);
       return sendError(res, 400, `invalid body: ${err instanceof Error ? err.message : String(err)}`, requestId);

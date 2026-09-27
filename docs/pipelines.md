@@ -264,7 +264,9 @@ otherwise never run; an event emitted from a contract method instead of a pipeli
 own, it only starts a pipeline with the body as `payload` and the route parameters as
 `params`. JSON bodies land in `payload`,
 `multipart/form-data` puts text fields in `payload` and files in `files`
-(`http.maxBodyBytes`, default 10 MB, otherwise 413). If `ctx.result` is a
+(`http.maxBodyBytes`, default 10 MB, otherwise 413: a declared `Content-Length` over the limit is
+refused before any byte of the body is read, and a body without one stops being read the moment it
+passes the limit). If `ctx.result` is a
 `binaryResult(data, contentType, filename?)`, the HTTP trigger responds with the raw bytes
 instead of JSON — with `nosniff` and a sandboxed CSP; `inline` only for known image/audio/
 video types plus `http.inlineTypes` from the config, otherwise `attachment` (uploads run on

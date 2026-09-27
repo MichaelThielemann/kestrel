@@ -125,7 +125,7 @@ event and cron triggers still run.
 | `port` | integer 0–65535 | `3000` | `0` picks a free port |
 | `host` | string | `"127.0.0.1"` | Interface to bind |
 | `corsOrigin` | string | – | Single allowed origin; omitted means no CORS headers |
-| `maxBodyBytes` | integer | `10485760` | A larger body answers 413 |
+| `maxBodyBytes` | integer | `10485760` | A larger body answers 413, checked against `Content-Length` and while reading |
 | `trustProxy` | boolean | `false` | Read the client address from `X-Forwarded-For` of a trusted proxy |
 | `proxyHops` | integer | `1` | Which `X-Forwarded-For` entry, counted from the right |
 | `trustedHeader` | string | – | A header the trusted proxy sets to the client address; wins over `trustProxy` |

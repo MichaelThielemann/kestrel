@@ -2,7 +2,7 @@ import { afterEach, describe, it, expect } from "vitest";
 import { binaryResult } from "../context.ts";
 import { silentLogger } from "../logger.ts";
 import type { RunResult, Runner } from "../runner.ts";
-import { buildResponse, clientIpResolver, createHttpServer, disposition, errorResponse, listen, matchRoute, parseQuery, parseRoute, responseForRun, routePattern } from "./http.ts";
+import { BodyTooLarge, buildResponse, clientIpResolver, createHttpServer, disposition, errorResponse, listen, matchRoute, parseQuery, parseRoute, readRequestBody, responseForRun, routePattern } from "./http.ts";
 
 describe("http routes", () => {
   const routes = [parseRoute("GET /pages/:id", "readPage"), parseRoute("POST /pages", "createPage"), parseRoute("GET /", "home")];
@@ -156,6 +156,36 @@ describe("http error format", () => {
     expect(responseForRun(failed).headers["retry-after"]).toBeUndefined();
     const forbidden: RunResult = { runId: "run-8", status: 403, error: "no", code: "FORBIDDEN", retryable: true };
     expect(responseForRun(forbidden).headers["retry-after"]).toBeUndefined();
+  });
+});
+
+describe("request body reading", () => {
+  function source(chunks: number, size: number): { stream: AsyncIterable<Uint8Array>; pulled: () => number } {
+    let pulled = 0;
+    async function* generate() {
+      for (let i = 0; i < chunks; i++) {
+        pulled += size;
+        yield new Uint8Array(size);
+      }
+    }
+    return { stream: generate(), pulled: () => pulled };
+  }
+
+  it("stops pulling chunks once the body exceeds the limit", async () => {
+    const body = source(1000, 1024);
+    await expect(readRequestBody(body.stream, 10 * 1024)).rejects.toBeInstanceOf(BodyTooLarge);
+    expect(body.pulled()).toBeLessThanOrEqual(10 * 1024 + 1024);
+  });
+
+  it("refuses a declared Content-Length over the limit before pulling anything", async () => {
+    const body = source(1, 16);
+    await expect(readRequestBody(body.stream, 10, "11")).rejects.toThrow(/body exceeds 10 bytes/);
+    expect(body.pulled()).toBe(0);
+  });
+
+  it("returns a body of exactly the limit", async () => {
+    const body = source(10, 1024);
+    expect((await readRequestBody(body.stream, 10 * 1024, "10240")).byteLength).toBe(10 * 1024);
   });
 });
 

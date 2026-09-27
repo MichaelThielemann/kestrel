@@ -1,5 +1,5 @@
 import { eventHandler, getRequestHeaders, getRequestURL, readRawBody, setResponseHeaders, setResponseStatus, type EventHandler, type H3Event } from "h3";
-import { BodyTooLarge, clientIpResolver, errorResponse, matchRoute, parseQuery, parseRequestBody, requestIdOf, responseForRun, type ClientIpOptions, type ContextInput, type HttpResponse, type Kestrel } from "@michaelthielemann/kestrel";
+import { BodyTooLarge, clientIpResolver, errorResponse, matchRoute, parseQuery, parseRequestBody, readRequestBody, requestIdOf, responseForRun, type ClientIpOptions, type ContextInput, type HttpResponse, type Kestrel } from "@michaelthielemann/kestrel";
 
 export interface KestrelHandlerOptions extends ClientIpOptions {
   mountPath?: string;
@@ -16,6 +16,18 @@ function stripMount(pathname: string, mountPath: string): string | null {
 }
 
 const WITH_BODY = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+function preBuffered(event: H3Event): boolean {
+  const req = event.node.req;
+  return event._requestBody !== undefined || event.web?.request?.body != null || Symbol.for("h3RawBody") in req || "rawBody" in req || "body" in req || "__unenv__" in req;
+}
+
+async function readBody(event: H3Event, maxBytes: number): Promise<Uint8Array> {
+  const contentLength = event.node.req.headers["content-length"];
+  if (!preBuffered(event)) return readRequestBody(event.node.req, maxBytes, contentLength);
+  const body = await readRawBody(event, false);
+  return readRequestBody(body === undefined ? [] : [body], maxBytes, contentLength);
+}
 
 async function respond(event: H3Event, response: HttpResponse): Promise<Buffer | string> {
   setResponseStatus(event, response.status);
@@ -38,11 +50,9 @@ export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHan
     const match = pathname === null ? undefined : matchRoute(kestrel.triggers.http, event.method, pathname);
     if (!match) return respond(event, errorResponse(404, `no route for ${event.method} ${url.pathname}`, requestId));
 
-    let raw: Buffer | undefined;
+    let raw: Uint8Array | undefined;
     try {
-      const body = WITH_BODY.has(event.method) ? await readRawBody(event, false) : undefined;
-      raw = body === undefined ? undefined : Buffer.from(body);
-      if (raw !== undefined && raw.byteLength > maxBodyBytes) throw new BodyTooLarge(`body exceeds ${maxBodyBytes} bytes`);
+      raw = WITH_BODY.has(event.method) ? await readBody(event, maxBodyBytes) : undefined;
     } catch (err) {
       if (err instanceof BodyTooLarge) return respond(event, errorResponse(413, err.message, requestId));
       throw err;
