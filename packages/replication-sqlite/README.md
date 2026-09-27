@@ -14,21 +14,30 @@ Shipping reads the WAL from the frame the previous run stopped at, asynchronousl
 and uploads segments of about 4 MiB (a single transaction larger than that stays in one segment), so
 a run costs time and memory in proportion to the new frames, not to the WAL. A frame is shipped only
 when it belongs to a committed transaction and its salts and checksum continue the WAL's checksum
-chain; a partly written frame at the end of the file waits for the next run. The module holds a read
-transaction on the database, which keeps SQLite from resetting the WAL before its frames are
-shipped. A checkpoint (`wal_checkpoint(TRUNCATE)`, without a busy timeout) reads the remaining
-committed frames, releases that transaction, checkpoints and takes it again in one synchronous step,
-then uploads those frames; since every writing connection lives in the same Node process, nothing
-can commit in between, so a checkpoint never loses frames. A checkpoint runs from `replication.sync`
-when the WAL file holds `checkpointBytes` or `checkpointSeconds` have passed since the last one,
-and, between syncs, as soon as a once-per-second check finds the WAL at `checkpointBytes` or more;
-the WAL therefore stays near `checkpointBytes` however rarely `replication.sync` runs. When another
-connection keeps the checkpoint from completing (an open write transaction or an older read
-snapshot), the WAL keeps growing and the next check tries again. If an upload fails after a
-checkpoint, the frames stay in memory and go out first on the next run; a new snapshot supersedes
-them, as does the snapshot a restarted process takes on its first sync. A `replication.sync` called while another is running returns that run's result instead of
-starting a second one; `replication.snapshot`, `replication.prepareRestore` and the
-size-triggered checkpoint wait for each other.
+chain; a partly written frame at the end of the file waits for the next run.
+
+The module holds a read transaction on the database, which keeps SQLite from resetting the WAL
+before its frames are shipped. A checkpoint first takes the database write lock on a second
+connection (`BEGIN IMMEDIATE`, without a busy timeout), so no connection in any thread or process
+can commit meanwhile; under that lock it reads the remaining committed frames, releases the read
+transaction, runs `wal_checkpoint(PASSIVE)` and takes the read transaction again, then releases the
+lock and uploads those frames. A checkpoint therefore never loses frames, whoever writes to the
+file. When the write lock is taken (an open write transaction elsewhere), the checkpoint is skipped
+and tried again at the next check. Once every frame is copied back, the next writer starts the WAL
+over from its beginning; the file keeps its size and SQLite reuses it, it is not truncated.
+
+A checkpoint runs from `replication.sync` when the WAL holds `checkpointBytes` of frames or
+`checkpointSeconds` have passed since the last one, and, between syncs, as soon as a once-per-second
+check finds `checkpointBytes` of frames in the WAL, so the WAL stays near `checkpointBytes` however
+rarely `replication.sync` runs. An older read snapshot on another connection can keep a checkpoint
+from copying every frame back; the WAL then keeps growing and the next check tries again.
+
+If an upload fails after a checkpoint, the frames stay in memory and go out first on the next run;
+a new snapshot supersedes them, as does the snapshot a restarted process takes on its first sync.
+A `replication.sync` called before a running one has started reading returns that run's result;
+called later, it runs once more after it, so a sync at shutdown ships every frame committed before
+it was called. `replication.snapshot`, `replication.prepareRestore` and the size-triggered
+checkpoint wait for each other.
 
 Config: `file`, `prefix`, `checkpointBytes`/`checkpointSeconds`,
 `snapshotSeconds` (24 h), `retentionSeconds` (48 h; the newest generation is always kept),
