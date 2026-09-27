@@ -7669,6 +7669,9 @@
                   },
                   "password": {
                     "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
                   }
                 },
                 "required": [

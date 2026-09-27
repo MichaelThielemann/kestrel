@@ -19,6 +19,7 @@ export const BACKEND_PACKAGE_NAMES: readonly string[] = [
   "@michaelthielemann/kestrel-insights",
   "@michaelthielemann/kestrel-links-default",
   "@michaelthielemann/kestrel-media-default",
+  "@michaelthielemann/kestrel-mfa-totp",
   "@michaelthielemann/kestrel-migrations-default",
   "@michaelthielemann/kestrel-openapi",
   "@michaelthielemann/kestrel-persistence-sqlite",

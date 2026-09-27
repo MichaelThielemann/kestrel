@@ -29,7 +29,9 @@ the same origin (`Sec-Fetch-Site: same-origin`, or an `Origin` matching `Host`);
 | `authn.logout` | `token` | `responseHeaders`, `result` | `UNAUTHENTICATED` |
 
 Generate a hash: `node -e "import('@michaelthielemann/kestrel-authn-single/impl').then(m => console.log(m.hashPassword(process.argv[1])))" -- <password>`
-Not included: multiple users, persistence of sessions across restarts, password change.
+Not included: multiple users, persistence of sessions across restarts, password change. On its own it is
+a password-only sign-in, meant for a local or development setup; an admin interface that must meet a
+multi-factor requirement uses `authn-multi` with `mfa-totp`.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
@@ -45,7 +47,7 @@ Not included: multiple users, persistence of sessions across restarts, password 
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `authn.login` | Log in with credentials; the token comes back in the body and in an HttpOnly session cookie | – | `token`, `identity`, `responseHeaders`, `result` | { username: string, password: string } | { token: string, identity: object, … } | 401 invalid credentials | portable | no |
+| `authn.login` | Log in with credentials; the token comes back in the body and in an HttpOnly session cookie | – | `token`, `identity`, `responseHeaders`, `result` | { username: string, password: string, code?: string } | { token: string, identity: object, … } | 401 invalid credentials | portable | no |
 | `authn.identifyUser` | Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin | – | `token?`, `identity?` | – | – | 403 a state-changing request authenticated by the session cookie is not from the same origin | portable | no |
 | `authn.requireUser` | Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin | – | `token`, `identity` | – | – | 401 not authenticated; 403 a state-changing request authenticated by the session cookie is not from the same origin | portable | no |
 | `authn.loadIdentity` | Current identity | `identity` | `result` | – | { id: string, claims: object, … } | 401 not authenticated | portable | no |

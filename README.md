@@ -44,6 +44,7 @@ running instance with a login, a content type and a step of your own.
 | `@michaelthielemann/kestrel-insights` | insights@1: the instance manifest (modules, config schemas, steps, pipelines, triggers) and live per-process run statistics from the core's observer hook. |
 | `@michaelthielemann/kestrel-links-default` | Steps links.extract/check/report/rebuild: finds external URLs in content, checks them periodically and reports broken links. |
 | `@michaelthielemann/kestrel-media-default` | Media uploads: files in blobstore@1, metadata in persistence@1; provides media@1, read access to the ready files. |
+| `@michaelthielemann/kestrel-mfa-totp` | A second factor for any authn@1 module: time-based one-time codes (RFC 6238) with recovery codes, stored via persistence@1. |
 | `@michaelthielemann/kestrel-migrations-default` | migrations@1: applies content migrations once, per document and stored locale, with a ledger. |
 | `@michaelthielemann/kestrel-persistence-sqlite` | persistence@1 on Node's built-in node:sqlite. |
 | `@michaelthielemann/kestrel-ratelimit-memory` | Step ratelimit.check:<bucket>: fixed-window rate limiting per client ip, in memory. |

@@ -1104,6 +1104,13 @@ Net changes since 5.8.1.
   doubles the block after each further exceeded window up to that bound. An `ip` bucket counts an IPv6
   address by its /64 and an IPv4-mapped address as its IPv4 address. `clientKey` and `usernameKey` are
   exported.
+- New package `@michaelthielemann/kestrel-mfa-totp` (module `mfa/totp`): a second factor for any `authn@1`
+  module — time-based one-time codes (RFC 6238) with ten single-use recovery codes, the secret sealed with
+  AES-256-GCM under a configured key, each code accepted once. Steps `mfa.check` (after `authn.login`; 401
+  `SECOND_FACTOR_REQUIRED` / `SECOND_FACTOR_SETUP_REQUIRED`, ending the session the login opened),
+  `mfa.startSetup`, `mfa.reset`, `mfa.forget` and `mfa.listEnrolled`; config `issuer`, `secretKey`,
+  `enforce`, `recoveryCodes`. `authn-multi` adds `authn.endSessions`, and both authn modules accept a
+  `code` in the login body for such a step.
 
 ### Changed
 

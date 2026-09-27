@@ -14,8 +14,8 @@ entry is never moved to another user: a login belongs to nobody else. Run it fro
 
 **Security entries.** With `securityEvents` (default on) the module watches every HTTP run and records,
 without any pipeline: `auth.failed` when one of `failedSteps` failed (default: `authn.login`,
-`authn.confirmPassword`, `authn.changePassword`, `authn.verifySecondFactor`,
-`authn.confirmSecondFactor`), with the attempted `username` when the step reported one;
+`authn.confirmPassword`, `authn.changePassword`, `mfa.check`, `mfa.startSetup`), with the attempted
+`username` when the step reported one;
 `access.denied` for any 403; `access.rateLimited` for a 429, at most once a minute per address and
 pipeline. Each carries `at`, `ip`, the `identityId` known when the run ended and `params`
 `{ pipeline, step, code }`; never a body, a password or a token. The attempted username of a failed
@@ -39,7 +39,7 @@ unavailable; it never fails otherwise.
 |---|---|---|---|
 | `retentionDays` | integer | no | – |
 | `securityEvents` | boolean | no | `true` |
-| `failedSteps` | array | no | `["authn.login","authn.confirmPassword","authn.changePassword","authn.verifySecondFactor","authn.confirmSecondFactor"]` |
+| `failedSteps` | array | no | `["authn.login","authn.confirmPassword","authn.changePassword","mfa.check","mfa.startSetup"]` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|

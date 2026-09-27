@@ -1074,6 +1074,7 @@
         "authn.deactivateUser",
         "authn.activateUser",
         "authn.cleanupSessions",
+        "authn.endSessions",
         "authn.requireRecentAuth",
         "authn.confirmPassword"
       ],
@@ -3219,8 +3220,8 @@
                 "authn.login",
                 "authn.confirmPassword",
                 "authn.changePassword",
-                "authn.verifySecondFactor",
-                "authn.confirmSecondFactor"
+                "mfa.check",
+                "mfa.startSetup"
               ],
               "description": "The steps whose failure is recorded as `auth.failed`"
             }
@@ -3260,16 +3261,16 @@
               "authn.login",
               "authn.confirmPassword",
               "authn.changePassword",
-              "authn.verifySecondFactor",
-              "authn.confirmSecondFactor"
+              "mfa.check",
+              "mfa.startSetup"
             ],
             "redacted": false,
             "default": [
               "authn.login",
               "authn.confirmPassword",
               "authn.changePassword",
-              "authn.verifySecondFactor",
-              "authn.confirmSecondFactor"
+              "mfa.check",
+              "mfa.startSetup"
             ]
           }
         ]
@@ -6868,6 +6869,9 @@
             },
             "password": {
               "type": "string"
+            },
+            "code": {
+              "type": "string"
             }
           },
           "required": [
@@ -7500,6 +7504,31 @@
           },
           "required": [
             "removed"
+          ]
+        }
+      }
+    },
+    {
+      "name": "authn.endSessions",
+      "module": "authn/multi",
+      "factory": false,
+      "description": {
+        "summary": "End every session of the user in params.id, e.g. after its second factor was reset",
+        "reads": [
+          "params.id"
+        ],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ok"
           ]
         }
       }
@@ -19177,6 +19206,9 @@
                   "type": "string"
                 },
                 "password": {
+                  "type": "string"
+                },
+                "code": {
                   "type": "string"
                 }
               },

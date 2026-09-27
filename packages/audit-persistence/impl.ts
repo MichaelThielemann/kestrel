@@ -94,7 +94,7 @@ export function entryFromEventData(data: Record<string, unknown>): AuditEntry {
 }
 
 /** The steps whose failure `auth.failed` records by default: every check of a password or a second factor. */
-export const DEFAULT_FAILED_STEPS: readonly string[] = ["authn.login", "authn.confirmPassword", "authn.changePassword", "authn.verifySecondFactor", "authn.confirmSecondFactor"];
+export const DEFAULT_FAILED_STEPS: readonly string[] = ["authn.login", "authn.confirmPassword", "authn.changePassword", "mfa.check", "mfa.startSetup"];
 
 const RATE_LIMITED_EVERY_MS = 60_000;
 

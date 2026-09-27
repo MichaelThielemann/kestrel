@@ -77,6 +77,7 @@ prefix).
 | `authn.deactivateUser` | beside |
 | `authn.activateUser` | beside |
 | `authn.cleanupSessions` | beside |
+| `authn.endSessions` | beside |
 | `authn.requireRecentAuth` | beside |
 | `authn.confirmPassword` | beside |
 | `content.validate` | none |

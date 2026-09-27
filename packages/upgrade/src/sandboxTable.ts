@@ -19,7 +19,7 @@ export const BUILT_IN_SANDBOX_ENTRIES: Readonly<Record<string, SandboxRewrite>> 
 };
 
 export const KNOWN_SAFE_USES: ReadonlySet<string> = new Set(
-  ["events-inmemory", "events-direct", "events-queue", "authn-single", "authn-multi", "authz-roles", "content-default", "delivery-static", "images-default", "insights", "links-default", "media-default", "ratelimit-memory", "redirects-default", "references-default", "renderer-plain", "revisions-default", "sanitize-svg", "site-default", "audit-persistence"].map((name) => `${OFFICIAL_PREFIX}${name}`),
+  ["events-inmemory", "events-direct", "events-queue", "authn-single", "authn-multi", "authz-roles", "content-default", "delivery-static", "images-default", "insights", "links-default", "media-default", "mfa-totp", "ratelimit-memory", "redirects-default", "references-default", "renderer-plain", "revisions-default", "sanitize-svg", "site-default", "audit-persistence"].map((name) => `${OFFICIAL_PREFIX}${name}`),
 );
 
 export function sandboxKey(use: string): string {

@@ -20,6 +20,7 @@ function key(module: string, step: string): string {
 export const OBJECT_BINDING_REGISTRY: Record<string, ObjectBindingDisposition> = {
   [key("audit/persistence", "anonymize")]: { kind: "waiver", reason: "params.id names the only user this step acts on; there is no second object to bind to." },
   [key("authn/multi", "updateUser")]: { kind: "waiver", reason: "params.id names the only user this step acts on; there is no second object to bind to." },
+  [key("mfa/totp", "forget")]: { kind: "waiver", reason: "params.id or the event payload's id names the only user this step acts on; there is no second object to bind to." },
   [key("authn/multi", "setPassword")]: { kind: "waiver", reason: "params.id names the only user this step acts on; there is no second object to bind to." },
   [key("authn/multi", "deleteUser")]: { kind: "test", file: "authn-multi/module.test.ts", title: "deleteUser keeps the user when the reassign target is unknown, inactive, themselves or not an id" },
 
