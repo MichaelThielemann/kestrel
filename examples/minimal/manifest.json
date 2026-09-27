@@ -1905,6 +1905,17 @@
             "allowPrivate": {
               "type": "boolean",
               "default": false
+            },
+            "maxLinksPerDocument": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000,
+              "default": 1000
+            },
+            "checkBudgetSeconds": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "default": 3600
             }
           },
           "additionalProperties": false
@@ -1964,6 +1975,28 @@
             "value": false,
             "redacted": false,
             "default": false
+          },
+          {
+            "path": "maxLinksPerDocument",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 1000,
+            "redacted": false,
+            "default": 1000
+          },
+          {
+            "path": "checkBudgetSeconds",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 3600,
+            "redacted": false,
+            "default": 3600
           }
         ]
       },

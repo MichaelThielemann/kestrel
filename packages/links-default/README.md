@@ -5,6 +5,18 @@ External link checking for content. `links.extract:<type>` after `content.create
 (HEAD, GET on 405/501; timeout, concurrency and recheck interval from config) and stores
 `ok`/`status`/`error`/`checkedAt` on all entries of that URL. `links.report` lists broken ones
 (optional `type` filter), `links.rebuild` refills the index from all content.
+Each document stores at most `maxLinksPerDocument` links (default 1000, counted over all fields and
+locales, one per field, locale and URL). A document with more gets one additional row whose `url` is
+the first link left out and whose `error` is `LINK_LIMIT_ERROR`; it shows up in `links.report` and is
+never requested. Scanning stops at the limit, so the cost of `links.extract` does not grow with the
+size of the text.
+
+`links.check` walks the index in batches of 100 rows and yields to the event loop between batches, so
+other requests are served while a run is in progress. Each URL is requested at most once per run, and
+the result is written to every due row with that URL. A run ends when `checkBudgetSeconds` (default
+3600) have passed; no new URL is requested after that, and the rows it did not reach stay due for the
+next run. `urls` in the summary counts the URLs requested or refused in this run.
+
 A probed URL's own `ok`/`status`/`error` (whether the *target* answered) is data, not a step
 failure — only a failure to read or write the index itself (a busy database) fails the step.
 Outbound requests are a SSRF surface. With `allowPrivate: false` (the default) a check sends a request
@@ -52,6 +64,8 @@ Not included: link rewriting, retries before reporting, robots.txt.
 | `recheckAfterSeconds` | integer | no | `21600` |
 | `userAgent` | string | no | `"kestrel-links/0.1 (+link check)"` |
 | `allowPrivate` | boolean | no | `false` |
+| `maxLinksPerDocument` | integer | no | `1000` |
+| `checkBudgetSeconds` | integer | no | `3600` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|

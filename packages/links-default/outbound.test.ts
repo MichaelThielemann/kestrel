@@ -28,7 +28,7 @@ function contentWith(urls: string[]): { content: Content; id: string } {
   return { content, id };
 }
 
-const config = { timeoutMs: 2000, concurrency: 1, recheckAfterSeconds: 3600, userAgent: "test", allowPrivate: false };
+const config = { timeoutMs: 2000, concurrency: 1, recheckAfterSeconds: 3600, userAgent: "test", allowPrivate: false, maxLinksPerDocument: 1000, checkBudgetSeconds: 3600 };
 
 const servers: Server[] = [];
 afterEach(async () => {

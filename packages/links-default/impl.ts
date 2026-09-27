@@ -1,6 +1,6 @@
-import type { Content, FieldDefinition, FieldType } from "@michaelthielemann/kestrel-contracts/content";
+import type { Content, ContentDocument, FieldDefinition, FieldType } from "@michaelthielemann/kestrel-contracts/content";
 import { err, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
-import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Document, Filter, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { isIP } from "node:net";
 import { isPrivateAddress, isPrivateHost, normalizeHostname } from "./address.ts";
 import { httpFetcher, systemResolver, type Fetcher, type Resolver } from "./outbound.ts";
@@ -16,6 +16,8 @@ export interface Config {
   recheckAfterSeconds: number;
   userAgent: string;
   allowPrivate: boolean;
+  maxLinksPerDocument: number;
+  checkBudgetSeconds: number;
 }
 
 export interface LinkEntry extends Document {
@@ -46,6 +48,9 @@ export interface Links {
   rebuild(): Promise<Result<{ documents: number; entries: number }, LinksError>>;
 }
 
+/** The `error` of the row that marks a document as holding more links than `maxLinksPerDocument`; its `url` is the first link left out. */
+export const LINK_LIMIT_ERROR = "not checked: the document has more links than the per-document limit";
+
 const PAGE = 100;
 const MAX_REDIRECTS = 5;
 const URL_PATTERN = /https?:\/\/[^\s"'<>()\]]+/g;
@@ -55,13 +60,22 @@ function definition(field: FieldType | FieldDefinition): FieldDefinition {
   return typeof field === "string" ? { type: field } : field;
 }
 
-export function findUrls(value: unknown, out = new Set<string>()): Set<string> {
+/** Collects the distinct `http(s)` URLs in a string or nested JSON value, stopping once `out` holds `limit` of them. */
+export function findUrls(value: unknown, out = new Set<string>(), limit = Number.POSITIVE_INFINITY): Set<string> {
+  if (out.size >= limit) return out;
   if (typeof value === "string") {
-    for (const match of value.match(URL_PATTERN) ?? []) out.add(match.replace(/[.,;:!?]+$/, ""));
+    const pattern = new RegExp(URL_PATTERN.source, "g");
+    for (let match = pattern.exec(value); match !== null && out.size < limit; match = pattern.exec(value)) out.add(match[0].replace(/[.,;:!?]+$/, ""));
   } else if (Array.isArray(value)) {
-    for (const v of value) findUrls(v, out);
+    for (const v of value) {
+      if (out.size >= limit) break;
+      findUrls(v, out, limit);
+    }
   } else if (typeof value === "object" && value !== null) {
-    for (const v of Object.values(value)) findUrls(v, out);
+    for (const v of Object.values(value)) {
+      if (out.size >= limit) break;
+      findUrls(v, out, limit);
+    }
   }
   return out;
 }
@@ -108,35 +122,41 @@ export async function createLinksDefault(
     if (!(type in model.types)) throw new Error(`links/default: unknown type "${type}"`);
   };
 
-  const entriesOf = async (type: string, id: string): Promise<Result<Array<Omit<LinkEntry, "id">>, LinksError>> => {
-    const out: Array<Omit<LinkEntry, "id">> = [];
-    const seen = new Set<string>();
+  const entriesOf = async (type: string, id: string): Promise<Result<{ entries: Array<Omit<LinkEntry, "id">>; overflow: Omit<LinkEntry, "id"> | null }, LinksError>> => {
+    const limit = config.maxLinksPerDocument;
+    const entries: Array<Omit<LinkEntry, "id">> = [];
+    const docs = new Map<string, ContentDocument | null>();
     for (const [field, def] of textFields(type)) {
       for (const locale of def.localized ? locales : [undefined]) {
-        const doc = await content.get(type, id, locale === undefined ? {} : { locale });
-        if (isErr(doc)) return doc;
-        for (const url of findUrls(doc.value?.[field])) {
-          const key = `${field}|${locale ?? ""}|${url}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          out.push({ url, fromType: type, fromId: id, field, locale: locale ?? "", ok: null, status: null, error: null, checkedAt: null });
+        const key = locale ?? "";
+        if (!docs.has(key)) {
+          const doc = await content.get(type, id, locale === undefined ? {} : { locale });
+          if (isErr(doc)) return doc;
+          docs.set(key, doc.value);
+        }
+        for (const url of findUrls(docs.get(key)?.[field], new Set(), limit - entries.length + 1)) {
+          const entry = { url, fromType: type, fromId: id, field, locale: key, ok: null, status: null, error: null, checkedAt: null };
+          if (entries.length >= limit) return ok({ entries, overflow: { ...entry, ok: false, error: LINK_LIMIT_ERROR } });
+          entries.push(entry);
         }
       }
     }
-    return ok(out);
+    return ok({ entries, overflow: null });
   };
 
   const extract: Links["extract"] = async (type, id) => {
     knownType(type);
     const deleted = await db.deleteMany(INDEX, { fromType: type, fromId: id });
     if (isErr(deleted)) return deleted;
-    const entries = await entriesOf(type, id);
-    if (isErr(entries)) return entries;
-    if (entries.value.length > 0) {
-      const created = await db.createMany<LinkEntry>(INDEX, entries.value);
+    const found = await entriesOf(type, id);
+    if (isErr(found)) return found;
+    const { entries, overflow } = found.value;
+    const rows = overflow === null ? entries : [...entries, overflow];
+    if (rows.length > 0) {
+      const created = await db.createMany<LinkEntry>(INDEX, rows);
       if (isErr(created)) return created;
     }
-    return ok(entries.value.length);
+    return ok(entries.length);
   };
 
   const destination = async (url: string, signal: AbortSignal): Promise<{ address?: string } | { error: string }> => {
@@ -187,36 +207,43 @@ export async function createLinksDefault(
       return db.deleteMany(INDEX, { fromType: type, fromId: id });
     },
     async check() {
-      const due = now() - config.recheckAfterSeconds * 1000;
-      const urls = new Set<string>();
-      for (let offset = 0; ; offset += PAGE) {
-        const page = await db.findMany<LinkEntry>(INDEX, {}, { sort: { id: "asc" }, limit: PAGE, offset });
-        if (isErr(page)) return page;
-        for (const row of page.value.items) if (row.checkedAt === null || row.checkedAt <= due) urls.add(row.url);
-        if (page.value.items.length < PAGE) break;
-      }
-      const queue = [...urls];
+      const started = now();
+      const due = started - config.recheckAfterSeconds * 1000;
+      const deadline = started + config.checkBudgetSeconds * 1000;
+      const results = new Map<string, CheckResult>();
       let checked = 0;
       let broken = 0;
       let skipped = 0;
-      let workerError: LinksError | null = null;
-      const worker = async (): Promise<void> => {
-        for (let url = queue.shift(); url !== undefined; url = queue.shift()) {
-          if (workerError !== null) return;
-          const result = await probe(url);
-          if (result.status === null && result.error !== null && !result.error.startsWith("timeout") && checkable(url, config.allowPrivate) !== null) skipped += 1;
-          else checked += 1;
-          if (!result.ok) broken += 1;
-          const updated = await db.updateMany<LinkEntry>(INDEX, { url }, { ...result, checkedAt: now() });
-          if (isErr(updated)) {
-            workerError = updated.error;
-            return;
+      let last: string | null = null;
+      for (;;) {
+        const filter: Filter = last === null ? {} : { id: { gt: last } };
+        const page = await db.findMany<LinkEntry>(INDEX, filter, { sort: { id: "asc" }, limit: PAGE });
+        if (isErr(page)) return page;
+        const rows = page.value.items.filter((row) => row.error !== LINK_LIMIT_ERROR && (row.checkedAt === null || row.checkedAt <= due));
+        const queue = [...new Set(rows.map((row) => row.url))].filter((url) => !results.has(url));
+        const worker = async (): Promise<void> => {
+          for (let url = queue.shift(); url !== undefined; url = queue.shift()) {
+            if (now() >= deadline) return;
+            const result = await probe(url);
+            results.set(url, result);
+            if (result.status === null && result.error !== null && !result.error.startsWith("timeout") && checkable(url, config.allowPrivate) !== null) skipped += 1;
+            else checked += 1;
+            if (!result.ok) broken += 1;
           }
+        };
+        await Promise.all(Array.from({ length: Math.max(1, config.concurrency) }, worker));
+        for (const row of rows) {
+          const result = results.get(row.url);
+          if (result === undefined) continue;
+          const updated = await db.updateOne<LinkEntry>(INDEX, row.id, { ...result, checkedAt: now() });
+          if (isErr(updated) && updated.error.code !== "NOT_FOUND") return err(updated.error);
         }
-      };
-      await Promise.all(Array.from({ length: Math.max(1, config.concurrency) }, worker));
-      if (workerError !== null) return err(workerError);
-      return ok({ urls: urls.size, checked, broken, skipped });
+        const tail = page.value.items.at(-1);
+        if (tail === undefined || page.value.items.length < PAGE || now() >= deadline) break;
+        last = tail.id;
+        await new Promise<void>((resume) => setImmediate(resume));
+      }
+      return ok({ urls: results.size, checked, broken, skipped });
     },
     async report(type) {
       if (type !== undefined) knownType(type);

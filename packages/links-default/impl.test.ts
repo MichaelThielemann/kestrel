@@ -67,7 +67,7 @@ function fakeFetch(statuses: Record<string, number | "timeout" | "error">): Fetc
 
 const publicResolver = async (): Promise<string[]> => ["93.184.215.14"];
 
-const config = { timeoutMs: 20, concurrency: 2, recheckAfterSeconds: 3600, userAgent: "test", allowPrivate: false };
+const config = { timeoutMs: 20, concurrency: 2, recheckAfterSeconds: 3600, userAgent: "test", allowPrivate: false, maxLinksPerDocument: 1000, checkBudgetSeconds: 3600 };
 
 async function createDoc(content: Content, type: string, data: Record<string, unknown>): Promise<ContentDocument> {
   return expectOk(await content.create(type, data));

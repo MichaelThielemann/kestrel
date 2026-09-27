@@ -14,6 +14,8 @@ export const configSchema = z
     recheckAfterSeconds: z.number().int().min(0).default(6 * 3600),
     userAgent: z.string().min(1).default("kestrel-links/0.1 (+link check)"),
     allowPrivate: z.boolean().default(false),
+    maxLinksPerDocument: z.number().int().min(1).max(100_000).default(1000),
+    checkBudgetSeconds: z.number().int().positive().default(3600),
   })
   .strict();
 

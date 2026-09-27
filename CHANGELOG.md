@@ -517,6 +517,11 @@ Net changes since 5.8.1.
   NAT64 and 6to4 IPv6 addresses. `Fetcher` receives `redirect: "manual"` and the checked `address`
   and returns `headers` for `Location`; the default is `httpFetcher` (`node:http`/`node:https`)
   instead of the global `fetch`. `createLinksDefault` takes an optional `Resolver` after `now`.
+- `links-default` stores at most `maxLinksPerDocument` links per document (default 1000) and marks a
+  document with more by one report row carrying `LINK_LIMIT_ERROR`; extraction stops scanning at the
+  limit. `links.check` works in batches of 100 rows, yields to the event loop between them, writes
+  results by row, and ends after `checkBudgetSeconds` (default 3600), leaving the rest due for the
+  next run; `urls` counts the URLs handled in the run. `Config` has both new fields.
 - `@michaelthielemann/kestrel-contracts`'s runtime helpers moved under
   `@michaelthielemann/kestrel-contracts/helpers/*`, no re-export left at the old path:
   `content-locale` → `helpers/content-locale`, `content-schema` → `helpers/content-schema`,
