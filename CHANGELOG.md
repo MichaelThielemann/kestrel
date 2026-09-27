@@ -502,8 +502,9 @@ Net changes since 5.8.1.
 - `redirects-default` requires `persistence@1`; a config loading it without a persistence provider
   fails to boot, naming the contract. It stores `redirects_auto_paths` and `redirects_auto_targets`.
   `Redirects.validate` returns a `Promise<Result>`, and `createRedirects` is async and takes `db`.
-- `redirects-default`: a rule's `from` holds at most 8 wildcards and 512 characters; saving a longer
-  one fails with `VALIDATION` naming the row, and a stored one is skipped and logged on publish.
+- `redirects-default`: a rule's `from` holds at most 8 wildcards and 512 characters, and a list at most
+  1000 rules; saving more fails with `VALIDATION`, and on publish a stored rule over a limit is skipped
+  and logged.
   `redirects.lookup` matches `from` in linear time instead of through the regex, with the same
   captures; a request path longer than 2048 characters matches no rule. Every entry of
   `redirects.json` and `redirects.render` carries `from` (the canonical wildcard path) next to

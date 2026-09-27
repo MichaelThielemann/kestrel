@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { matchWildcardPath } from "./match.ts";
-import { compilePublishableRedirects, compileRedirects, matchRedirect, MAX_FROM_LENGTH, MAX_LOOKUP_PATH_LENGTH, MAX_WILDCARDS, normalizeTarget, patternToRegexSource, RedirectRuleError, serializeRedirects } from "./rules.ts";
+import { compilePublishableRedirects, compileRedirects, matchRedirect, MAX_FROM_LENGTH, MAX_LOOKUP_PATH_LENGTH, MAX_RULES, MAX_WILDCARDS, normalizeTarget, patternToRegexSource, RedirectRuleError, serializeRedirects } from "./rules.ts";
 
 describe("patternToRegexSource", () => {
   it("anchors literals, tolerates a trailing slash and escapes regex characters", () => {
@@ -135,6 +135,15 @@ describe("wildcard matching cost and limits", () => {
     const from = `/${Array.from({ length: MAX_WILDCARDS + 1 }, () => "*").join("/")}`;
     expect(() => compileRedirects([{ from, to: "/x" }])).toThrow(new RegExp(`^Row 1: "From" has ${MAX_WILDCARDS + 1} wildcards, at most ${MAX_WILDCARDS} are allowed`));
     expect(() => compileRedirects([{ from: `/${Array.from({ length: MAX_WILDCARDS }, () => "*").join("/")}`, to: "/x" }])).not.toThrow();
+  });
+
+  it("rejects more rules than the limit and publishes only the first ones of a stored list", () => {
+    const rows = Array.from({ length: MAX_RULES + 2 }, (_, i) => ({ from: `/old/${i}`, to: `/new/${i}` }));
+    expect(compileRedirects(rows.slice(0, MAX_RULES))).toHaveLength(MAX_RULES);
+    expect(() => compileRedirects(rows)).toThrow(new RegExp(`at most ${MAX_RULES} redirect rules are allowed, got ${MAX_RULES + 2}`));
+    const { rules, skipped } = compilePublishableRedirects(rows);
+    expect(rules).toHaveLength(MAX_RULES);
+    expect(skipped).toEqual([`Row ${MAX_RULES + 1}: beyond the limit of ${MAX_RULES} rules`, `Row ${MAX_RULES + 2}: beyond the limit of ${MAX_RULES} rules`]);
   });
 
   it("rejects a from longer than the limit", () => {

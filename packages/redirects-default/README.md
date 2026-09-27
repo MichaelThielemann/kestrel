@@ -24,6 +24,8 @@ needs no per-item shape check. `from` is the canonical form (leading slash, no t
 is the same rule as an anchored regex source, for consumers that match with a regex engine.
 
 A `from` holds at most 8 wildcards and 512 characters; a longer one is rejected with the row number.
+A list holds at most 1000 rules (`MAX_RULES`): saving more fails with `VALIDATION`, and publishing a
+stored longer list keeps the first 1000 and logs the rest as skipped.
 
 ## Matching
 

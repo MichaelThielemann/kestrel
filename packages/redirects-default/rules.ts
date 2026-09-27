@@ -21,6 +21,9 @@ export const MAX_WILDCARDS = 8;
 /** The longest `from`, in characters, after trimming. */
 export const MAX_FROM_LENGTH = 512;
 
+/** The most editor rules one list may hold. */
+export const MAX_RULES = 1000;
+
 /** A request path longer than this, in characters, matches no rule. */
 export const MAX_LOOKUP_PATH_LENGTH = 2048;
 
@@ -145,6 +148,7 @@ function readText(value: unknown, what: string): string {
 export function compileRedirects(rows: unknown): RedirectRule[] {
   if (rows === null || rows === undefined) return [];
   if (!Array.isArray(rows)) throw new RedirectRuleError("Redirect rules must be a list");
+  if (rows.length > MAX_RULES) throw new RedirectRuleError(`at most ${MAX_RULES} redirect rules are allowed, got ${rows.length}`);
 
   return rows.map((raw, i) => {
     try {
@@ -183,6 +187,10 @@ export function compilePublishableRedirects(rows: unknown): { rules: RedirectRul
   const rules: RedirectRule[] = [];
   const skipped: string[] = [];
   rows.forEach((row, i) => {
+    if (i >= MAX_RULES) {
+      skipped.push(`Row ${i + 1}: beyond the limit of ${MAX_RULES} rules`);
+      return;
+    }
     try {
       rules.push(...compileRedirects([row]));
     } catch (error) {
