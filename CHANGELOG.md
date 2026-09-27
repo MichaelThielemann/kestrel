@@ -586,6 +586,10 @@ Net changes since 5.8.1.
   pipeline has no step reading `files` answers 415 (`UNSUPPORTED`) to a multipart body without reading
   it. Boot marks each route with `files`; new exports `MultipartLimits`, `DEFAULT_MULTIPART_LIMITS`,
   `isMultipart`, `multipartRefusal`, and `parseRequestBody` takes the limits as a third argument.
+- A request whose path has a `.` or `..` segment, literal or percent-encoded, answers 400 on the core
+  server and in the h3 adapter instead of being routed to the resolved path (new export
+  `hasDotSegment`). The h3 adapter exports `routedPipeline(event)`, the pipeline a request was routed
+  to, for a handler that wraps it.
 
 ### Added
 

@@ -14,4 +14,7 @@ forwarding headers of any other peer are ignored and the peer is the client), `t
 that omits the trusted header leaves `ctx.ip` absent; refusing such a request is the host's job, as
 the core server does with 403. Boot Kestrel with `http: null`;
 health/CORS stay with the host.
+A path with a `.` or `..` segment (also `%2e`-encoded) answers 400 instead of being resolved. A
+handler wrapping the adapter reads the pipeline a request was routed to with `routedPipeline(event)`
+(`undefined` when no route matched), so it can decide on the route rather than on the path.
 Knows no contracts and no modules.

@@ -55,6 +55,19 @@ function decodeSegment(part: string): string | undefined {
   }
 }
 
+/**
+ * Whether the path of a raw request target has a `.` or `..` segment, literal or percent-encoded, with
+ * `/` or `\` as separator. A URL parser resolves such a segment, so the routed path would differ from
+ * the one the request named; both HTTP paths answer 400 instead.
+ */
+export function hasDotSegment(target: string): boolean {
+  const path = target.split(/[?#]/, 1)[0] ?? "";
+  return path.split(/[/\\]/).some((segment) => {
+    const plain = segment.replace(/%2e/gi, ".");
+    return plain === "." || plain === "..";
+  });
+}
+
 /** Method plus segment shape; two routes differing only in a param name are the same pattern. */
 export function routePattern(route: Route): string {
   return `${route.method} /${route.segments.map((s) => (s.startsWith(":") ? ":" : s.startsWith("*") ? "*" : s)).join("/")}`;
@@ -429,8 +442,9 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
   return server;
 
   async function handle(req: IncomingMessage, res: ServerResponse, ip: string | undefined): Promise<void> {
-    const url = new URL(req.url ?? "/", "http://localhost");
     const requestId = requestIdOf(req.headers["x-request-id"]);
+    if (hasDotSegment(req.url ?? "/")) return sendError(res, 400, "invalid path: dot segment", requestId);
+    const url = new URL(req.url ?? "/", "http://localhost");
     if (healthPath && url.pathname === healthPath && req.method === "GET") {
       const meta: ResponseMeta = requestId === undefined ? { runId: randomUUID() } : { runId: randomUUID(), requestId };
       const { ok, restartRequired } = options.health?.() ?? { ok: true, restartRequired: false };

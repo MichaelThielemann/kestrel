@@ -306,6 +306,11 @@ status, duration, IP and — if present — `requestId`. `http.timeouts` sets `r
 `/health`, `null` disables it) answers without running a pipeline, with `{ ok, restartRequired }`
 from `kestrel.health()`: 503 once a module reports `restartRequired`, 200 otherwise.
 
+**Dot segments.** A request target whose path has a `.` or `..` segment, literal or
+percent-encoded (`%2e`), with `/` or `\` as separator, answers 400 on the core server and in the h3
+adapter. A URL parser would resolve the segment and route a different path than the one the request
+named, which a host's own path checks in front of the adapter would not see.
+
 **Client address.** `ctx.ip` (also used in the `http` log line and by `http.allow`) is the socket
 peer. Forwarding headers count only when that peer is a trusted proxy: an address in
 `http.trustedProxies` (default loopback, `["127.0.0.0/8", "::1"]`). A connection without a peer

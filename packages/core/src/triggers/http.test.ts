@@ -1,8 +1,9 @@
+import { request } from "node:http";
 import { afterEach, describe, it, expect } from "vitest";
 import { binaryResult } from "../context.ts";
 import { silentLogger } from "../logger.ts";
 import type { RunResult, Runner } from "../runner.ts";
-import { BodyTooLarge, buildResponse, clientIpResolver, createHttpServer, disposition, errorResponse, listen, matchRoute, parseQuery, parseRequestBody, parseRoute, readRequestBody, responseForRun, routePattern } from "./http.ts";
+import { BodyTooLarge, buildResponse, clientIpResolver, createHttpServer, disposition, errorResponse, hasDotSegment, listen, matchRoute, parseQuery, parseRequestBody, parseRoute, readRequestBody, responseForRun, routePattern } from "./http.ts";
 
 describe("http routes", () => {
   const routes = [parseRoute("GET /pages/:id", "readPage"), parseRoute("POST /pages", "createPage"), parseRoute("GET /", "home")];
@@ -55,6 +56,11 @@ describe("http routes", () => {
     const wild = [parseRoute("GET /site/*path", "resolve")];
     expect(matchRoute(wild, "GET", "/site/a%2Fb")).toBeUndefined();
     expect(matchRoute(wild, "GET", "/site/a/b")?.params).toEqual({ path: "a/b" });
+  });
+
+  it("recognizes literal and encoded dot segments, not dots inside a segment or in the query", () => {
+    for (const path of ["/a/../b", "/a/%2e%2e/b", "/a/.%2E/b", "/./a", "/a/.", "/a\\..\\b", "/a/%2E"]) expect(hasDotSegment(path), path).toBe(true);
+    for (const path of ["/a/b", "/.well-known/x", "/a/...", "/a/b.c", "/a?x=/../b", "/a#/../b", "/"]) expect(hasDotSegment(path), path).toBe(false);
   });
 
   it("rejects malformed triggers", () => {
@@ -339,6 +345,20 @@ describe("http server", () => {
     expect((await fetch(`${base}/echo`)).status).toBe(403);
     await close?.();
     base = await serve(counting, { trustedHeader: "X-Real-IP", trustedProxies: ["192.0.2.1"] });
+    expect((await fetch(`${base}/echo`)).status).toBe(200);
+  });
+
+  it("answers 400 to a request target with a dot segment", async () => {
+    const base = await serve(ok);
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = request(`${base}/`, { path: "/x/%2e%2e/echo" }, (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    expect(status).toBe(400);
     expect((await fetch(`${base}/echo`)).status).toBe(200);
   });
 

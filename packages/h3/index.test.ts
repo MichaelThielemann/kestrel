@@ -1,11 +1,11 @@
-import { createServer } from "node:http";
+import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
-import { createApp, toNodeListener } from "h3";
+import { createApp, eventHandler, toNodeListener } from "h3";
 import { afterEach, describe, it, expect } from "vitest";
 import { z } from "zod";
 import { binaryResult, boot, customFailure, defineContract, defineModule, definePipeline, ok, silentLogger, type Context, type Kestrel } from "@michaelthielemann/kestrel";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { createKestrelHandler } from "./index.ts";
+import { createKestrelHandler, routedPipeline } from "./index.ts";
 
 async function jsonBody<T>(res: Response): Promise<T> {
   return boundaryCast<T>(await res.json(), "json");
@@ -85,7 +85,47 @@ async function serve(options: Parameters<typeof createKestrelHandler>[1] = {}) {
   return `http://127.0.0.1:${boundaryCast<AddressInfo>(server.address(), "host").port}`;
 }
 
+function rawGet(base: string, path: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = request(`${base}/`, { path }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode ?? 0));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 describe("kestrel-h3", () => {
+  it("answers 400 to a path with a dot segment instead of routing the resolved path", async () => {
+    const base = await serve();
+    for (const path of ["/site/../echo/1", "/site/%2e%2e/echo/1", "/site/.%2E/echo/1", "/./echo/1", "/echo/1/.", "/site/x\\..\\..\\echo\\1"]) {
+      expect(await rawGet(base, path), path).toBe(400);
+    }
+    expect(await rawGet(base, "/site/.well-known/x")).toBe(200);
+    expect(await rawGet(base, "/echo/1?next=/../x")).toBe(200);
+  });
+
+  it("tells a wrapping handler which pipeline the request was routed to", async () => {
+    kestrel = await boot({ config, modules: [store], pipelines, logger: silentLogger });
+    const handler = createKestrelHandler(kestrel);
+    const seen: Array<string | undefined> = [];
+    const app = createApp();
+    app.use(eventHandler(async (event) => {
+      const answer: unknown = await handler(event);
+      seen.push(routedPipeline(event));
+      return answer;
+    }));
+    const server = createServer(toNodeListener(app));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    close = () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
+    const base = `http://127.0.0.1:${boundaryCast<AddressInfo>(server.address(), "host").port}`;
+    await fetch(`${base}/echo/1`);
+    await fetch(`${base}/site/a/b/`);
+    await fetch(`${base}/nope`);
+    expect(seen).toEqual(["echo", "echo", undefined]);
+  });
+
   it("routes params, query, json body, headers and ip like the core server", async () => {
     const base = await serve();
     const res = await fetch(`${base}/echo/42?x=1`, { headers: { authorization: "Bearer t" } });

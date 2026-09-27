@@ -1,5 +1,5 @@
 import { eventHandler, getRequestHeaders, getRequestURL, readRawBody, setResponseHeaders, setResponseStatus, type EventHandler, type H3Event } from "h3";
-import { BodyTooLarge, clientIpResolver, errorResponse, matchRoute, multipartRefusal, parseQuery, parseRequestBody, readRequestBody, requestIdOf, responseForRun, type ClientIpOptions, type ContextInput, type MultipartLimits, type HttpResponse, type Kestrel } from "@michaelthielemann/kestrel";
+import { BodyTooLarge, clientIpResolver, errorResponse, hasDotSegment, matchRoute, multipartRefusal, parseQuery, parseRequestBody, readRequestBody, requestIdOf, responseForRun, type ClientIpOptions, type ContextInput, type MultipartLimits, type HttpResponse, type Kestrel } from "@michaelthielemann/kestrel";
 
 export interface KestrelHandlerOptions extends ClientIpOptions {
   mountPath?: string;
@@ -17,6 +17,13 @@ function stripMount(pathname: string, mountPath: string): string | null {
 }
 
 const WITH_BODY = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+const routed = new WeakMap<H3Event, string>();
+
+/** The pipeline a `createKestrelHandler` handler routed this event to; `undefined` before it ran or when no route matched. */
+export function routedPipeline(event: H3Event): string | undefined {
+  return routed.get(event);
+}
 
 function preBuffered(event: H3Event): boolean {
   const req = event.node.req;
@@ -42,14 +49,16 @@ export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHan
   const resolveClient = clientIpResolver(options);
 
   return eventHandler(async (event) => {
-    const url = getRequestURL(event);
-    const pathname = stripMount(url.pathname, mountPath);
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(getRequestHeaders(event))) if (typeof v === "string") headers[k] = v;
     const requestId = requestIdOf(headers["x-request-id"]);
+    if (hasDotSegment(event.node.req.originalUrl ?? event.path) || hasDotSegment(event.path)) return respond(event, errorResponse(400, "invalid path: dot segment", requestId));
+    const url = getRequestURL(event);
+    const pathname = stripMount(url.pathname, mountPath);
 
     const match = pathname === null ? undefined : matchRoute(kestrel.triggers.http, event.method, pathname);
     if (!match) return respond(event, errorResponse(404, `no route for ${event.method} ${url.pathname}`, requestId));
+    routed.set(event, match.route.pipeline);
 
     const contentType = headers["content-type"] ?? "";
     const refusal = multipartRefusal(match.route, contentType, requestId);
