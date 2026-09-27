@@ -109,6 +109,13 @@ function matchFrom(from, path) {
   return captures;
 }
 
+function matchRule(rule, path) {
+  if (typeof rule.from === "string") return matchFrom(rule.from, path);
+  if (typeof rule.pattern !== "string") return null;
+  const m = new RegExp(rule.pattern).exec(path);
+  return m ? m.slice(1) : null;
+}
+
 function redirect(r) {
   const raw = dict().get("rules");
   if (!raw) {
@@ -130,7 +137,7 @@ function redirect(r) {
   }
   for (let i = 0; i < rules.length; i++) {
     const rule = rules[i];
-    const m = matchFrom(rule.from, path);
+    const m = matchRule(rule, path);
     if (!m) continue;
     const target = rule.target.replace(/\$(\d+)/g, (_, n) => m[Number(n) - 1] || "");
     r.return(rule.status, target);

@@ -20,7 +20,8 @@ NGINX reverse proxy in front of a static bucket periodically fetches `redirects.
 - The handler matches `from` with the same linear algorithm as `redirects.lookup` (see
   [`../../packages/redirects-default/README.md`](../../packages/redirects-default/README.md)), not the
   `pattern` regex, so no request path can make a rule expensive; a path longer than 2048 characters
-  goes to the origin unmatched.
+  goes to the origin unmatched. A rule without `from` (a list published before `from` existed, or a field
+  grant that leaves it out) is matched by its `pattern` instead.
 - For a 3xx code the second argument of `r.return()` is the redirect URL and sets `Location`
   internally; setting `r.headersOut.Location` beforehand has no effect, because nginx's built-in
   redirect response generation overwrites it.
