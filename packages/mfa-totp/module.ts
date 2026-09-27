@@ -112,7 +112,7 @@ export default defineModule({
       reads: ["identity", "token"],
       writes: ["result?"],
       input: { type: "object", properties: { code: { type: "string" } }, additionalProperties: true },
-      extendsOutput: { type: "object", properties: { recoveryCodes: { type: "array", items: { type: "string" } } } },
+      extendsOutput: { type: "object", properties: { recoveryCodes: { type: "array", items: { type: "string" } } }, required: [] },
       errors: { 401: "the code is wrong or used (`UNAUTHENTICATED`), a code is needed (`SECOND_FACTOR_REQUIRED`), or the account must set up a second factor first (`SECOND_FACTOR_SETUP_REQUIRED`)" },
     },
     startSetup: {

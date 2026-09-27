@@ -90,3 +90,31 @@ describe("mfa/totp steps", () => {
     expect((await runPipeline(reset, { headers, params: { id: "bob" } }, options)).status).toBe(200);
   });
 });
+
+describe("mfa/totp at boot", () => {
+  it("boots behind authn-multi in a login pipeline, with a reset that ends the user's sessions", async () => {
+    const { boot: bootKestrel } = await import("@michaelthielemann/kestrel");
+    const persistence = (await import("@michaelthielemann/kestrel-persistence-sqlite")).default;
+    const authnMulti = (await import("@michaelthielemann/kestrel-authn-multi")).default;
+    const kestrel = await bootKestrel({
+      config: {
+        modules: [
+          { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: ":memory:" } },
+          { use: "@michaelthielemann/kestrel-authn-multi", config: {} },
+          { use: "@michaelthielemann/kestrel-mfa-totp", config: { secretKey: KEY } },
+        ],
+        triggers: [{ http: "POST /login", pipeline: "login" }, { http: "DELETE /users/:id/second-factor", pipeline: "reset" }],
+        http: null,
+      },
+      modules: [persistence, authnMulti, module],
+      pipelines: [
+        definePipeline({ name: "login", steps: ["authn.login", "mfa.check"] }),
+        definePipeline({ name: "reset", steps: ["authn.requireUser", "mfa.reset", "authn.endSessions"] }),
+      ],
+      logger: silentLogger,
+    });
+    const refused = await kestrel.run("login", { trigger: { kind: "http", name: "POST /login" }, body: { username: "nobody", password: "whatever-it-is" } });
+    expect(refused.status).toBe(401);
+    await kestrel.stop();
+  });
+});
