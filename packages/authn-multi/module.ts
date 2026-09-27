@@ -203,6 +203,13 @@ export default defineModule({
       if (isErr(removed)) return ctx.fail(removed.error);
       return ok({ ...ctx, result: { removed: removed.value } });
     },
+    endSessions: async (ctx: Context) => {
+      const id = ctx.params.id;
+      if (id === undefined) throw new Error("authn.endSessions: no params.id (boot's dataflow check already proved this route always provides it)");
+      const ended = await authn.endSessions(id);
+      if (isErr(ended)) return ctx.fail(ended.error);
+      return ok({ ...ctx, result: { ok: true } });
+    },
     requireRecentAuth: stepFactory((arg: string) => {
       const seconds = windowSeconds(arg);
       return async (ctx: Context) => {
@@ -229,7 +236,7 @@ export default defineModule({
       summary: "Log in with credentials; the token comes back in the body and in an HttpOnly session cookie",
       reads: [],
       writes: ["token", "identity", "responseHeaders", "result"],
-      input: { type: "object", properties: { username: { type: "string" }, email: { type: "string" }, password: { type: "string" } }, required: ["password"], additionalProperties: false },
+      input: { type: "object", properties: { username: { type: "string" }, email: { type: "string" }, password: { type: "string" }, code: { type: "string" } }, required: ["password"], additionalProperties: false },
       output: { type: "object", properties: { token: { type: "string" }, identity: { type: "object", properties: { id: { type: "string" }, claims: { type: "object", additionalProperties: true } }, required: ["id", "claims"] } }, required: ["token", "identity"] },
       errors: { 401: "invalid credentials" },
     },
@@ -328,6 +335,12 @@ export default defineModule({
       errors: { 404: "user not found" },
     },
     cleanupSessions: { summary: "Remove expired sessions", reads: [], writes: ["result"], output: { type: "object", properties: { removed: { type: "number" } }, required: ["removed"] } },
+    endSessions: {
+      summary: "End every session of the user in params.id, e.g. after its second factor was reset",
+      reads: ["params.id"],
+      writes: ["result"],
+      output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+    },
     requireRecentAuth: (arg: string) => ({
       summary: `Require that the session's password was checked within the last ${arg} seconds, at login or through authn.confirmPassword; otherwise 403 REAUTH_REQUIRED`,
       reads: ["token"],

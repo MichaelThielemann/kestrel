@@ -77,3 +77,20 @@ describe("authn/multi recent authentication", () => {
     for (const bad of ["0", "-5", "abc", "1.5"]) expect(() => factory(bad), bad).toThrow(/positive whole number of seconds/);
   });
 });
+
+describe("authn/multi ending a user's sessions and a second factor's code", () => {
+  it("authn.endSessions ends every session of the user in params.id and no one else's", async () => {
+    const { instance, admin, other, options, headers } = await setup();
+    const others = await runPipeline(login, { body: { username: "bob", password: "long-enough" } }, options);
+    const otherHeaders = { authorization: `Bearer ${boundaryCast<{ token: string }>(others.result, "json").token}` };
+    const end = definePipeline({ name: "endSessions", steps: ["authn.endSessions"] });
+    expect((await runPipeline(end, { params: { id: other.id } }, options)).result).toEqual({ ok: true });
+    expect(expectOk(await instance.resolve(otherHeaders.authorization.slice(7)))).toBeNull();
+    expect(expectOk(await instance.resolve(headers.authorization.slice(7)))?.id).toBe(admin.id);
+  });
+
+  it("login accepts a second factor's code in the body and leaves it to a later step", async () => {
+    const { options } = await setup();
+    expect((await runPipeline(login, { body: { username: "admin", password: "long-enough", code: "123456" } }, options)).status).toBe(200);
+  });
+});

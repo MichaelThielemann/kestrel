@@ -58,6 +58,7 @@ username is `CONFLICT` (409), the last admin guard is `LAST_ADMIN` (409).
 | `authn.deactivateUser` | `params.id` | `result` | `VALIDATION` (self), `NOT_FOUND`, `LAST_ADMIN`, `TRANSIENT` |
 | `authn.activateUser` | `params.id` | `result` | `NOT_FOUND`, `TRANSIENT` |
 | `authn.cleanupSessions` | – | `result` | `TRANSIENT` |
+| `authn.endSessions` | `params.id` | `result` | `TRANSIENT` |
 | `authn.requireRecentAuth:<seconds>` | `token` | – | `UNAUTHENTICATED`, `REAUTH_REQUIRED`, `TRANSIENT` |
 | `authn.confirmPassword` | `token` | `result` | `VALIDATION`, `UNAUTHENTICATED`, `TRANSIENT` |
 
@@ -102,7 +103,7 @@ concerns), an e-mail field.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `authn.login` | Log in with credentials; the token comes back in the body and in an HttpOnly session cookie | – | `token`, `identity`, `responseHeaders`, `result` | { username?: string, email?: string, password: string } | { token: string, identity: object, … } | 401 invalid credentials | portable | no |
+| `authn.login` | Log in with credentials; the token comes back in the body and in an HttpOnly session cookie | – | `token`, `identity`, `responseHeaders`, `result` | { username?: string, email?: string, password: string, code?: string } | { token: string, identity: object, … } | 401 invalid credentials | portable | no |
 | `authn.identifyUser` | Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin | – | `token?`, `identity?` | – | – | 403 a state-changing request authenticated by the session cookie is not from the same origin | portable | no |
 | `authn.requireUser` | Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin | – | `token`, `identity` | – | – | 401 not authenticated; 403 a state-changing request authenticated by the session cookie is not from the same origin | portable | no |
 | `authn.loadIdentity` | Current identity | `identity` | `result` | – | { id: string, claims: object, … } | 401 not authenticated | portable | no |
@@ -118,6 +119,7 @@ concerns), an e-mail field.
 | `authn.deactivateUser` | Deactivate a user (ends their sessions) | `params.id` | `result` | – | { ok: boolean, … } | 400 cannot deactivate yourself; 404 user not found; 409 the last active admin cannot be deactivated (`LAST_ADMIN`) | beside | no |
 | `authn.activateUser` | Activate a user | `params.id` | `result` | – | { ok: boolean, … } | 404 user not found | beside | no |
 | `authn.cleanupSessions` | Remove expired sessions | – | `result` | – | { removed: number, … } | – | beside | no |
+| `authn.endSessions` | End every session of the user in params.id, e.g. after its second factor was reset | `params.id` | `result` | – | { ok: boolean, … } | – | beside | no |
 | `authn.requireRecentAuth:<arg>` | Require that the session's password was checked within the last <arg> seconds, at login or through authn.confirmPassword; otherwise 403 REAUTH_REQUIRED | `token` | – | – | – | 401 not authenticated; 403 the last password check is older than the window (`REAUTH_REQUIRED`) | beside | no |
 | `authn.confirmPassword` | Confirm the caller's password; marks the session as freshly authenticated for authn.requireRecentAuth | `token` | `result` | { password: string } | { ok: boolean, … } | 400 the password is missing or wrong; 401 not authenticated | beside | no |
 

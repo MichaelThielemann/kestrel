@@ -106,6 +106,8 @@ export interface AuthnMulti extends Authn {
   changePassword(id: string, current: string, next: string, keepToken?: string): Promise<Result<void, AuthnMultiError>>;
   setActive(id: string, active: boolean): Promise<Result<void, AuthnMultiError>>;
   cleanupSessions(): Promise<Result<number, AuthnMultiError>>;
+  /** Ends every session of the user; a user without one is fine. */
+  endSessions(userId: string): Promise<Result<void, AuthnMultiError>>;
   /** Whether the session's password was last checked within `maxAgeSeconds`; `false` for an unknown session. */
   recentlyAuthenticated(token: string, maxAgeSeconds: number): Promise<Result<boolean, AuthnMultiError>>;
   /** Checks the password of the session's user and, when it matches, marks the session as authenticated now. */
@@ -342,6 +344,11 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
       const removed = await db.deleteMany(SESSIONS, { expiresAt: { lte: now() } });
       if (isErr(removed)) return removed;
       return ok(removed.value);
+    },
+    async endSessions(userId) {
+      const cleared = await db.deleteMany(SESSIONS, { userId });
+      if (isErr(cleared)) return cleared;
+      return ok();
     },
     async recentlyAuthenticated(token, maxAgeSeconds) {
       const found = await db.findOne<SessionRow>(SESSIONS, { id: sessionId(token) });
