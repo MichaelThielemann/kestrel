@@ -232,7 +232,7 @@ describe("authn/multi module steps", () => {
     const authn = await createAuthnMulti(config, createFakePersistence());
     expectOk(await authn.createUser({ username: "bob", password: "long-enough" }));
     const login = module.steps!(authn).login;
-    expectErr(await login(ctx({ payload: { username: "bob", password: "wrong" } })), "UNAUTHENTICATED");
+    expect(expectErr(await login(ctx({ payload: { username: "bob", password: "wrong" } })), "UNAUTHENTICATED").details).toEqual({ username: "bob" });
     const step = expectOk(await login(ctx({ payload: { username: "bob", password: "long-enough" } })));
     expect(typeof step.token).toBe("string");
     expect(step.identity).toMatchObject({ claims: { username: "bob" } });

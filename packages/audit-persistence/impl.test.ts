@@ -89,7 +89,7 @@ describe("audit/persistence", () => {
 
   it("maps event data to an entry and drops everything else", () => {
     const entry = entryFromEventData({ eventId: "e1", event: "auth.loggedIn", at: 5, identity: { id: "u1", claims: {} }, params: { id: "x" }, result: { token: "secret" } });
-    expect(entry).toEqual({ eventId: "e1", event: "auth.loggedIn", at: 5, identityId: "u1", params: { id: "x" } });
+    expect(entry).toEqual({ eventId: "e1", event: "auth.loggedIn", at: 5, identityId: "u1", ip: null, params: { id: "x" } });
   });
 
   it("anonymous events get identityId null", () => {

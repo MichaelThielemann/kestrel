@@ -65,6 +65,7 @@ describe("authn/single steps", () => {
     const steps = module.steps!(createAuthnSingle(config));
     const error = expectErr(await steps.login(ctx({}, { username: "admin", password: "wrong" })), "UNAUTHENTICATED");
     expect(error.status).toBe(401);
+    expect(error.details).toEqual({ username: "admin" });
     const loggedIn = await steps.login(ctx({}, { username: "admin", password: "secret" }));
     expect(loggedIn.ok).toBe(true);
     if (loggedIn.ok) {

@@ -3154,6 +3154,26 @@
               "type": "integer",
               "exclusiveMinimum": 0,
               "description": "How long an entry is kept; without it `audit.prune` has no rule to apply and fails"
+            },
+            "securityEvents": {
+              "type": "boolean",
+              "default": true,
+              "description": "Record failed sign-ins and password checks, 403 and 429 answers of HTTP runs as entries"
+            },
+            "failedSteps": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "default": [
+                "authn.login",
+                "authn.confirmPassword",
+                "authn.changePassword",
+                "authn.verifySecondFactor",
+                "authn.confirmSecondFactor"
+              ],
+              "description": "The steps whose failure is recorded as `auth.failed`"
             }
           },
           "additionalProperties": false
@@ -3168,6 +3188,40 @@
             "status": "set",
             "value": 365,
             "redacted": false
+          },
+          {
+            "path": "securityEvents",
+            "type": "boolean",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": true,
+            "redacted": false,
+            "default": true
+          },
+          {
+            "path": "failedSteps",
+            "type": "array",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": [
+              "authn.login",
+              "authn.confirmPassword",
+              "authn.changePassword",
+              "authn.verifySecondFactor",
+              "authn.confirmSecondFactor"
+            ],
+            "redacted": false,
+            "default": [
+              "authn.login",
+              "authn.confirmPassword",
+              "authn.changePassword",
+              "authn.verifySecondFactor",
+              "authn.confirmSecondFactor"
+            ]
           }
         ]
       },

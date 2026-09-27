@@ -66,7 +66,7 @@ export default defineModule({
     login: async (ctx: Context) => {
       const session = await authn.login(credentials(ctx.payload));
       if (isErr(session)) return ctx.fail(session.error);
-      if (!session.value) return ctx.fail("UNAUTHENTICATED", "invalid credentials");
+      if (!session.value) return ctx.fail("UNAUTHENTICATED", "invalid credentials", { username: credentials(ctx.payload)[authn.identifier] ?? "" });
       const responseHeaders = { "set-cookie": sessionCookie(session.value.token, authn.sessionCookie) };
       return ok({ ...ctx, token: session.value.token, identity: session.value.identity, responseHeaders, result: session.value });
     },

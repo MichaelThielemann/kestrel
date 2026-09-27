@@ -502,6 +502,19 @@ describe("runPipeline observer", () => {
     expect(events).toEqual(["runStart p http", "stepStart deny", "stepEnd deny 403 fail(FORBIDDEN)", "runEnd p 403 fail FORBIDDEN deny timed"]);
   });
 
+  it("tells who and where a run came from: the client address, the identity known at its end and the failure details", async () => {
+    const ended: RunEndEvent[] = [];
+    const observer: RunObserver = { runEnd: (e) => ended.push(e) };
+    const identify = { name: "identify", description: { ...description, writes: ["identity"] }, fn: async (ctx: Context) => ok({ ...ctx, identity: { id: "u1", claims: {} } }) };
+    const deny = { name: "deny", description, fn: async (ctx: Context) => ctx.fail("FORBIDDEN", "no", { reason: "role" }) };
+    await runPipeline({ name: "p", steps: [identify, deny] }, { ...input, ip: "203.0.113.7" }, silentLogger, observer);
+    await runPipeline({ name: "q", steps: [identify] }, input, silentLogger, observer);
+    expect(ended[0]).toMatchObject({ pipeline: "p", status: 403, ip: "203.0.113.7", identityId: "u1", details: { reason: "role" } });
+    expect(ended[1]?.ip).toBeUndefined();
+    expect(ended[1]?.details).toBeUndefined();
+    expect(ended[1]?.identityId).toBe("u1");
+  });
+
   it("reports a throw as error with status 500", async () => {
     const { events, observer } = recording();
     await runPipeline({ name: "p", steps: [{ name: "boom", description, fn: async () => { throw new Error("x"); } }] }, input, silentLogger, observer);

@@ -39,6 +39,11 @@ describe("parseEmitSpec", () => {
 });
 
 describe("eventEnvelope", () => {
+  it("carries the client address of the run, or null when it has none", () => {
+    expect(eventEnvelope("user.created", fakeCtx({ ip: "192.0.2.10" })).envelope.ip).toBe("192.0.2.10");
+    expect(eventEnvelope("user.created", fakeCtx()).envelope.ip).toBeNull();
+  });
+
   it("derives id from result.id first", () => {
     const { envelope } = eventEnvelope("page.created", fakeCtx({ params: { id: "p-params" }, result: { id: "p-result" } }));
     expect(envelope.id).toBe("p-result");

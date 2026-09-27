@@ -3,15 +3,18 @@ import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { createAuditPersistence, entryFromEventData, type Audit } from "./impl.ts";
+import type { Logger } from "@michaelthielemann/kestrel/logger";
+import { createAuditPersistence, DEFAULT_FAILED_STEPS, entryFromEventData, rateLimitedThrottle, securityEntry, type Audit } from "./impl.ts";
 
 export const configSchema = z
   .object({
     retentionDays: z.number().int().positive().optional().describe("How long an entry is kept; without it `audit.prune` has no rule to apply and fails"),
+    securityEvents: z.boolean().default(true).describe("Record failed sign-ins and password checks, 403 and 429 answers of HTTP runs as entries"),
+    failedSteps: z.array(z.string().min(1)).default([...DEFAULT_FAILED_STEPS]).describe("The steps whose failure is recorded as `auth.failed`"),
   })
   .strict();
 
-type Instance = Audit & { retentionDays?: number };
+type Instance = Audit & { retentionDays?: number; securityEvents: boolean; failedSteps: readonly string[]; logger: Logger };
 
 function userIdOf(ctx: Context): string | null {
   if (ctx.params.id !== undefined) return ctx.params.id;
@@ -26,7 +29,21 @@ export default defineModule({
 
   async setup(config, deps): Promise<Instance> {
     const audit = await createAuditPersistence(deps.get(PERSISTENCE));
-    return { ...audit, ...(config.retentionDays === undefined ? {} : { retentionDays: config.retentionDays }) };
+    return { ...audit, securityEvents: config.securityEvents, failedSteps: config.failedSteps, logger: deps.logger, ...(config.retentionDays === undefined ? {} : { retentionDays: config.retentionDays }) };
+  },
+
+  attach(audit, kestrel) {
+    if (!audit.securityEvents) return;
+    const keep = rateLimitedThrottle();
+    return kestrel.observe({
+      runEnd(event) {
+        const entry = securityEntry(event, audit.failedSteps);
+        if (entry === null || !keep(entry)) return;
+        void audit.record(entry).then((recorded) => {
+          if (isErr(recorded)) audit.logger.error("audit/persistence: a security entry was not recorded", { event: entry.event, code: recorded.error.code });
+        });
+      },
+    });
   },
 
   steps: (audit) => ({

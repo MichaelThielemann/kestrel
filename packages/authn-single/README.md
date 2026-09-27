@@ -10,6 +10,9 @@ pipeline that runs `authn.requireUser` first (boot's dataflow check enforces it)
 Login derives the scrypt key on the libuv thread pool (`verifyPasswordAsync`) and does so for any
 username, so a wrong username takes as long as a wrong password.
 
+A failed login answers 401 with `details.username`, the name that was tried; the password is never
+repeated anywhere.
+
 `authn.login` answers the token in the body and sets it as the `kestrel_token` cookie (`HttpOnly`,
 `Secure`, `SameSite=Strict`, `Path=/`, `Max-Age` = `sessionTtlSeconds`); `authn.logout` removes it.
 `secureCookie: false` drops `Secure`, for signing in over plain HTTP during development only. A

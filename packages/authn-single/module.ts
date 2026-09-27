@@ -16,6 +16,10 @@ export const configSchema = z
   })
   .strict();
 
+function str(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
 function credentials(payload: Record<string, unknown>): Record<string, string> {
   return Object.fromEntries(Object.entries(payload).filter((e): e is [string, string] => typeof e[1] === "string"));
 }
@@ -34,7 +38,7 @@ export default defineModule({
     login: async (ctx: Context) => {
       const session = await authn.login(credentials(ctx.payload));
       if (isErr(session)) return ctx.fail(session.error);
-      if (!session.value) return ctx.fail("UNAUTHENTICATED", "invalid credentials");
+      if (!session.value) return ctx.fail("UNAUTHENTICATED", "invalid credentials", { username: str(ctx.payload.username) });
       const responseHeaders = { "set-cookie": sessionCookie(session.value.token, authn.sessionCookie) };
       return ok({ ...ctx, token: session.value.token, identity: session.value.identity, responseHeaders, result: session.value });
     },

@@ -126,12 +126,12 @@ export function eventDeliveryStepTests(make: () => Promise<EventDeliveryFixture>
       expect(body._events).toEqual({ status: "done", pipelines: [] });
     });
 
-    it("a plain emit's envelope has exactly {eventId, event, at, runId, identity, params, id}", async () => {
+    it("a plain emit's envelope has exactly {eventId, event, at, runId, identity, params, id, ip}", async () => {
       const fixture = await make();
       const before = Date.now();
       const envelope = await emitAndCapture(fixture, "page.created", fakeCtx());
       const after = Date.now();
-      expect(Object.keys(envelope).sort()).toEqual(["at", "event", "eventId", "id", "identity", "params", "runId"]);
+      expect(Object.keys(envelope).sort()).toEqual(["at", "event", "eventId", "id", "identity", "ip", "params", "runId"]);
       expect(envelope.at).toBeGreaterThanOrEqual(before);
       expect(envelope.at).toBeLessThanOrEqual(after);
     });

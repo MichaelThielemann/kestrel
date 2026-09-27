@@ -379,7 +379,8 @@ For every run:
 8. Independently of the logger, every observer registered with `kestrel.observe()` (or through
    a module's `attach` hook) sees `runStart`, `stepStart`, `stepEnd` (duration, status,
    `ok | fail(<code>) | error`) and `runEnd` (duration, status, `ok | fail | error`, code, step,
-   message) — the source of `insights` stats. A throwing observer is logged and never touches
+   message and details of a failure, the client `ip` and the `identityId` known at the end) — the
+   source of `insights` stats and of `audit-persistence`'s security entries. A throwing observer is logged and never touches
    the run.
 
 This makes pipelines **traceable** (a log line per step), **testable** (steps are pure
@@ -740,8 +741,8 @@ one place to read any flow in full, and no naming collisions between submodules.
 
 ## Event Data
 
-`events.emit:<name>` sends `{ eventId, event, at, runId, identity, params, id }` for the
-running pipeline. `eventId` is a fresh UUID per emit (a dedup key for consumers like
+`events.emit:<name>` sends `{ eventId, event, at, runId, identity, params, id, ip }` for the
+running pipeline; `ip` is the client address of the run, `null` for a cron or event run. `eventId` is a fresh UUID per emit (a dedup key for consumers like
 `audit.record`), `runId` is the id of the triggering run; the pipeline started by the event
 receives it as `parentRunId` and logs it in every step line. Cron runs have no parent. The
 raw `payload` (request body) is never passed on, and `result` is absent by default — the

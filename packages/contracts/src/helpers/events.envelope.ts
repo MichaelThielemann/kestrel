@@ -23,7 +23,7 @@ export function eventEnvelope(spec: string, ctx: Context): { name: string; envel
   const { name, withResult } = parseEmitSpec(spec);
   const result = boundaryCast<ResultShape | undefined>(ctx.result, "json");
   const id = typeof result?.id === "string" ? result.id : typeof result?.document?.id === "string" ? result.document.id : typeof ctx.params.id === "string" ? ctx.params.id : null;
-  const envelope: EventEnvelope = { eventId: randomUUID(), event: name, at: Date.now(), runId: ctx.runId, identity: ctx.identity ?? null, params: ctx.params, id };
+  const envelope: EventEnvelope = { eventId: randomUUID(), event: name, at: Date.now(), runId: ctx.runId, identity: ctx.identity ?? null, params: ctx.params, id, ip: ctx.ip ?? null };
   if (Array.isArray(result?.ids) && result.ids.every((v): v is string => typeof v === "string")) envelope.ids = result.ids;
   if (withResult) envelope.result = ctx.result ?? null;
   return { name, envelope };

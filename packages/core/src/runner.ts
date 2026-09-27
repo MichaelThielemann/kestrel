@@ -305,6 +305,13 @@ async function runStep(
   }
 }
 
+function identityIdOf(ctx: Context): string | undefined {
+  const identity: unknown = Reflect.get(ctx, "identity");
+  if (typeof identity !== "object" || identity === null) return undefined;
+  const id: unknown = Reflect.get(identity, "id");
+  return typeof id === "string" ? id : undefined;
+}
+
 function errorResult(runId: string, step: string, error: KestrelError): RunResult {
   return {
     runId,
@@ -336,6 +343,10 @@ export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInpu
     if (result.step !== undefined) end.step = result.step;
     const message = thrownMessage ?? (result.status < 400 ? undefined : result.error);
     if (message !== undefined) end.message = truncate(message);
+    if (result.status >= 400 && result.details !== undefined) end.details = result.details;
+    if (input.ip !== undefined) end.ip = input.ip;
+    const identityId = identityIdOf(ctx);
+    if (identityId !== undefined) end.identityId = identityId;
     observer.runEnd?.(end);
     return result;
   };

@@ -4,7 +4,8 @@ import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/test
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
-import type { Deps } from "@michaelthielemann/kestrel/defineModule";
+import type { Deps, Introspection } from "@michaelthielemann/kestrel/defineModule";
+import type { RunEndEvent, RunObserver } from "@michaelthielemann/kestrel";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
@@ -81,5 +82,71 @@ describe("audit/persistence module steps via runPipeline", () => {
 
     const { instance: unset } = await boot();
     expect(await runPipeline(prunePipeline, {}, { modules: [{ module, instance: unset }] })).toMatchObject({ status: 400, code: "VALIDATION" });
+  });
+});
+
+describe("audit/persistence security events", () => {
+  function attached(db: ReturnType<typeof createFakePersistence>, instance: Audit) {
+    let observer: RunObserver | undefined;
+    const kestrel: Introspection = {
+      describe: () => { throw new Error("not needed"); },
+      observe: (o) => { observer = o; return () => { observer = undefined; }; },
+      health: () => ({ ok: true, restartRequired: false, modules: [] }),
+    };
+    const detach = module.attach?.(instance, kestrel);
+    const end = (event: Partial<RunEndEvent>) => observer?.runEnd?.({ runId: "r", pipeline: "login", trigger: { kind: "http", name: "POST /login" }, at: 1_000, ms: 1, status: 200, outcome: "ok", ...event });
+    const entries = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return expectOk(await db.findMany<Record<string, unknown> & { id: string }>(COLLECTION, {})).items;
+    };
+    return { end, entries, detach };
+  }
+
+  it("records a failed login with its time, username and client address, and never a password", async () => {
+    const { instance, db } = await boot();
+    const { end, entries } = attached(db, instance);
+    end({ status: 401, outcome: "fail", code: "UNAUTHENTICATED", step: "authn.login", ip: "198.51.100.4", details: { username: "mallory" } });
+    const [entry] = await entries();
+    expect(entry).toMatchObject({ event: "auth.failed", at: 1_000, ip: "198.51.100.4", identityId: null, params: { pipeline: "login", step: "authn.login", code: "UNAUTHENTICATED", username: "mallory" } });
+    expect(JSON.stringify(entry)).not.toMatch(/password/i);
+  });
+
+  it("records 403 and 429 answers as structured entries with the client address and the pipeline", async () => {
+    const { instance, db } = await boot();
+    const { end, entries } = attached(db, instance);
+    end({ pipeline: "createUser", trigger: { kind: "http", name: "POST /users" }, status: 403, outcome: "fail", code: "FORBIDDEN", step: "authz.require:users.manage", ip: "198.51.100.5", identityId: "u2" });
+    end({ pipeline: "login", status: 429, outcome: "fail", code: "RATE_LIMITED", step: "ratelimit.check:login", ip: "198.51.100.6" });
+    const found = await entries();
+    expect(found).toEqual(expect.arrayContaining([
+      expect.objectContaining({ event: "access.denied", ip: "198.51.100.5", identityId: "u2", params: { pipeline: "createUser", step: "authz.require:users.manage", code: "FORBIDDEN" } }),
+      expect.objectContaining({ event: "access.rateLimited", ip: "198.51.100.6", params: { pipeline: "login", step: "ratelimit.check:login", code: "RATE_LIMITED" } }),
+    ]));
+  });
+
+  it("records a burst of rate-limited answers from one address once a minute, and ignores other runs", async () => {
+    const { instance, db } = await boot();
+    const { end, entries } = attached(db, instance);
+    for (let i = 0; i < 50; i++) end({ status: 429, outcome: "fail", code: "RATE_LIMITED", step: "ratelimit.check:login", ip: "198.51.100.7", at: 1_000 + i });
+    end({ status: 200 });
+    end({ status: 401, outcome: "fail", code: "UNAUTHENTICATED", step: "authn.requireUser", pipeline: "me" });
+    end({ status: 403, outcome: "fail", code: "FORBIDDEN", trigger: { kind: "cron", name: "* * * * *" } });
+    expect(await entries()).toHaveLength(1);
+  });
+
+  it("records nothing once detached", async () => {
+    const { instance, db } = await boot();
+    const { end, entries, detach } = attached(db, instance);
+    if (typeof detach === "function") detach();
+    end({ status: 403, outcome: "fail", code: "FORBIDDEN" });
+    expect(await entries()).toHaveLength(0);
+  });
+});
+
+describe("audit/persistence entries from events", () => {
+  it("keeps the client address and the id the event is about", async () => {
+    const { instance, db } = await boot();
+    await runPipeline(recordPipeline, { body: { eventId: "e9", event: "user.created", at: 5, identity: { id: "admin", claims: {} }, params: {}, id: "u9", ip: "192.0.2.1" } }, { modules: [{ module, instance }] });
+    const [entry] = expectOk(await db.findMany<Record<string, unknown> & { id: string }>(COLLECTION, {})).items;
+    expect(entry).toMatchObject({ event: "user.created", identityId: "admin", ip: "192.0.2.1", params: { id: "u9" } });
   });
 });

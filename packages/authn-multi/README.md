@@ -23,6 +23,9 @@ as for a real user with a wrong password. The pool has four threads unless `UV_T
 otherwise, and image processing shares it; raise it on a busy instance. `verifyPassword` stays the
 synchronous form for scripts.
 
+**Failed logins.** `authn.login` answers 401 with `details.username`, the name that was tried, so
+an observer such as `audit-persistence` can record it; the password is never repeated anywhere.
+
 **Browser sessions.** `authn.login` answers the token in the body, for a client that sends it as
 `Authorization: Bearer`, and sets it as the `kestrel_token` cookie (`HttpOnly`, `Secure`,
 `SameSite=Strict`, `Path=/`, `Max-Age` = `sessionTtlSeconds`), so a browser holds a session page

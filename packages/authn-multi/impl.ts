@@ -95,6 +95,8 @@ export interface UserPatch {
 
 export interface AuthnMulti extends Authn {
   readonly sessionCookie: SessionCookieOptions;
+  /** The credential field that names the user: `username` or `email`. */
+  readonly identifier: "username" | "email";
   createUser(input: { username: string; password: string; roles?: string[] }): Promise<Result<PublicUser, AuthnMultiError>>;
   listUsers(): Promise<Result<PublicUser[], AuthnMultiError>>;
   getUser(id: string): Promise<Result<PublicUser | null, AuthnMultiError>>;
@@ -207,6 +209,7 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
 
   return {
     sessionCookie: { maxAgeSeconds: config.sessionTtlSeconds, secure: config.secureCookie ?? true },
+    identifier: config.identifier,
     async login(credentials) {
       const username = credentials[config.identifier];
       const password = credentials.password;

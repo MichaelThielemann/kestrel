@@ -1085,6 +1085,12 @@ Net changes since 5.8.1.
   `details.maxAgeSeconds`) when that is longer ago than the window, and `authn.confirmPassword`, which
   checks the caller's password and renews the time. `changePassword` renews it for the session that
   made the change.
+- `RunEndEvent` carries `details` (for a failure), `ip` and `identityId`; the `events.emit` envelope
+  carries `ip`. `audit-persistence` stores `ip` on every entry, takes the event's `id` into `params.id`,
+  and records security entries on its own: `auth.failed` for a failed login or password check (with the
+  attempted username), `access.denied` for a 403 and `access.rateLimited` for a 429, each with the client
+  address, pipeline, step and code. New config `securityEvents` (default `true`) and `failedSteps`.
+  `authn.login` answers a failed login with `details.username`.
 
 ### Changed
 

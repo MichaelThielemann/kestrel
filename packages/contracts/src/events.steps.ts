@@ -20,6 +20,8 @@ export interface EventEnvelope extends EventIdentity {
   id: string | null;
   ids?: string[];
   result?: unknown;
+  /** The client address of the run that emitted the event, `null` when it had none. */
+  ip?: string | null;
 }
 
 /** What `events.readDeliveryStatus` answers: the deliveries this module gave up on. */

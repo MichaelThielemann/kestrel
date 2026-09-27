@@ -18,6 +18,12 @@ export interface RunEndEvent extends RunStartEvent {
   step?: string;
   /** Only for a status of 400 and above: the failure message a client would see, truncated and without a stack. A thrown error contributes its name only. */
   message?: string;
+  /** Only for a status of 400 and above: the failure details a client would see. */
+  details?: Record<string, unknown>;
+  /** The client address the run was started with, when its trigger had one. */
+  ip?: string;
+  /** The id of the identity on the context when the run ended; for a failed run, the one known before the failing step. */
+  identityId?: string;
 }
 
 export interface StepStartEvent {

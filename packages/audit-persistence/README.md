@@ -1,6 +1,7 @@
 # audit/persistence
-Writes one entry per event (`eventId`, `event`, `at`, `identityId`, `params`) into the collection
-`audit_entries`. Provides no contract, only the steps `audit.record`, `audit.anonymize` and
+Writes one entry per event (`eventId`, `event`, `at`, `identityId`, `ip`, `params`) into the collection
+`audit_entries`; `ip` is the client address the emitting run had, and the event's `id` (the document
+or user it is about) lands in `params.id` when the route had none. Provides no contract, only the steps `audit.record`, `audit.anonymize` and
 `audit.prune`, meant for pipelines started by an event or a cron trigger. Results and payloads of
 the originating pipeline are never stored. Requires `persistence@1`.
 
@@ -10,6 +11,15 @@ both for one user — `identityId` becomes `null` and every param naming them is
 event and its time stay, so the log keeps telling that something happened without telling who. An
 entry is never moved to another user: a login belongs to nobody else. Run it from a pipeline on
 `user.deleted`; it is idempotent, so a failed run can simply be repeated from an admin route.
+
+**Security entries.** With `securityEvents` (default on) the module watches every HTTP run and records,
+without any pipeline: `auth.failed` when one of `failedSteps` failed (default: `authn.login`,
+`authn.confirmPassword`, `authn.changePassword`, `authn.verifySecondFactor`,
+`authn.confirmSecondFactor`), with the attempted `username` when the step reported one;
+`access.denied` for any 403; `access.rateLimited` for a 429, at most once a minute per address and
+pipeline. Each carries `at`, `ip`, the `identityId` known when the run ended and `params`
+`{ pipeline, step, code }`; never a body, a password or a token. The attempted username of a failed
+sign-in is kept as sent — it may name nobody — so `audit.anonymize` does not remove it; retention does.
 
 **Retention.** `retentionDays` (no default) is how long an entry is kept. `audit.prune` deletes
 everything older than that and reports `{ removed }`; without the config key it fails 400, because
@@ -28,6 +38,8 @@ unavailable; it never fails otherwise.
 | Config | Type | Required | Default |
 |---|---|---|---|
 | `retentionDays` | integer | no | – |
+| `securityEvents` | boolean | no | `true` |
+| `failedSteps` | array | no | `["authn.login","authn.confirmPassword","authn.changePassword","authn.verifySecondFactor","authn.confirmSecondFactor"]` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
