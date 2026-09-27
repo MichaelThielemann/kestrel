@@ -544,8 +544,8 @@ Net changes since 5.8.1.
 - `media/default`'s `media.list` accepts a `type` query (`image`, `video` or `other`), matched against
   each item's content type with the contracts package's `mediaTypeMatches` (`other` is neither
   `image/*` nor `video/*`). `image`/`video` filter at the store; `other` cannot be expressed as a
-  store filter, so it filters every candidate in memory before paging and the total are computed, the
-  same way an unindexable text search already does, up to `MAX_UNINDEXED_SCAN` (5000) candidates.
+  store filter, so it scans every ready item in scope instead, in batches of 500, before paging and
+  counting in memory, the same way an unindexable text search already does.
 - A `kestrel.config` module entry accepts `defaults: { from, values }`: values a host supplies on the
   consumer's behalf. Boot merges `config` over them (plain objects key by key, everything else
   replaced whole) before parsing, and an invalid result names the defaults' source.
