@@ -158,6 +158,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`steps/removed`](#steps-removed) | source | auto | a string-literal reference to a removed step |
 | [`pipelines/verified-user`](#pipelines-verified-user) | load | auto / ask / manual | `revisions.reassignAuthor` with no verify step ahead of it |
 | [`pipelines/require-role`](#pipelines-require-role) | load | auto | `authn.requireUser` with no `authz.requireRole` after it, with authz-roles |
+| [`authz/media-list`](#authz-media-list) | load | auto | a role in authz-roles' config that grants `media.read` but not the media listing permission, with media-default |
 | [`steps/undeclared-output`](#steps-undeclared-output) | boot | ask | a step writes `result` without declaring its shape |
 | [`steps/undeclared-required`](#steps-undeclared-required) | boot | ask (no default) | an output schema declares properties without `required` |
 | [`steps/output-fold`](#steps-output-fold) | boot | manual | two steps' output schemas cannot fold onto one active schema |
@@ -242,6 +243,12 @@ An account without a configured role may only sign out and read its own identity
 every pipeline that runs `authn.requireUser` must run `authz.requireRole` after it, or boot fails
 naming the pipeline; the fix inserts the step. A pipeline any signed-in account may run goes into
 authz-roles' `rolelessPipelines` instead (default `["me", "logout"]`).
+
+#### authz-media-list
+With an `authz@1` module, media-default lists media only for callers holding `listPermission`
+(default `media.list`). A role written in authz-roles' config that grants `media.read` without it
+would lose the media library; the fix adds the permission to that role's list. Roles granting `*` or
+`media.*` already hold it.
 
 #### steps-undeclared-output
 A step writes `result` without declaring `output`, `extendsOutput`, `extendsItems` or `binary:

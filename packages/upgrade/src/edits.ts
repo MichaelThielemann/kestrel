@@ -266,6 +266,40 @@ export function replaceModuleConfigValue(file: string, source: string, options: 
   return { file, start, end, text: options.toText };
 }
 
+export interface AppendModuleConfigArrayOptions {
+  use: string;
+  /** Property names leading from the entry's `config` object to the array. */
+  path: readonly string[];
+  value: string;
+}
+
+/**
+ * Appends the string `value` to the array literal at `path` inside a module-list entry's `config`, in the
+ * quote style of the array's last element. `undefined` when the entry or the array cannot be found as a
+ * literal.
+ */
+export function appendModuleConfigArrayString(file: string, source: string, options: AppendModuleConfigArrayOptions): Edit | undefined {
+  const array = moduleListArray(source);
+  if (array === undefined) return undefined;
+  const entry = elements(array).find((e) => entryUse(e) === options.use);
+  if (entry === undefined) return undefined;
+  let node = objectProperty(entry, "config");
+  for (const key of options.path) {
+    if (node === undefined || node.type !== "ObjectExpression") return undefined;
+    node = objectProperty(node, key);
+  }
+  if (!isArray(node)) return undefined;
+  const last = elements(node).at(-1);
+  const quote = quoteOf(source, last);
+  const literal = `${quote}${options.value}${quote}`;
+  if (last === undefined) {
+    const { start, end } = span(node);
+    return { file, start, end, text: `[${literal}]` };
+  }
+  const { end } = span(last);
+  return { file, start: end, end, text: `, ${literal}` };
+}
+
 export interface ReplaceModuleConfigKeyOptions {
   use: string;
   fromKey: string;

@@ -19,6 +19,7 @@ import { queueOfferRule } from "./ruleQueueOffer.ts";
 import { SITE_PATH_RULES } from "./ruleSitePaths.ts";
 import { underscoreFieldRules } from "./ruleUnderscoreField.ts";
 import { verifiedUserRule } from "./ruleVerifiedUser.ts";
+import { mediaListRule } from "./ruleMediaList.ts";
 import { requireRoleRule } from "./ruleRequireRole.ts";
 import { useToken } from "./useToken.ts";
 
@@ -192,6 +193,7 @@ export const DEFAULT_RULES: readonly Rule[] = [
   kestrelBinariesRule,
   verifiedUserRule,
   requireRoleRule,
+  mediaListRule,
   contractHelperImportsRule,
   ...bootWrapRules,
   ...underscoreFieldRules,

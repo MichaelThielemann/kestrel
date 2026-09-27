@@ -15,6 +15,7 @@ import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
 import { dependencyCycleRule, optionalReadOrderRule, outputFoldRule, terminalOutputRule, undeclaredOutputRule, undeclaredRequiredRule } from "./ruleBootWraps.ts";
 import { underscoreFieldRule } from "./ruleUnderscoreField.ts";
 import { verifiedUserRule } from "./ruleVerifiedUser.ts";
+import { mediaListRule } from "./ruleMediaList.ts";
 import { requireRoleRule } from "./ruleRequireRole.ts";
 
 function fakeModule(name: string, emits: readonly string[] = []): ModuleDefinition {
@@ -829,5 +830,39 @@ describe("pipelines/require-role", () => {
     expect(await requireRoleRule.check(contextFor(withoutAuthz))).toEqual([]);
     const named = await project({ configModules: [{ ...AUTHZ, config: { ...AUTHZ.config, rolelessPipelines: ["profile"] } }], pipelines: [{ name: "profile", steps: ["authn.requireUser", "authn.loadIdentity"] }] });
     expect(await requireRoleRule.check(contextFor(named))).toEqual([]);
+  });
+});
+
+describe("authz/media-list", () => {
+  const MEDIA = { use: "@michaelthielemann/kestrel-media-default" };
+  const roles = { admin: ["*"], editor: ["pages.*", "media.read"], author: ["media.*"], viewer: ["media.read", "media.list"], guest: ["pages.read"] };
+
+  it("adds media.list to each written role that grants media.read without it", async () => {
+    const p = await project({ configModules: [MEDIA, { use: "@michaelthielemann/kestrel-authz-roles", config: { roles } }] });
+    const source = [
+      "export default defineConfig({",
+      "  modules: [",
+      '    { use: "@michaelthielemann/kestrel-media-default" },',
+      "    { use: \"@michaelthielemann/kestrel-authz-roles\", config: { roles: { admin: [\"*\"], editor: ['pages.*', 'media.read'], author: [\"media.*\"], viewer: [\"media.read\", \"media.list\"], guest: [\"pages.read\"] } } },",
+      "  ],",
+      "});",
+      "",
+    ].join("\n");
+    await writeFile(p.configFile, source);
+    const findings = await mediaListRule.check(contextFor(p));
+    expect(findings.map((f) => f.id)).toEqual(["authz/media-list:editor"]);
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    expect(applyEdits(source, edits).text).toContain("editor: ['pages.*', 'media.read', 'media.list']");
+    expect(findings[0]?.docs).toBe(upgradingDocs("authz-media-list"));
+  });
+
+  it("follows media-default's listPermission, and finds nothing without media-default or with roles only from defaults", async () => {
+    const custom = await project({ configModules: [{ ...MEDIA, config: { listPermission: "library.browse" } }, { use: "@michaelthielemann/kestrel-authz-roles", config: { roles: { viewer: ["media.read", "media.list"] } } }] });
+    expect((await mediaListRule.check(contextFor(custom))).map((f) => f.id)).toEqual(["authz/media-list:viewer"]);
+    const withoutMedia = await project({ configModules: [{ use: "@michaelthielemann/kestrel-authz-roles", config: { roles } }] });
+    expect(await mediaListRule.check(contextFor(withoutMedia))).toEqual([]);
+    const fromDefaults = await project({ configModules: [MEDIA, { use: "@michaelthielemann/kestrel-authz-roles", defaults: { from: "preset", values: { roles: { editor: ["media.read"] } } } }] });
+    expect(await mediaListRule.check(contextFor(fromDefaults))).toEqual([]);
   });
 });

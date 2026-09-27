@@ -645,6 +645,8 @@ Net changes since 5.8.1.
   account is served like an anonymous visitor.
 - `media.list` without `ids` and `media.listFolders` need the new `listPermission` (default `media.list`)
   when an `authz@1` module is loaded, instead of any signed-in identity; 403 otherwise. `media.*` grants it.
+  `kestrel upgrade`'s new `authz/media-list` adds it to each role in authz-roles' config that grants
+  `media.read`.
 
 ### Added
 
