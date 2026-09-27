@@ -32,8 +32,6 @@ function keyFor(kind: BucketKey, ctx: Context): string {
   return clientKey(ctx.ip);
 }
 
-const READS: Record<BucketKey, string[]> = { ip: ["ip?"], username: ["payload.username?", "payload.email?"], identity: ["identity"] };
-
 export default defineModule({
   name: "ratelimit/memory",
   provides: [],
@@ -63,7 +61,7 @@ export default defineModule({
       const kind = bucket === "<arg>" ? "ip" : limit.keyOf(bucket);
       return {
         summary: `Rate limit bucket ${bucket}, counted by ${kind === "ip" ? "client address" : kind}`,
-        reads: READS[kind],
+        reads: kind === "identity" ? ["identity"] : ["ip?", "payload.username?", "payload.email?"],
         writes: [],
         input: { type: "object", properties: { username: { type: "string" }, email: { type: "string" } }, additionalProperties: true },
         errors: { 429: "too many requests" },
