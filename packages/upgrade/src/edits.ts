@@ -291,13 +291,13 @@ export function appendModuleConfigArrayString(file: string, source: string, opti
   if (!isArray(node)) return undefined;
   const last = elements(node).at(-1);
   const quote = quoteOf(source, last);
-  const literal = `${quote}${options.value}${quote}`;
+  const literal = quote + options.value + quote;
   if (last === undefined) {
     const { start, end } = span(node);
-    return { file, start, end, text: `[${literal}]` };
+    return { file, start, end, text: "[" + literal + "]" };
   }
   const { end } = span(last);
-  return { file, start: end, end, text: `, ${literal}` };
+  return { file, start: end, end, text: ", " + literal };
 }
 
 export interface ReplaceModuleConfigKeyOptions {
