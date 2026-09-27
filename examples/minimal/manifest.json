@@ -3305,6 +3305,21 @@
                   "windowSeconds": {
                     "type": "integer",
                     "exclusiveMinimum": 0
+                  },
+                  "key": {
+                    "type": "string",
+                    "enum": [
+                      "ip",
+                      "username",
+                      "identity"
+                    ],
+                    "default": "ip",
+                    "description": "What the bucket counts by: the client address (IPv6 by its /64), the username or email in the body, or the signed-in identity"
+                  },
+                  "maxBlockSeconds": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "description": "With it, each further exceeded window doubles the block, up to this many seconds"
                   }
                 },
                 "required": [
@@ -3331,7 +3346,8 @@
             "value": {
               "login": {
                 "limit": 5,
-                "windowSeconds": 60
+                "windowSeconds": 60,
+                "key": "ip"
               }
             },
             "redacted": false
@@ -10980,8 +10996,10 @@
       "module": "ratelimit/memory",
       "factory": true,
       "description": {
-        "summary": "Rate limit bucket <arg>",
-        "reads": [],
+        "summary": "Rate limit bucket <arg>, counted by client address",
+        "reads": [
+          "ip?"
+        ],
         "writes": [],
         "errors": {
           "429": "too many requests"
@@ -18565,8 +18583,10 @@
           "name": "ratelimit.check",
           "module": "ratelimit/memory",
           "description": {
-            "summary": "Rate limit bucket login",
-            "reads": [],
+            "summary": "Rate limit bucket login, counted by client address",
+            "reads": [
+              "ip?"
+            ],
             "writes": [],
             "errors": {
               "429": "too many requests"

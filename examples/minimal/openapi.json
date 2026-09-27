@@ -7436,7 +7436,7 @@
     "/login": {
       "post": {
         "operationId": "login",
-        "summary": "Rate limit bucket login → Log in with credentials; the token comes back in the body and in an HttpOnly session cookie → Emit event \"auth.loggedIn\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Rate limit bucket login, counted by client address → Log in with credentials; the token comes back in the body and in an HttpOnly session cookie → Emit event \"auth.loggedIn\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "login"
         ],

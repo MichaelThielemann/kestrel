@@ -1,6 +1,14 @@
+import { isIPv4, isIPv6 } from "node:net";
+
+/** What a bucket counts by: the client address (an IPv6 address by its /64), the username a request names, or the signed-in identity. */
+export type BucketKey = "ip" | "username" | "identity";
+
 export interface Bucket {
   limit: number;
   windowSeconds: number;
+  key?: BucketKey | undefined;
+  /** The longest a key stays blocked once it exceeded the limit; each further exceeded window doubles the block up to this. Without it every block lasts one window. */
+  maxBlockSeconds?: number | undefined;
 }
 
 export interface Config {
@@ -16,15 +24,55 @@ export interface Decision {
 export interface RateLimit {
   hit(bucket: string, key: string): Decision;
   sweep(): number;
+  keyOf(bucket: string): BucketKey;
+}
+
+interface KeyState {
+  start: number;
+  count: number;
+  blockedUntil: number;
+  strikes: number;
+}
+
+function expandIPv6(address: string): string[] | undefined {
+  const [head = "", tail] = address.split("::");
+  const left = head === "" ? [] : head.split(":");
+  const right = tail === undefined || tail === "" ? [] : tail.split(":");
+  const missing = 8 - left.length - right.length;
+  if (tail === undefined ? missing !== 0 : missing < 0) return undefined;
+  return [...left, ...Array.from({ length: missing }, () => "0"), ...right].map((group) => group.toLowerCase().replace(/^0+(?=.)/, ""));
+}
+
+/** The key an `ip` bucket counts a client address by: an IPv4 address as is, an IPv4-mapped one as its IPv4 address, an IPv6 address by its /64 prefix, `"unknown"` without one. */
+export function clientKey(ip: string | undefined): string {
+  if (ip === undefined || ip === "") return "unknown";
+  const bare = ip.replace(/%.*$/, "");
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(bare)?.[1];
+  if (mapped !== undefined && isIPv4(mapped)) return mapped;
+  if (!isIPv6(bare)) return bare;
+  const groups = expandIPv6(bare);
+  return groups === undefined ? bare : `${groups.slice(0, 4).join(":")}::/64`;
+}
+
+/** The key a `username` bucket counts a request by: the named user, trimmed and lower-cased, so spelling variants share one budget. */
+export function usernameKey(name: string | undefined): string {
+  const normalized = (name ?? "").normalize("NFKC").trim().toLowerCase();
+  return normalized === "" ? "unknown" : normalized;
 }
 
 export function createRateLimitMemory(config: Config, now: () => number = Date.now): RateLimit {
-  const windows = new Map<string, { start: number; count: number }>();
+  const states = new Map<string, KeyState>();
   const bucketOf = (name: string): Bucket => {
     const bucket = config.buckets[name];
     if (!bucket) throw new Error(`ratelimit/memory: unknown bucket "${name}"`);
     return bucket;
   };
+  const blockMs = (bucket: Bucket, strikes: number): number => {
+    const windowMs = bucket.windowSeconds * 1000;
+    if (bucket.maxBlockSeconds === undefined) return windowMs;
+    return Math.min(windowMs * 2 ** (strikes - 1), bucket.maxBlockSeconds * 1000);
+  };
+  const quietMs = (bucket: Bucket): number => (bucket.maxBlockSeconds ?? bucket.windowSeconds) * 1000;
 
   return {
     hit(name, key) {
@@ -32,26 +80,39 @@ export function createRateLimitMemory(config: Config, now: () => number = Date.n
       const windowMs = bucket.windowSeconds * 1000;
       const t = now();
       const id = `${name}:${key}`;
-      let w = windows.get(id);
-      if (!w || t - w.start >= windowMs) {
-        w = { start: t, count: 0 };
-        windows.set(id, w);
+      let state = states.get(id);
+      if (state && t < state.blockedUntil) {
+        return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil((state.blockedUntil - t) / 1000)) };
       }
-      w.count += 1;
-      const retryAfterSeconds = Math.max(1, Math.ceil((w.start + windowMs - t) / 1000));
-      return { allowed: w.count <= bucket.limit, remaining: Math.max(0, bucket.limit - w.count), retryAfterSeconds };
+      if (!state || t - state.start >= windowMs || state.blockedUntil > 0) {
+        const strikes = state && state.blockedUntil > 0 && t - state.blockedUntil < quietMs(bucket) ? state.strikes : 0;
+        state = { start: t, count: 0, blockedUntil: 0, strikes };
+        states.set(id, state);
+      }
+      state.count += 1;
+      if (state.count <= bucket.limit) {
+        return { allowed: true, remaining: bucket.limit - state.count, retryAfterSeconds: Math.max(1, Math.ceil((state.start + windowMs - t) / 1000)) };
+      }
+      state.strikes += 1;
+      state.blockedUntil = bucket.maxBlockSeconds === undefined ? state.start + windowMs : t + blockMs(bucket, state.strikes);
+      return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil((state.blockedUntil - t) / 1000)) };
     },
     sweep() {
       const t = now();
       let removed = 0;
-      for (const [id, w] of windows) {
-        const name = id.slice(0, id.indexOf(":"));
-        if (t - w.start >= bucketOf(name).windowSeconds * 1000) {
-          windows.delete(id);
+      for (const [id, state] of states) {
+        const bucket = bucketOf(id.slice(0, id.indexOf(":")));
+        const windowOver = t - state.start >= bucket.windowSeconds * 1000;
+        const blockOver = state.blockedUntil === 0 || t - state.blockedUntil >= quietMs(bucket);
+        if (windowOver && blockOver) {
+          states.delete(id);
           removed += 1;
         }
       }
       return removed;
+    },
+    keyOf(name) {
+      return bucketOf(name).key ?? "ip";
     },
   };
 }

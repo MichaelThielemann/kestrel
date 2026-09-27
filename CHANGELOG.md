@@ -1091,6 +1091,11 @@ Net changes since 5.8.1.
   attempted username), `access.denied` for a 403 and `access.rateLimited` for a 429, each with the client
   address, pipeline, step and code. New config `securityEvents` (default `true`) and `failedSteps`.
   `authn.login` answers a failed login with `details.username`.
+- `ratelimit-memory` buckets take a `key` — `ip` (default), `username` (the body's `username` or
+  `email`, normalized) or `identity` (the signed-in user) — and an optional `maxBlockSeconds` that
+  doubles the block after each further exceeded window up to that bound. An `ip` bucket counts an IPv6
+  address by its /64 and an IPv4-mapped address as its IPv4 address. `clientKey` and `usernameKey` are
+  exported.
 
 ### Changed
 
