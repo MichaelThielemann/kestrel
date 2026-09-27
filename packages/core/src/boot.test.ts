@@ -427,8 +427,10 @@ describe("boot", () => {
     expect(await ipVia({ trustProxy: true, proxyHops: 3 }, { "x-forwarded-for": "203.0.113.9, 10.0.0.1" })).toBeNull();
     expect(await ipVia({ trustProxy: true }, {})).toBeNull();
     expect(await ipVia({ trustedHeader: "Trusted-Client-IP" }, { "trusted-client-ip": "198.51.100.7", "x-forwarded-for": "203.0.113.9" })).toBe("198.51.100.7");
-    expect(await ipVia({ trustedHeader: "Trusted-Client-IP", trustProxy: true }, { "x-forwarded-for": "203.0.113.9" })).toBeNull();
+    expect(await ipVia({ trustedHeader: "Trusted-Client-IP", trustProxy: true }, { "x-forwarded-for": "203.0.113.9" })).toMatchObject({ code: "FORBIDDEN" });
+    expect(await ipVia({ trustedHeader: "Trusted-Client-IP", trustedProxies: ["192.0.2.1"] }, { "trusted-client-ip": "198.51.100.7" })).toBe("127.0.0.1");
     await expect(boot({ config: config({ proxyHops: 0 }), modules: [spy], pipelines: [ipPipeline], logger: silentLogger })).rejects.toThrow(/proxyHops/);
+    await expect(boot({ config: config({ trustedProxies: ["proxy.example.org"] }), modules: [spy], pipelines: [ipPipeline], logger: silentLogger })).rejects.toThrow(/http\.trustedProxies: ip allowlist: invalid entry "proxy.example.org"/);
   });
 
   it("rejects an http.allow entry that is neither an address nor a CIDR range at boot", async () => {

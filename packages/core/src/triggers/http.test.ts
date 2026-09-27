@@ -2,7 +2,7 @@ import { afterEach, describe, it, expect } from "vitest";
 import { binaryResult } from "../context.ts";
 import { silentLogger } from "../logger.ts";
 import type { RunResult, Runner } from "../runner.ts";
-import { buildResponse, createHttpServer, disposition, errorResponse, listen, matchRoute, parseQuery, parseRoute, responseForRun, routePattern } from "./http.ts";
+import { buildResponse, clientIpResolver, createHttpServer, disposition, errorResponse, listen, matchRoute, parseQuery, parseRoute, responseForRun, routePattern } from "./http.ts";
 
 describe("http routes", () => {
   const routes = [parseRoute("GET /pages/:id", "readPage"), parseRoute("POST /pages", "createPage"), parseRoute("GET /", "home")];
@@ -159,6 +159,49 @@ describe("http error format", () => {
   });
 });
 
+describe("client address behind proxies", () => {
+  const request = (remoteAddress: string | undefined, headers: Record<string, string> = {}) => ({ headers, socket: { remoteAddress } });
+
+  it("ignores forwarding headers from a peer outside trustedProxies and uses the peer address", () => {
+    const resolve = clientIpResolver({ trustedHeader: "X-Real-IP", trustedProxies: ["10.0.0.1"] });
+    expect(resolve(request("203.0.113.5", { "x-real-ip": "10.9.9.9" }))).toEqual({ ip: "203.0.113.5", missingHeader: false });
+    const chain = clientIpResolver({ trustProxy: true, trustedProxies: ["10.0.0.1"] });
+    expect(chain(request("203.0.113.5", { "x-forwarded-for": "10.9.9.9" }))).toEqual({ ip: "203.0.113.5", missingHeader: false });
+  });
+
+  it("reads the forwarding headers of a peer inside trustedProxies", () => {
+    const resolve = clientIpResolver({ trustedHeader: "X-Real-IP", trustedProxies: ["10.0.0.0/8"] });
+    expect(resolve(request("10.0.0.1", { "x-real-ip": "198.51.100.7" }))).toEqual({ ip: "198.51.100.7", missingHeader: false });
+    expect(resolve(request("::ffff:10.0.0.1", { "x-real-ip": "198.51.100.7" })).ip).toBe("198.51.100.7");
+    const chain = clientIpResolver({ trustProxy: true, trustedProxies: ["10.0.0.0/8"] });
+    expect(chain(request("10.0.0.1", { "x-forwarded-for": "203.0.113.9, 198.51.100.7" })).ip).toBe("198.51.100.7");
+  });
+
+  it("trusts loopback peers by default and treats a peer without an address as loopback", () => {
+    const resolve = clientIpResolver({ trustedHeader: "X-Real-IP" });
+    expect(resolve(request("127.0.0.1", { "x-real-ip": "198.51.100.7" })).ip).toBe("198.51.100.7");
+    expect(resolve(request("::1", { "x-real-ip": "198.51.100.7" })).ip).toBe("198.51.100.7");
+    expect(resolve(request(undefined, { "x-real-ip": "198.51.100.7" })).ip).toBe("198.51.100.7");
+    expect(resolve(request("192.0.2.1", { "x-real-ip": "198.51.100.7" })).ip).toBe("192.0.2.1");
+    expect(clientIpResolver({ trustedHeader: "X-Real-IP", trustedProxies: [] })(request(undefined, { "x-real-ip": "198.51.100.7" }))).toEqual({ missingHeader: false });
+  });
+
+  it("takes the value the trusted peer appended last when the trusted header carries several", () => {
+    const resolve = clientIpResolver({ trustedHeader: "X-Forwarded-For" });
+    expect(resolve(request("127.0.0.1", { "x-forwarded-for": "10.9.9.9, 203.0.113.77" })).ip).toBe("203.0.113.77");
+  });
+
+  it("flags a trusted peer that sent no trusted header", () => {
+    const resolve = clientIpResolver({ trustedHeader: "X-Real-IP" });
+    expect(resolve(request("127.0.0.1"))).toEqual({ missingHeader: true });
+    expect(resolve(request("192.0.2.1"))).toEqual({ ip: "192.0.2.1", missingHeader: false });
+  });
+
+  it("rejects a trustedProxies entry that is neither an address nor a CIDR range", () => {
+    expect(() => clientIpResolver({ trustedProxies: ["proxy.example.org"] })).toThrow(/invalid entry "proxy.example.org"/);
+  });
+});
+
 describe("http server", () => {
   let close: (() => Promise<void>) | undefined;
   afterEach(async () => {
@@ -209,6 +252,37 @@ describe("http server", () => {
     base = await serve(ok, { allow: ["::ffff:127.0.0.1"], corsOrigin: "https://example.org" });
     expect((await fetch(`${base}/echo`, { method: "OPTIONS" })).status).toBe(204);
     expect(() => createHttpServer([], ok, silentLogger, { allow: ["example.org"] })).toThrow(/invalid entry "example.org"/);
+  });
+
+  it("decides http.allow on the peer address when the peer is not a trusted proxy", async () => {
+    let base = await serve(ok, { allow: ["10.0.0.0/8"], trustedHeader: "X-Real-IP", trustedProxies: ["192.0.2.1"] });
+    expect((await fetch(`${base}/echo`, { headers: { "x-real-ip": "10.9.9.9" } })).status).toBe(403);
+    await close?.();
+    base = await serve(ok, { allow: ["10.0.0.0/8"], trustProxy: true, trustedProxies: ["192.0.2.1"] });
+    expect((await fetch(`${base}/echo`, { headers: { "x-forwarded-for": "10.9.9.9" } })).status).toBe(403);
+    await close?.();
+    base = await serve(ok, { allow: ["10.0.0.0/8"], trustedHeader: "X-Real-IP" });
+    expect((await fetch(`${base}/echo`, { headers: { "x-real-ip": "10.9.9.9" } })).status).toBe(200);
+  });
+
+  it("refuses a request from a trusted proxy without the trusted header, with or without http.allow", async () => {
+    let seen = 0;
+    const counting: Runner = async () => {
+      seen += 1;
+      return { runId: "run-1", status: 200, result: { ok: true } };
+    };
+    let base = await serve(counting, { trustedHeader: "X-Real-IP" });
+    const refused = await fetch(`${base}/echo`);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ error: "forbidden", code: "FORBIDDEN" });
+    expect((await fetch(`${base}/echo`, { headers: { "x-real-ip": "198.51.100.7" } })).status).toBe(200);
+    expect(seen).toBe(1);
+    await close?.();
+    base = await serve(counting, { trustedHeader: "X-Real-IP", allow: ["0.0.0.0/0"] });
+    expect((await fetch(`${base}/echo`)).status).toBe(403);
+    await close?.();
+    base = await serve(counting, { trustedHeader: "X-Real-IP", trustedProxies: ["192.0.2.1"] });
+    expect((await fetch(`${base}/echo`)).status).toBe(200);
   });
 
   it("applies the configured server timeouts", async () => {

@@ -75,7 +75,7 @@ const res = await kestrel.run("resolvePage", { trigger: { kind: "http", name: "s
 ```
 
 Notes: `node:sqlite` needs Node ≥ 22 (no edge runtime). With `http: null` the host serves its own
-health route, answered from `kestrel.health()`, and handles CORS. Rate limiting per IP only works behind a proxy with `trustProxy: true`. A runnable example
+health route, answered from `kestrel.health()`, and handles CORS. Rate limiting per IP behind a proxy needs `trustProxy: true` or `trustedHeader`, and the proxy's address in `trustedProxies` unless it connects over loopback. A runnable example
 without Nuxt: [`../examples/h3`](../examples/h3).
 
 ## Ground rules

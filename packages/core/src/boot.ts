@@ -517,6 +517,11 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
     } catch (err) {
       sink.fail("invalid-allowlist", CORE, `http.allow: ${err instanceof Error ? err.message : String(err)}`);
     }
+    try {
+      createAllowlist(config.http.trustedProxies);
+    } catch (err) {
+      sink.fail("invalid-allowlist", CORE, `http.trustedProxies: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   const definitions = new Map<string, PipelineDefinition>();
@@ -735,6 +740,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
           trustProxy: http.trustProxy,
           proxyHops: http.proxyHops,
           ...(http.trustedHeader === undefined ? {} : { trustedHeader: http.trustedHeader }),
+          trustedProxies: http.trustedProxies,
           allow: http.allow,
           healthPath: http.healthPath,
           health: introspection.health,

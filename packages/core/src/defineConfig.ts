@@ -30,6 +30,7 @@ export const configSchema = z
         trustProxy: z.boolean().default(false),
             proxyHops: z.number().int().positive().default(1),
             trustedHeader: z.string().min(1).optional(),
+            trustedProxies: z.array(z.string().min(1)).default(["127.0.0.0/8", "::1"]),
             allow: z.array(z.string().min(1)).default([]),
             healthPath: z.string().regex(/^\/\S*$/).nullable().default("/health"),
             inlineTypes: z.array(z.string().min(1)).default([]),

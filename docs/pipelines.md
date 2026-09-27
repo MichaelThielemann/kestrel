@@ -301,11 +301,20 @@ status, duration, IP and — if present — `requestId`. `http.timeouts` sets `r
 from `kestrel.health()`: 503 once a module reports `restartRequired`, 200 otherwise.
 
 **Client address.** `ctx.ip` (also used in the `http` log line and by `http.allow`) is the socket
-peer, unless a proxy sits in front. With `http.trustProxy`, it's the `X-Forwarded-For` entry
-`http.proxyHops` (default 1) counted from the right — the end proxies append to, never the
-client-supplied left end; a chain shorter than `proxyHops` yields no address. `http.trustedHeader`
-(e.g. a platform's trusted-client header) wins over both: its first value is the client, and a
-missing header yields no address.
+peer. Forwarding headers count only when that peer is a trusted proxy: an address in
+`http.trustedProxies` (default loopback, `["127.0.0.0/8", "::1"]`). A connection without a peer
+address, such as a Unix domain socket or an in-process call, counts as loopback. A request from any
+other peer is attributed to the peer itself, whatever headers it sends, so a client that reaches the
+port directly cannot choose its own address for `http.allow` or a rate limit. From a trusted proxy,
+with `http.trustProxy`, `ctx.ip` is the `X-Forwarded-For` entry `http.proxyHops` (default 1) counted
+from the right — the end proxies append to, never the client-supplied left end; a chain shorter than
+`proxyHops` yields no address. `http.trustedHeader` (a header the proxy sets to the client address,
+e.g. nginx's `proxy_set_header X-Real-IP $remote_addr;` or a platform's trusted-client header) wins
+over `trustProxy`: the value the proxy set last is the client, so with `X-Forwarded-For` as the
+trusted header it is the rightmost entry. The core server answers `403 forbidden` to a request from a
+trusted proxy that lacks the trusted header, with or without `http.allow`; the proxy is expected to
+set it on every request. `clientIpResolver(options)` compiles the same policy for a host of its own
+and reports that case as `missingHeader`.
 
 **IP allowlisting.** `http.allow` (default `[]`, meaning open) restricts the whole server to a list
 of IPv4/IPv6 addresses or CIDR ranges, e.g. `["203.0.113.0/24", "2001:db8::/32", "10.0.0.5"]`.

@@ -69,7 +69,8 @@ Binary results are served `inline` for a built-in safe set of content types plus
 (`sanitize-svg`), otherwise boot fails.
 
 ## HTTP config
-`http` takes `port`, `host`, `corsOrigin`, `maxBodyBytes`, `trustProxy`, `healthPath`, `inlineTypes`
+`http` takes `port`, `host`, `corsOrigin`, `maxBodyBytes`, `trustProxy`, `proxyHops`, `trustedHeader`,
+`trustedProxies`, `allow`, `healthPath`, `inlineTypes`
 and `timeouts: { requestMs, headersMs, keepAliveMs }` (defaults 30000 / 10000 / 5000), which map to
 `server.requestTimeout`, `server.headersTimeout` and `server.keepAliveTimeout`. An incoming
 `x-request-id` header of short printable ASCII becomes `ctx.requestId`, appears in the `http` log

@@ -570,6 +570,16 @@ Net changes since 5.8.1.
   public (`site/*` only), with an example bucket policy.
 - `examples/nginx-njs` proxies to the origin over `https://` with certificate verification and passes
   `Host`, `X-Forwarded-For` and `X-Forwarded-Proto`; `ORIGIN_UPSTREAM` defaults to `origin` (port 443).
+- Forwarding headers count only from a trusted proxy. The new `http.trustedProxies` (also an option
+  of `createKestrelHandler`) lists the peers, as addresses or CIDR ranges, whose `trustedHeader` or
+  `X-Forwarded-For` is read; it defaults to loopback, and a connection without a peer address (a Unix
+  domain socket, an in-process call) counts as loopback. A request from any other peer is attributed
+  to the peer's own address for `ctx.ip`, `http.allow` and rate limits. A proxy on another host must
+  now be listed, otherwise every request is attributed to the proxy. `trustedHeader` takes the value
+  the proxy set last instead of the first. The core server answers 403 to a request from a trusted
+  proxy without the trusted header, with or without `http.allow`; the h3 adapter leaves `ctx.ip`
+  absent for it. New exports: `clientIpResolver`, `LOOPBACK_PROXIES`, `ClientAddress`, `PeerRequest`;
+  `clientIp` accepts any request with `headers` and `socket`.
 
 ### Added
 

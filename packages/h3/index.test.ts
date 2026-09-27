@@ -114,6 +114,22 @@ describe("kestrel-h3", () => {
     expect(await ipVia({ trustedHeader: "Trusted-Client-IP" }, { "x-forwarded-for": "203.0.113.9" })).toBeNull();
   });
 
+  it("reads forwarding headers only from a peer in trustedProxies, otherwise the peer is the client", async () => {
+    const ipsVia = async (options: Parameters<typeof createKestrelHandler>[1], values: string[]) => {
+      await close?.();
+      await kestrel?.stop();
+      const base = await serve(options);
+      const ips: Array<string | null> = [];
+      for (const value of values) ips.push((await jsonBody<{ ip: string | null }>(await fetch(`${base}/echo/1`, { headers: { "x-real-ip": value, "x-forwarded-for": value } }))).ip);
+      return ips;
+    };
+    const rotating = ["10.9.9.1", "10.9.9.2", "10.9.9.3"];
+    expect(await ipsVia({ trustedHeader: "X-Real-IP", trustedProxies: ["192.0.2.1"] }, rotating)).toEqual(["127.0.0.1", "127.0.0.1", "127.0.0.1"]);
+    expect(await ipsVia({ trustProxy: true, trustedProxies: ["192.0.2.1"] }, rotating)).toEqual(["127.0.0.1", "127.0.0.1", "127.0.0.1"]);
+    expect(await ipsVia({ trustedHeader: "X-Real-IP", trustedProxies: ["127.0.0.1"] }, rotating)).toEqual(rotating);
+    expect(await ipsVia({ trustedHeader: "X-Real-IP" }, rotating)).toEqual(rotating);
+  });
+
   it("groups repeated query keys into arrays, keeps single values as strings", async () => {
     const base = await serve();
     const res = await fetch(`${base}/echo/1?tag=a&tag=b`);

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { boot as bootKestrel } from "@michaelthielemann/kestrel";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
@@ -42,5 +43,28 @@ describe("ratelimit/memory module steps via runPipeline", () => {
     const res = await runPipeline(sweepPipeline, {}, { modules: [{ module, instance }] });
     expect(res.status).toBe(200);
     expect(boundaryCast<{ removed: number }>(res.result, "json").removed).toBe(0);
+  });
+});
+
+describe("ratelimit/memory behind the core http server", () => {
+  it("keys every request of an untrusted peer on the peer, whatever forwarding header it sends", async () => {
+    const kestrel = await bootKestrel({
+      config: {
+        modules: [{ use: "./ratelimit", config: { buckets: { login: { limit: 2, windowSeconds: 60 } } } }],
+        triggers: [{ http: "POST /login", pipeline: "login" }],
+        http: { port: 0, trustedHeader: "X-Real-IP", trustedProxies: ["192.0.2.1"] },
+      },
+      modules: [module],
+      pipelines: [definePipeline({ name: "login", steps: ["ratelimit.check:login"] })],
+      logger: silentLogger,
+    });
+    try {
+      const base = `http://127.0.0.1:${(await kestrel.start()).http?.port ?? 0}`;
+      const statuses: number[] = [];
+      for (const address of ["10.9.9.1", "10.9.9.2", "10.9.9.3", "10.9.9.4"]) statuses.push((await fetch(`${base}/login`, { method: "POST", headers: { "x-real-ip": address } })).status);
+      expect(statuses).toEqual([200, 200, 429, 429]);
+    } finally {
+      await kestrel.stop();
+    }
   });
 });

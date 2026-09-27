@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { boundaryCast } from "../cast.ts";
 import { isBinaryResult, requestIdOf, type ContextInput, type UploadedFile } from "../context.ts";
@@ -245,6 +245,29 @@ export interface ClientIpOptions {
   trustProxy?: boolean;
   proxyHops?: number;
   trustedHeader?: string;
+  /**
+   * Peers whose forwarding headers are believed, as addresses or CIDR ranges; default `LOOPBACK_PROXIES`.
+   * A request from any other peer is attributed to the peer itself. A connection without a peer address
+   * (a Unix domain socket, an in-process call) counts as loopback.
+   */
+  trustedProxies?: readonly string[];
+}
+
+/** The default `trustedProxies`: the IPv4 and IPv6 loopback ranges. */
+export const LOOPBACK_PROXIES: readonly string[] = ["127.0.0.0/8", "::1"];
+
+/** The part of an incoming request the client address is derived from. */
+export interface PeerRequest {
+  headers: IncomingHttpHeaders;
+  socket?: { remoteAddress?: string | undefined } | null;
+}
+
+/** The client address of one request under a peer policy. */
+export interface ClientAddress {
+  /** The client address; absent when none can be derived. */
+  ip?: string;
+  /** `true` when `trustedHeader` is set and a trusted proxy sent the request without it. */
+  missingHeader: boolean;
 }
 
 export interface HttpOptions extends ClientIpOptions {
@@ -264,22 +287,45 @@ function headerValues(value: string | string[] | undefined): string[] {
     .filter((v) => v !== "");
 }
 
-export function clientIp(req: IncomingMessage, options: boolean | ClientIpOptions = {}): string | undefined {
-  const { trustProxy = false, proxyHops = 1, trustedHeader } = typeof options === "boolean" ? { trustProxy: options } : options;
-  if (trustedHeader !== undefined) return headerValues(req.headers[trustedHeader.toLowerCase()])[0];
-  if (trustProxy) {
+function addressed(ip: string | undefined): ClientAddress {
+  return ip === undefined ? { missingHeader: false } : { ip, missingHeader: false };
+}
+
+/**
+ * Compiles a peer policy once into a function that derives each request's client address. Forwarding
+ * headers count only from a peer in `trustedProxies`: `trustedHeader` gives the value that peer set last,
+ * `trustProxy` the `X-Forwarded-For` entry `proxyHops` from the right. Throws on an invalid
+ * `trustedProxies` entry.
+ */
+export function clientIpResolver(options: boolean | ClientIpOptions = {}): (req: PeerRequest) => ClientAddress {
+  const { trustProxy = false, proxyHops = 1, trustedHeader, trustedProxies = LOOPBACK_PROXIES } = typeof options === "boolean" ? { trustProxy: options } : options;
+  const proxies = createAllowlist(trustedProxies);
+  const header = trustedHeader?.toLowerCase();
+  return (req) => {
+    const peer = req.socket?.remoteAddress || undefined;
+    const fromProxy = proxies !== null && proxies.check(peer ?? "127.0.0.1");
+    if (!fromProxy || (header === undefined && !trustProxy)) return addressed(peer);
+    if (header !== undefined) {
+      const ip = headerValues(req.headers[header]).at(-1);
+      return ip === undefined ? { missingHeader: true } : addressed(ip);
+    }
     const chain = headerValues(req.headers["x-forwarded-for"]);
-    return chain.length >= proxyHops ? chain[chain.length - proxyHops] : undefined;
-  }
-  return req.socket.remoteAddress ?? undefined;
+    return addressed(chain.length >= proxyHops ? chain[chain.length - proxyHops] : undefined);
+  };
+}
+
+/** The client address of one request under a peer policy (see `clientIpResolver`). */
+export function clientIp(req: PeerRequest, options: boolean | ClientIpOptions = {}): string | undefined {
+  return clientIpResolver(options)(req).ip;
 }
 
 export function createHttpServer(routes: readonly Route[], run: Runner, logger: Logger, options: HttpOptions = {}): Server {
   const healthPath = options.healthPath === undefined ? "/health" : options.healthPath;
   const allowlist = createAllowlist(options.allow ?? []);
-  const peer: ClientIpOptions = { trustProxy: options.trustProxy ?? false, proxyHops: options.proxyHops ?? 1, ...(options.trustedHeader === undefined ? {} : { trustedHeader: options.trustedHeader }) };
+  const resolveClient = clientIpResolver(options);
   const server = createServer((req, res) => {
-    if (allowlist !== null && !allowlist.check(clientIp(req, peer))) {
+    const client = resolveClient(req);
+    if (client.missingHeader || (allowlist !== null && !allowlist.check(client.ip))) {
       sendError(res, 403, "forbidden", requestIdOf(req.headers["x-request-id"]));
       return;
     }
@@ -294,7 +340,7 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
         return;
       }
     }
-    void handle(req, res).catch((err: unknown) => {
+    void handle(req, res, client.ip).catch((err: unknown) => {
       logger.error("http handler failed", { error: err instanceof Error ? err.stack : String(err) });
       if (!res.headersSent) sendError(res, 500, "internal error", requestIdOf(req.headers["x-request-id"]));
     });
@@ -304,7 +350,7 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
   server.keepAliveTimeout = options.timeouts?.keepAliveMs ?? 5_000;
   return server;
 
-  async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async function handle(req: IncomingMessage, res: ServerResponse, ip: string | undefined): Promise<void> {
     const url = new URL(req.url ?? "/", "http://localhost");
     const requestId = requestIdOf(req.headers["x-request-id"]);
     if (healthPath && url.pathname === healthPath && req.method === "GET") {
@@ -327,7 +373,6 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") headers[k] = v;
     const input: ContextInput = { trigger: { kind: "http", name: `${req.method} ${url.pathname}` }, payload: { ...query, ...body.payload }, body: body.payload, query, params: match.params, headers, files: body.files };
-    const ip = clientIp(req, peer);
     if (ip !== undefined) input.ip = ip;
 
     const result = await run(match.route.pipeline, input);

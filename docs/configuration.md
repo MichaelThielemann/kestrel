@@ -126,9 +126,10 @@ event and cron triggers still run.
 | `host` | string | `"127.0.0.1"` | Interface to bind |
 | `corsOrigin` | string | – | Single allowed origin; omitted means no CORS headers |
 | `maxBodyBytes` | integer | `10485760` | A larger body answers 413 |
-| `trustProxy` | boolean | `false` | Read the client address from `X-Forwarded-For` |
+| `trustProxy` | boolean | `false` | Read the client address from `X-Forwarded-For` of a trusted proxy |
 | `proxyHops` | integer | `1` | Which `X-Forwarded-For` entry, counted from the right |
-| `trustedHeader` | string | – | A platform's client header; its first value wins over `trustProxy` |
+| `trustedHeader` | string | – | A header the trusted proxy sets to the client address; wins over `trustProxy` |
+| `trustedProxies` | string[] | `["127.0.0.0/8", "::1"]` | Peers (addresses or CIDR ranges) whose forwarding headers count |
 | `allow` | string[] | `[]` | IPv4/IPv6 addresses or CIDR ranges; empty means open |
 | `healthPath` | string \| `null` | `"/health"` | Answers `{ ok, restartRequired }` from `kestrel.health()` without a pipeline |
 | `inlineTypes` | string[] | `[]` | Content types served `inline` beyond the built-in safe set |
@@ -136,8 +137,8 @@ event and cron triggers still run.
 | `timeouts.headersMs` | integer | `10000` | `server.headersTimeout` |
 | `timeouts.keepAliveMs` | integer | `5000` | `server.keepAliveTimeout` |
 
-`allow` is checked before routing, for health and CORS preflight too; an entry that is neither an
-address nor a CIDR range aborts the boot. `image/svg+xml` in `inlineTypes` requires a module that
+`allow` is checked before routing, for health and CORS preflight too; an entry of `allow` or
+`trustedProxies` that is neither an address nor a CIDR range aborts the boot. `image/svg+xml` in `inlineTypes` requires a module that
 registers the step `sanitize.svg`, otherwise the boot aborts.
 
 `healthPath` is a liveness probe and needs no authentication. It answers `{ ok, restartRequired }`
