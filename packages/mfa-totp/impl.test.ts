@@ -212,6 +212,34 @@ describe("mfa/totp checks", () => {
     expect(expectOk(await env.mfa.check(ALICE, codeAt(secret, env.now())))).toEqual({ kind: "pass" });
   });
 
+  it("lets the right code from a known device in while unknown devices have locked the factor, and leaves that lock in place", async () => {
+    const env = await setup();
+    const { secret } = await enroll(env);
+    const wrong = () => (codeAt(secret, env.now()) === "000000" ? "111111" : "000000");
+    for (let i = 0; i < 10; i++) {
+      env.advance(30_000);
+      expectOk(await env.mfa.check(ALICE, wrong()));
+    }
+    env.advance(30_000);
+    expect(expectOk(await env.mfa.check(ALICE, codeAt(secret, env.now()), { knownDevice: true }))).toEqual({ kind: "pass" });
+    env.advance(30_000);
+    expect(expectOk(await env.mfa.check(ALICE, codeAt(secret, env.now())))).toMatchObject({ kind: "refuse", reason: "locked" });
+  });
+
+  it("does not count the wrong codes of a known device against the factor, and still accepts each code only once there", async () => {
+    const env = await setup();
+    const { secret } = await enroll(env);
+    const wrong = () => (codeAt(secret, env.now()) === "000000" ? "111111" : "000000");
+    for (let i = 0; i < 30; i++) {
+      env.advance(30_000);
+      expect(expectOk(await env.mfa.check(ALICE, wrong(), { knownDevice: true }))).toEqual({ kind: "refuse", reason: "wrong" });
+    }
+    env.advance(30_000);
+    const code = codeAt(secret, env.now());
+    expect(expectOk(await env.mfa.check(ALICE, code))).toEqual({ kind: "pass" });
+    expect(expectOk(await env.mfa.check(ALICE, code, { knownDevice: true }))).toEqual({ kind: "refuse", reason: "wrong" });
+  });
+
   it("keeps the count across a restart", async () => {
     const db = createFakePersistence();
     const env = await setup("all", undefined, db);

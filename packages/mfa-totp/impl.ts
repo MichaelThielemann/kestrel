@@ -51,9 +51,15 @@ export type MfaError = KestrelError<"CONFLICT" | "NOT_FOUND" | "TRANSIENT" | "EN
 /** The status `startSetup` answers when the account needs an enrollment code it did not give. */
 export const ENROLLMENT_CODE_STATUS = 403;
 
+/** Where a check comes from. */
+export interface CheckOrigin {
+  /** The request comes from a device the account signed in from before: its codes neither count towards nor wait for the lock that wrong codes from other devices set, and a pass leaves that lock in place. */
+  knownDevice?: boolean | undefined;
+}
+
 export interface MfaTotp {
   /** Checks the second factor of a caller whose password was just accepted; `code` is a time-based or a recovery code. */
-  check(identity: Identity, code: string | undefined): Promise<Result<Check, MfaError>>;
+  check(identity: Identity, code: string | undefined, origin?: CheckOrigin): Promise<Result<Check, MfaError>>;
   /** Stores a new, unconfirmed secret for the caller; the next check with a code for it confirms it. After a reset, or with `requireEnrollmentCode`, it needs the enrollment code the reset issued. */
   startSetup(identity: Identity, enrollmentCode?: string): Promise<Result<Setup, MfaError>>;
   /** Removes the user's factor and answers a one-time code the user needs to set up a new one. */
@@ -240,10 +246,11 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
       return { failures: locking ? 0 : failures, locks, lockedUntil };
     });
 
-  const settle = async (row: FactorRow, plan: (row: FactorRow) => Partial<Omit<FactorRow, "id">> | undefined, answer: Check): Promise<Result<Check, MfaError>> => {
+  const settle = async (row: FactorRow, plan: (row: FactorRow) => Partial<Omit<FactorRow, "id">> | undefined, answer: Check, clearLock: boolean): Promise<Result<Check, MfaError>> => {
     const settled = await update(row, (current) => {
       const patch = plan(current);
-      return patch === undefined ? undefined : { ...patch, failures: 0, locks: 0, lockedUntil: 0 };
+      if (patch === undefined) return undefined;
+      return clearLock ? { ...patch, failures: 0, locks: 0, lockedUntil: 0 } : patch;
     });
     if (isErr(settled)) return settled;
     return ok(settled.value !== undefined ? answer : { kind: "refuse", reason: "wrong" });
@@ -252,14 +259,15 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
   const WRONG: Check = { kind: "refuse", reason: "wrong" };
 
   return {
-    async check(identity, code) {
+    async check(identity, code, origin = {}) {
       const found = await factorOf(identity.id);
       if (isErr(found)) return found;
       const row = found.value !== null && found.value.secret !== "" ? found.value : null;
       const given = code?.trim() ?? "";
+      const known = origin.knownDevice === true;
 
       if (row !== null && given !== "") {
-        const counted = await countAttempt(row);
+        const counted = known ? ok(row) : await countAttempt(row);
         if (isErr(counted)) return counted;
         const attempt = counted.value;
         if (attempt === undefined) {
@@ -274,7 +282,7 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
         const sameSecret = (current: FactorRow): boolean => current.secret === attempt.secret;
 
         if (attempt.confirmed) {
-          if (step !== undefined) return settle(attempt, (current) => (sameSecret(current) && step > current.lastStep ? { lastStep: step, ...resealed } : undefined), { kind: "pass" });
+          if (step !== undefined) return settle(attempt, (current) => (sameSecret(current) && step > current.lastStep ? { lastStep: step, ...resealed } : undefined), { kind: "pass" }, !known);
           const digests = new Set(recoveryDigests(given));
           if (!attempt.recovery.some((stored) => digests.has(stored))) return ok(WRONG);
           return settle(
@@ -284,6 +292,7 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
               return kept.length < current.recovery.length ? { recovery: kept } : undefined;
             },
             { kind: "pass" },
+            !known,
           );
         }
 
@@ -293,6 +302,7 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
           attempt,
           (current) => (!current.confirmed && sameSecret(current) && step > current.lastStep ? { confirmed: true, lastStep: step, recovery: recoveryCodes.map(recoveryDigest), enrollment: null, ...resealed } : undefined),
           { kind: "pass", recoveryCodes },
+          !known,
         );
       }
 

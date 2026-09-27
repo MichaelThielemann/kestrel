@@ -1114,6 +1114,19 @@ Net changes since 5.8.1.
   requests get no more than `limit` through. An `ip` bucket counts an IPv6
   address by its /64 and an IPv4-mapped address as its IPv4 address. `clientKey` and `usernameKey` are
   exported.
+- Known devices at sign-in: a `ratelimit-memory` `username` bucket takes `knownDevices`, a budget of its
+  own for each device holding a valid device cookie for the account it names, counted in place of the
+  account's, so a third party who blocks an account for unknown devices no longer locks its owner out.
+  The new step `ratelimit.rememberDevice:<bucket>`, after the login, hands out that cookie:
+  `__Host-kestrel_device`, `HttpOnly`, `Secure`, `SameSite=Strict`, bound to the account, signed with
+  HMAC-SHA-256 under the new module config `deviceCookies` (`secretKey`, `previousSecretKeys`,
+  `maxAgeSeconds` default 30 days, `secure`). A device that uses up its budget, a cookie for another
+  account or an expired one counts against the account as before. The check leaves `knownDevice` on the
+  context (a `Context` augmentation in `@michaelthielemann/kestrel-contracts/knownDevice`), and
+  `mfa.check` neither counts nor applies its lock for such a request.
+- `Context.responseCookies` (a `string[]`): further `set-cookie` values a step adds to a successful HTTP
+  response, each sent as a header of its own after the one in `responseHeaders`. It reaches `RunResult`
+  as `cookies` and `HttpResponse` as `cookies`; the core HTTP server and `kestrel-h3` send them.
 - New package `@michaelthielemann/kestrel-mfa-totp` (module `mfa/totp`): a second factor for any `authn@1`
   module — time-based one-time codes (RFC 6238) with ten single-use recovery codes of 125 bits, kept as
   keyed digests, the secret sealed with AES-256-GCM under a configured key, each code accepted once, and

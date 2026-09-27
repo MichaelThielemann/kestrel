@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AUTHN, type Authn } from "@michaelthielemann/kestrel-contracts/authn";
 import { AUTHZ } from "@michaelthielemann/kestrel-contracts/authz";
+import "@michaelthielemann/kestrel-contracts/knownDevice";
 import { customFailure } from "@michaelthielemann/kestrel-contracts/errors";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { Context } from "@michaelthielemann/kestrel/context";
@@ -62,7 +63,7 @@ export default defineModule({
     check: async (ctx: Context) => {
       if (!ctx.identity || !ctx.token) return ctx.fail("UNAUTHENTICATED", "not authenticated");
       const code = typeof ctx.payload.code === "string" ? ctx.payload.code : undefined;
-      const checked = await mfa.check(ctx.identity, code);
+      const checked = await mfa.check(ctx.identity, code, { knownDevice: ctx.knownDevice !== undefined });
       if (isErr(checked)) return ctx.fail(checked.error);
       const outcome = checked.value;
       if (outcome.kind === "pass") {
@@ -114,8 +115,8 @@ export default defineModule({
 
   describe: () => ({
     check: {
-      summary: "After authn.login: check the second factor with payload.code (a time-based or a recovery code). A refusal ends the session the login opened; a code that confirms a new factor adds result.recoveryCodes, shown once",
-      reads: ["identity", "token"],
+      summary: "After authn.login: check the second factor with payload.code (a time-based or a recovery code). A refusal ends the session the login opened; a code that confirms a new factor adds result.recoveryCodes, shown once. From a known device, wrong codes neither count towards nor wait for the factor's lock",
+      reads: ["identity", "token", "knownDevice?"],
       writes: ["result?"],
       input: { type: "object", properties: { code: { type: "string" } }, additionalProperties: true },
       extendsOutput: { type: "object", properties: { recoveryCodes: { type: "array", items: { type: "string" } } }, required: [] },

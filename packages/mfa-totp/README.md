@@ -46,6 +46,13 @@ is counted before it is checked, so a burst of parallel requests gets no more th
 checked either. The count lives in `mfa_factors`, so it survives a restart and holds without any
 rate-limit module; a correct code clears it, and so does a reset.
 
+**Known devices.** Someone who knows the password could lock the factor for its owner with wrong
+codes. When `ratelimit-memory` recognised a device cookie for the account (`knownDevices`, see its
+README), `knownDevice` is on the context and `mfa.check` treats the request as coming from the
+owner's device: its codes neither count towards the lock nor wait for it, and a pass leaves a lock
+set from other devices in place. Each code is still accepted once. The device's own rate-limit
+budget bounds its wrong codes instead; once that is used up, the device counts as unknown again.
+
 **Locked out.** When the only administrator has lost the device and the recovery codes, or is locked,
 someone with access to the database clears it directly. With `persistence-sqlite`, stop the server and
 run `DELETE FROM mfa_factors WHERE "userId" = '<id>';` to remove the factor (the account then sets up a
@@ -86,7 +93,7 @@ from a running session.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `mfa.check` | After authn.login: check the second factor with payload.code (a time-based or a recovery code). A refusal ends the session the login opened; a code that confirms a new factor adds result.recoveryCodes, shown once | `identity`, `token` | `result?` | { code?: string, … } | { recoveryCodes?: string[], … } | 401 the code is wrong or used (`UNAUTHENTICATED`), a code is needed (`SECOND_FACTOR_REQUIRED`), or the account must set up a second factor first (`SECOND_FACTOR_SETUP_REQUIRED`); 429 too many wrong codes in a row; the factor is locked for a while (`RATE_LIMITED`) | – | no |
+| `mfa.check` | After authn.login: check the second factor with payload.code (a time-based or a recovery code). A refusal ends the session the login opened; a code that confirms a new factor adds result.recoveryCodes, shown once. From a known device, wrong codes neither count towards nor wait for the factor's lock | `identity`, `token`, `knownDevice?` | `result?` | { code?: string, … } | { recoveryCodes?: string[], … } | 401 the code is wrong or used (`UNAUTHENTICATED`), a code is needed (`SECOND_FACTOR_REQUIRED`), or the account must set up a second factor first (`SECOND_FACTOR_SETUP_REQUIRED`); 429 too many wrong codes in a row; the factor is locked for a while (`RATE_LIMITED`) | – | no |
 | `mfa.startSetup` | Check the password through authn@1 and start setting up a second factor: answers the new secret and its otpauth URI to the caller it identified; the next login with a code for it confirms it | – | `identity`, `result` | { username?: string, email?: string, password: string, enrollmentCode?: string } | { secret: string, uri: string, … } | 401 invalid credentials; 403 the account needs the enrollment code a reset issued (`ENROLLMENT_CODE_REQUIRED`); 409 the account already has a second factor | – | no |
 | `mfa.reset` | Remove another user's second factor and answer the one-time enrollment code its owner needs to set up a new one; run it after a step that ends that user's sessions | `identity?`, `params.id` | `result` | – | { ok: boolean, enrollmentCode: string, … } | 400 the caller's own account | – | no |
 | `mfa.forget` | Remove the second factor of the user in params.id or the event payload's id, e.g. on user.deleted | `params.id?`, `payload.id?` | – | { id?: string \| null, … } | – | 400 no user id | – | no |

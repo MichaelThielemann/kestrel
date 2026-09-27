@@ -303,7 +303,10 @@ decides itself: when it sets one, that value is sent (`media.serve` marks an ori
 `immutable`); when it does not, the response stays `no-store`. A step may also leave
 `responseHeaders` (a `Record<string, string>`, declared in its `writes`) on the context; the headers
 it holds after the last step go out with the response the same way, under the same mandatory ones —
-this is how `authn.login` sets the session cookie. A submitted
+this is how `authn.login` sets the session cookie. A response that needs more than one cookie takes
+the further `set-cookie` values from `responseCookies` (a `string[]`, declared in `writes` like
+`responseHeaders`), each sent as a header of its own; `ratelimit.rememberDevice` adds the device
+cookie this way next to the session cookie. A submitted
 `X-Request-Id` shows up as `requestId` in the context, in the `http` log line and again in
 the response header. Each request produces one `http` log line with method, path, pipeline,
 status, duration, IP and — if present — `requestId`. `http.timeouts` sets `requestMs`
@@ -348,6 +351,9 @@ one outside the list, answers `403 forbidden` with no further detail; an entry t
 valid address nor a CIDR range stops the boot and names the bad entry.
 
 Rate limits are a step: `ratelimit.check:login` before `authn.login` (module `ratelimit-memory`).
+A bucket counted per account can give each device the account signed in from before a budget of its
+own (`knownDevices`, with `ratelimit.rememberDevice` after the login), so a third party who blocks the
+account for unknown devices does not lock its owner out; the module's README shows the pipeline.
 
 ## Runner Behavior (in the core, `runner.ts`)
 

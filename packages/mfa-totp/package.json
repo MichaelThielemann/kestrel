@@ -43,6 +43,7 @@
     "@michaelthielemann/kestrel-authz-roles": "workspace:*",
     "@michaelthielemann/kestrel-contracts": "workspace:*",
     "@michaelthielemann/kestrel-persistence-sqlite": "workspace:*",
+    "@michaelthielemann/kestrel-ratelimit-memory": "workspace:*",
     "vitest": "^3.2.0"
   },
   "repository": {

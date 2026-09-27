@@ -114,6 +114,16 @@ pipeline or a dead-letter row with no pipeline assigned, and translations publis
 their own ([`data/translation-slug`](#data-translation-slug)). Take a consistent snapshot close to
 cutover (a replication snapshot, or `sqlite3 <db> ".backup <copy>"`).
 
+## 7. Known devices at sign-in
+
+Nothing changes until a project opts in. A `username` bucket in front of the login blocks the account
+for everyone once its budget is used up, whoever sent the attempts. To keep the owner's own devices out
+of that block, add `knownDevices` to the bucket, `deviceCookies` with a `secretKey` of 32 bytes to the
+`ratelimit-memory` config, and `ratelimit.rememberDevice:<bucket>` after the login steps, including
+`mfa.check`; the module's README shows the whole pipeline. A custom HTTP transport that writes
+`HttpResponse` itself must also send `cookies`, one `set-cookie` header each, or the device cookie never
+reaches the browser. Devices get their cookie at their next successful sign-in.
+
 ## Cutover
 
 Switching an already-running project's event delivery to `events-queue`, or draining it before a
