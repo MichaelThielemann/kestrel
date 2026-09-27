@@ -1,7 +1,12 @@
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { matchWildcardPath } from "./match.ts";
 
-/** One entry of the published artifact. `pattern` is a regex SOURCE string, anchored, path-only. */
+/**
+ * One entry of the published artifact. `from` is the canonical wildcard path (leading slash, no trailing
+ * slash, `*` and `**`); `pattern` is the equivalent anchored regex SOURCE string, path-only.
+ */
 export interface RedirectRule {
+  from: string;
   pattern: string;
   target: string;
   status: number;
@@ -9,6 +14,15 @@ export interface RedirectRule {
 
 /** The statuses the editor offers. 301/302 cover SEO; 307/308 preserve the method on non-GET requests. */
 export const REDIRECT_STATUSES = ["301", "302", "307", "308"] as const;
+
+/** The most wildcards (`*` and `**` together) one `from` may hold. */
+export const MAX_WILDCARDS = 8;
+
+/** The longest `from`, in characters, after trimming. */
+export const MAX_FROM_LENGTH = 512;
+
+/** A request path longer than this, in characters, matches no rule. */
+export const MAX_LOOKUP_PATH_LENGTH = 2048;
 
 /** A rule the editor has to fix. The message names the 1-based row so it is actionable in the UI. */
 export class RedirectRuleError extends Error {}
@@ -28,13 +42,14 @@ const ONE_SEGMENT = `(${SEGMENT_CHAR}+)`;
 const MANY_SEGMENTS = `(${SEGMENT_CHAR}${PATH_CHAR}*?)`;
 
 /**
- * Translate an authored `from` into an anchored regex source. Matching is path-only and case-sensitive;
- * an authored trailing slash is dropped and one is tolerated at match time, so `/blog` and `/blog/` are
- * the same rule.
+ * Validate an authored `from` and return its canonical form: leading slash, no trailing slash. Matching is
+ * path-only and case-sensitive; an authored trailing slash is dropped and one is tolerated at match time, so
+ * `/blog` and `/blog/` are the same rule.
  */
-export function patternToRegexSource(from: string): string {
+export function canonicalFrom(from: string): string {
   const raw = from.trim();
   if (!raw) throw new RedirectRuleError('"From" must not be blank');
+  if (raw.length > MAX_FROM_LENGTH) throw new RedirectRuleError(`"From" is longer than ${MAX_FROM_LENGTH} characters`);
   if (SCHEME.test(raw) || raw.startsWith("//")) {
     throw new RedirectRuleError('"From" matches the request path only — drop the scheme and host');
   }
@@ -43,8 +58,14 @@ export function patternToRegexSource(from: string): string {
   if (raw.includes("\\")) throw new RedirectRuleError('"From" must not contain a backslash');
   if (raw.split("/").some((seg) => seg === "..")) throw new RedirectRuleError('"From" must not contain ".."');
   if (/\*\*\/?\*\*/.test(raw)) throw new RedirectRuleError('"From" has two `**` in a row — one already matches any number of segments');
+  const wildcards = wildcardCount(raw);
+  if (wildcards > MAX_WILDCARDS) throw new RedirectRuleError(`"From" has ${wildcards} wildcards, at most ${MAX_WILDCARDS} are allowed`);
+  return `/${raw.replace(/^\/+/, "").replace(/\/+$/, "")}`;
+}
 
-  const path = `/${raw.replace(/^\/+/, "").replace(/\/+$/, "")}`;
+/** Translate an authored `from` into the anchored regex source that matches what `canonicalFrom` describes. */
+export function patternToRegexSource(from: string): string {
+  const path = canonicalFrom(from);
   if (path === "/") return "^/$";
 
   let body = "";
@@ -140,7 +161,7 @@ export function compileRedirects(rows: unknown): RedirectRule[] {
         throw new RedirectRuleError('"To" writes a placeholder as $1, $2, … — not ${1}');
       }
       assertPlaceholdersAfterHost(target);
-      return { pattern: patternToRegexSource(from), target, status: readStatus(entry.status) };
+      return { from: canonicalFrom(from), pattern: patternToRegexSource(from), target, status: readStatus(entry.status) };
     } catch (err) {
       throw new RedirectRuleError(`Row ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -178,14 +199,16 @@ export function serializeRedirects(rules: RedirectRule[]): string {
 
 /**
  * Reference implementation of the edge's match step — first rule that matches wins, `$n` substituted
- * from the capture groups. Kestrel does not serve redirects; this pins the semantics the edge handler
- * has to reproduce, and is what the tests assert against.
+ * from the captures. Kestrel serves redirects through `redirects.lookup` with exactly this function; an
+ * edge handler reproduces it. Matching runs over `from` in time proportional to the path per rule; a path longer than
+ * `MAX_LOOKUP_PATH_LENGTH` characters matches nothing.
  */
 export function matchRedirect(rules: RedirectRule[], path: string): { target: string; status: number } | null {
+  if (path.length > MAX_LOOKUP_PATH_LENGTH) return null;
   for (const rule of rules) {
-    const m = new RegExp(rule.pattern).exec(path);
-    if (!m) continue;
-    return { target: rule.target.replace(/\$(\d+)/g, (_, n: string) => m[Number(n)] ?? ""), status: rule.status };
+    const captures = matchWildcardPath(rule.from, path);
+    if (!captures) continue;
+    return { target: rule.target.replace(/\$(\d+)/g, (_, n: string) => captures[Number(n) - 1] ?? ""), status: rule.status };
   }
   return null;
 }

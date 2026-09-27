@@ -1,6 +1,6 @@
 # redirects/default
 Admin-managed redirects, plus automatic redirects for documents that moved: the `redirects` singleton
-(`rules: json`, list of `{ from, to, status }`, order = priority) is compiled into anchored regex rules.
+(`rules: json`, list of `{ from, to, status }`, order = priority) is compiled into wildcard rules.
 `from` uses `*` (one segment) / `**` (one or more), `to` is a path or an `http(s)` URL with `$1…`; `status`
 301 (default) | 302 | 307 | 308. Config: `type` (`redirects`), `field` (`rules`), `prefix` (blobstore prefix,
 same as delivery-static), `key` (`redirects.json`). Requires `content@1`, `blobstore@1` and `persistence@1`
@@ -9,8 +9,8 @@ Steps: `redirects.validate` before `content.set` (`VALIDATION`, `details.row`, m
 an editor rule that would redirect into an existing automatic redirect); `redirects.recordMoves` applies
 `site.pathsMoved` moves to the automatic-redirect state; `redirects.lookup` in the site pipeline before
 `site.resolve` – on a hit (editor or automatic) the pipeline ends with `{ redirect: { to, status } }`;
-`redirects.export` after save and in publish-all writes `<prefix>redirects.json` (`[{ pattern, target,
-status }]`, editor rules first then automatic ones, `[]` when empty; broken legacy rows are skipped and
+`redirects.export` after save and in publish-all writes `<prefix>redirects.json` (`[{ from, pattern,
+target, status }]`, editor rules first then automatic ones, `[]` when empty; broken legacy rows are skipped and
 logged); `redirects.render` serves the same list from the DB; `redirects.listAuto` and `redirects.removeAuto`
 back the admin view of automatic redirects.
 Not included: query matching/forwarding, regex authoring, the edge handler itself (see `../../examples/nginx-njs`).
@@ -18,10 +18,25 @@ Not included: query matching/forwarding, regex authoring, the edge handler itsel
 ## How a rule compiles
 
 Editors never write a regex. `from` is a path with `*` (one segment) or `**` (one or more)
-wildcards, and `to` references them positionally as `$1`, `$2`, … in authored order; the translation
-into the anchored regex happens here, so the edge only matches and substitutes. The exported list is
-`{ pattern, target, status }` for every rule and nothing else, so a consumer such as the njs handler
-needs no per-item shape check.
+wildcards, and `to` references them positionally as `$1`, `$2`, … in authored order. The exported list is
+`{ from, pattern, target, status }` for every rule and nothing else, so a consumer such as the njs handler
+needs no per-item shape check. `from` is the canonical form (leading slash, no trailing slash); `pattern`
+is the same rule as an anchored regex source, for consumers that match with a regex engine.
+
+A `from` holds at most 8 wildcards and 512 characters; a longer one is rejected with the row number.
+
+## Matching
+
+`redirects.lookup` matches `from` directly, without a regex: a linear pass over the request path per
+rule, so the cost of a lookup grows with the path length and the number of rules, never with how the
+wildcards of a rule can be split. `*` takes as much of the segment as it can, `**` as little as it can,
+and a trailing slash on the request is tolerated; the captures are exactly those of `pattern`. A request
+path longer than 2048 characters matches no rule and falls through to the page lookup. The njs handler in
+`../../examples/nginx-njs` uses the same algorithm.
+
+`pattern` in a backtracking regex engine gives the same result, but several wildcards in one segment
+(`/p/*-*-*`) can take time polynomial in the path length on a path that almost matches. An edge that
+matches `pattern` bounds the request path length itself, or matches `from` as described above.
 
 `${1}` is rejected: it compiles clean and then ships verbatim in every `Location`, a rule that
 silently 404s. A bare `$` is left alone — it is a legal path character, only `$` followed by digits

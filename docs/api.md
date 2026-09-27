@@ -405,7 +405,7 @@ non-empty strings, no other fields — otherwise 400 with path and reason
 |---|---|---|---|
 | GET | `/redirects` | – | document; as long as it was never set: 200 with an empty document (`redirects.read`) |
 | PUT | `/redirects` | `{ rules: [{ from, to, status? }] }` | document, writes `redirects.json` to the blob store (`redirects.write`); 400 `redirects: Row N: …` on an invalid rule |
-| GET | `/redirects.json` | – | `[{ pattern, target, status }]` – public, same content as the file in the blob store; editor rules first, then the automatic redirects of moved pages |
+| GET | `/redirects.json` | – | `[{ from, pattern, target, status }]` – public, same content as the file in the blob store; editor rules first, then the automatic redirects of moved pages |
 | GET | `/admin/redirects/auto` | – | `[{ from, to, type, docId, locale, seq }]` – automatic redirects in effect, sorted by `from` (`redirects.read`) |
 | DELETE | `/admin/redirects/auto/*path` | – | removes the automatic redirect at that path (a later move of a page away from that path creates a new one) and rewrites `redirects.json` (`redirects.write`); 404 when there is none |
 

@@ -502,6 +502,13 @@ Net changes since 5.8.1.
 - `redirects-default` requires `persistence@1`; a config loading it without a persistence provider
   fails to boot, naming the contract. It stores `redirects_auto_paths` and `redirects_auto_targets`.
   `Redirects.validate` returns a `Promise<Result>`, and `createRedirects` is async and takes `db`.
+- `redirects-default`: a rule's `from` holds at most 8 wildcards and 512 characters; saving a longer
+  one fails with `VALIDATION` naming the row, and a stored one is skipped and logged on publish.
+  `redirects.lookup` matches `from` in linear time instead of through the regex, with the same
+  captures; a request path longer than 2048 characters matches no rule. Every entry of
+  `redirects.json` and `redirects.render` carries `from` (the canonical wildcard path) next to
+  `pattern`; a field grant for `redirectRules` names `from` to pass it on. The njs example matches
+  `from` with the same algorithm.
 - `@michaelthielemann/kestrel-contracts`'s runtime helpers moved under
   `@michaelthielemann/kestrel-contracts/helpers/*`, no re-export left at the old path:
   `content-locale` → `helpers/content-locale`, `content-schema` → `helpers/content-schema`,

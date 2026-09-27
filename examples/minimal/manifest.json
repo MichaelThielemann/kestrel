@@ -1185,6 +1185,7 @@
                 "headers.x-kestrel-variant"
               ],
               "redirectRules": [
+                "from",
                 "pattern",
                 "target",
                 "status"
@@ -10585,6 +10586,9 @@
           "items": {
             "type": "object",
             "properties": {
+              "from": {
+                "type": "string"
+              },
               "pattern": {
                 "type": "string"
               },
@@ -10602,6 +10606,7 @@
               }
             },
             "required": [
+              "from",
               "pattern",
               "target",
               "status"
@@ -21882,6 +21887,9 @@
               "items": {
                 "type": "object",
                 "properties": {
+                  "from": {
+                    "type": "string"
+                  },
                   "pattern": {
                     "type": "string"
                   },
@@ -21899,6 +21907,7 @@
                   }
                 },
                 "required": [
+                  "from",
                   "pattern",
                   "target",
                   "status"
@@ -21927,6 +21936,7 @@
               "shape": "array",
               "answers": {
                 "anonymous": [
+                  "from",
                   "pattern",
                   "target",
                   "status"

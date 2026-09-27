@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { compilePublishableRedirects, compileRedirects, matchRedirect, normalizeTarget, patternToRegexSource, RedirectRuleError, serializeRedirects } from "./rules.ts";
+import { matchWildcardPath } from "./match.ts";
+import { compilePublishableRedirects, compileRedirects, matchRedirect, MAX_FROM_LENGTH, MAX_LOOKUP_PATH_LENGTH, MAX_WILDCARDS, normalizeTarget, patternToRegexSource, RedirectRuleError, serializeRedirects } from "./rules.ts";
 
 describe("patternToRegexSource", () => {
   it("anchors literals, tolerates a trailing slash and escapes regex characters", () => {
@@ -35,8 +36,8 @@ describe("normalizeTarget", () => {
 describe("compileRedirects", () => {
   it("compiles rows in order with status default 301", () => {
     expect(compileRedirects([{ from: "/blog/*", to: "/artikel/$1" }, { from: "/x", to: "/y", status: "302" }])).toEqual([
-      { pattern: patternToRegexSource("/blog/*"), target: "/artikel/$1", status: 301 },
-      { pattern: patternToRegexSource("/x"), target: "/y", status: 302 },
+      { from: "/blog/*", pattern: patternToRegexSource("/blog/*"), target: "/artikel/$1", status: 301 },
+      { from: "/x", pattern: patternToRegexSource("/x"), target: "/y", status: 302 },
     ]);
     expect(compileRedirects(null)).toEqual([]);
   });
@@ -59,5 +60,90 @@ describe("compilePublishableRedirects + serialize + match", () => {
     expect(matchRedirect(rules, "/a/")).toEqual({ target: "/b", status: 301 });
     expect(matchRedirect(rules, "/blog/x/y")).toEqual({ target: "https://neu.example/p/x/y", status: 301 });
     expect(matchRedirect(rules, "/nope")).toBeNull();
+  });
+});
+
+describe("wildcard matching cost and limits", () => {
+  const within = (ms: number, run: () => void) => {
+    const start = performance.now();
+    run();
+    expect(performance.now() - start).toBeLessThan(ms);
+  };
+
+  it("carries the canonical from next to the regex pattern", () => {
+    expect(compileRedirects([{ from: "blog/*/", to: "/x/$1" }])).toEqual([{ from: "/blog/*", pattern: patternToRegexSource("/blog/*"), target: "/x/$1", status: 301 }]);
+    expect(compileRedirects([{ from: "/", to: "/home" }])[0]?.from).toBe("/");
+  });
+
+  it("matches several wildcards in one segment against a long near-miss path in linear time", () => {
+    const [rule] = compileRedirects([{ from: "/produkte/*-*-*", to: "/p/$1/$2/$3" }]);
+    within(50, () => expect(matchWildcardPath(rule!.from, `/produkte/${"-".repeat(8000)}/x`)).toBeNull());
+    within(50, () => expect(matchWildcardPath(rule!.from, `/produkte/${"-".repeat(8000)}`)).toEqual(["-".repeat(7996), "-", "-"]));
+    within(50, () => expect(matchRedirect([rule!], `/produkte/${"-".repeat(2000)}/x`)).toBeNull());
+  });
+
+  it("matches a rule with many wildcards in one segment in linear time", () => {
+    const from = `/${Array.from({ length: 12 }, () => "*").join("-")}/x`;
+    within(50, () => expect(matchWildcardPath(from, `/${"-".repeat(50)}`)).toBeNull());
+    within(50, () => expect(matchWildcardPath(from, `/${"-".repeat(8000)}`)).toBeNull());
+    within(50, () => expect(matchWildcardPath(from, `/${"-".repeat(8000)}/x`)).toHaveLength(12));
+  });
+
+  it("matches several ** wildcards against a long path in linear time", () => {
+    const [rule] = compileRedirects([{ from: "/a/**/b/**/c/**", to: "/z/$1/$2/$3" }]);
+    within(50, () => expect(matchWildcardPath(rule!.from, `/a/${"b/c/".repeat(2000)}\\`)).toBeNull());
+  });
+
+  it("captures exactly what the exported regex captures", () => {
+    const froms = ["/blog/*", "/blog/**", "/*-*-*", "/a/**/b/*", "/**/amp", "/docs/**/*.html", "/x/*.*", "/"];
+    const paths = ["/", "/blog/a", "/blog/a/b/", "/blog//x", "/a-b-c-d", "/a-b", "/a/x/y/b/z", "/a/b/b/b/q", "/p/q/amp", "/amp", "/docs/a/b/c.d.html", "/x/a.b.c", "/x/.b", "/blog/a/", "//"];
+    for (const from of froms) {
+      const [rule] = compileRedirects([{ from, to: from === "/" ? "/home" : "/t" }]);
+      for (const path of paths) {
+        const m = new RegExp(rule!.pattern).exec(path);
+        const expected = m ? m.slice(1).join("|") : null;
+        const hit = matchRedirect([{ ...rule!, target: m ? m.slice(1).map((_, i) => `$${i + 1}`).join("|") : "" }], path);
+        expect(hit ? hit.target : null, `${from} against ${path}`).toBe(expected);
+      }
+    }
+  });
+
+  it("agrees with the exported regex on generated rules and paths", () => {
+    let seed = 7;
+    const next = (n: number) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % n;
+    };
+    const pick = (alphabet: string[], max: number) => Array.from({ length: next(max) + 1 }, () => alphabet[next(alphabet.length)]).join("");
+    let compiled = 0;
+    for (let i = 0; i < 400; i++) {
+      const from = `/${pick(["a", "-", "/", "*", "**", ".", "a/"], 6)}`;
+      const { rules } = compilePublishableRedirects([{ from, to: "/t" }]);
+      const rule = rules[0];
+      if (!rule) continue;
+      compiled += 1;
+      for (let j = 0; j < 20; j++) {
+        const path = `/${pick(["a", "-", "/", ".", "b", "\\"], 10)}`;
+        const m = new RegExp(rule.pattern).exec(path);
+        expect(matchWildcardPath(rule.from, path), `${from} against ${path}`).toEqual(m ? m.slice(1) : null);
+      }
+    }
+    expect(compiled).toBeGreaterThan(200);
+  });
+
+  it("rejects a rule with more wildcards than the limit and names the limit", () => {
+    const from = `/${Array.from({ length: MAX_WILDCARDS + 1 }, () => "*").join("/")}`;
+    expect(() => compileRedirects([{ from, to: "/x" }])).toThrow(new RegExp(`^Row 1: "From" has ${MAX_WILDCARDS + 1} wildcards, at most ${MAX_WILDCARDS} are allowed`));
+    expect(() => compileRedirects([{ from: `/${Array.from({ length: MAX_WILDCARDS }, () => "*").join("/")}`, to: "/x" }])).not.toThrow();
+  });
+
+  it("rejects a from longer than the limit", () => {
+    expect(() => compileRedirects([{ from: `/${"a".repeat(MAX_FROM_LENGTH)}`, to: "/x" }])).toThrow(new RegExp(`"From" is longer than ${MAX_FROM_LENGTH} characters`));
+  });
+
+  it("matches no rule for a path longer than the lookup limit", () => {
+    const [rule] = compileRedirects([{ from: "/**", to: "/x" }]);
+    expect(matchRedirect([rule!], `/${"a".repeat(MAX_LOOKUP_PATH_LENGTH - 1)}`)).toEqual({ target: "/x", status: 301 });
+    expect(matchRedirect([rule!], `/${"a".repeat(MAX_LOOKUP_PATH_LENGTH)}`)).toBeNull();
   });
 });

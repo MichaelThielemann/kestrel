@@ -18,7 +18,7 @@ export const configSchema = z
   })
   .strict();
 
-const RULE_SCHEMA = { type: "object", properties: { pattern: { type: "string" }, target: { type: "string" }, status: { type: "integer", enum: [301, 302, 307, 308] } }, required: ["pattern", "target", "status"] };
+const RULE_SCHEMA = { type: "object", properties: { from: { type: "string" }, pattern: { type: "string" }, target: { type: "string" }, status: { type: "integer", enum: [301, 302, 307, 308] } }, required: ["from", "pattern", "target", "status"] };
 const ROW_SCHEMA = { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, status: { type: ["string", "number"] } } };
 const MOVE_SCHEMA = { type: "object", properties: { type: { type: "string" }, id: { type: "string" }, locale: { type: "string" }, from: { type: ["string", "null"] }, to: { type: ["string", "null"] }, seq: { type: "number" } }, required: ["type", "id", "locale", "from", "to", "seq"] };
 const AUTO_REDIRECT_SCHEMA = { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, type: { type: "string" }, docId: { type: "string" }, locale: { type: "string" }, seq: { type: "number" } }, required: ["from", "to", "type", "docId", "locale", "seq"] };

@@ -28,7 +28,7 @@ export default defineConfig({
           settings: ["id", "title", "description", "navigation", "_locales", "_translations"],
           media: ["id", "path", "filename", "contentType", "size", "width", "height", "alt", "title", "description", "provenance", "variants[].size", "variants[].width", "variants[].height", "variants[].format", "variants[].path"],
           mediaFile: ["headers.cache-control", "headers.x-content-provenance", "headers.x-kestrel-variant"],
-          redirectRules: ["pattern", "target", "status"],
+          redirectRules: ["from", "pattern", "target", "status"],
         },
       },
     },

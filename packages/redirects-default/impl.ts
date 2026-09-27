@@ -4,6 +4,7 @@ import { err, failure, isErr, ok, type KestrelError, type Result } from "@michae
 import type { Document, Filter, Persistence, PersistenceError, Schema } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { unobserved } from "@michaelthielemann/kestrel/reads";
+import { matchWildcardPath } from "./match.ts";
 import { compilePublishableRedirects, compileRedirects, exactPathPatternSource, matchRedirect, serializeRedirects, RedirectRuleError, type RedirectRule } from "./rules.ts";
 
 export interface Config {
@@ -194,12 +195,16 @@ export async function createRedirects(config: Config, deps: { content: Content; 
     if (isErr(effective)) return effective;
     const rules: RedirectRule[] = [];
     for (const auto of effective.value) {
-      const shadowedBy = editorRules.find((rule) => new RegExp(rule.pattern).test(auto.to));
+      if (auto.from.includes("*")) {
+        logger.info(`redirects/default: skipped the automatic redirect ${auto.from} -> ${auto.to}, its path contains a wildcard character`, { from: auto.from, to: auto.to });
+        continue;
+      }
+      const shadowedBy = editorRules.find((rule) => matchWildcardPath(rule.from, auto.to) !== null);
       if (shadowedBy) {
         logger.info(`redirects/default: skipped the automatic redirect ${auto.from} -> ${auto.to}, an editor rule already redirects its target`, { from: auto.from, to: auto.to });
         continue;
       }
-      rules.push({ pattern: exactPathPatternSource(auto.from), target: auto.to, status: 301 });
+      rules.push({ from: auto.from, pattern: exactPathPatternSource(auto.from), target: auto.to, status: 301 });
     }
     return ok(rules);
   }
