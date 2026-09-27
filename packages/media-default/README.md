@@ -225,7 +225,7 @@ Config: `allowedTypes` (`image/*`, `application/pdf`, `*` or `*/*`), `deniedType
 patterns matched against the media type without parameters, ignoring case, see above), `maxBytes`,
 `prefix` (default `media/`, must end with `/`), `publicPath` (default `/media`), `publicCopy`
 (optional `{ prefix }`), `uploadStaleAfterMs` (default 15 minutes), `anonymousList` (`"ids"` default,
-or `"all"` for a public catalogue), `maxLimit` (default 200) and `defaultLimit` (default `maxLimit`, never
+or `"all"` for a public catalogue), `listPermission` (default `media.list`), `maxLimit` (default 200) and `defaultLimit` (default `maxLimit`, never
 above it, or setup fails), `locales`/`defaultLocale`. `media.list` without `limit` answers at most
 `defaultLimit` items with the full `total`, refuses a `limit` above `maxLimit` (400), and reads at most
 `maxLimit` of the `ids` it is given.
@@ -236,7 +236,10 @@ above it, or setup fails), `locales`/`defaultLocale`. `media.list` without `limi
 (a file's URL is meant to be public once a page links it). `media.list` and `media.listFolders` are
 different: without a signed-in caller, `media.list` answers only when the request names `ids`
 explicitly (401 `UNAUTHENTICATED` otherwise), and `media.listFolders` always needs a signed-in
-caller. Set `anonymousList: "all"` to restore anonymous listing for a deployment that wants a public
+caller. With an `authz@1` module loaded, a signed-in caller also needs `listPermission` (default
+`media.list`) for either listing, or gets 403 `FORBIDDEN` — being signed in is not enough, so an account
+whose roles grant nothing cannot see the whole library, unpublished uploads included; `media.*` grants
+it. Set `anonymousList: "all"` to restore anonymous listing for a deployment that wants a public
 media catalogue; it is never the default. Which fields of an item an anonymous caller receives is up
 to the pipeline's last step, `authz-roles`' `authz.fields:media`: `examples/minimal` grants `id`,
 `path`, `filename`, `contentType`, `size`, `width`, `height`, `alt`, `title`, `description`,
@@ -266,8 +269,8 @@ unavailable):
 |---|---|
 | `media.upload` | `VALIDATION` (no file, invalid folder or provenance), `UNSUPPORTED` (type not allowed), `PAYLOAD_TOO_LARGE` (over `maxBytes`), `CONFLICT` (name taken in that folder; `details.field: "location"`) |
 | `media.get` | `VALIDATION` (unknown locale), `NOT_FOUND` |
-| `media.list` | `VALIDATION` (invalid folder, unknown locale), `UNAUTHENTICATED` (no identity and no `ids`, unless `anonymousList: "all"`) |
-| `media.listFolders` | `UNAUTHENTICATED` (no identity, unless `anonymousList: "all"`) |
+| `media.list` | `VALIDATION` (invalid folder, unknown locale), `UNAUTHENTICATED` (no identity and no `ids`, unless `anonymousList: "all"`), `FORBIDDEN` (no `ids` and no `listPermission`) |
+| `media.listFolders` | `UNAUTHENTICATED` (no identity, unless `anonymousList: "all"`), `FORBIDDEN` (no `listPermission`) |
 | `media.update` | `VALIDATION` (name, folder, provenance or text), `NOT_FOUND`, `CONFLICT` (name taken in that folder) |
 | `media.download`, `media.serve` | `NOT_FOUND` |
 | `media.remove` | `VALIDATION` (missing id) |
@@ -309,7 +312,7 @@ Not included: image resizing, tags, linking media to content documents.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
-`@michaelthielemann/kestrel-media-default` – module `media/default`: provides `media@1`; requires `blobstore@1`, `persistence@1`.
+`@michaelthielemann/kestrel-media-default` – module `media/default`: provides `media@1`; requires `blobstore@1`, `persistence@1`; optional `authz@1`.
 
 | Config | Type | Required | Default |
 |---|---|---|---|
@@ -326,6 +329,7 @@ Not included: image resizing, tags, linking media to content documents.
 | `anonymousList` | enum | no | `"ids"` |
 | `maxLimit` | integer | no | `200` |
 | `defaultLimit` | integer | no | – |
+| `listPermission` | string | no | `"media.list"` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
@@ -334,6 +338,8 @@ Not included: image resizing, tags, linking media to content documents.
 | `media.get` | Media metadata | `params.id` | `result` | ?locale: string | { id: string, path: string, filename: string, folder: string, contentType: string, size: number, createdAt: number, updatedAt: number, provenance: object, width: number \| null, height: number \| null, alt: string \| null, title: string \| null, description: string \| null } | 400 unknown locale; 404 not found | – | no |
 | `media.list` | List media, newest first; anonymous callers may only fetch by ids | `identity?` | `result` | ?folder: string, recursive: boolean, q: string, sort: string, type: "image" \| "video" \| "other", limit: integer, offset: integer, ids: string, locale: string | { items: object[], total: number, … } | 400 invalid folder, unknown locale, invalid type, or limit above maxLimit; 401 no identity and no ids (unless anonymousList is "all") | – | no |
 | `media.listFolders` | Folders (persistent and implied) with item counts; anonymous callers are refused | `identity?` | `result` | – | object[] | 401 no identity (unless anonymousList is "all") | – | no |
+| `media.list` | List media, newest first; anonymous callers may only fetch by ids | `identity?` | `result` | ?folder: string, recursive: boolean, q: string, sort: string, type: "image" \| "video" \| "other", limit: integer, offset: integer, ids: string, locale: string | { items: object[], total: number, … } | 400 invalid folder, unknown locale or invalid type; 401 no identity and no ids (unless anonymousList is "all"); 403 no ids and, with an authz module, no listPermission | – | no |
+| `media.listFolders` | Folders (persistent and implied) with item counts; anonymous callers are refused | `identity?` | `result` | – | object[] | 401 no identity (unless anonymousList is "all"); 403 with an authz module, no listPermission | – | no |
 | `media.createFolder` | Create a folder (idempotent: an existing folder is returned unchanged) | – | `result` | { path: string } | { folder: string, count: number, … } | 400 missing or invalid path | – | no |
 | `media.renameFolder` | Rename or move a folder (metadata only: keys and paths do not change) | `params.path` | `result` | { path: string } | { folder: string, moved: number, … } | 400 missing or invalid path; 404 folder not found; 409 target folder already exists | – | no |
 | `media.listFolderItems` | Item ids in a folder, for use with references.guardAll:media before removeFolder | `params.path` | `result` | ?recursive: boolean | { path: string, ids: string[], … } | 400 missing or invalid path; 404 folder not found; 409 folder not empty (without `recursive`) | – | no |

@@ -1,11 +1,12 @@
 import { z } from "zod";
-import "@michaelthielemann/kestrel-contracts/authn";
+import type { Identity } from "@michaelthielemann/kestrel-contracts/authn";
+import { AUTHZ, type AuthzError } from "@michaelthielemann/kestrel-contracts/authz";
 import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { MEDIA } from "@michaelthielemann/kestrel-contracts/media";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { binaryResult, first, stepFactory, type Context, type StepResult } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
-import { isErr, ok } from "@michaelthielemann/kestrel/result";
+import { isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import { createMediaDefault, MEDIA_KINDS, publishedFileOf, SORTABLE, type ListOptions, type Media, type MediaItem, type MediaKind, type SortField } from "./impl.ts";
 
 export const configSchema = z
@@ -27,6 +28,7 @@ export const configSchema = z
     anonymousList: z.enum(["ids", "all"]).default("ids"),
     maxLimit: z.number().int().min(1).default(200),
     defaultLimit: z.number().int().min(1).optional(),
+    listPermission: z.string().min(1).default("media.list").describe("The permission a signed-in caller needs to list the library or its folders when an authz module is loaded"),
   })
   .strict()
   .refine((config) => config.defaultLimit === undefined || config.defaultLimit <= config.maxLimit, { message: "defaultLimit must not exceed maxLimit", path: ["defaultLimit"] });
@@ -80,6 +82,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+type Instance = Media & { listAccess?: (identity: Identity) => Promise<Result<boolean, AuthzError>> };
+
+async function listRefusal(media: Instance, ctx: Context): Promise<StepResult | undefined> {
+  if (media.anonymousListAllowed()) return undefined;
+  if (!ctx.identity) return ctx.fail("UNAUTHENTICATED", ANONYMOUS_LIST_MESSAGE);
+  if (media.listAccess === undefined) return undefined;
+  const allowed = await media.listAccess(ctx.identity);
+  if (isErr(allowed)) return ctx.fail(allowed.error);
+  return allowed.value ? undefined : ctx.fail("FORBIDDEN", "media/default: listing the library needs its list permission");
+}
+
 const ANONYMOUS_LIST_MESSAGE = "media/default: anonymous callers read media by id only – sign in to list the library";
 
 const PROVENANCE = { type: "object", properties: { origin: { type: "string", enum: ["human", "ai", "mixed", "unknown"] }, tool: { type: "string" }, model: { type: "string" }, at: { type: "number" } }, required: ["origin"], description: "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown" };
@@ -128,11 +141,16 @@ export default defineModule({
   name: "media/default",
   provides: [MEDIA],
   requires: [BLOBSTORE, PERSISTENCE],
+  optional: [AUTHZ],
   configSchema,
 
-  async setup(config, deps): Promise<Media> {
+  async setup(config, deps): Promise<Instance> {
     if (config.defaultLocale !== undefined && !config.locales.includes(config.defaultLocale)) throw new Error("media/default: defaultLocale must be one of locales");
-    return createMediaDefault(config, deps.get(BLOBSTORE), deps.get(PERSISTENCE), deps.logger);
+    const media = await createMediaDefault(config, deps.get(BLOBSTORE), deps.get(PERSISTENCE), deps.logger);
+    const authz = deps.find(AUTHZ);
+    if (authz === undefined) return media;
+    const listAccess = (identity: Identity) => authz.can(identity, config.listPermission);
+    return Object.assign(media, { listAccess });
   },
 
   attach: (media, kestrel) => media.attach(kestrel),
@@ -192,8 +210,9 @@ export default defineModule({
     },
     list: async (ctx: Context): Promise<StepResult> => {
       const ids = idsFrom(ctx.payload.ids);
-      if (ids.length === 0 && !ctx.identity && !media.anonymousListAllowed()) {
-        return ctx.fail("UNAUTHENTICATED", ANONYMOUS_LIST_MESSAGE);
+      if (ids.length === 0) {
+        const refused = await listRefusal(media, ctx);
+        if (refused !== undefined) return refused;
       }
       if (ids.length > 0) {
         const items = await media.byIds(ids.slice(0, media.listLimits().max), localeOf(ctx));
@@ -205,7 +224,8 @@ export default defineModule({
       return ok({ ...ctx, result: { items: page.value.items.map((i) => media.toPublicItem(i)), total: page.value.total } });
     },
     listFolders: async (ctx: Context): Promise<StepResult> => {
-      if (!ctx.identity && !media.anonymousListAllowed()) return ctx.fail("UNAUTHENTICATED", ANONYMOUS_LIST_MESSAGE);
+      const refused = await listRefusal(media, ctx);
+      if (refused !== undefined) return refused;
       const folders = await media.folders();
       if (isErr(folders)) return ctx.fail(folders.error);
       return ok({ ...ctx, result: folders.value });
@@ -301,7 +321,7 @@ export default defineModule({
       errors: { 400: "no file or invalid folder/provenance (per-file for a multi-file request)", 409: "the folder already has a file with that name, `details.field: \"location\"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict", 413: "file exceeds maxBytes (per-file for a multi-file request)", 415: "type not allowed (per-file for a multi-file request)" },
     },
     get: { summary: "Media metadata", reads: ["params.id"], writes: ["result"], query: { locale: { type: "string" } }, output: MEDIA_ITEM_SCHEMA, errors: { 400: "unknown locale", 404: "not found" } },
-    list: { summary: "List media, newest first; anonymous callers may only fetch by ids", reads: ["identity?"], writes: ["result"], query: { folder: { type: "string" }, recursive: { type: "boolean" }, q: { type: "string" }, sort: { type: "string" }, type: { type: "string", enum: [...MEDIA_KINDS] }, limit: { type: "integer", minimum: 1, maximum: media.listLimits().max }, offset: { type: "integer", minimum: 0 }, ids: { type: "string" }, locale: { type: "string" } }, output: { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, total: { type: "number" } }, required: ["items", "total"] }, errors: { 400: "invalid folder, unknown locale, invalid type, or limit above maxLimit", 401: "no identity and no ids (unless anonymousList is \"all\")" } },
+    list: { summary: "List media, newest first; anonymous callers may only fetch by ids", reads: ["identity?"], writes: ["result"], query: { folder: { type: "string" }, recursive: { type: "boolean" }, q: { type: "string" }, sort: { type: "string" }, type: { type: "string", enum: [...MEDIA_KINDS] }, limit: { type: "integer", minimum: 1, maximum: media.listLimits().max }, offset: { type: "integer", minimum: 0 }, ids: { type: "string" }, locale: { type: "string" } }, output: { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, total: { type: "number" } }, required: ["items", "total"] }, errors: { 400: "invalid folder, unknown locale, invalid type, or limit above maxLimit", 401: "no identity and no ids (unless anonymousList is \"all\")", 403: "no ids and, with an authz module, no listPermission" } },
     download: { summary: "The file itself", reads: ["params.id"], writes: ["result"], binary: true, errors: { 404: "not found" } },
     serve: media.publicCopyEnabled()
       ? {
@@ -319,7 +339,7 @@ export default defineModule({
           binary: true,
           errors: { 404: "not found, not ready, or not the name the file was uploaded under" },
         },
-    listFolders: { summary: "Folders (persistent and implied) with item counts; anonymous callers are refused", reads: ["identity?"], writes: ["result"], output: { type: "array", items: { type: "object", properties: { folder: { type: "string" }, count: { type: "number" } }, required: ["folder", "count"] } }, errors: { 401: "no identity (unless anonymousList is \"all\")" } },
+    listFolders: { summary: "Folders (persistent and implied) with item counts; anonymous callers are refused", reads: ["identity?"], writes: ["result"], output: { type: "array", items: { type: "object", properties: { folder: { type: "string" }, count: { type: "number" } }, required: ["folder", "count"] } }, errors: { 401: "no identity (unless anonymousList is \"all\")", 403: "with an authz module, no listPermission" } },
     update: { summary: "Rename, move, set provenance or texts (alt/title/description per locale); the file's key and path never change", reads: ["params.id"], writes: ["result"], input: { type: "object", properties: { filename: { type: "string" }, folder: { type: "string" }, provenance: PROVENANCE, locale: { type: "string" }, alt: { type: ["string", "null"] }, title: { type: ["string", "null"] }, description: { type: ["string", "null"] } }, additionalProperties: false }, query: { locale: { type: "string" } }, output: MEDIA_ITEM_SCHEMA, errors: { 400: "invalid name, folder or text (texts are plain text, max 2000 chars)", 404: "not found", 409: "the folder already has a file with that name, `details.field: \"location\"`" } },
     remove: { summary: "Delete file and metadata: end the item's readiness, then remove copy, blob and row, then a final sweep", reads: ["params.id"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }, errors: { 400: "missing id" } },
     reconcile: { summary: "Compare the blobs under the media prefix with the media_items rows; with `delete` also removes blobs that no row points at (rows are never deleted)", reads: [], writes: ["result"], input: { type: "object", properties: { delete: { type: "boolean" } }, additionalProperties: false }, output: RECONCILE_SCHEMA },
