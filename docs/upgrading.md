@@ -205,7 +205,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`redirects/requires-persistence`](#redirects-requires-persistence) | load | manual | `redirects-default` without a `persistence@1` provider |
 | [`imports/redirects-impl`](#imports-redirects-impl) | load | none (info) | a local module importing `kestrel-redirects-default/impl` |
 | [`deps/kestrel-range`](#deps-kestrel-range), `deps/mixed-majors`, `deps/pre-install` | source | auto / manual / none | a `@michaelthielemann/kestrel*` dependency range |
-| [`scripts/kestrel-binaries`](#scripts-kestrel-binaries) | source | auto / manual (warning) | a `kestrel-openapi` or `kestrel-upgrade` command in `package.json` scripts or another project file |
+| [`scripts/kestrel-binaries`](#scripts-kestrel-binaries) | source | auto / manual (warning) | a `kestrel-openapi` or `kestrel-upgrade` command, or an unscoped `npx kestrel`, in `package.json` scripts or another project file |
 | [`deps/host-outdated`](#deps-host-outdated), `deps/host-refused` | source | manual | a direct dependency whose plugin is not built for this version, or whose `kestrel` field is refused |
 | [`offer/event-queue`](#offer-event-queue) | source | none / ask / auto | the switch from `events-direct` to `events-queue` |
 | [`boot/<code>`](#boot-code) | boot | manual | any boot error no rule above claims |
@@ -610,20 +610,30 @@ the same edit.
 | `kestrel-upgrade …` | `kestrel upgrade …` |
 | `npx [-y] @michaelthielemann/kestrel-upgrade@<v> …` | `npx -y @michaelthielemann/kestrel-cli@<v> upgrade …` |
 | `pnpm dlx @michaelthielemann/kestrel-upgrade@<v> …` | `pnpm dlx @michaelthielemann/kestrel-cli@<v> upgrade …` |
-
 | `npm exec @michaelthielemann/kestrel-upgrade@<v> [--] …` | `npm exec @michaelthielemann/kestrel-cli@<v> -- upgrade …` |
-| `npx [-y] kestrel-upgrade …` | `kestrel upgrade …` (an error: an unscoped `npx` would fetch an unrelated registry package of that name) |
+| `npx [-y] kestrel-upgrade …` | `kestrel upgrade …` (an error) |
+| `npx [-y] kestrel …`, `npx [-y] kestrel-cli …` | `kestrel …` (an error) |
+
+The unscoped npm names `kestrel`, `kestrel-cli`, `kestrel-openapi` and `kestrel-upgrade` do not
+belong to this project. A runner that installs a missing package on the fly (`npx`, `npm exec`
+without `--no`, `pnpm dlx`, `yarn dlx`, `bunx`) fetches whatever the registry holds under such a
+name when the project's own `@michaelthielemann/kestrel-cli` is not installed, and runs it with
+access to the project and its `.env`. Every such command is an error; in a script the runner is
+dropped, since a script finds the locally installed `kestrel` on its `PATH`.
 
 Only a command token is rewritten: at the start of the script, after `&&`, `;` or `|`, after
-`node_modules/.bin/`, or behind a runner (`pnpm`, `pnpm exec`, `npm exec [--]`, `yarn`) or an
-environment prefix (`VAR=value …`, `cross-env …`), which stays in place; a longer word containing
-the name stays. A script that still runs one of the removed binaries in a form the rule cannot
+`node_modules/.bin/`, or behind a runner (`pnpm`, `pnpm exec`, `yarn`) or an environment prefix
+(`VAR=value …`, `cross-env …`), which stays in place; a longer word containing the name stays. A script that still runs one of the removed binaries in a form the rule cannot
 rewrite, or runs the path of a removed bin file (`…/kestrel-openapi/dist/cli.js`), gets a manual
 warning. `kestrel openapi` refuses flags it
 does not know, so a rewritten line that passes one gets a warning naming the flag. In other project
 files (`Dockerfile*`, `*.service`, `*.yml`/`*.yaml`, `*.sh`, `Makefile`, `Procfile`, `*.json` and
-`*.js`/`*.mjs`/`*.ts`, never Markdown or lockfiles) the rule reports each such line as a warning
-with its file and line and the new form, and edits nothing.
+`*.js`/`*.mjs`/`*.ts`, never lockfiles) the rule reports each such line as a warning with its file
+and line and the new form, and edits nothing. A line in one of those files or in a Markdown file that
+runs an unscoped name through a fetching runner is an error instead, with the safe forms as the
+suggestion: `pnpm exec kestrel …`, `npm exec --no -- kestrel …`, `yarn kestrel …` for the installed
+command, or `npx -y @michaelthielemann/kestrel-cli@6 …` for the scoped package. A plain mention of a
+removed binary in Markdown is not reported.
 
 #### deps-host-outdated
 A direct dependency of the project (not one of kestrel's own packages) carries a plugin that is not

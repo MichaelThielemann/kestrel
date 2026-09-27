@@ -25,6 +25,13 @@ Net changes since 5.8.1.
   ships the program under a second name, `kestrel-cli`, which is what both run.
   `@michaelthielemann/kestrel-upgrade` is a library only; `scripts/kestrel-binaries` rewrites the old
   command, including the `pnpm dlx`/`npx` form.
+- `scripts/kestrel-binaries` reports every command that runs the unscoped name `kestrel`,
+  `kestrel-cli`, `kestrel-openapi` or `kestrel-upgrade` through a runner that installs a missing
+  package on the fly (`npx`, `npm exec` without `--no`, `pnpm dlx`, `yarn dlx`, `bunx`) as an error,
+  in `package.json` scripts, other project files and Markdown: those names belong to unrelated
+  registry packages. In a script it drops the runner (`npx kestrel check` becomes `kestrel check`);
+  elsewhere it names `pnpm exec kestrel …`, `npm exec --no -- kestrel …` or
+  `npx -y @michaelthielemann/kestrel-cli@6 …`.
 - A host package registers its upgrade plugin through a `kestrel` field in its own `package.json`
   (`plugin`, `pluginApi`, `engine`) instead of shipping its own binary; the load-failure hint that
   pointed at such a binary is removed. A direct dependency that depends on
