@@ -522,6 +522,13 @@ Net changes since 5.8.1.
   limit. `links.check` works in batches of 100 rows, yields to the event loop between them, writes
   results by row, and ends after `checkBudgetSeconds` (default 3600), leaving the rest due for the
   next run; `urls` counts the URLs handled in the run. `Config` has both new fields.
+- `media-default` treats an upload declared as an image type or PDF as the type its leading bytes
+  identify when they differ: SVG or HTML markup sent as `image/png` meets `deniedTypes`, and PNG bytes
+  sent as `image/jpeg` are stored as `image/png` with a `.png` name. `sanitize.svg` also sanitizes SVG
+  markup declared as another image type. `images-default` hands an original to sharp only when its
+  bytes are its stored type, passes `renderTimeoutMs` to sharp's own time limit (`Renderer` takes an
+  optional `RenderOptions`), and renders no further size of an item in a run after a timeout.
+  `helpers/mediaType` adds `sniffMediaType`, `verifiedMediaType` and `contentMatchesMediaType`.
 - `@michaelthielemann/kestrel-contracts`'s runtime helpers moved under
   `@michaelthielemann/kestrel-contracts/helpers/*`, no re-export left at the old path:
   `content-locale` → `helpers/content-locale`, `content-schema` → `helpers/content-schema`,

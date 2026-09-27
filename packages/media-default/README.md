@@ -23,6 +23,13 @@ Every item has exactly one public URL, `path`: `<publicPath>/<id>/<name>` (defau
 demoted to `.bin` when its file may no longer be published as the type its extension names (see
 below).
 
+A declared image type or `application/pdf` is checked against the file's leading bytes
+(`verifiedMediaType`): when they identify another type — PNG bytes sent as `image/jpeg`, SVG or HTML
+markup sent as `image/png` — the upload is treated as that type from here on, for `allowedTypes`,
+`deniedTypes`, the stored type and the name's extension. A type the bytes are refused as names both
+(`type "image/svg+xml" (declared as "image/png") is not allowed`). Bytes that match no known signature
+keep the declared type, and every other declared type is taken as declared.
+
 The declared content type has to be exactly one media type: `type/subtype` of RFC 9110 token
 characters, optionally followed by `;` parameters, with no comma. Anything else — a list such as
 `image/png; x=1, text/html` (a browser uses the last type of a list), or an empty type — is refused

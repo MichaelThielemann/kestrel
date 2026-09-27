@@ -40,6 +40,11 @@ since a published name keeps its extension. `mediaTypeMatches` and `mediaTypeAll
 `type/*+suffix` every subtype of a top-level type that ends in `+suffix` (with `*` as the type, of
 every top-level type), any other pattern one type, with case and parameters ignored on both sides.
 `media@1`'s `MediaFilter` uses the same rule.
+`sniffMediaType` names the type a file's leading bytes identify (PNG, JPEG, GIF, WebP, AVIF, HEIC/HEIF,
+TIFF, BMP, ICO, JPEG XL, PDF, SVG, other XML, HTML) or `null`; `verifiedMediaType` answers the type an
+upload is treated as — the identified type when a declared image type or PDF has bytes of another
+type, the declared value otherwise — and `contentMatchesMediaType` whether the bytes are the declared
+type.
 `helpers/content-locale` is not a contract either: `satisfiesFilter`, `publishedLocale` and
 `narrowListTranslations` implement one rule on top of `content@1` — a locale that fails a filter is
 never a fallback source and never counted in `_translations` — for every module that builds a
@@ -78,7 +83,8 @@ frozen shapes in `events.steps`), `helpers/persistence.owned` (`ownedPersistence
 `isSchemaNode`, `jsonTypeOf`, `declaresType`, `typeTag` — JSON Schema resolution shared by the walkers of
 `validate-jsonschema` and `references-default`), `helpers/links` (`collectInternalRefs`),
 `helpers/mediaType` (`parseMediaType`, `mediaTypeEssence`, `canonicalMediaType`, `publicFormOf`,
-`mediaTypeMatches`, `mediaTypeAllowed`, `EXTENSION_BY_TYPE`, `NEUTRAL_TYPE`, `NEUTRAL_EXTENSION`),
+`mediaTypeMatches`, `mediaTypeAllowed`, `sniffMediaType`, `verifiedMediaType`, `contentMatchesMediaType`,
+`EXTENSION_BY_TYPE`, `NEUTRAL_TYPE`, `NEUTRAL_EXTENSION`),
 `helpers/persistence` (`fieldDefinition`), `helpers/renderer` (`renderFailed`) and
 `helpers/migrations` (`migrationFailed`).
 

@@ -3675,7 +3675,7 @@
       "module": "sanitize/svg",
       "factory": false,
       "description": {
-        "summary": "Sanitize uploaded SVG files (scripts, handlers, external references removed)",
+        "summary": "Sanitize uploaded SVG files, also SVG content declared as another image type (scripts, handlers, external references removed)",
         "reads": [
           "files"
         ],
@@ -26014,7 +26014,7 @@
           "name": "sanitize.svg",
           "module": "sanitize/svg",
           "description": {
-            "summary": "Sanitize uploaded SVG files (scripts, handlers, external references removed)",
+            "summary": "Sanitize uploaded SVG files, also SVG content declared as another image type (scripts, handlers, external references removed)",
             "reads": [
               "files"
             ],

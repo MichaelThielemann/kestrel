@@ -166,3 +166,96 @@ export function publicFormOf(contentType: string, svgSanitized = false): { conte
   if (parsed === null || extension === undefined || (parsed.essence === SVG && !svgSanitized)) return { contentType: NEUTRAL_TYPE, extension: NEUTRAL_EXTENSION };
   return { contentType: canonicalOf(parsed), extension };
 }
+
+const ISO_BRANDS: Readonly<Record<string, string>> = {
+  avif: "image/avif",
+  avis: "image/avif",
+  heic: "image/heic",
+  heix: "image/heic",
+  hevc: "image/heic",
+  hevx: "image/heic",
+  heim: "image/heic",
+  heis: "image/heic",
+  mif1: "image/heif",
+  msf1: "image/heif",
+};
+
+const SAME_TYPE: Readonly<Record<string, string>> = {
+  "image/vnd.microsoft.icon": "image/x-icon",
+  "image/heic": "image/heif",
+};
+
+const CHECKED_BY_CONTENT = ["image/*", "application/pdf"];
+const MARKUP_WINDOW = 4096;
+
+function startsWith(data: Uint8Array, offset: number, signature: readonly number[]): boolean {
+  return signature.every((byte, i) => data[offset + i] === byte);
+}
+
+function latin1(data: Uint8Array, offset: number, length: number): string {
+  return String.fromCharCode(...data.subarray(offset, offset + length));
+}
+
+function isoBrand(data: Uint8Array): string | null {
+  if (data.length < 12 || latin1(data, 4, 4) !== "ftyp") return null;
+  const size = ((data[0] ?? 0) << 24) | ((data[1] ?? 0) << 16) | ((data[2] ?? 0) << 8) | (data[3] ?? 0);
+  const end = Math.min(data.length, size > 8 ? size : 32);
+  const brands = [latin1(data, 8, 4)];
+  for (let offset = 16; offset + 4 <= end; offset += 4) brands.push(latin1(data, offset, 4));
+  for (const brand of brands) {
+    const type = ISO_BRANDS[brand];
+    if (type !== undefined) return type;
+  }
+  return null;
+}
+
+function markupType(data: Uint8Array): string | null {
+  let offset = startsWith(data, 0, [0xef, 0xbb, 0xbf]) ? 3 : 0;
+  while (offset < data.length && [0x09, 0x0a, 0x0d, 0x20].includes(data[offset] ?? 0)) offset += 1;
+  if (data[offset] !== 0x3c) return null;
+  const text = new TextDecoder("utf-8").decode(data.subarray(offset, offset + MARKUP_WINDOW)).toLowerCase();
+  if (/<svg[\s/>]/.test(text)) return "image/svg+xml";
+  if (text.startsWith("<?xml") && !text.includes("<html")) return "application/xml";
+  return "text/html";
+}
+
+/**
+ * The media type a file's leading bytes identify: the common raster image formats, PDF, SVG, other XML
+ * and HTML. `null` when the bytes match none of them. Markup counts as SVG when an `<svg` element starts
+ * within its first 4 KiB, after any byte-order mark, whitespace, XML declaration, comment or doctype.
+ */
+export function sniffMediaType(data: Uint8Array): string | null {
+  if (startsWith(data, 0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "image/png";
+  if (startsWith(data, 0, [0xff, 0xd8, 0xff])) return "image/jpeg";
+  if (latin1(data, 0, 6) === "GIF87a" || latin1(data, 0, 6) === "GIF89a") return "image/gif";
+  if (latin1(data, 0, 4) === "RIFF" && latin1(data, 8, 4) === "WEBP") return "image/webp";
+  if (startsWith(data, 0, [0x49, 0x49, 0x2a, 0x00]) || startsWith(data, 0, [0x4d, 0x4d, 0x00, 0x2a])) return "image/tiff";
+  if (startsWith(data, 0, [0xff, 0x0a]) || startsWith(data, 0, [0, 0, 0, 0x0c, 0x4a, 0x58, 0x4c, 0x20, 0x0d, 0x0a, 0x87, 0x0a])) return "image/jxl";
+  if (latin1(data, 0, 5) === "%PDF-") return "application/pdf";
+  if (startsWith(data, 0, [0, 0, 1, 0]) && data.length >= 6) return "image/x-icon";
+  if (latin1(data, 0, 2) === "BM" && data.length >= 14) return "image/bmp";
+  return isoBrand(data) ?? markupType(data);
+}
+
+function sameType(a: string, b: string): boolean {
+  return (SAME_TYPE[a] ?? a) === (SAME_TYPE[b] ?? b);
+}
+
+/**
+ * The type to treat an uploaded file as. For a declared image type or PDF whose bytes {@link sniffMediaType}
+ * identifies as a different type, that type; otherwise the declared value unchanged, including for bytes it
+ * does not recognise and for every other declared type.
+ */
+export function verifiedMediaType(declared: string, data: Uint8Array): string {
+  const essence = mediaTypeEssence(declared);
+  if (essence === null || !mediaTypeAllowed(CHECKED_BY_CONTENT, [], essence)) return declared;
+  const sniffed = sniffMediaType(data);
+  return sniffed === null || sameType(sniffed, essence) ? declared : sniffed;
+}
+
+/** Whether {@link sniffMediaType} identifies the bytes as exactly the declared type (aliases such as HEIC and HEIF count as one). */
+export function contentMatchesMediaType(data: Uint8Array, declared: string): boolean {
+  const essence = mediaTypeEssence(declared);
+  const sniffed = sniffMediaType(data);
+  return essence !== null && sniffed !== null && sameType(sniffed, essence);
+}

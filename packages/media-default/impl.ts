@@ -4,7 +4,7 @@ import { dirname, extname, relative, resolve as resolvePath, sep } from "node:pa
 import type { Introspection, PipelineManifest, PipelineStepManifest } from "@michaelthielemann/kestrel";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { LoadedMediaFile, MediaFile, MediaFiles, MediaFilesError, MediaFilter } from "@michaelthielemann/kestrel-contracts/media";
-import { canonicalMediaType, mediaTypeAllowed, mediaTypeEssence, mediaTypeMatches, NEUTRAL_EXTENSION, NEUTRAL_TYPE, publicFormOf } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
+import { canonicalMediaType, mediaTypeAllowed, mediaTypeEssence, mediaTypeMatches, NEUTRAL_EXTENSION, NEUTRAL_TYPE, publicFormOf, verifiedMediaType } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
 import type { Document, Filter, FindOptions, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -704,10 +704,12 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
 
   const api: Media = {
     async upload(file, folder = "", provenance, svgSanitized = false) {
-      const contentType = canonicalMediaType(file.contentType);
+      const verified = verifiedMediaType(file.contentType, file.data);
+      const contentType = canonicalMediaType(verified);
       const essence = contentType === null ? null : mediaTypeEssence(contentType);
       if (contentType === null || essence === null || !mediaTypeAllowed(config.allowedTypes, config.deniedTypes, essence)) {
-        return err(failure("UNSUPPORTED", `media/default: type ${JSON.stringify(file.contentType)} is not allowed`));
+        const declared = verified === file.contentType ? "" : ` (declared as ${JSON.stringify(file.contentType)})`;
+        return err(failure("UNSUPPORTED", `media/default: type ${JSON.stringify(verified)}${declared} is not allowed`));
       }
       if (file.data.byteLength > config.maxBytes) return err(failure("PAYLOAD_TOO_LARGE", `media/default: file exceeds ${config.maxBytes} bytes`));
       const folderPath = safeFolder(folder);

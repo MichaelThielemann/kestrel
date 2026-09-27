@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { EXTENSION_BY_TYPE, NEUTRAL_EXTENSION, NEUTRAL_TYPE, canonicalMediaType, mediaTypeAllowed, mediaTypeEssence, mediaTypeMatches, parseMediaType, publicFormOf } from "./mediaType.ts";
+import { EXTENSION_BY_TYPE, NEUTRAL_EXTENSION, NEUTRAL_TYPE, canonicalMediaType, contentMatchesMediaType, mediaTypeAllowed, mediaTypeEssence, mediaTypeMatches, parseMediaType, publicFormOf, sniffMediaType, verifiedMediaType } from "./mediaType.ts";
 
 const neutral = { contentType: NEUTRAL_TYPE, extension: NEUTRAL_EXTENSION };
 
@@ -172,5 +172,56 @@ describe("publicFormOf", () => {
       expect(activeExtensions.has(extension)).toBe(false);
       expect(mediaTypeEssence(contentType)).toBe(contentType);
     }
+  });
+});
+
+const bytes = (...parts: Array<string | number[]>): Uint8Array => Uint8Array.from(parts.flatMap((p) => (typeof p === "string" ? [...p].map((c) => c.charCodeAt(0)) : p)));
+
+describe("sniffMediaType", () => {
+  it("recognises image and document signatures", () => {
+    expect(sniffMediaType(bytes([0x89], "PNG", [0x0d, 0x0a, 0x1a, 0x0a, 0, 0]))).toBe("image/png");
+    expect(sniffMediaType(bytes([0xff, 0xd8, 0xff, 0xe0]))).toBe("image/jpeg");
+    expect(sniffMediaType(bytes("GIF89a", [1, 0]))).toBe("image/gif");
+    expect(sniffMediaType(bytes("RIFF", [0, 0, 0, 0], "WEBPVP8 "))).toBe("image/webp");
+    expect(sniffMediaType(bytes([0, 0, 0, 0x1c], "ftypavif", [0, 0, 0, 0], "mif1"))).toBe("image/avif");
+    expect(sniffMediaType(bytes([0, 0, 0, 0x18], "ftypheic", [0, 0, 0, 0]))).toBe("image/heic");
+    expect(sniffMediaType(bytes("II*", [0]))).toBe("image/tiff");
+    expect(sniffMediaType(bytes("%PDF-1.7"))).toBe("application/pdf");
+    expect(sniffMediaType(bytes([0, 0, 0, 0x18], "ftypisom", [0, 0, 0, 0]))).toBeNull();
+    expect(sniffMediaType(bytes("plain text"))).toBeNull();
+    expect(sniffMediaType(new Uint8Array())).toBeNull();
+  });
+
+  it("recognises markup, and svg among it wherever the root element starts", () => {
+    expect(sniffMediaType(bytes('<svg xmlns="http://www.w3.org/2000/svg"/>'))).toBe("image/svg+xml");
+    expect(sniffMediaType(bytes([0xef, 0xbb, 0xbf], '\n  <?xml version="1.0"?>\n<!-- drawn by hand -->\n<!DOCTYPE svg>\n<svg width="1"/>'))).toBe("image/svg+xml");
+    expect(sniffMediaType(bytes('<?xml version="1.0"?><feed/>'))).toBe("application/xml");
+    expect(sniffMediaType(bytes("<!doctype html><p>hi"))).toBe("text/html");
+  });
+});
+
+describe("verifiedMediaType", () => {
+  const svg = bytes("<svg/>");
+  const png = bytes([0x89], "PNG", [0x0d, 0x0a, 0x1a, 0x0a]);
+  it("takes the recognised type of an image or pdf whose content is another type", () => {
+    expect(verifiedMediaType("image/png", svg)).toBe("image/svg+xml");
+    expect(verifiedMediaType("image/jpeg", png)).toBe("image/png");
+    expect(verifiedMediaType("application/pdf", svg)).toBe("image/svg+xml");
+  });
+  it("keeps the declared type when the content matches it, is not recognised, or the type is not checked", () => {
+    expect(verifiedMediaType("image/png; foo=bar", png)).toBe("image/png; foo=bar");
+    expect(verifiedMediaType("image/png", bytes([1, 2, 3]))).toBe("image/png");
+    expect(verifiedMediaType("image/x-icon", bytes([0, 0, 1, 0]))).toBe("image/x-icon");
+    expect(verifiedMediaType("image/vnd.microsoft.icon", bytes([0, 0, 1, 0]))).toBe("image/vnd.microsoft.icon");
+    expect(verifiedMediaType("text/plain", svg)).toBe("text/plain");
+  });
+});
+
+describe("contentMatchesMediaType", () => {
+  it("is true only when the content is recognised as the declared type", () => {
+    expect(contentMatchesMediaType(bytes([0xff, 0xd8, 0xff, 0xdb]), "image/jpeg")).toBe(true);
+    expect(contentMatchesMediaType(bytes("<svg/>"), "image/png")).toBe(false);
+    expect(contentMatchesMediaType(bytes([1, 2, 3]), "image/png")).toBe(false);
+    expect(contentMatchesMediaType(bytes([0, 0, 0, 0x1c], "ftypmif1", [0, 0, 0, 0], "heic"), "image/heif")).toBe(true);
   });
 });

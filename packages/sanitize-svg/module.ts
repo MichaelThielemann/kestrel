@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Context, UploadedFile } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { ok } from "@michaelthielemann/kestrel/result";
+import { verifiedMediaType } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
 import { isSvg, sanitizeSvg } from "./impl.ts";
 
 export const configSchema = z
@@ -24,7 +25,7 @@ export default defineModule({
     svg: async (ctx: Context) => {
       const files: UploadedFile[] = [];
       for (const file of ctx.files) {
-        if (!isSvg(file.contentType)) {
+        if (!isSvg(file.contentType) && !isSvg(verifiedMediaType(file.contentType, file.data))) {
           files.push(file);
           continue;
         }
@@ -43,7 +44,7 @@ export default defineModule({
 
   describe: () => ({
     svg: {
-      summary: "Sanitize uploaded SVG files (scripts, handlers, external references removed)",
+      summary: "Sanitize uploaded SVG files, also SVG content declared as another image type (scripts, handlers, external references removed)",
       reads: ["files"],
       writes: ["files"],
       errors: { 413: "svg too large", 400: "invalid svg" },

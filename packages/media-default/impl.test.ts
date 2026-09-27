@@ -89,7 +89,17 @@ describe("media/default", () => {
     const { media } = await make();
     expect(expectErr(await media.upload({ ...png, contentType: "text/html" }), "UNSUPPORTED").message).toMatch(/not allowed/);
     expect(expectErr(await media.upload({ ...png, contentType: "image/svg+xml" }), "UNSUPPORTED").status).toBe(415);
+    expect(expectErr(await media.upload({ ...png, data: new TextEncoder().encode("<svg/>") }), "UNSUPPORTED").message).toMatch(/image\/svg\+xml/);
     expect(expectErr(await media.upload({ ...png, data: new Uint8Array(11) }), "PAYLOAD_TOO_LARGE").status).toBe(413);
+  });
+
+  it("stores an image with the type its content has when the declared type differs", async () => {
+    const { media, blobs } = await make();
+    const signature = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const item = expectOk(await media.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: signature })).item;
+    expect(item.contentType).toBe("image/png");
+    expect(item.filename).toBe("photo.png");
+    expect(blobs.blobs.get(item.key)?.contentType).toBe("image/png");
   });
 
   it("reads bytes back and removes blob and metadata together", async () => {
@@ -173,7 +183,7 @@ describe("media/default", () => {
   describe("the public copy of a file whose type is not a known inert one", () => {
     const allowAll = { ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: ["image/svg+xml"], maxBytes: 100, publicCopy: { prefix: "site/" } };
     const cases: Array<[string, string, string, string]> = [
-      ["x.html", "image/x-foo", "image/x-foo", "x-html.bin"],
+      ["x.html", "image/x-foo", "text/html", "x-html.bin"],
       ["x.html", "text/html", "text/html", "x-html.bin"],
       ["X.XHTML", "application/xhtml+xml", "application/xhtml+xml", "X-XHTML.bin"],
       ["app.js", "text/javascript", "text/javascript", "app-js.bin"],

@@ -296,17 +296,14 @@ describe("examples/minimal media: public copies need anonymous read", () => {
 });
 
 describe("examples/minimal media: nothing active reaches the public copy", () => {
-  it("an HTML file sent as an image type is published as .bin and served as application/octet-stream", async () => {
+  it("an HTML file sent as an image type is refused as HTML and leaves no public copy", async () => {
     const example = await bootExample();
     try {
       const token = await adminToken(example);
-      const item = await upload(example, token, "Invite.HTML", "image/x-foo", new TextEncoder().encode("<html><script>alert(1)</script></html>"));
-      expect(fileOf(item.path)).toBe("Invite-HTML.bin");
-      expect(readdirSync(join(example.blobRoot, "site", "media", item.id), { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name)).toEqual(["Invite-HTML.bin"]);
-      const served = await example.kestrel.run("serveMediaFile", { trigger, params: { id: item.id, name: "Invite-HTML.bin" } });
-      expect(served.status).toBe(200);
-      expect(boundaryCast<{ contentType: string }>(served.result, "json").contentType).toBe("application/octet-stream");
-      expect((await example.kestrel.run("serveMediaFile", { trigger, params: { id: item.id, name: "Invite.HTML" } })).status).toBe(404);
+      const refused = await example.kestrel.run("uploadMedia", { trigger, headers: bearer(token), files: [{ field: "file", filename: "Invite.HTML", contentType: "image/x-foo", data: new TextEncoder().encode("<html><script>alert(1)</script></html>") }] });
+      expect(refused.status).toBe(415);
+      expect(refused.error).toMatch(/text\/html/);
+      expect(existsSync(join(example.blobRoot, "site", "media"))).toBe(false);
     } finally {
       await example.dispose();
     }

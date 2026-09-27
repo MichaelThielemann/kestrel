@@ -50,6 +50,18 @@ describe("sanitize/svg step via runPipeline", () => {
     expect(files[1]?.text).toBe("not an svg");
   });
 
+  it("sanitizes svg content declared as another image type and types it as svg", async () => {
+    const instance = await makeInstance();
+    const dirty = encoder.encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><rect width="1" height="1"/></svg>');
+
+    const res = await runPipeline(pipeline("sanitize.svg", "probe.files"), { files: [{ field: "file", filename: "a.png", contentType: "image/png", data: dirty }] }, { modules: [{ module, instance }], steps: probeFiles });
+
+    expect(res.status).toBe(200);
+    const files = boundaryCast<Array<{ filename: string; contentType: string; text: string }>>(res.result, "host");
+    expect(files[0]?.contentType).toBe("image/svg+xml");
+    expect(files[0]?.text).not.toContain("<script");
+  });
+
   it("rejects an oversized svg with PAYLOAD_TOO_LARGE", async () => {
     const instance = await makeInstance({ maxBytes: 2 });
     const dirty = encoder.encode("<svg><rect/></svg>");
