@@ -65,6 +65,8 @@ function fakeFetch(statuses: Record<string, number | "timeout" | "error">): Fetc
   return Object.assign(f, { calls });
 }
 
+const publicResolver = async (): Promise<string[]> => ["93.184.215.14"];
+
 const config = { timeoutMs: 20, concurrency: 2, recheckAfterSeconds: 3600, userAgent: "test", allowPrivate: false };
 
 async function createDoc(content: Content, type: string, data: Record<string, unknown>): Promise<ContentDocument> {
@@ -91,7 +93,7 @@ describe("links/default", () => {
   it("extracts per field and locale, replacing on re-extract", async () => {
     const db = createFakePersistence();
     const content = fakeContent();
-    const links = await createLinksDefault(config, content, db, fakeFetch({}));
+    const links = await createLinksDefault(config, content, db, fakeFetch({}), Date.now, publicResolver);
     const doc = await createDoc(content, "pages", { title: "https://a.example", body: { t: "https://a.example https://b.example" } });
     await createDoc(content, "pages", { title: "x" });
     expect(expectOk(await links.extract("pages", doc.id))).toBe(3);
@@ -108,7 +110,7 @@ describe("links/default", () => {
     const content = fakeContent();
     const fetcher = fakeFetch({ "https://ok.example": 200, "https://gone.example": 404, "https://headless.example": 405, "https://slow.example": "timeout", "https://down.example": "error" });
     let t = 1_000_000;
-    const links = await createLinksDefault(config, content, db, fetcher, () => t);
+    const links = await createLinksDefault(config, content, db, fetcher, () => t, publicResolver);
     const a = await createDoc(content, "pages", { body: ["https://ok.example", "https://gone.example", "https://headless.example", "https://slow.example", "https://down.example", "http://10.0.0.1/admin"] });
     const b = await createDoc(content, "pages", { title: "https://ok.example" });
     expectOk(await links.extract("pages", a.id));
@@ -135,7 +137,7 @@ describe("links/default", () => {
   it("rebuild reindexes all documents of types with text fields", async () => {
     const db = createFakePersistence();
     const content = fakeContent();
-    const links = await createLinksDefault(config, content, db, fakeFetch({}));
+    const links = await createLinksDefault(config, content, db, fakeFetch({}), Date.now, publicResolver);
     for (let i = 0; i < 120; i++) await createDoc(content, "pages", { title: `https://site${i}.example` });
     await db.createOne(INDEX, { url: "https://stale.example", fromType: "pages", fromId: "stale", field: "title", locale: "de", ok: null, status: null, error: null, checkedAt: null });
     expect(expectOk(await links.rebuild())).toEqual({ documents: 120, entries: 120 });
@@ -145,7 +147,7 @@ describe("links/default", () => {
   it("extract and unextract steps map their contract failures through ctx.fail", async () => {
     const db = createFakePersistence();
     const content = fakeContent();
-    const links = await createLinksDefault(config, content, db, fakeFetch({}));
+    const links = await createLinksDefault(config, content, db, fakeFetch({}), Date.now, publicResolver);
     const doc = await createDoc(content, "pages", { title: "https://a.example" });
     const steps = module.steps!(links);
     expect(expectErr(await steps.unextract("pages")(ctx({}, {})), "VALIDATION").message).toBe("missing id");
@@ -156,7 +158,7 @@ describe("links/default", () => {
   it("every contract-backed step answers a retryable 503", async () => {
     const db = createFakePersistence();
     const content = fakeContent();
-    const links = await createLinksDefault(config, content, db, fakeFetch({}));
+    const links = await createLinksDefault(config, content, db, fakeFetch({}), Date.now, publicResolver);
     const doc = await createDoc(content, "pages", { title: "https://a.example" });
     expectOk(await links.extract("pages", doc.id));
     const steps = module.steps!(links);

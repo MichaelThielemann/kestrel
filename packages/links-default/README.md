@@ -7,8 +7,27 @@ External link checking for content. `links.extract:<type>` after `content.create
 (optional `type` filter), `links.rebuild` refills the index from all content.
 A probed URL's own `ok`/`status`/`error` (whether the *target* answered) is data, not a step
 failure — only a failure to read or write the index itself (a busy database) fails the step.
-Outbound requests are a SSRF surface: non-http schemes and private/loopback addresses are never
-requested (`allowPrivate: false`); hostnames resolving to private ranges are not detected.
+Outbound requests are a SSRF surface. With `allowPrivate: false` (the default) a check sends a request
+only to an `http(s)` URL whose host is a globally reachable address:
+
+- A hostname is compared without trailing dots and case (`localhost.`, `LOCALHOST`), and `localhost`,
+  `*.localhost`, `*.local`, `*.localdomain`, `*.internal` and `*.home.arpa` are refused by name.
+- A hostname is resolved first (every address, `dns.lookup`); if any address is in a blocked range the
+  URL is not requested, and the connection goes to the address that passed the check, so a second
+  resolution to another address cannot take its place.
+- Blocked ranges are the IANA special-purpose ranges that are not globally reachable: IPv4 `0/8`,
+  `10/8`, `100.64/10`, `127/8`, `169.254/16`, `172.16/12`, `192.0.0/24`, `192.0.2/24`, `192.88.99/24`,
+  `192.168/16`, `198.18/15`, `198.51.100/24`, `203.0.113/24`, multicast `224/4` and `240/4` including
+  broadcast; IPv6 `::/96` (unspecified, loopback, IPv4-compatible), `::ffff:0:0:0/96`, `64:ff9b:1::/48`,
+  `100::/64`, `2001::/23`, `2001:db8::/32`, `3fff::/20`, `5f00::/16`, `fc00::/7`, `fe80::/10`,
+  `fec0::/10` and multicast `ff00::/8`. An IPv4 address embedded in an IPv4-mapped (`::ffff:0:0/96`),
+  NAT64 (`64:ff9b::/96`) or 6to4 (`2002::/16`) address is checked against the IPv4 list.
+- Redirects are followed by hand, at most 5 hops; every hop passes the same checks before it is
+  requested. A hop that fails them ends the check with that error (`private address`), more hops end it
+  with `too many redirects`.
+
+A URL refused this way is stored with `ok: false`, `status: null` and the reason in `error`, and counts
+as `skipped` in the `links.check` summary when the reason applies to the URL itself.
 Every method returns a `Result`: a failure is an `Err(KestrelError)`, never an exception. Only
 wiring bugs throw (unknown type).
 

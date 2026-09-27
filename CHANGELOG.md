@@ -509,6 +509,14 @@ Net changes since 5.8.1.
   `redirects.json` and `redirects.render` carries `from` (the canonical wildcard path) next to
   `pattern`; a field grant for `redirectRules` names `from` to pass it on. The njs example matches
   `from` with the same algorithm.
+- `links-default` resolves a URL's hostname before a check and requests it only when every address is
+  globally reachable, connecting to the checked address; redirects are followed by hand, at most 5
+  hops, each checked the same way (`private address`, `too many redirects`). Hostnames are compared
+  without trailing dots, and the blocked ranges cover the IANA special-purpose ranges, including
+  shared, benchmarking, multicast and broadcast addresses and IPv4 addresses inside IPv4-mapped,
+  NAT64 and 6to4 IPv6 addresses. `Fetcher` receives `redirect: "manual"` and the checked `address`
+  and returns `headers` for `Location`; the default is `httpFetcher` (`node:http`/`node:https`)
+  instead of the global `fetch`. `createLinksDefault` takes an optional `Resolver` after `now`.
 - `@michaelthielemann/kestrel-contracts`'s runtime helpers moved under
   `@michaelthielemann/kestrel-contracts/helpers/*`, no re-export left at the old path:
   `content-locale` → `helpers/content-locale`, `content-schema` → `helpers/content-schema`,

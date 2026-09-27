@@ -1,6 +1,12 @@
 import type { Content, FieldDefinition, FieldType } from "@michaelthielemann/kestrel-contracts/content";
 import { err, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import { isIP } from "node:net";
+import { isPrivateAddress, isPrivateHost, normalizeHostname } from "./address.ts";
+import { httpFetcher, systemResolver, type Fetcher, type Resolver } from "./outbound.ts";
+
+export { isPrivateAddress, isPrivateHost } from "./address.ts";
+export { httpFetcher, systemResolver, type Fetcher, type Resolver } from "./outbound.ts";
 
 export const INDEX = "links_index";
 
@@ -30,8 +36,6 @@ export interface CheckResult {
   error: string | null;
 }
 
-export type Fetcher = (url: string, init: { method: string; headers: Record<string, string>; signal: AbortSignal; redirect: "follow" }) => Promise<{ status: number }>;
-
 export type LinksError = KestrelError<"VALIDATION" | "NOT_FOUND" | "CONFLICT" | "TRANSIENT">;
 
 export interface Links {
@@ -43,6 +47,7 @@ export interface Links {
 }
 
 const PAGE = 100;
+const MAX_REDIRECTS = 5;
 const URL_PATTERN = /https?:\/\/[^\s"'<>()\]]+/g;
 const TEXT_TYPES = new Set<FieldType>(["text", "richtext", "json"]);
 
@@ -61,18 +66,6 @@ export function findUrls(value: unknown, out = new Set<string>()): Set<string> {
   return out;
 }
 
-export function isPrivateHost(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return true;
-  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host);
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
-    return a === 10 || a === 127 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
-  }
-  if (host.includes(":")) return host === "::1" || host === "::" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80");
-  return false;
-}
-
 export function checkable(url: string, allowPrivate: boolean): string | null {
   let parsed: URL;
   try {
@@ -85,7 +78,23 @@ export function checkable(url: string, allowPrivate: boolean): string | null {
   return null;
 }
 
-export async function createLinksDefault(config: Config, content: Content, db: Persistence, fetcher: Fetcher = fetch, now: () => number = Date.now): Promise<Links> {
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = (): void => reject(new Error("aborted"));
+    if (signal.aborted) return abort();
+    signal.addEventListener("abort", abort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
+export async function createLinksDefault(
+  config: Config,
+  content: Content,
+  db: Persistence,
+  fetcher: Fetcher = httpFetcher,
+  now: () => number = Date.now,
+  resolve: Resolver = systemResolver,
+): Promise<Links> {
   const model = content.model();
   const locales = model.locales ?? [];
   const prepared = await db.ensureCollection(INDEX, { url: "string", fromType: "string", fromId: "string", field: "string", locale: "string", ok: "boolean", status: "number", error: "string", checkedAt: "number" });
@@ -130,6 +139,19 @@ export async function createLinksDefault(config: Config, content: Content, db: P
     return ok(entries.value.length);
   };
 
+  const destination = async (url: string, signal: AbortSignal): Promise<{ address?: string } | { error: string }> => {
+    const reason = checkable(url, config.allowPrivate);
+    if (reason !== null) return { error: reason };
+    if (config.allowPrivate) return {};
+    const host = normalizeHostname(new URL(url).hostname);
+    if (isIP(host) !== 0) return { address: host };
+    const addresses = await untilAborted(resolve(host), signal);
+    const [first] = addresses;
+    if (first === undefined) return { error: "no address" };
+    if (addresses.some(isPrivateAddress)) return { error: "private address" };
+    return { address: first };
+  };
+
   const probe = async (url: string): Promise<CheckResult> => {
     const reason = checkable(url, config.allowPrivate);
     if (reason !== null) return { ok: false, status: null, error: reason };
@@ -137,8 +159,17 @@ export async function createLinksDefault(config: Config, content: Content, db: P
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), config.timeoutMs);
       try {
-        const res = await fetcher(url, { method, headers: { "user-agent": config.userAgent, accept: "*/*" }, signal: controller.signal, redirect: "follow" });
-        return { ok: res.status < 400, status: res.status, error: null };
+        let current = url;
+        for (let hop = 0; ; hop++) {
+          const target = await destination(current, controller.signal);
+          if ("error" in target) return { ok: false, status: null, error: target.error };
+          const init = { method, headers: { "user-agent": config.userAgent, accept: "*/*" }, signal: controller.signal, redirect: "manual" as const };
+          const res = await fetcher(current, target.address === undefined ? init : { ...init, address: target.address });
+          const location = res.status >= 300 && res.status < 400 ? (res.headers?.get("location") ?? null) : null;
+          if (location === null) return { ok: res.status < 400, status: res.status, error: null };
+          if (hop >= MAX_REDIRECTS) return { ok: false, status: null, error: "too many redirects" };
+          current = new URL(location, current).href;
+        }
       } catch (err) {
         return { ok: false, status: null, error: controller.signal.aborted ? `timeout after ${config.timeoutMs}ms` : err instanceof Error ? err.message : String(err) };
       } finally {
