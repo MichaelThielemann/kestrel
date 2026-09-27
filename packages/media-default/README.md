@@ -102,7 +102,7 @@ the bytes behind a given `path` never change.
 With `publicCopy: { prefix }` configured, this module also keeps a copy of every `ready` item's
 original at `<publicCopy.prefix><publicPath without its leading "/">/<id>/<name>` (e.g.
 `site/media/<id>/photo.jpg`) — written by the same step that makes the original visible (upload) and
-removed when the item is deleted, so a static export or a bucket served directly needs no separate
+removed when the item is deleted, so a static export or a bucket whose `site/*` is served directly needs no separate
 build step for media. New step `media.syncPublic` reconciles that copy tree with the stored items
 (`{ written, removed, missing }`): it fails an `uploading` row stuck longer than
 `uploadStaleAfterMs` (default 15 minutes, an abandoned upload) the same way a normal failure is
@@ -128,13 +128,37 @@ the copy tree, and the persistence module orders ids the same way for `sort: { i
 storage `prefix` overlap, if `publicCopy` is set but no pipeline runs `media.serve`, or if a pipeline
 runs `media.syncPublic` without `publicCopy` set.
 
-Three key families share the blobstore, with three owners:
+These key families share the blobstore when every module uses its default prefix:
 
-| Key | Owner | What it is |
-|---|---|---|
-| `media/<id>/<name>` | this module (`prefix` configurable) | the original bytes, one blob per `media_items` row |
-| `media-variants/<id>/<size>.<ext>` | `images/default` (its own `prefix`) | the generated variants of a medium; `media.reconcile` never considers them, see below |
-| `site/media/<id>/<name>` and `site/media/<id>/variants/<size>.<ext>` | this module and `images/default`, each writing only its own depth-1 files | the public copies, served directly by a static host or a bucket in front of the origin |
+| Key | Owner | What it is | Public |
+|---|---|---|---|
+| `media/<id>/<name>` | this module (`prefix` configurable) | the original bytes, one blob per `media_items` row, including items that are still uploading or were never made public | no |
+| `media-variants/<id>/<size>.<ext>` | `images/default` (its own `prefix`) | the generated variants of a medium; `media.reconcile` never considers them, see below | no |
+| `site/media/<id>/<name>` and `site/media/<id>/variants/<size>.<ext>` | this module and `images/default`, each writing only its own depth-1 files | the public copies, served directly by a static host or a bucket in front of the origin | yes |
+| `site/…` (pages, `redirects.json`, `llms.txt`) | `delivery/static`, `redirects/default` | the static export | yes |
+| `replica/gen/<generation>/…` | `replication/sqlite` (`prefix`) | snapshots and WAL segments of the whole database: sessions, password hashes, drafts | no |
+| the `key` of `backup/blobstore` | `backup/blobstore` | a copy of the database file | no |
+
+Only the public copy tree may be readable without credentials. A bucket that is served directly
+grants anonymous read on `site/*` alone, never on the whole bucket; with an S3 bucket policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::example-bucket/site/*"
+    }
+  ]
+}
+```
+
+With a bucket-wide `prefix` on `blobstore-s3` (say `kestrel/`), every key above gains it, and the
+resource becomes `arn:aws:s3:::example-bucket/kestrel/site/*`. No `s3:ListBucket` for anonymous
+callers either.
 
 The original's URL and its variants' URLs share one directory per item, so `publicPath` and
 `publicCopy` must be configured identically on this module and on `images-default`. Their private

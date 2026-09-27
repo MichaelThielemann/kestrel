@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -117,10 +118,10 @@ async function listPoints(blobs: Blobstore, prefix: string): Promise<Result<Poin
   if (isErr(list)) return list;
   const out: Point[] = [];
   for (const info of list.value) {
-    const m = /gen\/(\d{8}T\d{6}Z)\/(snapshot\.db|wal\/(\d+)-(\d+)-([0-9TZ]+)\.wal)$/.exec(info.key);
+    const m = /gen\/(\d{8}T\d{6}Z(?:-[0-9a-f]+)?)\/(snapshot\.db|wal\/(\d+)-(\d+)-([0-9TZ]+)\.wal)$/.exec(info.key);
     if (!m) continue;
     const generation = m[1] ?? "";
-    if (m[2] === "snapshot.db") out.push({ generation, at: unstamp(generation), kind: "snapshot", key: info.key });
+    if (m[2] === "snapshot.db") out.push({ generation, at: unstamp(generation.slice(0, 16)), kind: "snapshot", key: info.key });
     else out.push({ generation, at: unstamp(m[5] ?? ""), kind: "wal", key: info.key });
   }
   return ok(out.sort((a, b) => a.generation.localeCompare(b.generation) || (a.kind === "snapshot" ? -1 : b.kind === "snapshot" ? 1 : a.key.localeCompare(b.key))));
@@ -232,7 +233,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     let data: Uint8Array = new Uint8Array(readFileSync(file));
     const wal = readCommittedSync(fromStart);
     if (wal && wal.frames > 0) data = applySegment(data, wal.segment);
-    const gen = stamp(at);
+    const gen = `${stamp(at)}-${randomBytes(16).toString("hex")}`;
     const put = await blobs.put(`${config.prefix}gen/${gen}/snapshot.db`, data, { contentType: "application/vnd.sqlite3" });
     if (isErr(put)) return put;
     generation = gen;
@@ -363,7 +364,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     for (const gen of generations.slice(0, -1)) {
       const newest = Math.max(...points.filter((p) => p.generation === gen).map((p) => p.at));
       const successorSnapshot = generations[generations.indexOf(gen) + 1];
-      if (newest >= cutoff || successorSnapshot === undefined || unstamp(successorSnapshot) > cutoff) continue;
+      if (newest >= cutoff || successorSnapshot === undefined || unstamp(successorSnapshot.slice(0, 16)) > cutoff) continue;
       for (const p of points.filter((x) => x.generation === gen)) {
         const removedOne = await blobs.remove(p.key);
         if (isErr(removedOne)) return removedOne;

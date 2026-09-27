@@ -5,7 +5,9 @@ holds, such as `"kestrel/"`), `region`, `endpoint`, `allowInsecureEndpoint`, `fo
 environment, profile, instance role), `timeoutMs` (default 10000, used for both the connection and
 the request timeout, so a silent socket never hangs a pipeline step) and `maxAttempts` (default 3,
 the SDK's retry limit including the first try). `put` stores the `contentType` hint as the object's
-`Content-Type`, so a bucket served directly answers with the right type; `get` returns bytes only
+`Content-Type`, so a public copy served straight from the bucket answers with the right type (serve
+only the public tree, `site/*`, see the key table in `media-default`'s README; the rest of the bucket
+holds originals, database replicas and backups); `get` returns bytes only
 and `list` reports key and size. The store never wrote sidecar files.
 
 `endpoint` must be `https://`, or plain `http://` on a loopback address (`localhost`, `127.0.0.0/8`,

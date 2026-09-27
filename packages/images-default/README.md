@@ -103,7 +103,7 @@ busy database is a retryable `TRANSIENT` (503).
 With `publicCopy: { prefix }` configured, every variant's public path also gets a copy at
 `<publicCopy.prefix><publicPath without its leading "/">/<id>/variants/<size>.<ext>` (e.g.
 `site/media/<id>/variants/thumb.webp`) — the original's bytes until the render replaces them at the
-same path, so a static export or a bucket served directly always has *something* at every listed
+same path, so a static export or a bucket whose `site/*` is served directly always has *something* at every listed
 path, never a 404. `images.syncPublic` reconciles that tree: it removes copies (and rows) of items
 that are gone, places a ready item missing a size, rewrites a copy that does not match its row, and
 removes a foreign file — all restricted to files directly under `<id>/variants/`, never anything

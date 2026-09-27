@@ -114,7 +114,7 @@ describe("replication/sqlite", () => {
     const { repl, blobs, insert, count, restoredCount, clock } = setup();
     insert(5);
     const first = expectOk(await repl.sync());
-    expect(first.generation).toMatch(/^\d{8}T\d{6}Z$/);
+    expect(first.generation).toMatch(/^\d{8}T\d{6}Z-[0-9a-f]{32}$/);
     expect([...blobs.blobs.keys()].some((k) => k.endsWith("/snapshot.db"))).toBe(true);
     expect((await restoredCount({})).n).toBe(5);
 
@@ -127,6 +127,32 @@ describe("replication/sqlite", () => {
 
     clock.advance(30_000);
     expect(expectOk(await repl.sync()).frames).toBe(0);
+  });
+
+  it("names every generation with a random part, so a snapshot key cannot be derived from the time it was taken", async () => {
+    const { repl, blobs, insert } = setup();
+    insert(1);
+    const first = expectOk(await repl.snapshot()).generation;
+    const second = expectOk(await repl.snapshot()).generation;
+    expect(first.slice(0, 16)).toBe(second.slice(0, 16));
+    expect(first).not.toBe(second);
+    expect([...blobs.blobs.keys()].sort()).toEqual([`replica/gen/${first}/snapshot.db`, `replica/gen/${second}/snapshot.db`].sort());
+    const points = expectOk(await repl.points());
+    expect(points).toHaveLength(2);
+    expect(points.every((point) => Number.isFinite(point.at))).toBe(true);
+  });
+
+  it("still lists and restores a generation named by its time alone", async () => {
+    const { repl, blobs, insert, restoredCount } = setup();
+    insert(4);
+    const current = expectOk(await repl.snapshot()).generation;
+    const snapshot = blobs.blobs.get(`replica/gen/${current}/snapshot.db`);
+    if (!snapshot) throw new Error("snapshot missing");
+    blobs.blobs.delete(`replica/gen/${current}/snapshot.db`);
+    blobs.blobs.set("replica/gen/20260101T000000Z/snapshot.db", snapshot);
+    const points = expectOk(await repl.points());
+    expect(points).toEqual([{ generation: "20260101T000000Z", at: Date.parse("2026-01-01T00:00:00Z"), kind: "snapshot", key: "replica/gen/20260101T000000Z/snapshot.db" }]);
+    expect(await restoredCount({ generation: "20260101T000000Z" })).toMatchObject({ n: 4, ok: "ok" });
   });
 
   it("restores a snapshot of a fragmented database with later frames layered on top", async () => {
@@ -163,7 +189,7 @@ describe("replication/sqlite", () => {
     insert(3);
     expectErr(await repl.prepareRestore({}), "NOT_FOUND");
     const snap = expectOk(await repl.snapshot());
-    expect(snap.generation).toMatch(/^\d{8}T\d{6}Z$/);
+    expect(snap.generation).toMatch(/^\d{8}T\d{6}Z-[0-9a-f]{32}$/);
     expect([...blobs.blobs.keys()].filter((k) => k.includes("/gen/null/"))).toEqual([]);
     expect([...blobs.blobs.keys()]).toEqual([`replica/gen/${snap.generation}/snapshot.db`]);
     clock.advance(30_000);

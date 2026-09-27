@@ -10,6 +10,12 @@ restore = snapshot + segments up to the requested time, applied page by page; th
 opened and passes `PRAGMA quick_check` before it is handed over, otherwise the restore fails with
 `TRANSIENT` naming the generation.
 
+A generation is named by the time its snapshot was taken plus 32 random hex digits
+(`20260927T101500Z-9f…`), and every key of it lives under `<prefix>gen/<generation>/`, so a snapshot
+key cannot be derived from the time it was taken. A generation named by the time alone is listed and
+restored as well. The snapshot holds the whole database, sessions and
+password hashes included: `prefix` must lie outside anything a bucket or static host serves publicly.
+
 Shipping reads the WAL from the frame the previous run stopped at, asynchronously in 1 MiB chunks,
 and uploads segments of about 4 MiB (a single transaction larger than that stays in one segment), so
 a run costs time and memory in proportion to the new frames, not to the WAL. A frame is shipped only
