@@ -28,7 +28,7 @@ const store = defineModule({
   steps: (db) => ({
     echo: async (ctx: Context) => ok({ ...ctx, result: { payload: ctx.payload, params: ctx.params, ip: ctx.ip ?? null, auth: ctx.headers.authorization ?? null } }),
     fail: async (ctx: Context) => ctx.fail(customFailure("TEAPOT", 418, "teapot", { details: { pot: true } })),
-    greet: async (ctx: Context) => ok({ ...ctx, responseHeaders: { "set-cookie": "greeting=hello; HttpOnly; Path=/" }, result: { ok: true } }),
+    greet: async (ctx: Context) => ok({ ...ctx, responseHeaders: { "set-cookie": "greeting=hello; HttpOnly; Path=/" }, responseCookies: ["visit=1; HttpOnly; Path=/"], result: { ok: true } }),
     upload: async (ctx: Context) => {
       const file = ctx.files[0];
       if (!file) return ctx.fail("VALIDATION", "no file");
@@ -44,7 +44,7 @@ const store = defineModule({
   describe: () => ({
     echo: { summary: "Echoes payload, params, ip and the authorization header.", reads: ["payload", "params", "ip", "headers.authorization"], writes: ["result"], output: { type: "object" } },
     fail: { summary: "Always fails with a teapot error.", reads: [], writes: [] },
-    greet: { summary: "Sets a cookie on the response.", reads: [], writes: ["responseHeaders", "result"], output: { type: "object" } },
+    greet: { summary: "Sets two cookies on the response.", reads: [], writes: ["responseHeaders", "responseCookies", "result"], output: { type: "object" } },
     upload: { summary: "Stores an uploaded file.", reads: ["files", "payload.note"], writes: ["result"], output: { type: "object", properties: { filename: { type: "string" }, size: { type: "number" } }, required: ["filename", "size"] } },
     download: { summary: "Serves a stored file as a binary result.", reads: ["params.name"], writes: ["result"], binary: true },
   }),
@@ -210,7 +210,7 @@ describe("kestrel-h3", () => {
     const base = await serve();
     const res = await fetch(`${base}/greet`, { method: "POST" });
     expect(res.status).toBe(200);
-    expect(res.headers.get("set-cookie")).toBe("greeting=hello; HttpOnly; Path=/");
+    expect(res.headers.getSetCookie()).toEqual(["greeting=hello; HttpOnly; Path=/", "visit=1; HttpOnly; Path=/"]);
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 

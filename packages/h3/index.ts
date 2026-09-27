@@ -1,4 +1,4 @@
-import { eventHandler, getRequestHeaders, getRequestURL, readRawBody, setResponseHeaders, setResponseStatus, type EventHandler, type H3Event } from "h3";
+import { appendResponseHeader, eventHandler, getRequestHeaders, getRequestURL, readRawBody, setResponseHeaders, setResponseStatus, type EventHandler, type H3Event } from "h3";
 import { BodyTooLarge, UnsupportedMediaType, clientIpResolver, errorResponse, hasDotSegment, matchRoute, multipartRefusal, parseQuery, parseRequestBody, readRequestBody, requestIdOf, responseForRun, type ClientIpOptions, type ContextInput, type MultipartLimits, type HttpResponse, type Kestrel } from "@michaelthielemann/kestrel";
 
 export interface KestrelHandlerOptions extends ClientIpOptions {
@@ -40,6 +40,7 @@ async function readBody(event: H3Event, maxBytes: number): Promise<Uint8Array> {
 async function respond(event: H3Event, response: HttpResponse): Promise<Buffer | string> {
   setResponseStatus(event, response.status);
   setResponseHeaders(event, response.headers);
+  for (const cookie of response.cookies ?? []) appendResponseHeader(event, "set-cookie", cookie);
   return typeof response.body === "string" ? response.body : Buffer.from(response.body);
 }
 

@@ -155,6 +155,12 @@ describe("http response headers from a run", () => {
     const res = responseForRun({ runId: "run-2", status: 401, error: "no", code: "UNAUTHENTICATED", retryable: false, headers: { "set-cookie": "a=; Max-Age=0" } });
     expect(res.headers["set-cookie"]).toBe("a=; Max-Age=0");
   });
+
+  it("carries the further cookies of a run next to its headers", () => {
+    const res = responseForRun({ runId: "run-3", status: 200, result: { ok: true }, headers: { "set-cookie": "a=b; HttpOnly" }, cookies: ["c=d; HttpOnly"] });
+    expect(res.headers["set-cookie"]).toBe("a=b; HttpOnly");
+    expect(res.cookies).toEqual(["c=d; HttpOnly"]);
+  });
 });
 
 describe("http error format", () => {
@@ -401,6 +407,13 @@ describe("http server", () => {
   }
 
   const ok: Runner = async () => ({ runId: "run-1", status: 200, result: { ok: true } });
+
+  it("sends every cookie of a run as its own set-cookie header", async () => {
+    const withCookies: Runner = async () => ({ runId: "run-1", status: 200, result: { ok: true }, headers: { "set-cookie": "a=1; HttpOnly" }, cookies: ["b=2; HttpOnly", "c=3; HttpOnly"] });
+    const base = await serve(withCookies);
+    const res = await fetch(`${base}/echo`);
+    expect(res.headers.getSetCookie()).toEqual(["a=1; HttpOnly", "b=2; HttpOnly", "c=3; HttpOnly"]);
+  });
 
   it("closes the server to addresses outside http.allow, trusting X-Forwarded-For only with trustProxy", async () => {
     let base = await serve(ok, { allow: ["127.0.0.1"] });

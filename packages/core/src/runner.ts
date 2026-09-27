@@ -29,6 +29,8 @@ export interface RunResult {
   details?: Record<string, unknown>;
   /** The `responseHeaders` the last step left on the context of a successful run. */
   headers?: Record<string, string>;
+  /** The `responseCookies` the last step left on the context of a successful run. */
+  cookies?: string[];
 }
 
 export type Runner = (pipeline: string, input: ContextInput) => Promise<RunResult>;
@@ -290,7 +292,7 @@ async function runStep(
       }
     }
     log("ok", 200);
-    if (ended) return { kind: "done", result: { runId, status: 200, result: after.result, ...(after.responseHeaders === undefined ? {} : { headers: after.responseHeaders }) } };
+    if (ended) return { kind: "done", result: { runId, status: 200, result: after.result, ...(after.responseHeaders === undefined ? {} : { headers: after.responseHeaders }), ...(after.responseCookies === undefined ? {} : { cookies: after.responseCookies }) } };
     return { kind: "ok", ctx: after };
   } catch (caught) {
     log("error", 500);
@@ -450,6 +452,7 @@ export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInpu
   const done: RunResult = { runId, status: 200 };
   if (ctx.result !== undefined) done.result = ctx.result;
   if (ctx.responseHeaders !== undefined) done.headers = ctx.responseHeaders;
+  if (ctx.responseCookies !== undefined) done.cookies = ctx.responseCookies;
   return finish(trace(done));
 }
 

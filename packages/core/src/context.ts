@@ -55,6 +55,8 @@ export interface Context extends Kestrel.ContextExtensions {
   result?: unknown;
   /** Headers an HTTP trigger adds to a successful response, such as a `set-cookie`; the transport's own security and caching headers still win. */
   responseHeaders?: Record<string, string>;
+  /** Further `set-cookie` values an HTTP trigger adds to a successful response, each as a header of its own after the one in `responseHeaders`. */
+  responseCookies?: string[];
   fail(code: CoreCode, message: string, details?: Record<string, unknown>): Err<KestrelError>;
   fail(error: KestrelError): Err<KestrelError>;
   done(result: unknown): Ok<Context>;

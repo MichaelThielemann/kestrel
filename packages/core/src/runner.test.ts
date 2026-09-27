@@ -245,6 +245,14 @@ describe("runPipeline", () => {
     expect(res.runId).not.toBe("spoof");
   });
 
+  it("returns the response headers and the further cookies the steps of a successful run set", async () => {
+    const { logger } = collectingLogger();
+    const setBoth = { name: "one", description: { summary: "test", reads: [], writes: ["responseHeaders", "responseCookies"] }, fn: async (ctx: Context) => ok({ ...ctx, responseHeaders: { "set-cookie": "a=1" }, responseCookies: ["b=2", "c=3"] }) };
+    const res = await runPipeline({ name: "p", steps: [setBoth] }, input, logger);
+    expect(res.headers).toEqual({ "set-cookie": "a=1" });
+    expect(res.cookies).toEqual(["b=2", "c=3"]);
+  });
+
   it("drops a request id that is not short printable ASCII", async () => {
     const { logger } = collectingLogger();
     const res = await runPipeline({ name: "p", steps: [{ name: "one", description, fn: async (ctx: Context) => ok(ctx) }] }, { trigger: { kind: "http", name: "GET /x" }, headers: { "x-request-id": "a".repeat(300) } }, logger);

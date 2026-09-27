@@ -299,6 +299,8 @@ export async function parseRequestBody(contentType: string, body: Uint8Array, li
 export interface HttpResponse {
   status: number;
   headers: Record<string, string>;
+  /** Further `set-cookie` values, each sent as a header of its own after any `set-cookie` in `headers`. */
+  cookies?: string[];
   body: Uint8Array | string;
 }
 
@@ -359,8 +361,13 @@ function metaOf(result: RunResult): ResponseMeta {
 }
 
 export function responseForRun(result: RunResult, extraInline: readonly string[] = []): HttpResponse {
-  if (result.status >= 400) return buildResponse(result.status, errorBody(result), metaOf(result), extraInline, result.headers);
-  return buildResponse(result.status, result.result, metaOf(result), extraInline, result.headers);
+  const response = result.status >= 400 ? buildResponse(result.status, errorBody(result), metaOf(result), extraInline, result.headers) : buildResponse(result.status, result.result, metaOf(result), extraInline, result.headers);
+  return result.cookies === undefined || result.cookies.length === 0 ? response : { ...response, cookies: result.cookies };
+}
+
+function responseCookies(response: HttpResponse): string[] {
+  const own = response.headers["set-cookie"];
+  return [...(own === undefined ? [] : [own]), ...(response.cookies ?? [])];
 }
 
 const EDGE_CODE_BY_STATUS: Readonly<Record<number, CoreCode>> = {
@@ -404,7 +411,8 @@ function sendError(res: ServerResponse, status: number, error: string, requestId
 }
 
 function write(res: ServerResponse, response: HttpResponse): void {
-  res.writeHead(response.status, response.headers);
+  const cookies = responseCookies(response);
+  res.writeHead(response.status, cookies.length > 1 ? { ...response.headers, "set-cookie": cookies } : response.headers);
   res.end(typeof response.body === "string" ? response.body : Buffer.from(response.body));
 }
 
