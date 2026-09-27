@@ -65,7 +65,7 @@ export default defineModule({
         summary: `Rate limit bucket ${bucket}, counted by ${kind === "ip" ? "client address" : kind}`,
         reads: READS[kind],
         writes: [],
-        ...(kind === "username" ? { input: { type: "object", properties: { username: { type: "string" }, email: { type: "string" } }, additionalProperties: true } } : {}),
+        input: { type: "object", properties: { username: { type: "string" }, email: { type: "string" } }, additionalProperties: true },
         errors: { 429: "too many requests" },
       };
     },
