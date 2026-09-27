@@ -519,7 +519,7 @@ Net changes since 5.8.1.
   instead of the global `fetch`. `createLinksDefault` takes an optional `Resolver` after `now`.
 - `links-default` stores at most `maxLinksPerDocument` links per document (default 1000) and marks a
   document with more by one report row carrying `LINK_LIMIT_ERROR`; extraction stops scanning at the
-  limit. `links.check` works in batches of 100 rows, yields to the event loop between them, writes
+  limit and leaves out URLs longer than 2048 characters (`MAX_URL_LENGTH`). `links.check` works in batches of 100 rows, yields to the event loop between them, writes
   results by row, and ends after `checkBudgetSeconds` (default 3600), leaving the rest due for the
   next run; `urls` counts the URLs handled in the run. `Config` has both new fields.
 - `media-default` treats an upload declared as an image type or PDF as the type its leading bytes

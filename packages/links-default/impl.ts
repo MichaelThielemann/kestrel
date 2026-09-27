@@ -51,6 +51,9 @@ export interface Links {
 /** The `error` of the row that marks a document as holding more links than `maxLinksPerDocument`; its `url` is the first link left out. */
 export const LINK_LIMIT_ERROR = "not checked: the document has more links than the per-document limit";
 
+/** The longest URL, in characters, that is indexed; a longer one is left out. */
+export const MAX_URL_LENGTH = 2048;
+
 const PAGE = 100;
 const MAX_REDIRECTS = 5;
 const URL_PATTERN = /https?:\/\/[^\s"'<>()\]]+/g;
@@ -60,12 +63,15 @@ function definition(field: FieldType | FieldDefinition): FieldDefinition {
   return typeof field === "string" ? { type: field } : field;
 }
 
-/** Collects the distinct `http(s)` URLs in a string or nested JSON value, stopping once `out` holds `limit` of them. */
+/** Collects the distinct `http(s)` URLs of at most `MAX_URL_LENGTH` characters in a string or nested JSON value, stopping once `out` holds `limit` of them. */
 export function findUrls(value: unknown, out = new Set<string>(), limit = Number.POSITIVE_INFINITY): Set<string> {
   if (out.size >= limit) return out;
   if (typeof value === "string") {
     const pattern = new RegExp(URL_PATTERN.source, "g");
-    for (let match = pattern.exec(value); match !== null && out.size < limit; match = pattern.exec(value)) out.add(match[0].replace(/[.,;:!?]+$/, ""));
+    for (let match = pattern.exec(value); match !== null && out.size < limit; match = pattern.exec(value)) {
+      const url = match[0].replace(/[.,;:!?]+$/, "");
+      if (url.length <= MAX_URL_LENGTH) out.add(url);
+    }
   } else if (Array.isArray(value)) {
     for (const v of value) {
       if (out.size >= limit) break;

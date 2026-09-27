@@ -5,7 +5,7 @@ External link checking for content. `links.extract:<type>` after `content.create
 (HEAD, GET on 405/501; timeout, concurrency and recheck interval from config) and stores
 `ok`/`status`/`error`/`checkedAt` on all entries of that URL. `links.report` lists broken ones
 (optional `type` filter), `links.rebuild` refills the index from all content.
-Each document stores at most `maxLinksPerDocument` links (default 1000, counted over all fields and
+A URL longer than 2048 characters (`MAX_URL_LENGTH`) is not indexed. Each document stores at most `maxLinksPerDocument` links (default 1000, counted over all fields and
 locales, one per field, locale and URL). A document with more gets one additional row whose `url` is
 the first link left out and whose `error` is `LINK_LIMIT_ERROR`; it shows up in `links.report` and is
 never requested. Scanning stops at the limit, so the cost of `links.extract` does not grow with the

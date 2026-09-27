@@ -6,7 +6,7 @@ import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createPersistenceSqlite } from "@michaelthielemann/kestrel-persistence-sqlite/impl";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { ok } from "@michaelthielemann/kestrel/result";
-import { createLinksDefault, findUrls, INDEX, LINK_LIMIT_ERROR, type Fetcher, type LinkEntry } from "./impl.ts";
+import { createLinksDefault, findUrls, INDEX, LINK_LIMIT_ERROR, MAX_URL_LENGTH, type Fetcher, type LinkEntry } from "./impl.ts";
 
 const model: ContentModel = { locales: ["de", "en"], defaultLocale: "de", types: { pages: { kind: "multi", fields: { title: { type: "text", localized: true }, body: "json" } } } };
 
@@ -40,6 +40,12 @@ function manyUrls(count: number, host = "a.example"): string {
 describe("link index limits", () => {
   it("stops collecting urls at the given limit", () => {
     expect([...findUrls(manyUrls(10), new Set(), 3)]).toEqual(["https://a.example/0", "https://a.example/1", "https://a.example/2"]);
+  });
+
+  it("leaves out a url longer than the url length limit", () => {
+    const longest = `https://a.example/${"x".repeat(MAX_URL_LENGTH - 18)}`;
+    expect(longest).toHaveLength(MAX_URL_LENGTH);
+    expect([...findUrls(`${longest} ${longest}y https://b.example/ok http://a/${"z".repeat(5_000_000)}`)]).toEqual([longest, "https://b.example/ok"]);
   });
 
   it("stores at most the per-document limit and marks the document as truncated", async () => {
