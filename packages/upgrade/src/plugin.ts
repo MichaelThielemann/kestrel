@@ -73,10 +73,20 @@ export interface DataContentType {
   fields: Record<string, DataContentField>;
 }
 
+/** One routed type the `data` command's `data/translation-slug` check reads: its slug field (default `slug`) and the filter a locale passes to be published (`liveWhen`, equality per field). */
+export interface DataRoute {
+  slugField?: string;
+  liveWhen?: Record<string, unknown>;
+}
+
 /** The content model the `data` command's underscore-field counter needs: every type's fields and whether each is localized, plus the project's locales. */
 export interface DataContentModel {
   types: Record<string, DataContentType>;
   locales?: readonly string[];
+  /** The default locale; the first of `locales` when absent. */
+  defaultLocale?: string;
+  /** The types whose public paths come from a slug per locale, for `data/translation-slug`; none are checked when absent. */
+  routes?: Record<string, DataRoute>;
   /** The identifier `RuleContext.locateModelFields` receives as `use` when `model/underscore-field` renames a field here, for a project with no `kestrel.config.ts` module-list entry to name instead. */
   use?: string;
   /**

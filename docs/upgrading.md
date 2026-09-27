@@ -110,7 +110,8 @@ reading anything else — the only SQL it issues itself; a copy that fails this,
 refused (exit 2) rather than read, since a plain file copy of a live database can be torn. It then
 reads the verified copy through the project's own installed `persistence-sqlite`, so the collection
 layout stays that module's knowledge, and reports stored `events_queue` rows not yet fanned out to a
-pipeline or a dead-letter row with no pipeline assigned. Take a consistent snapshot close to
+pipeline or a dead-letter row with no pipeline assigned, and translations published without a slug of
+their own ([`data/translation-slug`](#data-translation-slug)). Take a consistent snapshot close to
 cutover (a replication snapshot, or `sqlite3 <db> ".backup <copy>"`).
 
 ## Cutover
@@ -191,6 +192,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`responses/breaking-step-shapes`](#responses-breaking-step-shapes) | source | none (info) | a pipeline running a step whose response or manifest shape changed |
 | [`responses/binary-cache-control`](#responses-binary-cache-control) | source | none (info) | a local module mentioning `cache-control` near a binary step result |
 | [`pipelines/images-plan`](#pipelines-images-plan) | source | manual (warning) | a pipeline calling `images.plan` directly |
+| [`data/translation-slug`](#data-translation-slug) | data | manual (error) | a stored translation of a routed type that is published without a slug of its own |
 | [`data/media-layout`](#data-media-layout) | data | none (error) | a stored `media_items` key off-layout, or a pre-6.0 `images_variants`/`images_retired` row with no `slot` |
 | [`data/site-media-leftovers`](#data-site-media-leftovers) | data | manual (warning) | a leftover 5.x static export copy `media.syncPublic` never touches |
 | [`data/blobstore-tmp-suffix`](#data-blobstore-tmp-suffix) | data | none (info) | a stored filesystem-blobstore key already ending in `.kestrel-tmp` |
@@ -508,6 +510,17 @@ a `generateImageVariants` triggered on `images.planned` instead — which one ap
 project's delivery mode and whether it has adopted lanes, so this tool does not guess. Silent once a
 pipeline already does only the planning half and some pipeline triggered on `images.planned` does
 the generating half — that split is already correct, not something to review again.
+
+#### data-translation-slug
+In 6.0.0 a locale is served only through its own slug: a translation published without one has no path,
+answers 404, is not exported and cannot be saved as published again (`site-default`'s `site.indexPath`
+refuses it). The `data` command reads every type `site-default` routes (its `routes`, or the ones a host
+plugin's `dataModel` names) and reports each translation that passes the route's `liveWhen` in its own
+locale, holds at least one localized value there and has no slug there. Set a slug in that locale, or
+withdraw the translation. Where the default locale is published, the finding names its slug, which is
+public already and may be copied; where it is not, the finding names only the document and locale, since
+that slug is not public. The tool does not change the database: make the change in the admin or through
+the API, or with a migration on the running instance, then run `data` again.
 
 #### data-media-layout
 The `data` command's own SQL check: a `media_items` row whose key is not `<prefix><id>/<name>` makes
@@ -871,7 +884,9 @@ classification never imports a plugin.
   the layouts it actually recognizes.
 - `dataModel?(root): Promise<DataContentModel | undefined>` — supplies the content model the `data`
   command's underscore-field counter needs (`types`, each with a `fields` map of `{ localized? }`,
-  plus optional `locales`, `use` and `file`), for a project layout where it cannot be read from a
+  plus optional `locales`, `defaultLocale`, `routes`, `use` and `file`; `routes` names the types whose
+  paths come from a slug per locale, with `slugField` and `liveWhen`, for `data/translation-slug`), for
+  a project layout where it cannot be read from a
   `content-default` module's config on `kestrel.config.ts`. Consulted through the same `detect()` used
   for `check`/`fix`; `undefined`, from the hook or its result, skips underscore-field counting for
   this project without failing the rest of the `data` command, which stays SQLite-only either way.

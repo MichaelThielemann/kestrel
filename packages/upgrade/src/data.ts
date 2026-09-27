@@ -13,7 +13,7 @@ import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { trackTempDir, untrackTempDir } from "./cleanup.ts";
 import { isRecord } from "./guards.ts";
-import type { DataContentModel, UpgradePlugin } from "./plugin.ts";
+import type { DataContentModel, DataRoute, UpgradePlugin } from "./plugin.ts";
 import { detectPlugin } from "./pluginRules.ts";
 import { loadIssuesAsFindings } from "./project.ts";
 import type { Finding, UpgradeReport } from "./report.ts";
@@ -140,7 +140,21 @@ function contentDefaultModel(config: unknown): DataContentModel | undefined {
     types[typeName] = { fields };
   }
   const locales = config.locales;
-  return { types, ...(Array.isArray(locales) ? { locales: locales.filter((l): l is string => typeof l === "string") } : {}) };
+  return {
+    types,
+    ...(Array.isArray(locales) ? { locales: locales.filter((l): l is string => typeof l === "string") } : {}),
+    ...(typeof config.defaultLocale === "string" ? { defaultLocale: config.defaultLocale } : {}),
+  };
+}
+
+function siteDefaultRoutes(config: unknown): Record<string, DataRoute> | undefined {
+  if (!isRecord(config) || !isRecord(config.routes)) return undefined;
+  const routes: Record<string, DataRoute> = {};
+  for (const [type, route] of Object.entries(config.routes)) {
+    if (!isRecord(route)) continue;
+    routes[type] = { ...(typeof route.slugField === "string" ? { slugField: route.slugField } : {}), ...(isRecord(route.liveWhen) ? { liveWhen: route.liveWhen } : {}) };
+  }
+  return routes;
 }
 
 function configLoadFailedFinding(err: unknown, pluginKind: string | undefined): Finding {
@@ -177,7 +191,10 @@ async function builtInDataModel(root: string, pluginKind: string | undefined): P
   try {
     const config = await loadConfig(configFile);
     const entry = config.modules.find((m) => useToken(m.use) === "content-default");
-    return { model: contentDefaultModel(entry === undefined ? undefined : effectiveModuleConfig(entry)) };
+    const model = contentDefaultModel(entry === undefined ? undefined : effectiveModuleConfig(entry));
+    const site = config.modules.find((m) => useToken(m.use) === "site-default");
+    const routes = site === undefined ? undefined : siteDefaultRoutes(effectiveModuleConfig(site));
+    return { model: model === undefined || routes === undefined ? model : { ...model, routes } };
   } catch (err) {
     return { issue: configLoadFailedFinding(err, pluginKind) };
   }
@@ -193,6 +210,92 @@ async function activeDataModel(root: string, plugin: UpgradePlugin | undefined):
   } catch (err) {
     return { issues: [hookFailedFinding(plugin.kind, "dataModel", err)] };
   }
+}
+
+const SLUG_PAGE = 500;
+const SLUG_SHOWN = 20;
+
+function present(value: unknown): boolean {
+  return value !== null && value !== undefined && value !== "";
+}
+
+function matches(stored: unknown, expected: unknown): boolean {
+  if (typeof expected === "boolean") return expected ? stored === true || stored === 1 || stored === "1" || stored === "true" : stored === false || stored === 0 || stored === "0" || stored === "false";
+  const scalar = (value: unknown): string | undefined => (typeof value === "string" || typeof value === "number" ? String(value) : undefined);
+  return scalar(stored) !== undefined && scalar(stored) === scalar(expected);
+}
+
+interface SlugHit {
+  id: string;
+  locale: string;
+  copyable: string | null;
+}
+
+async function translationSlugHits(db: Persistence, typeName: string, fields: Record<string, { localized?: boolean }>, route: DataRoute, locales: readonly string[], defaultLocale: string): Promise<SlugHit[]> {
+  const slugField = route.slugField ?? "slug";
+  if (fields[slugField]?.localized !== true) return [];
+  const liveWhen = Object.entries(route.liveWhen ?? {});
+  const column = (field: string, locale: string): string => (fields[field]?.localized === true ? `${field}__${locale}` : field);
+  const localized = Object.keys(fields).filter((field) => fields[field]?.localized === true);
+  const columns: Record<string, "string"> = {};
+  for (const locale of locales) {
+    for (const field of localized) columns[column(field, locale)] = "string";
+    for (const [field] of liveWhen) columns[column(field, locale)] = "string";
+  }
+  try {
+    if (isErr(await db.ensureCollection(typeName, columns))) return [];
+  } catch {
+    return [];
+  }
+  const live = (row: Document, locale: string): boolean => liveWhen.every(([field, expected]) => matches(row[column(field, locale)], expected));
+  const hits: SlugHit[] = [];
+  for (let offset = 0; ; offset += SLUG_PAGE) {
+    const page = await db.findMany<Document>(typeName, {}, { sort: { id: "asc" }, limit: SLUG_PAGE, offset });
+    if (isErr(page)) return hits;
+    for (const row of page.value.items) {
+      const source = row[column(slugField, defaultLocale)];
+      const copyable = live(row, defaultLocale) && typeof source === "string" && source !== "" ? source : null;
+      for (const locale of locales) {
+        if (locale === defaultLocale || !live(row, locale) || present(row[column(slugField, locale)])) continue;
+        if (!localized.some((field) => present(row[column(field, locale)]))) continue;
+        hits.push({ id: row.id, locale, copyable });
+      }
+    }
+    if (page.value.items.length < SLUG_PAGE) return hits;
+  }
+}
+
+async function translationSlugFindings(db: Persistence, model: DataContentModel | undefined): Promise<Finding[]> {
+  const locales = model?.locales ?? [];
+  if (model?.routes === undefined || locales.length < 2) return [];
+  const defaultLocale = model.defaultLocale ?? locales[0] ?? "";
+  const findings: Finding[] = [];
+  for (const [typeName, route] of Object.entries(model.routes)) {
+    const type = model.types[typeName];
+    if (type === undefined) continue;
+    const hits = await translationSlugHits(db, typeName, type.fields, route, locales, defaultLocale);
+    if (hits.length === 0) continue;
+    const name = (hit: SlugHit): string => `${hit.id} (${hit.locale})`;
+    const listed = (items: SlugHit[], text: (hit: SlugHit) => string): string => `${items.slice(0, SLUG_SHOWN).map(text).join(", ")}${items.length > SLUG_SHOWN ? `, and ${items.length - SLUG_SHOWN} more` : ""}`;
+    const copyable = hits.filter((hit) => hit.copyable !== null);
+    const manual = hits.filter((hit) => hit.copyable === null);
+    const parts = [
+      ...(copyable.length === 0 ? [] : [`the default locale is published, so its slug is public already and can be copied: ${listed(copyable, (hit) => `${name(hit)}: "${hit.copyable ?? ""}"`)}`]),
+      ...(manual.length === 0 ? [] : [`the default locale is not published, so give each a new slug or withdraw it: ${listed(manual, name)}`]),
+    ];
+    findings.push({
+      id: `data/translation-slug:${typeName}`,
+      rule: "data/translation-slug",
+      severity: "error",
+      tier: "data",
+      where: { path: typeName },
+      message: `${hits.length} translation(s) of "${typeName}" are published without a slug of their own, so 6.0.0 serves none of them and refuses to save them published: ${listed(hits, name)}`,
+      suggestion: `set a slug in that locale or withdraw the translation; ${parts.join("; ")}`,
+      fix: { kind: "manual" },
+      docs: upgradingDocs("data-translation-slug"),
+    });
+  }
+  return findings;
 }
 
 async function pluginDataFindings(db: Persistence, root: string, plugin: UpgradePlugin | undefined, model: DataContentModel | undefined): Promise<Finding[]> {
@@ -486,6 +589,7 @@ export async function runDataStep(dbFile: string, root: string, plugins: readonl
     let mediaLayout: Finding[];
     let dataModelIssues: Finding[];
     let fromPlugin: Finding[];
+    let translationSlugs: Finding[];
     try {
       queued = await queueFindings(db);
       if (queued.error !== undefined) return { exitCode: 2, error: queued.error };
@@ -494,12 +598,13 @@ export async function runDataStep(dbFile: string, root: string, plugins: readonl
       dataModelIssues = [...loadIssuesAsFindings(detectIssues), ...issues];
       counts = contentModel === undefined ? {} : await underscoreFieldCounts(copy, db, contentModel);
       mediaLayout = await mediaLayoutFindings(root, db);
+      translationSlugs = await translationSlugFindings(db, contentModel);
       fromPlugin = await pluginDataFindings(db, root, plugin, contentModel);
     } finally {
       db.close();
     }
     const [siteMediaLeftovers, blobstoreTmpSuffix] = await Promise.all([siteMediaLeftoversFindings(root), blobstoreTmpSuffixFindings(root)]);
-    const findings = [...queued.findings, ...underscoreFieldFindings(counts), ...mediaLayout, ...siteMediaLeftovers, ...blobstoreTmpSuffix, ...dataModelIssues, ...fromPlugin];
+    const findings = [...queued.findings, ...underscoreFieldFindings(counts), ...mediaLayout, ...translationSlugs, ...siteMediaLeftovers, ...blobstoreTmpSuffix, ...dataModelIssues, ...fromPlugin];
     const report: UpgradeReport = {
       schema: 1,
       tool: { name: "kestrel-upgrade", version: toolVersion() },

@@ -565,3 +565,73 @@ describe("runDataStep: findings a plugin reads from stored data", () => {
     expect(result.report?.findings).toEqual([expect.objectContaining({ message: expect.stringContaining("broken hook") as unknown })]);
   });
 });
+
+describe("runDataStep: translations published without a slug of their own", () => {
+  const contentConfig = {
+    locales: ["de", "en"],
+    defaultLocale: "de",
+    types: {
+      pages: {
+        kind: "multi",
+        fields: { slug: { type: "slug", required: true, localized: true }, title: { type: "text", required: true, localized: true }, status: { type: "enum", options: ["draft", "published"], localized: true } },
+      },
+    },
+  };
+  const siteConfig = { routes: { pages: { home: "home", liveWhen: { status: "published" } } } };
+
+  async function pagesDb(file: string, rows: Array<Record<string, unknown>>): Promise<void> {
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("pages", { slug__de: "string", slug__en: "string", title__de: "string", title__en: "string", status__de: "string", status__en: "string" });
+    for (const row of rows) await db.createOne("pages", row);
+    db.close();
+  }
+
+  it("reports each one, and names the slug to copy only where the default locale is published", async () => {
+    const root = await moduleProjectRoot([
+      { use: "@michaelthielemann/kestrel-content-default", config: contentConfig },
+      { use: "@michaelthielemann/kestrel-site-default", config: siteConfig },
+    ]);
+    const file = join(dir, "kestrel.db");
+    await pagesDb(file, [
+      { id: "open", slug__de: "sommerfest", title__de: "Sommerfest", status__de: "published", title__en: "Summer party", status__en: "published" },
+      { id: "hidden", slug__de: "geheimer-plan", title__de: "Plan", status__de: "draft", title__en: "Press release", status__en: "published" },
+      { id: "fine", slug__de: "kontakt", title__de: "Kontakt", status__de: "published", slug__en: "contact", title__en: "Contact", status__en: "published" },
+      { id: "draft", slug__de: "neu", title__de: "Neu", status__de: "published", title__en: "New", status__en: "draft" },
+      { id: "untranslated", slug__de: "nur-de", title__de: "Nur DE", status__de: "published" },
+    ]);
+    const result = await runDataStep(file, root);
+    expect(result.exitCode).toBe(1);
+    const findings = result.report?.findings.filter((f) => f.rule === "data/translation-slug") ?? [];
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ severity: "error", tier: "data", where: { path: "pages" }, fix: { kind: "manual" } });
+    expect(findings[0]?.message).toContain("open (en)");
+    expect(findings[0]?.message).toContain("hidden (en)");
+    expect(findings[0]?.message).not.toContain("fine");
+    expect(findings[0]?.message).not.toContain("draft (en)");
+    expect(findings[0]?.message).not.toContain("untranslated");
+    expect(findings[0]?.suggestion).toContain('open (en): "sommerfest"');
+    expect(findings[0]?.suggestion).not.toContain("geheimer-plan");
+  });
+
+  it("reports nothing without a routed type", async () => {
+    const root = await moduleProjectRoot([{ use: "@michaelthielemann/kestrel-content-default", config: contentConfig }]);
+    const file = join(dir, "kestrel.db");
+    await pagesDb(file, [{ id: "open", slug__de: "sommerfest", title__de: "Sommerfest", status__de: "published", title__en: "Summer party", status__en: "published" }]);
+    const result = await runDataStep(file, root);
+    expect(result.report?.findings.filter((f) => f.rule === "data/translation-slug")).toEqual([]);
+  });
+
+  it("reads the routes a plugin's dataModel hook supplies", async () => {
+    const root = await pluginProjectRoot();
+    const file = join(dir, "kestrel.db");
+    await pagesDb(file, [{ id: "open", slug__de: "sommerfest", title__de: "Sommerfest", status__de: "published", title__en: "Summer party", status__en: "published" }]);
+    const plugin: UpgradePlugin = {
+      kind: "test-plugin",
+      detect: (candidate) => candidate === root,
+      load: () => Promise.resolve({ issues: [] }),
+      dataModel: () => Promise.resolve({ locales: ["de", "en"], defaultLocale: "de", types: { pages: { fields: { slug: { localized: true }, title: { localized: true }, status: { localized: true } } } }, routes: { pages: { liveWhen: { status: "published" } } } }),
+    };
+    const result = await runDataStep(file, root, [plugin]);
+    expect(result.report?.findings.map((f) => f.rule)).toContain("data/translation-slug");
+  });
+});
