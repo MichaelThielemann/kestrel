@@ -6,6 +6,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="${SMOKE_DIR:-$(mktemp -d)}"
 PORT="${SMOKE_PORT:-3123}"
 SCOPE="@michaelthielemann/kestrel"
+BEFORE="${SMOKE_BEFORE:-$(node -e 'process.stdout.write(new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString())')}"
+NPM_INSTALL=(npm install --no-audit --no-fund --loglevel=error --ignore-scripts --before="$BEFORE")
 mkdir -p "$WORK/tarballs" "$WORK/consumer/pipelines"
 
 echo "== build"
@@ -61,8 +63,8 @@ import { definePipeline } from "$SCOPE/definePipeline";
 export default definePipeline({ name: "listPages", steps: ["authn.identifyUser", "authz.require:pages.read", "content.list:pages", "authz.fields:pages?shape=list"] });
 TS
 
-echo "== install (npm, no workspace)"
-npm install --no-audit --no-fund --loglevel=error
+echo "== install (npm, no workspace, no install scripts, registry state as of $BEFORE)"
+"${NPM_INSTALL[@]}"
 test -x node_modules/.bin/kestrel
 test -x node_modules/.bin/kestrel-cli
 
@@ -120,7 +122,7 @@ for tgz in "$WORK"/tarballs/*.tgz; do
     "$SCOPE"|"$SCOPE-contracts"|"$SCOPE-cli"|"$SCOPE-upgrade"|"$SCOPE-openapi") cli_tarballs="$cli_tarballs $tgz" ;;
   esac
 done
-(cd "$WORK/dlx" && echo '{ "name": "dlx", "private": true }' > package.json && npm install --no-audit --no-fund --loglevel=error $cli_tarballs)
+(cd "$WORK/dlx" && echo '{ "name": "dlx", "private": true }' > package.json && "${NPM_INSTALL[@]}" $cli_tarballs)
 cd "$WORK/dlx-project"
 ln -s "$WORK/consumer/node_modules" node_modules
 cp "$WORK/consumer/package.json" package.json
