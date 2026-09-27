@@ -12,7 +12,8 @@ forwarding headers of any other peer are ignored and the peer is the client), `t
 `trustedHeader` (the value the trusted proxy set last is the client) – derived by the core's
 `clientIpResolver()`, so `ctx.ip` (rate limits) cannot drift between the two paths. A trusted proxy
 that omits the trusted header leaves `ctx.ip` absent; refusing such a request is the host's job, as
-the core server does with 403. Boot Kestrel with `http: null`;
+the core server does with 403. A host that does not refuse it lets such requests share one rate-limit
+key (`ratelimit-memory` counts them under `"unknown"`). Boot Kestrel with `http: null`;
 health/CORS stay with the host.
 A path with a `.` or `..` segment (also `%2e`-encoded) answers 400 instead of being resolved. A
 handler wrapping the adapter reads the pipeline a request was routed to with `routedPipeline(event)`

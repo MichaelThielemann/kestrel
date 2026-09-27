@@ -198,6 +198,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`tests/run-pipeline-validates`](#tests-run-pipeline-validates) | source | none (info) | a file importing `testing/runPipeline` |
 | [`boot/dependency-cycle`](#boot-dependency-cycle) | boot | manual | a module dependency cycle |
 | [`runtime/restore-freshness`](#runtime-restore-freshness) | load | none (info) | `restoreOnStart` left on for `replication-sqlite`/`backup-blobstore` |
+| [`http/trusted-proxies`](#http-trusted-proxies) | load | none (info) | `http.trustProxy` or `http.trustedHeader` without `http.trustedProxies` |
 | [`delivery/dependents`](#delivery-dependents) | source | none (info) | `delivery-static` publishing on events without marking dependent outputs |
 | [`site/routed-slug-unique`](#site-routed-slug-unique) | load | auto (error / warning) | a `unique` slug field on a type in `site-default`'s `routes` |
 | [`site/path-wiring`](#site-path-wiring) | boot | manual | a routed write without `site.indexPath`/`site.announcePaths`, or a read with another `home`/`slugField` |
@@ -543,6 +544,14 @@ A module dependency cycle — `boot()` names the full cycle path.
 #### runtime-restore-freshness
 `replication-sqlite`/`backup-blobstore` now fail boot when the database file was created during
 this boot while a restore point exists, if `restoreOnStart` is on (the default).
+
+#### http-trusted-proxies
+`http.trustProxy` or `http.trustedHeader` is set, but `http.trustedProxies` is not. Forwarding headers
+now count only from a peer in `trustedProxies`, which defaults to loopback (`127.0.0.0/8`, `::1`). A
+proxy that connects from another address — another host, a container network — is ignored, every
+request is attributed to the proxy's address (one rate-limit key for all clients, and an allowlist
+decides on the proxy), and the server logs `forwarding header from <peer> ignored` once per peer and
+hour. List the proxy's address or network in `http.trustedProxies`.
 
 #### delivery-dependents
 `delivery-static` publishes on events, but no pipeline runs `delivery.markDependents:<type>`, no cron runs

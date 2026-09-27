@@ -3,7 +3,7 @@ import { afterEach, describe, it, expect } from "vitest";
 import { binaryResult } from "../context.ts";
 import { silentLogger } from "../logger.ts";
 import type { RunResult, Runner } from "../runner.ts";
-import { BodyTooLarge, buildResponse, clientIpResolver, createHttpServer, disposition, errorResponse, hasDotSegment, listen, matchRoute, parseQuery, parseRequestBody, parseRoute, readRequestBody, responseForRun, routePattern } from "./http.ts";
+import { BodyTooLarge, buildResponse, clientIpResolver, forwardingWarner, createHttpServer, disposition, errorResponse, hasDotSegment, listen, matchRoute, parseQuery, parseRequestBody, parseRoute, readRequestBody, responseForRun, routePattern } from "./http.ts";
 
 describe("http routes", () => {
   const routes = [parseRoute("GET /pages/:id", "readPage"), parseRoute("POST /pages", "createPage"), parseRoute("GET /", "home")];
@@ -288,9 +288,28 @@ describe("client address behind proxies", () => {
 
   it("ignores forwarding headers from a peer outside trustedProxies and uses the peer address", () => {
     const resolve = clientIpResolver({ trustedHeader: "X-Real-IP", trustedProxies: ["10.0.0.1"] });
-    expect(resolve(request("203.0.113.5", { "x-real-ip": "10.9.9.9" }))).toEqual({ ip: "203.0.113.5", missingHeader: false });
+    expect(resolve(request("203.0.113.5", { "x-real-ip": "10.9.9.9" }))).toEqual({ ip: "203.0.113.5", missingHeader: false, forwardingIgnored: true });
+    expect(resolve(request("203.0.113.5"))).toEqual({ ip: "203.0.113.5", missingHeader: false });
     const chain = clientIpResolver({ trustProxy: true, trustedProxies: ["10.0.0.1"] });
-    expect(chain(request("203.0.113.5", { "x-forwarded-for": "10.9.9.9" }))).toEqual({ ip: "203.0.113.5", missingHeader: false });
+    expect(chain(request("203.0.113.5", { "x-forwarded-for": "10.9.9.9" }))).toEqual({ ip: "203.0.113.5", missingHeader: false, forwardingIgnored: true });
+    expect(clientIpResolver({ trustedProxies: ["10.0.0.1"] })(request("203.0.113.5", { "x-forwarded-for": "10.9.9.9" }))).toEqual({ ip: "203.0.113.5", missingHeader: false });
+  });
+
+  it("warns once per peer and interval about ignored forwarding headers, for a bounded number of peers", () => {
+    const lines: string[] = [];
+    let now = 0;
+    const warn = forwardingWarner((line) => lines.push(line), { intervalMs: 1000, maxPeers: 2, now: () => now });
+    warn("203.0.113.5");
+    warn("203.0.113.5");
+    warn("203.0.113.6");
+    expect(lines).toEqual([expect.stringContaining("203.0.113.5"), expect.stringContaining("203.0.113.6")]);
+    expect(lines[0]).toMatch(/not in trustedProxies/);
+    now = 1500;
+    warn("203.0.113.5");
+    expect(lines).toHaveLength(3);
+    warn("203.0.113.7");
+    warn("203.0.113.8");
+    expect(lines).toHaveLength(5);
   });
 
   it("reads the forwarding headers of a peer inside trustedProxies", () => {
@@ -307,7 +326,7 @@ describe("client address behind proxies", () => {
     expect(resolve(request("::1", { "x-real-ip": "198.51.100.7" })).ip).toBe("198.51.100.7");
     expect(resolve(request(undefined, { "x-real-ip": "198.51.100.7" })).ip).toBe("198.51.100.7");
     expect(resolve(request("192.0.2.1", { "x-real-ip": "198.51.100.7" })).ip).toBe("192.0.2.1");
-    expect(clientIpResolver({ trustedHeader: "X-Real-IP", trustedProxies: [] })(request(undefined, { "x-real-ip": "198.51.100.7" }))).toEqual({ missingHeader: false });
+    expect(clientIpResolver({ trustedHeader: "X-Real-IP", trustedProxies: [] })(request(undefined, { "x-real-ip": "198.51.100.7" }))).toEqual({ missingHeader: false, forwardingIgnored: true });
   });
 
   it("takes the value the trusted peer appended last when the trusted header carries several", () => {
@@ -421,6 +440,35 @@ describe("http server", () => {
     });
     expect(status).toBe(400);
     expect((await fetch(`${base}/echo`)).status).toBe(200);
+  });
+
+  it("logs a warning when a peer outside trustedProxies sends forwarding headers", async () => {
+    const warnings: string[] = [];
+    const logger = { ...silentLogger, warn: (message: string) => { warnings.push(message); } };
+    const server = createHttpServer([parseRoute("GET /echo", "echo")], ok, logger, { trustedHeader: "X-Real-IP", trustedProxies: ["192.0.2.1"] });
+    const address = await listen(server, 0, "127.0.0.1");
+    close = () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
+    const base = `http://127.0.0.1:${address.port}`;
+    await fetch(`${base}/echo`);
+    expect(warnings).toEqual([]);
+    await fetch(`${base}/echo`, { headers: { "x-real-ip": "10.9.9.9" } });
+    await fetch(`${base}/echo`, { headers: { "x-real-ip": "10.9.9.8" } });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("127.0.0.1");
+  });
+
+  it("answers the health path to a probe without the trusted header, judging it by its peer address", async () => {
+    let base = await serve(ok, { trustedHeader: "X-Real-IP" });
+    expect((await fetch(`${base}/health`)).status).toBe(200);
+    expect(await (await fetch(`${base}/health`)).json()).toEqual({ ok: true, restartRequired: false });
+    expect((await fetch(`${base}/echo`)).status).toBe(403);
+    expect((await fetch(`${base}/health`, { method: "POST" })).status).toBe(403);
+    await close?.();
+    base = await serve(ok, { trustedHeader: "X-Real-IP", allow: ["127.0.0.1"] });
+    expect((await fetch(`${base}/health`)).status).toBe(200);
+    await close?.();
+    base = await serve(ok, { trustedHeader: "X-Real-IP", allow: ["10.0.0.0/8"] });
+    expect((await fetch(`${base}/health`)).status).toBe(403);
   });
 
   it("applies the configured server timeouts", async () => {

@@ -182,4 +182,16 @@ export const deliveryDependentsRule: Rule = {
   },
 };
 
-export const INFO_RULES: readonly Rule[] = [deliveryMembersRule, busHandlerThrowsRule, busSubscriberQueueRule, typeSignaturesRule, breakingStepShapesRule, ctxDoneTerminalOutputRule, runPipelineValidatesRule, restoreFreshnessRule, deliveryDependentsRule];
+/** `http/trusted-proxies`: forwarding headers now count only from `http.trustedProxies`, which defaults to loopback, so a proxy on another address makes every request look like it came from the proxy. */
+export const trustedProxiesRule: Rule = {
+  id: "http/trusted-proxies",
+  check(ctx) {
+    const http: unknown = ctx.project.input.config.http;
+    if (!isRecord(http) || http.trustedProxies !== undefined) return [];
+    const policy = http.trustProxy === true ? "http.trustProxy" : typeof http.trustedHeader === "string" ? "http.trustedHeader" : undefined;
+    if (policy === undefined) return [];
+    return [infoFinding("http/trusted-proxies", "http/trusted-proxies", `${policy} is set without http.trustedProxies; forwarding headers now count only from a peer in trustedProxies, which defaults to loopback, so a proxy connecting from any other address is ignored and every request is attributed to the proxy`, "if the proxy does not connect over loopback, list its address or network in http.trustedProxies; a warning in the log names each peer whose forwarding headers were ignored", { file: ctx.project.configFile }, upgradingDocs("http-trusted-proxies"))];
+  },
+};
+
+export const INFO_RULES: readonly Rule[] = [deliveryMembersRule, busHandlerThrowsRule, busSubscriberQueueRule, typeSignaturesRule, breakingStepShapesRule, ctxDoneTerminalOutputRule, runPipelineValidatesRule, restoreFreshnessRule, deliveryDependentsRule, trustedProxiesRule];

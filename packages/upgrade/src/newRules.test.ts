@@ -10,7 +10,7 @@ import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import type { LoadedProject, RuleContext } from "./plugin.ts";
 import { upgradingDocs } from "./ruleHelpers.ts";
 import { readFileOrUndefined } from "./rules.ts";
-import { breakingStepShapesRule, busHandlerThrowsRule, busSubscriberQueueRule, ctxDoneTerminalOutputRule, deliveryDependentsRule, deliveryMembersRule, restoreFreshnessRule, runPipelineValidatesRule, typeSignaturesRule } from "./ruleInfo.ts";
+import { breakingStepShapesRule, busHandlerThrowsRule, busSubscriberQueueRule, ctxDoneTerminalOutputRule, deliveryDependentsRule, deliveryMembersRule, restoreFreshnessRule, runPipelineValidatesRule, trustedProxiesRule, typeSignaturesRule } from "./ruleInfo.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
 import { dependencyCycleRule, optionalReadOrderRule, outputFoldRule, terminalOutputRule, undeclaredOutputRule, undeclaredRequiredRule } from "./ruleBootWraps.ts";
 import { underscoreFieldRule } from "./ruleUnderscoreField.ts";
@@ -647,6 +647,28 @@ describe("info rules", () => {
     await writeFile(file, 'import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";\n');
     const p = await project({ moduleFiles: { "notes/local": file } });
     expect(await runPipelineValidatesRule.check(contextFor(p))).toHaveLength(1);
+  });
+
+  async function withHttp(http: unknown): Promise<LoadedProject> {
+    const p = await project({});
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+    return { ...p, input: { ...p.input, config: { ...p.input.config, http: http as never } } };
+  }
+
+  it("http/trusted-proxies names a forwarding policy that relies on the loopback default", async () => {
+    for (const http of [{ trustProxy: true }, { trustedHeader: "x-real-ip" }]) {
+      const findings = await trustedProxiesRule.check(contextFor(await withHttp(http)));
+      expect(findings).toHaveLength(1);
+      expect(findings[0]?.severity).toBe("info");
+      expect(findings[0]?.message).toContain("trustedProxies");
+      expect(findings[0]?.docs).toBe(upgradingDocs("http-trusted-proxies"));
+    }
+  });
+
+  it("http/trusted-proxies stays quiet without a forwarding policy or with trustedProxies set", async () => {
+    for (const http of [undefined, null, {}, { trustProxy: false }, { trustProxy: true, trustedProxies: ["10.0.0.0/8"] }]) {
+      expect(await trustedProxiesRule.check(contextFor(await withHttp(http)))).toEqual([]);
+    }
   });
 
   it("runtime/restore-freshness fires when restoreOnStart defaults on", async () => {

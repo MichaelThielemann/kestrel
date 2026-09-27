@@ -5,7 +5,7 @@ import { boundaryCast } from "../cast.ts";
 import { isBinaryResult, requestIdOf, type ContextInput, type UploadedFile } from "../context.ts";
 import type { InstanceHealth } from "../defineModule.ts";
 import type { CoreCode } from "../errors.ts";
-import type { Logger } from "../logger.ts";
+import { logWarn, type Logger } from "../logger.ts";
 import type { RunResult, Runner } from "../runner.ts";
 import { createAllowlist } from "./allowlist.ts";
 import { isRecord } from "../guards.ts";
@@ -433,6 +433,35 @@ export interface ClientAddress {
   ip?: string;
   /** `true` when `trustedHeader` is set and a trusted proxy sent the request without it. */
   missingHeader: boolean;
+  /** Set when a peer outside `trustedProxies` sent the forwarding header the policy reads; the header was ignored. */
+  forwardingIgnored?: true;
+}
+
+/** Options of `forwardingWarner`. */
+export interface ForwardingWarnerOptions {
+  /** How long one peer stays quiet after a warning; default one hour. */
+  intervalMs?: number;
+  /** How many peers are remembered before the memory is cleared; default 1000. */
+  maxPeers?: number;
+  now?: () => number;
+}
+
+/**
+ * A rate-limited warning for requests whose forwarding headers were ignored because the peer is not in
+ * `trustedProxies`: one line per peer and interval, so a proxy missing from the list shows up in the log.
+ */
+export function forwardingWarner(warn: (message: string) => void, options: ForwardingWarnerOptions = {}): (peer: string | undefined) => void {
+  const { intervalMs = 60 * 60 * 1000, maxPeers = 1000, now = Date.now } = options;
+  const last = new Map<string, number>();
+  return (peer) => {
+    const key = peer ?? "local";
+    const at = now();
+    const previous = last.get(key);
+    if (previous !== undefined && at - previous < intervalMs) return;
+    if (!last.has(key) && last.size >= maxPeers) last.clear();
+    last.set(key, at);
+    warn(`forwarding header from ${key} ignored: the peer is not in trustedProxies; list the proxy there if it is one`);
+  };
 }
 
 export interface HttpOptions extends ClientIpOptions {
@@ -470,7 +499,11 @@ export function clientIpResolver(options: boolean | ClientIpOptions = {}): (req:
   return (req) => {
     const peer = req.socket?.remoteAddress || undefined;
     const fromProxy = proxies !== null && proxies.check(peer ?? "127.0.0.1");
-    if (!fromProxy || (header === undefined && !trustProxy)) return addressed(peer);
+    if (header === undefined && !trustProxy) return addressed(peer);
+    if (!fromProxy) {
+      const forwarded = req.headers[header ?? "x-forwarded-for"] !== undefined;
+      return forwarded ? { ...addressed(peer), forwardingIgnored: true } : addressed(peer);
+    }
     if (header !== undefined) {
       const ip = headerValues(req.headers[header]).at(-1);
       return ip === undefined ? { missingHeader: true } : addressed(ip);
@@ -489,9 +522,13 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
   const healthPath = options.healthPath === undefined ? "/health" : options.healthPath;
   const allowlist = createAllowlist(options.allow ?? []);
   const resolveClient = clientIpResolver(options);
+  const warnForwarding = forwardingWarner((message) => logWarn(logger, message));
   const server = createServer((req, res) => {
     const client = resolveClient(req);
-    if (client.missingHeader || (allowlist !== null && !allowlist.check(client.ip))) {
+    if (client.forwardingIgnored) warnForwarding(req.socket.remoteAddress);
+    const probe = healthPath !== null && req.method === "GET" && (req.url ?? "/").split("?", 1)[0] === healthPath;
+    const ip = client.missingHeader && probe ? req.socket.remoteAddress : client.ip;
+    if ((client.missingHeader && !probe) || (allowlist !== null && !allowlist.check(ip))) {
       sendError(res, 403, "forbidden", requestIdOf(req.headers["x-request-id"]));
       return;
     }
@@ -506,7 +543,7 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
         return;
       }
     }
-    void handle(req, res, client.ip).catch((err: unknown) => {
+    void handle(req, res, ip).catch((err: unknown) => {
       logger.error("http handler failed", { error: err instanceof Error ? err.stack : String(err) });
       if (!res.headersSent) sendError(res, 500, "internal error", requestIdOf(req.headers["x-request-id"]));
     });

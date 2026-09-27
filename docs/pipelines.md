@@ -326,8 +326,15 @@ e.g. nginx's `proxy_set_header X-Real-IP $remote_addr;` or a platform's trusted-
 over `trustProxy`: the value the proxy set last is the client, so with `X-Forwarded-For` as the
 trusted header it is the rightmost entry. The core server answers `403 forbidden` to a request from a
 trusted proxy that lacks the trusted header, with or without `http.allow`; the proxy is expected to
-set it on every request. `clientIpResolver(options)` compiles the same policy for a host of its own
-and reports that case as `missingHeader`.
+set it on every request. The one exception is a `GET` of `http.healthPath`: a liveness probe from a
+load balancer or the platform rarely carries the header, so it is answered and judged by its peer
+address against `http.allow`; its body is only `{ ok, restartRequired }`. A request from a peer outside
+`trustedProxies` that carries the header the policy reads is attributed to the peer, and the server
+logs `forwarding header from <peer> ignored` once per peer and hour, so a proxy missing from the list
+shows up in the log (`forwardingWarner` gives a host the same warning). An in-process call counts as
+loopback, so forwarding headers it passes on are believed; a host that forwards a client's headers into
+such calls should not rely on `ctx.ip` there. `clientIpResolver(options)` compiles the same policy for a
+host of its own and reports these cases as `missingHeader` and `forwardingIgnored`.
 
 **IP allowlisting.** `http.allow` (default `[]`, meaning open) restricts the whole server to a list
 of IPv4/IPv6 addresses or CIDR ranges, e.g. `["203.0.113.0/24", "2001:db8::/32", "10.0.0.5"]`.

@@ -577,9 +577,15 @@ Net changes since 5.8.1.
   to the peer's own address for `ctx.ip`, `http.allow` and rate limits. A proxy on another host must
   now be listed, otherwise every request is attributed to the proxy. `trustedHeader` takes the value
   the proxy set last instead of the first. The core server answers 403 to a request from a trusted
-  proxy without the trusted header, with or without `http.allow`; the h3 adapter leaves `ctx.ip`
-  absent for it. New exports: `clientIpResolver`, `LOOPBACK_PROXIES`, `ClientAddress`, `PeerRequest`;
-  `clientIp` accepts any request with `headers` and `socket`.
+  proxy without the trusted header, with or without `http.allow`, except a `GET` of `http.healthPath`,
+  which is answered and judged by its peer address so load-balancer probes keep working; the h3
+  adapter leaves `ctx.ip` absent for such a request. A request from an untrusted peer that carries the
+  forwarding header is logged once per peer and hour (`forwarding header from <peer> ignored`), and
+  `kestrel upgrade`'s new info rule `http/trusted-proxies` names a config with `trustProxy` or
+  `trustedHeader` but no `trustedProxies`. **Upgrading:** if your proxy does not connect over loopback,
+  set `http.trustedProxies` to its address or network before deploying 6.0.0. New exports:
+  `clientIpResolver`, `forwardingWarner`, `LOOPBACK_PROXIES`, `ClientAddress`, `ForwardingWarnerOptions`,
+  `PeerRequest`; `clientIp` accepts any request with `headers` and `socket`.
 - A `multipart/form-data` body is limited per request by the new `http.multipart`
   (`maxParts` 120, `maxFiles` 20, `maxFields` 100; the h3 adapter's `multipart` option): the core's own
   multipart parser reads it part by part, and the first part past a limit answers 413 before it is
