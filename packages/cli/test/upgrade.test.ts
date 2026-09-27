@@ -90,7 +90,7 @@ describe("host plugin discovery", { timeout: 60_000 }, () => {
     expect(check.code).toBe(0);
     const checked = boundaryCast<CheckReport>(JSON.parse(check.stdout), "json");
     expect(checked.plugins).toEqual([{ package: "example-host", version: "3.0.0", kind: "example-host" }]);
-    expect(checked.host).toEqual([{ code: "example-host-check", severity: "warning", owner: "example-host", reason: "checked by the host, api 4" }]);
+    expect(checked.host).toEqual([{ code: "example-host-check", severity: "warning", owner: "example-host", reason: "checked by the host, api 5" }]);
     const human = await runCli(["check", "--root", dir]);
     expect(human.stdout).toContain("plugins: example-host 3.0.0");
   });
