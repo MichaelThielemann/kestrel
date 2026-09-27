@@ -26,7 +26,9 @@ only to an `http(s)` URL whose host is a globally reachable address:
   `*.localhost`, `*.local`, `*.localdomain`, `*.internal` and `*.home.arpa` are refused by name.
 - A hostname is resolved first (every address, `dns.lookup`); if any address is in a blocked range the
   URL is not requested, and the connection goes to the address that passed the check, so a second
-  resolution to another address cannot take its place.
+  resolution to another address cannot take its place. With several addresses (IPv6 and IPv4) the
+  connection tries them in resolution order and falls back to the next when one cannot be reached; a
+  connection that fails at once ends the check with that error, never the process.
 - Blocked ranges are the IANA special-purpose ranges that are not globally reachable: IPv4 `0/8`,
   `10/8`, `100.64/10`, `127/8`, `169.254/16`, `172.16/12`, `192.0.0/24`, `192.0.2/24`, `192.88.99/24`,
   `192.168/16`, `198.18/15`, `198.51.100/24`, `203.0.113/24`, multicast `224/4` and `240/4` including

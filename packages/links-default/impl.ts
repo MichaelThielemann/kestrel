@@ -159,17 +159,16 @@ export async function createLinksDefault(
     return ok(entries.length);
   };
 
-  const destination = async (url: string, signal: AbortSignal): Promise<{ address?: string } | { error: string }> => {
+  const destination = async (url: string, signal: AbortSignal): Promise<{ addresses?: string[] } | { error: string }> => {
     const reason = checkable(url, config.allowPrivate);
     if (reason !== null) return { error: reason };
     if (config.allowPrivate) return {};
     const host = normalizeHostname(new URL(url).hostname);
-    if (isIP(host) !== 0) return { address: host };
+    if (isIP(host) !== 0) return { addresses: [host] };
     const addresses = await untilAborted(resolve(host), signal);
-    const [first] = addresses;
-    if (first === undefined) return { error: "no address" };
+    if (addresses.length === 0) return { error: "no address" };
     if (addresses.some(isPrivateAddress)) return { error: "private address" };
-    return { address: first };
+    return { addresses };
   };
 
   const probe = async (url: string): Promise<CheckResult> => {
@@ -184,7 +183,7 @@ export async function createLinksDefault(
           const target = await destination(current, controller.signal);
           if ("error" in target) return { ok: false, status: null, error: target.error };
           const init = { method, headers: { "user-agent": config.userAgent, accept: "*/*" }, signal: controller.signal, redirect: "manual" as const };
-          const res = await fetcher(current, target.address === undefined ? init : { ...init, address: target.address });
+          const res = await fetcher(current, target.addresses === undefined ? init : { ...init, addresses: target.addresses });
           const location = res.status >= 300 && res.status < 400 ? (res.headers?.get("location") ?? null) : null;
           if (location === null) return { ok: res.status < 400, status: res.status, error: null };
           if (hop >= MAX_REDIRECTS) return { ok: false, status: null, error: "too many redirects" };

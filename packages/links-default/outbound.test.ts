@@ -7,6 +7,7 @@ import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { ok } from "@michaelthielemann/kestrel/result";
 import { checkable, createLinksDefault, httpFetcher, isPrivateAddress, type Fetcher, type Resolver } from "./impl.ts";
+import { pinnedLookup } from "./outbound.ts";
 
 const model: ContentModel = { types: { pages: { kind: "multi", fields: { body: "json" } } } };
 
@@ -53,7 +54,7 @@ async function listener(handle: (url: string, host: string | undefined) => { sta
 function recordingFetcher(answers: Record<string, { status: number; location?: string }>): Fetcher & { calls: string[] } {
   const calls: string[] = [];
   const fetcher: Fetcher = async (url, init) => {
-    calls.push(`${init.method} ${url} via ${init.address ?? "-"}`);
+    calls.push(`${init.method} ${url} via ${init.addresses?.join(",") ?? "-"}`);
     const answer = answers[url];
     if (!answer) throw new Error("unexpected request");
     return { status: answer.status, headers: { get: (name: string) => (name.toLowerCase() === "location" ? (answer.location ?? null) : null) } };
@@ -145,9 +146,64 @@ describe("outbound link checks", () => {
       hosts.push(host);
       return { status: 204 };
     });
-    const res = await httpFetcher(`http://pinned.invalid:${target.port}/x`, { method: "HEAD", headers: { "user-agent": "test" }, signal: new AbortController().signal, redirect: "manual", address: "127.0.0.1" });
+    const res = await httpFetcher(`http://pinned.invalid:${target.port}/x`, { method: "HEAD", headers: { "user-agent": "test" }, signal: new AbortController().signal, redirect: "manual", addresses: ["127.0.0.1"] });
     expect(res.status).toBe(204);
     expect(hosts).toEqual([`pinned.invalid:${target.port}`]);
     expect(target.requests).toEqual(["HEAD /x"]);
+  });
+
+  it("hands every checked address of a hostname to the fetcher", async () => {
+    const fetcher = recordingFetcher({ "https://dual.example/": { status: 200 } });
+    const { content, id } = contentWith(["https://dual.example/"]);
+    const links = await createLinksDefault(config, content, createFakePersistence(), fetcher, Date.now, resolver({ "dual.example": ["2606:4700:4700::1111", "93.184.215.14"] }));
+    expectOk(await links.extract("pages", id));
+    expectOk(await links.check());
+    expect(fetcher.calls).toEqual(["HEAD https://dual.example/ via 2606:4700:4700::1111,93.184.215.14"]);
+  });
+
+  it("answers the pinned lookup asynchronously with every checked address in order", async () => {
+    const lookup = pinnedLookup(["2001:4860::1", "93.184.215.14"]);
+    let answered = false;
+    const all = new Promise<unknown>((resolve) => {
+      lookup("pinned.invalid", { all: true }, (_error, addresses) => {
+        answered = true;
+        resolve(addresses);
+      });
+    });
+    expect(answered).toBe(false);
+    expect(await all).toEqual([
+      { address: "2001:4860::1", family: 6 },
+      { address: "93.184.215.14", family: 4 },
+    ]);
+    const single = await new Promise<unknown[]>((resolve) => lookup("pinned.invalid", {}, (_error, address, family) => resolve([address, family])));
+    expect(single).toEqual(["2001:4860::1", 6]);
+  });
+
+  it("falls back to the next checked address when the first cannot be reached", async () => {
+    const target = await listener(() => ({ status: 204 }));
+    const res = await httpFetcher(`http://pinned.invalid:${target.port}/x`, { method: "HEAD", headers: {}, signal: new AbortController().signal, redirect: "manual", addresses: ["::1", "127.0.0.1"] });
+    expect(res.status).toBe(204);
+    expect(target.requests).toEqual(["HEAD /x"]);
+  });
+
+  it("rejects a pinned connection that fails without raising an uncaught exception", async () => {
+    const uncaught: unknown[] = [];
+    const record = (error: unknown): void => {
+      uncaught.push(error);
+    };
+    process.on("uncaughtException", record);
+    try {
+      const closed = await listener(() => ({ status: 200 }));
+      await Promise.all(servers.splice(0).map((s) => new Promise((resolve) => s.close(resolve))));
+      const outcome = await httpFetcher(`http://pinned.invalid:${closed.port}/x`, { method: "HEAD", headers: {}, signal: new AbortController().signal, redirect: "manual", addresses: ["127.0.0.1"] }).then(
+        () => "answered",
+        (error: unknown) => (error instanceof Error ? "rejected" : "odd"),
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(outcome).toBe("rejected");
+      expect(uncaught).toEqual([]);
+    } finally {
+      process.off("uncaughtException", record);
+    }
   });
 });
