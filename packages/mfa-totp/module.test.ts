@@ -114,7 +114,7 @@ describe("mfa/totp at boot", () => {
       pipelines: [
         definePipeline({ name: "login", steps: ["authn.login", "mfa.check"] }),
         definePipeline({ name: "setup", steps: ["mfa.startSetup"] }),
-        definePipeline({ name: "reset", steps: ["authn.requireUser", "mfa.reset", "authn.endSessions"] }),
+        definePipeline({ name: "reset", steps: ["authn.requireUser", "authn.endSessions", "mfa.reset"] }),
       ],
       logger: silentLogger,
     });

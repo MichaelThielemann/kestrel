@@ -40,10 +40,12 @@ the version it read, so two requests with the same code cannot both pass.
 lives in `mfa_factors`, so it survives a restart and holds without any rate-limit module; a correct code
 clears it, and so does a reset.
 
-**Resetting.** `mfa.reset` (`params.id`) removes another user's factor and answers `{ ok, enrollmentCode }` —
-not the caller's own (400); a user who lost the device signs in with a recovery code. Follow it with a step that ends that user's sessions,
-e.g. `authn-multi`'s `authn.endSessions`. `mfa.forget` removes the factor of a deleted user (event
-`user.deleted`). `mfa.listEnrolled` answers the ids of the users with a confirmed factor.
+**Resetting.** `mfa.reset` (`params.id`) removes another user's factor and answers
+`{ ok, enrollmentCode }` — not the caller's own (400); a user who lost the device signs in with a recovery
+code. Run it after a
+step that ends that user's sessions, e.g. `authn-multi`'s `authn.endSessions`, so the enrollment code is
+the answer. `mfa.forget` removes the factor of a deleted user (event `user.deleted`). `mfa.listEnrolled`
+answers the ids of the users with a confirmed factor.
 
 Config: `issuer` (the name an app shows, default `Kestrel`), `secretKey` (required, secret), `enforce`
 (`"all"` default, `"none"`, or `{ permissions: [...] }` for the accounts holding one of them),
@@ -72,7 +74,7 @@ from a running session.
 |---|---|---|---|---|---|---|---|---|
 | `mfa.check` | After authn.login: check the second factor with payload.code (a time-based or a recovery code). A refusal ends the session the login opened; a code that confirms a new factor adds result.recoveryCodes, shown once | `identity`, `token` | `result?` | { code?: string, … } | { recoveryCodes?: string[], … } | 401 the code is wrong or used (`UNAUTHENTICATED`), a code is needed (`SECOND_FACTOR_REQUIRED`), or the account must set up a second factor first (`SECOND_FACTOR_SETUP_REQUIRED`); 429 too many wrong codes in a row; the factor is locked for a while (`RATE_LIMITED`) | – | no |
 | `mfa.startSetup` | Check the password through authn@1 and start setting up a second factor: answers the new secret and its otpauth URI to the caller it identified; the next login with a code for it confirms it | – | `identity`, `result` | { username?: string, email?: string, password: string, enrollmentCode?: string } | { secret: string, uri: string, … } | 401 invalid credentials; 403 the account needs the enrollment code a reset issued (`ENROLLMENT_CODE_REQUIRED`); 409 the account already has a second factor | – | no |
-| `mfa.reset` | Remove another user's second factor and answer the one-time enrollment code its owner needs to set up a new one; follow it with a step that ends that user's sessions | `identity?`, `params.id` | `result` | – | { ok: boolean, enrollmentCode: string, … } | 400 the caller's own account | – | no |
+| `mfa.reset` | Remove another user's second factor and answer the one-time enrollment code its owner needs to set up a new one; run it after a step that ends that user's sessions | `identity?`, `params.id` | `result` | – | { ok: boolean, enrollmentCode: string, … } | 400 the caller's own account | – | no |
 | `mfa.forget` | Remove the second factor of the user in params.id or the event payload's id, e.g. on user.deleted | `params.id?`, `payload.id?` | – | { id?: string \| null, … } | – | 400 no user id | – | no |
 | `mfa.listEnrolled` | The ids of the users with a confirmed second factor | – | `result` | – | string[] | – | – | no |
 
