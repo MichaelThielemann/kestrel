@@ -599,6 +599,15 @@ describe("media/default list: page size", () => {
     expect((await run({ limit: "4" })).status).toBe(400);
   });
 
+  it("reads at most maxLimit of the ids a list by ids names", async () => {
+    const { media } = await makeInstance({ maxLimit: 2 });
+    const ids: string[] = [];
+    for (const name of ["a.png", "b.png", "c.png"]) ids.push(expectOk(await media.upload({ filename: name, contentType: "image/png", data: new Uint8Array([name.charCodeAt(0)]) })).item.id);
+    const res = await runPipeline(pipeline("media.list"), { query: { ids: ids.join(",") } }, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect(boundaryCast<{ items: unknown[]; total: number }>(res.result, "host")).toMatchObject({ total: 2, items: [expect.anything(), expect.anything()] });
+  });
+
   it("uses maxLimit as the page size when defaultLimit is not set, and refuses a defaultLimit above maxLimit", async () => {
     expect(configSchema.parse(config()).maxLimit).toBe(200);
     expect(() => configSchema.parse(config({ maxLimit: 5, defaultLimit: 6 }))).toThrow(/defaultLimit/);
