@@ -1350,6 +1350,10 @@
               "type": "integer",
               "minimum": 1,
               "default": 200
+            },
+            "defaultLimit": {
+              "type": "integer",
+              "minimum": 1
             }
           },
           "required": [
@@ -1473,6 +1477,16 @@
             "value": 200,
             "redacted": false,
             "default": 200
+          },
+          {
+            "path": "defaultLimit",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "missing",
+            "value": null,
+            "redacted": false
           }
         ]
       },

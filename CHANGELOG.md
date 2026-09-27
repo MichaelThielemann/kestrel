@@ -1043,6 +1043,10 @@ Net changes since 5.8.1.
 
 ### Changed
 
+- `content-default`: `content.list:<t>` without `limit` answers at most `defaultLimit` items (new config
+  key, default `maxLimit`, 200 unless configured) instead of every match; `total` still counts every
+  match. A client that relied on one unbounded page reads further pages with `offset`. `content@1`'s own
+  `list()` is unchanged.
 - `validate-jsonschema`: the HTML sanitizer keeps an element's `id` only when it starts with an ASCII
   letter and holds at most 64 ASCII letters, digits, `-` and `_`; any other `id` is dropped and the
   element kept. Stored content keeps such an id until its next save through `validate.sanitize`.

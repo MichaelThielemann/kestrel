@@ -23,10 +23,12 @@ export const configSchema = z
     locales: z.array(z.string().min(1)).optional(),
     defaultLocale: z.string().min(1).optional(),
     maxLimit: z.number().int().min(1).default(200),
+    defaultLimit: z.number().int().min(1).optional(),
   })
-  .strict();
+  .strict()
+  .refine((config) => config.defaultLimit === undefined || config.defaultLimit <= config.maxLimit, { message: "defaultLimit must not exceed maxLimit", path: ["defaultLimit"] });
 
-type ContentInstance = Content & { maxLimit: number };
+type ContentInstance = Content & { maxLimit: number; defaultLimit: number };
 
 function parseTarget(arg: string): { type: string; fixed: Record<string, unknown> } {
   const [type, query] = arg.split("?");
@@ -65,8 +67,8 @@ function integerParam(ctx: Context, key: string): Result<number | undefined, Kes
   return ok(value);
 }
 
-function listOptions(ctx: Context, maxLimit: number): Result<ListOptions, KestrelError> {
-  const options: ListOptions = {};
+function listOptions(ctx: Context, maxLimit: number, defaultLimit: number): Result<ListOptions, KestrelError> {
+  const options: ListOptions = { limit: defaultLimit };
   const limit = integerParam(ctx, "limit");
   if (isErr(limit)) return limit;
   if (limit.value !== undefined) {
@@ -203,7 +205,7 @@ export default defineModule({
     const model: ContentModel = { types: boundaryCast<ContentModel["types"]>(config.types, "host") };
     if (config.locales !== undefined) model.locales = config.locales;
     if (config.defaultLocale !== undefined) model.defaultLocale = config.defaultLocale;
-    return { ...(await createContentDefault(model, deps.get(PERSISTENCE))), maxLimit: config.maxLimit };
+    return { ...(await createContentDefault(model, deps.get(PERSISTENCE))), maxLimit: config.maxLimit, defaultLimit: config.defaultLimit ?? config.maxLimit };
   },
 
   steps: (content) => ({
@@ -242,7 +244,7 @@ export default defineModule({
       const { fallback: fallbackFlag, ...filter } = fixed;
       assertNoFallbackWithFilter(fallbackFlag, filter);
       return async (ctx: Context) => {
-        const parsed = listOptions(ctx, content.maxLimit);
+        const parsed = listOptions(ctx, content.maxLimit, content.defaultLimit);
         if (isErr(parsed)) return parsed;
         const locale = localeOf(ctx, fixed);
         const page = await content.list(type, filter, { ...parsed.value, ...locale });

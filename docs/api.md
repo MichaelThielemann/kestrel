@@ -326,7 +326,8 @@ identical paths.
 `sort` is a field name, a leading `-` means descending; an unknown field → 400 (`unknown sort field
 …`). `limit` and `offset` must be integers (`limit` ≥ 1, `offset` ≥ 0); an invalid value or a
 `limit` above the ceiling (`maxLimit` in the `content/default` config, default 200) → 400. Without
-`limit`, the list returns every match. Write calls need `pages.write`, deletion needs `pages.delete`
+`limit`, the list returns at most `defaultLimit` items (`content/default` config, default `maxLimit`);
+`total` counts every match, so page through with `offset`. Write calls need `pages.write`, deletion needs `pages.delete`
 (deleting a single translation is a write, `pages.write`).
 
 `GET /pages` and `GET /pages/:id` carry a fixed filter (`status=published`) in their step argument;

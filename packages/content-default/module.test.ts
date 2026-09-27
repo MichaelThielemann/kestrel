@@ -32,7 +32,7 @@ const MODEL = {
   },
 };
 
-async function boot() {
+async function boot(extra: Record<string, unknown> = {}) {
   const db = createFakePersistence();
   const providers = new Map<string, unknown>([[PERSISTENCE.name, db]]);
   const deps: Deps = {
@@ -45,7 +45,7 @@ async function boot() {
     root: process.cwd(),
     eventTriggers: [],
   };
-  const config = configSchema.parse(MODEL);
+  const config = configSchema.parse({ ...MODEL, ...extra });
   const instance = await module.setup(config, deps);
   return { instance, db };
 }
@@ -141,6 +141,47 @@ describe("content/default module steps", () => {
     const missing = await run(["content.create:notes"], { body: { slug: "b", title: null, status: "draft" } }, instance);
     expect(missing).toMatchObject({ status: 400, code: "VALIDATION", step: "content.create:notes" });
     expect(missing.details?.problems).toEqual([{ path: "$.title", message: "expected string, got null" }]);
+  });
+
+  describe("a list without limit", () => {
+    async function seeded(count: number, extra: Record<string, unknown>) {
+      const { instance } = await boot(extra);
+      for (let i = 0; i < count; i++) await run(["content.create:notes"], { body: { slug: `n${i}`, title: `N${i}`, status: "draft" } }, instance);
+      return instance;
+    }
+
+    it("answers at most maxLimit items with the full total", async () => {
+      const instance = await seeded(7, { maxLimit: 5 });
+      const res = await run(["content.list:notes"], {}, instance);
+      expect(res.status).toBe(200);
+      const page = boundaryCast<{ items: unknown[]; total: number }>(res.result, "host");
+      expect(page.items).toHaveLength(5);
+      expect(page.total).toBe(7);
+    });
+
+    it("answers at most defaultLimit items when it is set below maxLimit", async () => {
+      const instance = await seeded(4, { maxLimit: 5, defaultLimit: 2 });
+      const page = boundaryCast<{ items: unknown[]; total: number }>((await run(["content.list:notes"], { query: { offset: "1" } }, instance)).result, "host");
+      expect(page.items).toHaveLength(2);
+      expect(page.total).toBe(4);
+    });
+
+    it("still refuses a limit above maxLimit", async () => {
+      const instance = await seeded(1, { maxLimit: 5 });
+      const res = await run(["content.list:notes"], { query: { limit: "6" } }, instance);
+      expect(res.status).toBe(400);
+    });
+
+    it("refuses a defaultLimit above maxLimit at setup", async () => {
+      await expect(boot({ maxLimit: 5, defaultLimit: 6 })).rejects.toThrow(/defaultLimit/);
+    });
+
+    it("leaves content@1's own list unbounded for callers inside the process", async () => {
+      const instance = await seeded(7, { maxLimit: 5 });
+      const all = boundaryCast<{ list: (type: string, filter: object) => Promise<{ ok: boolean; value: { items: unknown[] } }> }>(instance, "host");
+      const listed = await all.list("notes", {});
+      expect(listed.value.items).toHaveLength(7);
+    });
   });
 
   it("rejects a non-integer limit with 400 VALIDATION from the query schema", async () => {

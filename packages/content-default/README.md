@@ -37,7 +37,10 @@ stored document can miss; `list:<t>` or
 `list:<t>?status=published` pins a fixed filter the client cannot override and reads `limit`,
 `offset` and `sort=-field` from the payload. `limit` and `offset` must be integers (`limit` ≥ 1,
 `offset` ≥ 0), `limit` at most `maxLimit` (config, default 200), `sort` a known field; anything
-else is `VALIDATION` (400). An unknown `?locale=` is `VALIDATION` too, on every step.
+else is `VALIDATION` (400). Without `limit`, a page holds at most `defaultLimit` items (config, default
+`maxLimit`, never above it, or setup fails); `total` still counts every match, so a client pages with
+`offset`. The limit applies to the step only: `content@1`'s own `list()` stays unbounded for callers in
+the process. An unknown `?locale=` is `VALIDATION` too, on every step.
 A fixed filter also narrows `_translations`: a locale counts only once its own values satisfy the
 same filter too (`get` through `@michaelthielemann/kestrel-contracts/helpers/content-locale`'s
 `publishedLocale`, `list` through its `narrowListTranslations`, one query per other locale for the
@@ -69,6 +72,7 @@ rewriting (see site-default), versioning.
 | `locales` | array | no | – |
 | `defaultLocale` | string | no | – |
 | `maxLimit` | integer | no | `200` |
+| `defaultLimit` | integer | no | – |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
