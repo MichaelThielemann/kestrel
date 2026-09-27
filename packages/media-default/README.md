@@ -28,7 +28,10 @@ A declared image type or `application/pdf` is checked against the file's leading
 markup sent as `image/png` — the upload is treated as that type from here on, for `allowedTypes`,
 `deniedTypes`, the stored type and the name's extension. A type the bytes are refused as names both
 (`type "image/svg+xml" (declared as "image/png") is not allowed`). Bytes that match no known signature
-keep the declared type, and every other declared type is taken as declared.
+keep the declared type, and every other declared type is taken as declared. An ISO image file (AVIF, HEIC, HEIF) keeps
+a declared type that any of its brands names, and counts as AVIF when one brand is AVIF. Markup counts as
+SVG only when `<svg` starts within its first 4 KiB; an SVG with a longer prologue (comments, a large
+doctype) sent as an image type is treated as HTML or XML and meets `deniedTypes` accordingly.
 
 The declared content type has to be exactly one media type: `type/subtype` of RFC 9110 token
 characters, optionally followed by `;` parameters, with no comma. Anything else — a list such as

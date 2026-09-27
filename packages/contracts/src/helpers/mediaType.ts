@@ -196,17 +196,16 @@ function latin1(data: Uint8Array, offset: number, length: number): string {
   return String.fromCharCode(...data.subarray(offset, offset + length));
 }
 
-function isoBrand(data: Uint8Array): string | null {
-  if (data.length < 12 || latin1(data, 4, 4) !== "ftyp") return null;
+const ISO_PRIORITY = ["image/avif", "image/heic", "image/heif"];
+
+function isoTypes(data: Uint8Array): string[] {
+  if (data.length < 12 || latin1(data, 4, 4) !== "ftyp") return [];
   const size = ((data[0] ?? 0) << 24) | ((data[1] ?? 0) << 16) | ((data[2] ?? 0) << 8) | (data[3] ?? 0);
   const end = Math.min(data.length, size > 8 ? size : 32);
   const brands = [latin1(data, 8, 4)];
   for (let offset = 16; offset + 4 <= end; offset += 4) brands.push(latin1(data, offset, 4));
-  for (const brand of brands) {
-    const type = ISO_BRANDS[brand];
-    if (type !== undefined) return type;
-  }
-  return null;
+  const found = new Set(brands.flatMap((brand) => ISO_BRANDS[brand] ?? []));
+  return ISO_PRIORITY.filter((type) => found.has(type));
 }
 
 function markupType(data: Uint8Array): string | null {
@@ -234,7 +233,7 @@ export function sniffMediaType(data: Uint8Array): string | null {
   if (latin1(data, 0, 5) === "%PDF-") return "application/pdf";
   if (startsWith(data, 0, [0, 0, 1, 0]) && data.length >= 6) return "image/x-icon";
   if (latin1(data, 0, 2) === "BM" && data.length >= 14) return "image/bmp";
-  return isoBrand(data) ?? markupType(data);
+  return isoTypes(data)[0] ?? markupType(data);
 }
 
 function sameType(a: string, b: string): boolean {
@@ -243,19 +242,19 @@ function sameType(a: string, b: string): boolean {
 
 /**
  * The type to treat an uploaded file as. For a declared image type or PDF whose bytes {@link sniffMediaType}
- * identifies as a different type, that type; otherwise the declared value unchanged, including for bytes it
+ * identifies as a different type, that type (an ISO image file keeps a declared type any of its brands names); otherwise the declared value unchanged, including for bytes it
  * does not recognise and for every other declared type.
  */
 export function verifiedMediaType(declared: string, data: Uint8Array): string {
   const essence = mediaTypeEssence(declared);
   if (essence === null || !mediaTypeAllowed(CHECKED_BY_CONTENT, [], essence)) return declared;
   const sniffed = sniffMediaType(data);
-  return sniffed === null || sameType(sniffed, essence) ? declared : sniffed;
+  return sniffed === null || sameType(sniffed, essence) || isoTypes(data).includes(essence) ? declared : sniffed;
 }
 
 /** Whether {@link sniffMediaType} identifies the bytes as exactly the declared type (aliases such as HEIC and HEIF count as one). */
 export function contentMatchesMediaType(data: Uint8Array, declared: string): boolean {
   const essence = mediaTypeEssence(declared);
   const sniffed = sniffMediaType(data);
-  return essence !== null && sniffed !== null && sameType(sniffed, essence);
+  return essence !== null && sniffed !== null && (sameType(sniffed, essence) || isoTypes(data).includes(essence));
 }

@@ -217,6 +217,22 @@ describe("verifiedMediaType", () => {
   });
 });
 
+describe("ISO image brands", () => {
+  const mif1Avif = bytes([0, 0, 0, 0x1c], "ftypmif1", [0, 0, 0, 0], "mif1avifmiaf");
+  const mif1Heic = bytes([0, 0, 0, 0x1c], "ftypmif1", [0, 0, 0, 0], "mif1heicmiaf");
+  it("recognises AVIF whose major brand is mif1", () => {
+    expect(sniffMediaType(mif1Avif)).toBe("image/avif");
+    expect(verifiedMediaType("image/avif", mif1Avif)).toBe("image/avif");
+    expect(contentMatchesMediaType(mif1Avif, "image/avif")).toBe(true);
+  });
+  it("keeps a declared type that any of the brands names", () => {
+    expect(verifiedMediaType("image/heic", mif1Heic)).toBe("image/heic");
+    expect(verifiedMediaType("image/heif", mif1Heic)).toBe("image/heif");
+    expect(contentMatchesMediaType(mif1Heic, "image/heic")).toBe(true);
+    expect(verifiedMediaType("image/png", mif1Avif)).toBe("image/avif");
+  });
+});
+
 describe("contentMatchesMediaType", () => {
   it("is true only when the content is recognised as the declared type", () => {
     expect(contentMatchesMediaType(bytes([0xff, 0xd8, 0xff, 0xdb]), "image/jpeg")).toBe(true);

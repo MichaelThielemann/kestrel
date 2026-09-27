@@ -529,7 +529,8 @@ Net changes since 5.8.1.
   markup declared as another image type. `images-default` hands an original to sharp only when its
   bytes are its stored type, passes `renderTimeoutMs` to sharp's own time limit (`Renderer` takes an
   optional `RenderOptions`), and renders no further size of an item in a run after a timeout.
-  `helpers/mediaType` adds `sniffMediaType`, `verifiedMediaType` and `contentMatchesMediaType`.
+  `helpers/mediaType` adds `sniffMediaType`, `verifiedMediaType` and `contentMatchesMediaType`. An AVIF
+  file whose major brand is `mif1` counts as AVIF.
 - `@michaelthielemann/kestrel-contracts`'s runtime helpers moved under
   `@michaelthielemann/kestrel-contracts/helpers/*`, no re-export left at the old path:
   `content-locale` → `helpers/content-locale`, `content-schema` → `helpers/content-schema`,
