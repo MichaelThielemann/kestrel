@@ -1116,11 +1116,12 @@ Net changes since 5.8.1.
   keyed digests, the secret sealed with AES-256-GCM under a configured key, each code accepted once, and
   the factor locked after ten wrong codes in a row (429, for longer each time; `maxFailures`,
   `lockSeconds`). A reset answers a one-time enrollment code that setting up the new factor requires
-  (`requireEnrollmentCode` extends that to accounts that never had one). Steps `mfa.check` (after `authn.login`; 401
-  `SECOND_FACTOR_REQUIRED` / `SECOND_FACTOR_SETUP_REQUIRED`, ending the session the login opened),
-  `mfa.startSetup`, `mfa.reset`, `mfa.forget` and `mfa.listEnrolled`; config `issuer`, `secretKey`,
-  `enforce`, `recoveryCodes`, `maxFailures`, `lockSeconds`, `requireEnrollmentCode`. `authn-multi` adds `authn.endSessions`, and both authn modules accept a
-  `code` in the login body for such a step.
+  (`requireEnrollmentCode` extends that to accounts that never had one). Steps `mfa.check` (after
+  `authn.login`; 401 `SECOND_FACTOR_REQUIRED` / `SECOND_FACTOR_SETUP_REQUIRED`, ending the session the
+  login opened), `mfa.startSetup`, `mfa.reset`, `mfa.forget` and `mfa.listEnrolled`; config `issuer`,
+  `secretKey`, `enforce`, `recoveryCodes`, `maxFailures`, `lockSeconds`, `requireEnrollmentCode`.
+  `authn-multi` adds `authn.endSessions`, and both authn modules accept a `code` in the login body for
+  such a step.
 
 ### Changed
 
