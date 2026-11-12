@@ -149,7 +149,8 @@ paths, `images.export:<dir>` leaves its variants out, `images.attach` lists no v
 reports it as not `available`, and nothing writes a public copy for it again: not the placeholder of
 a new size, not the end of a render, not a retired path, not `images.syncPublic`, which also removes
 any copy of it that it finds. Every writer of a public copy checks the mark before and after it
-writes, so a copy written while a hide in another process lands is withdrawn again. Its rows, its
+writes, so a copy written while a hide in another process lands is withdrawn again, and written once
+more when a show followed before the withdrawal. Its rows, its
 private variants and its renders stay and go on as
 usual, so `images.showMany` only writes the copies again, from the stored renders or, where none is
 done yet and for a retired path, from the original. A media trash keeps the item ready for

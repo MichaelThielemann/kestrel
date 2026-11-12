@@ -139,6 +139,43 @@ describe("images/default hidden items", () => {
     await images.close();
   });
 
+  it("a copy withdrawn because a hide landed during its write is written again when a show followed", async () => {
+    const w = await world();
+    const writer = await rendered(w);
+    const other = await w.open();
+    const key = "site/media/a/variants/thumb.webp";
+    w.blobs.blobs.delete(key);
+    const put = w.blobs.put.bind(w.blobs);
+    const remove = w.blobs.remove.bind(w.blobs);
+    let phase: "write" | "hiding" | "withdraw" | "done" = "write";
+    w.blobs.put = async (written, data, options) => {
+      const stored = await put(written, data, options);
+      if (phase === "write" && written === key) {
+        phase = "hiding";
+        expectOk(await other.hide(["a"]));
+        phase = "withdraw";
+      }
+      return stored;
+    };
+    w.blobs.remove = async (removed) => {
+      if (phase === "withdraw" && removed === key) {
+        phase = "done";
+        expectOk(await other.show(["a"]));
+      }
+      return remove(removed);
+    };
+
+    expectOk(await writer.syncPublic());
+    await whenIdle(writer);
+    await whenIdle(other);
+
+    expect(phase).toBe("done");
+    expect(expectOk(await writer.hidden(["a"])).has("a")).toBe(false);
+    expect(w.blobs.blobs.get(key)?.data).toEqual(RENDERED);
+    await writer.close();
+    await other.close();
+  });
+
   it("hide and show are idempotent and raise no images.variantsChanged", async () => {
     const w = await world();
     const images = await rendered(w);

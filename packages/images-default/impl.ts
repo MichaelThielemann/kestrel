@@ -431,17 +431,20 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   }
 
   async function putCopy(mediaId: string, file: string, data: Uint8Array, contentType: string): Promise<Result<boolean, KestrelError>> {
-    const hidden = await isHidden(mediaId);
-    if (isErr(hidden)) return hidden;
-    if (hidden.value) return ok(false);
     const key = copyKey(mediaId, file);
-    const put = await blobs.put(key, data, { contentType });
-    if (isErr(put)) return put;
-    const hiddenMeanwhile = await isHidden(mediaId);
-    if (isErr(hiddenMeanwhile)) return hiddenMeanwhile;
-    if (!hiddenMeanwhile.value) return ok(true);
-    const withdrawn = await blobs.remove(key);
-    return isErr(withdrawn) ? withdrawn : ok(false);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const hidden = await isHidden(mediaId);
+      if (isErr(hidden)) return hidden;
+      if (hidden.value) return ok(false);
+      const put = await blobs.put(key, data, { contentType });
+      if (isErr(put)) return put;
+      const hiddenMeanwhile = await isHidden(mediaId);
+      if (isErr(hiddenMeanwhile)) return hiddenMeanwhile;
+      if (!hiddenMeanwhile.value) return ok(true);
+      const withdrawn = await blobs.remove(key);
+      if (isErr(withdrawn)) return withdrawn;
+    }
+    return err(failure("TRANSIENT", `images: media/${mediaId} was hidden and shown while its copy ${file} was written – write it again`));
   }
 
   async function removeAllCopies(mediaId: string): Promise<Result<number, KestrelError>> {
