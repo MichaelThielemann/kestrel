@@ -368,6 +368,28 @@ describe("media/default restore around other writes", () => {
     expect(expectOk(await media.list({ folder: "box" })).items.map((i) => i.id)).toEqual([item.id]);
   });
 
+  it("does not recreate the old folder when a folder rename runs right after it read the item", async () => {
+    const { media, db } = await setup();
+    const item = await put(media, "a.png", "old");
+    const neighbour = await put(media, "b.png", "old");
+    expectOk(await media.trash([item.id]));
+    const findOne = db.findOne.bind(db);
+    let renamedMidway = false;
+    db.findOne = async <T extends Document>(collection: string, filter: Filter) => {
+      const found = await findOne<T>(collection, filter);
+      if (!renamedMidway && collection === COLLECTION && filter.id === item.id) {
+        renamedMidway = true;
+        expectOk(await media.renameFolder("old", "new"));
+      }
+      return found;
+    };
+    expect(expectOk(await media.restore([item.id])).ids).toEqual([item.id]);
+    expect(renamedMidway).toBe(true);
+    expect(await rowOf(db, item.id)).toMatchObject({ status: "ready", folder: "new", location: "new/a.png" });
+    expect(expectOk(await media.folders()).map((f) => f.folder)).toEqual(["new"]);
+    expect(expectOk(await media.list({ folder: "new" })).items.map((i) => i.id).sort()).toEqual([item.id, neighbour.id].sort());
+  });
+
   it("follows a folder rename that runs while it looks for a free name", async () => {
     const { media, db } = await setup();
     const item = await put(media, "a.png", "old");

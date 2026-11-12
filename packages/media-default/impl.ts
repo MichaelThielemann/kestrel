@@ -804,7 +804,11 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     if (isErr(still)) return still;
     return still.value === null ? blobs.remove(key) : ok();
   };
-  const bringBackInto = async (item: MediaItem): Promise<Result<{ filename: string; version: number } | { changed: MediaItem } | null, MediaError>> => {
+  const bringBackInto = async (read: MediaItem): Promise<Result<{ filename: string; version: number } | { changed: MediaItem } | null, MediaError>> => {
+    const current = await db.findOne<MediaItem>(COLLECTION, { id: read.id });
+    if (isErr(current)) return current;
+    if (current.value?.status !== TRASHED) return ok(null);
+    const item = current.value;
     const folderReady = await ensureFolder(item.folder);
     if (isErr(folderReady)) return folderReady;
     for (let attempt = 1; attempt <= MAX_SUFFIX; attempt += 1) {
