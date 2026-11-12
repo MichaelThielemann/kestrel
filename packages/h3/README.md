@@ -18,4 +18,30 @@ health/CORS stay with the host.
 A path with a `.` or `..` segment (also `%2e`-encoded) answers 400 instead of being resolved. A
 handler wrapping the adapter reads the pipeline a request was routed to with `routedPipeline(event)`
 (`undefined` when no route matched), so it can decide on the route rather than on the path.
+
+### Request log
+With `logger` (the core's `Logger`, e.g. the one passed to `boot()`), the handler writes one
+`logger.info("http", …)` line per request with the fields of the core server's line: `runId`
+(the `X-Kestrel-Run-Id` of the response), `requestId` (a valid incoming `X-Request-Id`), `method`,
+`path` (with the mount path, without the query string), `pipeline`, `status`, `ms` and `ip`. A
+request refused before its pipeline ran gets a line too, with a `reason` and, when no route
+matched, no `pipeline`:
+
+| Status | `reason` |
+|---|---|
+| 400 | `invalid path: dot segment` (no `pipeline`; `path` is the raw path) |
+| 400 | `invalid body: malformed JSON`, `invalid body: body must be a JSON object`, `invalid multipart body: <cause>` |
+| 404 | `no route` |
+| 413 | `body exceeds <n> bytes` or `multipart body has more than <n> <parts>`, with `declaredBytes` when the request sent a `Content-Length` |
+| 415 | `unsupported content type`, `this route does not accept multipart/form-data` |
+
+A handler that throws writes a line with status 500 and `reason: "handler failed"` before the error
+reaches h3. A line never holds a body, a header value (the declared length aside), a cookie or the
+query string; `reason` is at most 200 characters. Without `logger` the handler writes nothing.
+
+`onRefusal(refusal)` receives each refusal before the pipeline as a `RequestRefusal`: the fields of
+its line (`reason` included, `declaredBytes` left out), `at` (epoch ms) and the error `code` the
+client received (`VALIDATION`, `NOT_FOUND`, `PAYLOAD_TOO_LARGE`, `UNSUPPORTED`). A throwing callback
+is reported to `logger` as `onRefusal threw` and does not change the response.
+
 Knows no contracts and no modules.

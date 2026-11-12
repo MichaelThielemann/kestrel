@@ -650,6 +650,12 @@ Net changes since 5.8.1.
 
 ### Added
 
+- `kestrel-h3`'s `createKestrelHandler` takes a `logger` and writes one `http` line per request
+  with the fields of the core server's line (`runId`, `requestId`, `method`, `path`, `pipeline`,
+  `status`, `ms`, `ip`). A request refused before its pipeline (unknown route, dot segment, body too
+  large, unreadable body, unsupported content type) gets a line too, with a `reason` and, for a body
+  too large, the `declaredBytes`; a line never holds a body, a header value, a cookie or the query
+  string. `onRefusal` receives each such refusal as a `RequestRefusal`.
 - `kestrel check`, `kestrel explain` and `kestrel manifest` inspect a project without starting it,
   in a sandboxed scratch copy, through the project's own core. `check` lists every load issue, boot
   problem, warning and not-checked item with module and cause (`--json`, `--fail-on`) and is meant
