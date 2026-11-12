@@ -64,7 +64,7 @@ describe("media/default trash: the library no longer shows a trashed item", () =
     const kept = await put(media, "kept.png", "photos/2024");
     const gone = await put(media, "gone.png", "photos/2024");
     const alone = await put(media, "alone.png", "solo");
-    expect(expectOk(await media.trash([gone.id, alone.id]))).toEqual({ ids: [gone.id, alone.id], unchanged: [], skipped: [] });
+    expect(expectOk(await media.trash([gone.id, alone.id]))).toEqual({ ids: [gone.id, alone.id], unchanged: [], skipped: [], versions: { [gone.id]: 1, [alone.id]: 1 } });
 
     expect(expectOk(await media.get(gone.id))).toBeNull();
     expect(expectOk(await media.list()).items.map((i) => i.id)).toEqual([kept.id]);
@@ -119,7 +119,7 @@ describe("media/default trash: the library no longer shows a trashed item", () =
     const item = await put(media, "a.png");
     expectOk(await media.trash([item.id]));
     expectOk(await blobs.put(copyKeyOf(item.id, item.filename), new Uint8Array([1]), { contentType: "image/png" }));
-    expect(expectOk(await media.trash([item.id, "no-such-id"]))).toEqual({ ids: [item.id], unchanged: [item.id], skipped: [{ id: "no-such-id", reason: "not_found" }] });
+    expect(expectOk(await media.trash([item.id, "no-such-id"]))).toEqual({ ids: [item.id], unchanged: [item.id], skipped: [{ id: "no-such-id", reason: "not_found" }], versions: { [item.id]: 1 } });
     expect(blobs.blobs.has(copyKeyOf(item.id, item.filename))).toBe(false);
   });
 
@@ -148,7 +148,7 @@ describe("media/default trash and restore repeated after a partial failure", () 
     };
     expectErr(await media.trash([a.id, b.id]), "TRANSIENT");
     expect((await rowOf(db, a.id))?.status).toBe("trashed");
-    expect(expectOk(await media.trash([a.id, b.id]))).toEqual({ ids: [a.id, b.id], unchanged: [a.id], skipped: [] });
+    expect(expectOk(await media.trash([a.id, b.id]))).toEqual({ ids: [a.id, b.id], unchanged: [a.id], skipped: [], versions: { [a.id]: 1, [b.id]: 1 } });
   });
 
   it("a repeated restore hands every id that is ready on in ids, also those the failed run already brought back", async () => {
@@ -167,7 +167,7 @@ describe("media/default trash and restore repeated after a partial failure", () 
     };
     expectErr(await media.restore([a.id, b.id]), "TRANSIENT");
     expect((await rowOf(db, a.id))?.status).toBe("ready");
-    expect(expectOk(await media.restore([a.id, b.id]))).toEqual({ ids: [a.id, b.id], unchanged: [a.id], skipped: [], renamed: [] });
+    expect(expectOk(await media.restore([a.id, b.id]))).toEqual({ ids: [a.id, b.id], unchanged: [a.id], skipped: [], renamed: [], versions: { [a.id]: 2, [b.id]: 2 } });
   });
 
   it("a repeated trashFolder hands on the items it trashed, also when the folder is gone", async () => {
@@ -175,8 +175,8 @@ describe("media/default trash and restore repeated after a partial failure", () 
     const a = await put(media, "a.png", "trip");
     const b = await put(media, "b.png", "trip/day1");
     expectOk(await media.trashFolder("trip"));
-    expect(expectOk(await media.trashFolder("trip"))).toEqual({ path: "trip", ids: [a.id, b.id], unchanged: [a.id, b.id] });
-    expect(expectOk(await media.trashFolder("trip/day1"))).toEqual({ path: "trip/day1", ids: [b.id], unchanged: [b.id] });
+    expect(expectOk(await media.trashFolder("trip"))).toEqual({ path: "trip", ids: [a.id, b.id], unchanged: [a.id, b.id], versions: { [a.id]: 1, [b.id]: 1 } });
+    expect(expectOk(await media.trashFolder("trip/day1"))).toEqual({ path: "trip/day1", ids: [b.id], unchanged: [b.id], versions: { [b.id]: 1 } });
   });
 
   it("a trashFolder repeated after a public copy could not be removed hands on the items the failed run trashed", async () => {
@@ -217,7 +217,7 @@ describe("media/default trash and restore repeated after a partial failure", () 
       return deleteMany(collection, filter);
     };
     expectErr(await media.trashFolder("trip"), "TRANSIENT");
-    expect(expectOk(await media.trashFolder("trip"))).toEqual({ path: "trip", ids: [a.id, b.id], unchanged: [a.id, b.id] });
+    expect(expectOk(await media.trashFolder("trip"))).toEqual({ path: "trip", ids: [a.id, b.id], unchanged: [a.id, b.id], versions: { [a.id]: 1, [b.id]: 1 } });
     expect(expectOk(await media.folders())).toEqual([]);
   });
 });
@@ -288,7 +288,7 @@ describe("media/default trash: the name is free at once", () => {
     expect(second.id).not.toBe(first.id);
 
     const restored = expectOk(await media.restore([first.id]));
-    expect(restored).toEqual({ ids: [first.id], unchanged: [], skipped: [], renamed: [{ id: first.id, from: "photo.png", to: "photo-2.png" }] });
+    expect(restored).toEqual({ ids: [first.id], unchanged: [], skipped: [], renamed: [{ id: first.id, from: "photo.png", to: "photo-2.png" }], versions: { [first.id]: 2 } });
     const back = expectOk(await media.get(first.id));
     expect(back).toMatchObject({ filename: "photo-2.png", folder: "album", key: first.key, location: "album/photo-2.png" });
     expect(media.toPublicItem(back!).path).toBe(media.toPublicItem(first).path);
@@ -317,7 +317,7 @@ describe("media/default restore", () => {
     expectOk(await media.removeFolder("deep"));
     expect(expectOk(await db.count(FOLDERS, {}))).toBe(0);
 
-    expect(expectOk(await media.restore([item.id]))).toEqual({ ids: [item.id], unchanged: [], skipped: [], renamed: [] });
+    expect(expectOk(await media.restore([item.id]))).toEqual({ ids: [item.id], unchanged: [], skipped: [], renamed: [], versions: { [item.id]: 2 } });
     const back = expectOk(await media.get(item.id, "en"));
     expect(back).toMatchObject({ id: item.id, key: item.key, filename: "a.png", folder: "deep/er", location: "deep/er/a.png", status: "ready", alt: "A picture", provenance: { origin: "ai", tool: "painter" }, trashedAt: null });
     expect(expectOk(await media.get(item.id, "de"))?.alt).toBe("Ein Bild");
@@ -330,7 +330,7 @@ describe("media/default restore", () => {
     const { media, blobs } = await setup();
     const item = await put(media, "a.png");
     blobs.blobs.delete(copyKeyOf(item.id, item.filename));
-    expect(expectOk(await media.restore([item.id, "no-such-id"]))).toEqual({ ids: [item.id], unchanged: [item.id], skipped: [{ id: "no-such-id", reason: "not_found" }], renamed: [] });
+    expect(expectOk(await media.restore([item.id, "no-such-id"]))).toEqual({ ids: [item.id], unchanged: [item.id], skipped: [{ id: "no-such-id", reason: "not_found" }], renamed: [], versions: { [item.id]: 0 } });
     expect(blobs.blobs.has(copyKeyOf(item.id, item.filename))).toBe(true);
   });
 
@@ -363,7 +363,7 @@ describe("media/default restore around other writes", () => {
     blobs.put = putBlob;
     expect(expectOk(await db.count(COLLECTION, { location: "box/a.png", status: "failed" }))).toBe(1);
 
-    expect(expectOk(await media.restore([item.id]))).toEqual({ ids: [item.id], unchanged: [], skipped: [], renamed: [] });
+    expect(expectOk(await media.restore([item.id]))).toEqual({ ids: [item.id], unchanged: [], skipped: [], renamed: [], versions: { [item.id]: 2 } });
     expect(expectOk(await media.get(item.id))).toMatchObject({ filename: "a.png", location: "box/a.png" });
     expect(expectOk(await media.list({ folder: "box" })).items.map((i) => i.id)).toEqual([item.id]);
   });
@@ -540,7 +540,7 @@ describe("media/default folders around trashed items", () => {
     const other = await put(media, "c.png", "tripping");
     clock.now = 4_000;
     const trashed = expectOk(await media.trashFolder("trip"));
-    expect(trashed).toEqual({ path: "trip", ids: [a.id, b.id], unchanged: [] });
+    expect(trashed).toEqual({ path: "trip", ids: [a.id, b.id], unchanged: [], versions: { [a.id]: 1, [b.id]: 1 } });
     expect(expectOk(await media.folders()).map((f) => f.folder)).toEqual(["tripping"]);
     expect(expectOk(await db.count(FOLDERS, { path: { like: "trip/%" } }))).toBe(0);
     expect(expectOk(await media.listTrash()).items.map((i) => [i.id, i.trashedAt]).sort()).toEqual([[a.id, 4_000], [b.id, 4_000]].sort());
@@ -561,7 +561,7 @@ describe("media/default trashFolder with items that are not ready", () => {
     expectOk(await db.updateMany(COLLECTION, { id: failed.id }, { status: "failed" }));
     expectOk(await db.updateMany(COLLECTION, { id: abandoned.id }, { status: "uploading", updatedAt: clock.now }));
     clock.now += CONFIG.uploadStaleAfterMs;
-    expect(expectOk(await media.trashFolder("shoot"))).toEqual({ path: "shoot", ids: [ready.id], unchanged: [] });
+    expect(expectOk(await media.trashFolder("shoot"))).toEqual({ path: "shoot", ids: [ready.id], unchanged: [], versions: { [ready.id]: 1 } });
     expect(await rowOf(db, failed.id)).toBeNull();
     expect(await rowOf(db, abandoned.id)).toBeNull();
     expect(blobs.blobs.has(failed.key)).toBe(false);

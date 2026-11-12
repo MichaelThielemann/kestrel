@@ -103,4 +103,52 @@ describe("images/default with a media-default item in the trash", () => {
     expect(expectOk(await store.count(HIDDEN, { mediaId: item.id }))).toBe(0);
     expect([...blobs.blobs.keys()].filter((key) => key.includes(item.id))).toEqual([]);
   });
+
+  it("leaves an item hidden when a restore's show arrives after a later trash's hide", async () => {
+    const store = createFakePersistence();
+    const blobs = memoryBlobs();
+    const media = await createMediaDefault(MEDIA_CONFIG, blobs, store, quiet);
+    const images = await createImages(IMAGES_CONFIG, { blobs, db: store, media, logger: quiet, render: renderer });
+    const photo = await sharp({ create: { width: 64, height: 48, channels: 3, background: "#668844" } }).jpeg().toBuffer();
+    const item = expectOk(await media.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: photo })).item;
+    expectOk(await images.generate(item.id));
+    const first = expectOk(await media.trash([item.id]));
+    expectOk(await images.hide(first.ids, first.versions));
+
+    const restored = expectOk(await media.restore([item.id]));
+    const trashedAgain = expectOk(await media.trash([item.id]));
+    expectOk(await images.hide(trashedAgain.ids, trashedAgain.versions));
+    expectOk(await images.show(restored.ids, restored.versions));
+
+    const publicVariant = `site/media/${item.id}/variants/thumb.webp`;
+    expect(expectOk(await media.get(item.id))).toBeNull();
+    expect(expectOk(await images.read(item.id, "thumb.webp"))).toBeNull();
+    expect(blobs.blobs.has(publicVariant)).toBe(false);
+    expectOk(await images.syncPublic());
+    expect(blobs.blobs.has(publicVariant)).toBe(false);
+    await images.close();
+  });
+
+  it("leaves an item shown when a trash's hide arrives after a later restore's show", async () => {
+    const store = createFakePersistence();
+    const blobs = memoryBlobs();
+    const media = await createMediaDefault(MEDIA_CONFIG, blobs, store, quiet);
+    const images = await createImages(IMAGES_CONFIG, { blobs, db: store, media, logger: quiet, render: renderer });
+    const photo = await sharp({ create: { width: 64, height: 48, channels: 3, background: "#448866" } }).jpeg().toBuffer();
+    const item = expectOk(await media.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: photo })).item;
+    expectOk(await images.generate(item.id));
+
+    const trashed = expectOk(await media.trash([item.id]));
+    const restored = expectOk(await media.restore([item.id]));
+    expectOk(await images.show(restored.ids, restored.versions));
+    expectOk(await images.hide(trashed.ids, trashed.versions));
+
+    const publicVariant = `site/media/${item.id}/variants/thumb.webp`;
+    expect(expectOk(await media.get(item.id))).not.toBeNull();
+    expect(expectOk(await images.read(item.id, "thumb.webp"))).toMatchObject({ variant: "done", fallback: false });
+    expect(blobs.blobs.has(publicVariant)).toBe(true);
+    expectOk(await images.syncPublic());
+    expect(blobs.blobs.has(publicVariant)).toBe(true);
+    await images.close();
+  });
 });

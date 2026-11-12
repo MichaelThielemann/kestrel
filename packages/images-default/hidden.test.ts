@@ -124,7 +124,7 @@ describe("images/default hidden items", () => {
     expect(copiesOf(w.blobs, "a")).toEqual(["site/media/a/variants/hero.jpg", "site/media/a/variants/thumb.webp"]);
     expect(w.blobs.blobs.get("site/media/a/variants/thumb.webp")?.data).toEqual(RENDERED);
     expect(expectOk(await images.read("a", "thumb.webp"))).toMatchObject({ variant: "done", fallback: false });
-    expect(expectOk(await w.db.count(HIDDEN, {}))).toBe(0);
+    expect(expectOk(await w.db.count(HIDDEN, { hidden: true }))).toBe(0);
     await images.close();
   });
 
@@ -323,6 +323,23 @@ describe("images/default hideMany, showMany and attach steps", () => {
     const shown = expectOk(await steps.showMany(ctxWith(result)));
     expect(shown.result).toEqual(result);
     expect(copiesOf(w.blobs, "a")).toHaveLength(2);
+    await images.close();
+  });
+
+  it("hideMany and showMany leave an id alone whose result.versions entry a later move overtook", async () => {
+    const w = await world();
+    const images = await rendered(w);
+    const steps = boundaryCast<Steps>(module.steps!(images), "host");
+
+    expectOk(await steps.hideMany(ctxWith({ ids: ["a"], versions: { a: 3 } })));
+    expectOk(await steps.showMany(ctxWith({ ids: ["a"], versions: { a: 2 } })));
+    expect(copiesOf(w.blobs, "a")).toEqual([]);
+    expect(expectOk(await images.hidden(["a"])).has("a")).toBe(true);
+
+    expectOk(await steps.showMany(ctxWith({ ids: ["a"], versions: { a: 4 } })));
+    expectOk(await steps.hideMany(ctxWith({ ids: ["a"], versions: { a: 3 } })));
+    expect(copiesOf(w.blobs, "a")).toHaveLength(2);
+    expect(expectOk(await images.hidden(["a"])).has("a")).toBe(false);
     await images.close();
   });
 

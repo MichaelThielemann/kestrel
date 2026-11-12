@@ -69,10 +69,13 @@ export interface Retired extends Document {
   retiredAt: number;
 }
 
-/** A media item whose variants have no public copies and are not served or exported until it is shown again. */
+/** Whether a media item's variants are hidden: without public copies, not served and not exported until it is shown again. */
 export interface Hidden extends Document {
   mediaId: string;
-  hiddenAt: number;
+  hidden: boolean;
+  /** The trash version of the move that set `hidden`; a hide or show with a lower version is ignored. */
+  version: number;
+  updatedAt: number;
 }
 
 export interface Job extends Document {
@@ -150,10 +153,10 @@ export interface Images {
   publicPath(mediaId: string, variant: Variant): string;
   publicCopyEnabled(): boolean;
   syncPublic(): Promise<Result<PublicSync, KestrelError>>;
-  /** Withdraws the public copies of each known item's variants and retired paths; they are not served, exported or copied again until {@link Images.show}. Rows and private variants stay. Unknown ids are ignored. */
-  hide(mediaIds: string[]): Promise<Result<void, KestrelError>>;
-  /** Lifts {@link Images.hide} and writes the public copies of each item again. */
-  show(mediaIds: string[]): Promise<Result<void, KestrelError>>;
+  /** Withdraws the public copies of each known item's variants and retired paths; they are not served, exported or copied again until {@link Images.show}. Rows and private variants stay. Unknown ids are ignored. With `versions` (the media item's trash version per id), an id whose last hide or show carried a higher version is left alone, so the move that happened last decides. */
+  hide(mediaIds: string[], versions?: Readonly<Record<string, number>>): Promise<Result<void, KestrelError>>;
+  /** Lifts {@link Images.hide} and writes the public copies of each item again; `versions` as for {@link Images.hide}. */
+  show(mediaIds: string[], versions?: Readonly<Record<string, number>>): Promise<Result<void, KestrelError>>;
   /** The ids among `mediaIds` that are hidden. */
   hidden(mediaIds: string[]): Promise<Result<Set<string>, KestrelError>>;
   attach(kestrel: Introspection): void;
@@ -238,7 +241,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     [VARIANTS, { mediaId: "string", size: "string", slot: { type: "string", unique: true }, spec: "string", width: "number", height: "number", format: "string", key: "string", bytes: "number", state: "string", error: "json", attempts: "number", updatedAt: "number" }],
     [JOBS, { state: "string", total: "number", done: "number", failed: "number", cursor: "string", startedAt: "number", updatedAt: "number", finishedAt: "json", error: "json" }],
     [RETIRED, { mediaId: "string", file: "string", slot: { type: "string", unique: true }, retiredAt: "number" }],
-    [HIDDEN, { mediaId: { type: "string", unique: true }, hiddenAt: "number" }],
+    [HIDDEN, { mediaId: { type: "string", unique: true }, hidden: "boolean", version: "number", updatedAt: "number" }],
   ];
   for (const [collection, schema] of collections) {
     const prepared = await db.ensureCollection(collection, schema);
@@ -386,18 +389,40 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   }
 
   async function isHidden(mediaId: string): Promise<Result<boolean, KestrelError>> {
-    const marked = await db.count(HIDDEN, { mediaId });
+    const marked = await db.count(HIDDEN, { mediaId, hidden: true });
     return isErr(marked) ? marked : ok(marked.value > 0);
   }
 
   async function hiddenAmong(mediaIds: string[]): Promise<Result<Set<string>, KestrelError>> {
     const found = new Set<string>();
     for (let i = 0; i < mediaIds.length; i += EVENT_CHUNK) {
-      const page = await db.findMany<Hidden>(HIDDEN, { mediaId: { in: mediaIds.slice(i, i + EVENT_CHUNK) } }, { limit: EVENT_CHUNK });
+      const page = await db.findMany<Hidden>(HIDDEN, { mediaId: { in: mediaIds.slice(i, i + EVENT_CHUNK) }, hidden: true }, { limit: EVENT_CHUNK });
       if (isErr(page)) return page;
       for (const row of page.value.items) found.add(row.mediaId);
     }
     return ok(found);
+  }
+
+  async function markHidden(mediaId: string, hidden: boolean, version: number | undefined): Promise<Result<boolean, KestrelError>> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const found = await db.findOne<Hidden>(HIDDEN, { mediaId });
+      if (isErr(found)) return found;
+      const row = found.value;
+      if (row === null) {
+        if (!hidden && version === undefined) return ok(true);
+        const created = await db.createOne<Hidden>(HIDDEN, { mediaId, hidden, version: version ?? 0, updatedAt: now() });
+        if (isErr(created)) {
+          if (created.error.code === "CONFLICT") continue;
+          return created;
+        }
+        return ok(true);
+      }
+      if (version !== undefined && version < row.version) return ok(false);
+      const updated = await db.updateMany<Hidden>(HIDDEN, { id: row.id, hidden: row.hidden, version: row.version }, { hidden, version: version ?? row.version, updatedAt: now() });
+      if (isErr(updated)) return updated;
+      if (updated.value > 0) return ok(true);
+    }
+    return err(failure("TRANSIENT", `images: media/${mediaId} was hidden and shown at the same time – hide or show it again`));
   }
 
   async function putCopy(mediaId: string, file: string, data: Uint8Array, contentType: string): Promise<Result<boolean, KestrelError>> {
@@ -1524,7 +1549,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
 
       const hidden = new Set<string>();
       const suspects = new Set<string>();
-      const surveyedHidden = await eachRow<Hidden>(HIDDEN, {}, async (row) => {
+      const surveyedHidden = await eachRow<Hidden>(HIDDEN, { hidden: true }, async (row) => {
         hidden.add(row.mediaId);
         if (!ready.has(row.mediaId)) suspects.add(row.mediaId);
         return ok(undefined);
@@ -1639,13 +1664,14 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       return ok({ written, removed, planned, missing });
     },
 
-    async hide(mediaIds) {
+    async hide(mediaIds, versions) {
       for (const mediaId of new Set(mediaIds)) {
         const media = await readMedia(mediaId);
         if (isErr(media)) return media;
         if (media.value === null) continue;
-        const marked = await db.createOne<Hidden>(HIDDEN, { mediaId, hiddenAt: now() });
-        if (isErr(marked) && marked.error.code !== "CONFLICT") return marked;
+        const marked = await markHidden(mediaId, true, versions?.[mediaId]);
+        if (isErr(marked)) return marked;
+        if (!marked.value) continue;
         const withdrawn = await exclusive(mediaId, async (): Promise<Result<number, KestrelError>> => {
           const still = await isHidden(mediaId);
           if (isErr(still)) return still;
@@ -1656,12 +1682,16 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       return ok(undefined);
     },
 
-    async show(mediaIds) {
+    async show(mediaIds, versions) {
       for (const mediaId of new Set(mediaIds)) {
-        const unmarked = await db.deleteMany(HIDDEN, { mediaId });
+        const unmarked = await markHidden(mediaId, false, versions?.[mediaId]);
         if (isErr(unmarked)) return unmarked;
-        if (config.publicCopy === undefined) continue;
-        const rewritten = await exclusive(mediaId, () => writeCopiesOf(mediaId));
+        if (!unmarked.value || config.publicCopy === undefined) continue;
+        const rewritten = await exclusive(mediaId, async (): Promise<Result<void, KestrelError>> => {
+          const hidden = await isHidden(mediaId);
+          if (isErr(hidden)) return hidden;
+          return hidden.value ? ok(undefined) : writeCopiesOf(mediaId);
+        });
         if (isErr(rewritten)) return rewritten;
       }
       return ok(undefined);

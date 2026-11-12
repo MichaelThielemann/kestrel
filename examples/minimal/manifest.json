@@ -5530,12 +5530,20 @@
                   "reason"
                 ]
               }
+            },
+            "versions": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number"
+              },
+              "description": "per id in ids, the item's trash version after the step; it rises with every move into or out of the trash, and images.hideMany and images.showMany ignore an id whose version a later move overtook"
             }
           },
           "required": [
             "ids",
             "unchanged",
-            "skipped"
+            "skipped",
+            "versions"
           ]
         },
         "errors": {
@@ -5572,12 +5580,20 @@
               "items": {
                 "type": "string"
               }
+            },
+            "versions": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number"
+              },
+              "description": "per id in ids, the item's trash version after the step; it rises with every move into or out of the trash, and images.hideMany and images.showMany ignore an id whose version a later move overtook"
             }
           },
           "required": [
             "path",
             "ids",
-            "unchanged"
+            "unchanged",
+            "versions"
           ]
         },
         "errors": {
@@ -5649,6 +5665,13 @@
                 ]
               }
             },
+            "versions": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number"
+              },
+              "description": "per id in ids, the item's trash version after the step; it rises with every move into or out of the trash, and images.hideMany and images.showMany ignore an id whose version a later move overtook"
+            },
             "renamed": {
               "type": "array",
               "description": "restored items whose display name was taken and that came back as <stem>-<n>.<ext>; key and path are unchanged",
@@ -5677,7 +5700,8 @@
             "ids",
             "unchanged",
             "skipped",
-            "renamed"
+            "renamed",
+            "versions"
           ]
         },
         "errors": {
@@ -5851,7 +5875,7 @@
       "module": "media/default",
       "factory": false,
       "description": {
-        "summary": "Select the trashed items among body.ids into result.ids for media.purge, reporting the others in result.skipped",
+        "summary": "Select the trashed items among body.ids, and those whose purge stopped halfway, into result.ids for media.purge, reporting the others in result.skipped",
         "reads": [],
         "writes": [
           "result"
@@ -6012,7 +6036,7 @@
       "module": "media/default",
       "factory": false,
       "description": {
-        "summary": "Delete trashed items for good, each as media.remove: the ids in result.ids when an earlier step selected them (its result.skipped is kept), otherwise body.ids (at most 200); an id that is not trashed is skipped",
+        "summary": "Delete trashed items for good, each as media.remove: the ids in result.ids when an earlier step selected them (its result.skipped is kept), otherwise body.ids (at most 200); an item whose purge stopped halfway is finished, any other id that is not trashed is skipped",
         "reads": [
           "result.ids?",
           "result.skipped?"
@@ -7419,9 +7443,10 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged",
+        "summary": "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.versions (from the same steps), an id whose variants a later move already showed is left alone",
         "reads": [
-          "result.ids"
+          "result.ids",
+          "result.versions?"
         ],
         "writes": []
       }
@@ -7431,9 +7456,10 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged",
+        "summary": "Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged; with result.versions, an id whose variants a later move already hid stays hidden",
         "reads": [
-          "result.ids"
+          "result.ids",
+          "result.versions?"
         ],
         "writes": []
       }
@@ -16237,7 +16263,7 @@
           "name": "media.purge",
           "module": "media/default",
           "description": {
-            "summary": "Delete trashed items for good, each as media.remove: the ids in result.ids when an earlier step selected them (its result.skipped is kept), otherwise body.ids (at most 200); an id that is not trashed is skipped",
+            "summary": "Delete trashed items for good, each as media.remove: the ids in result.ids when an earlier step selected them (its result.skipped is kept), otherwise body.ids (at most 200); an item whose purge stopped halfway is finished, any other id that is not trashed is skipped",
             "reads": [
               "result.ids?",
               "result.skipped?"
@@ -23109,7 +23135,7 @@
           "name": "media.purge",
           "module": "media/default",
           "description": {
-            "summary": "Delete trashed items for good, each as media.remove: the ids in result.ids when an earlier step selected them (its result.skipped is kept), otherwise body.ids (at most 200); an id that is not trashed is skipped",
+            "summary": "Delete trashed items for good, each as media.remove: the ids in result.ids when an earlier step selected them (its result.skipped is kept), otherwise body.ids (at most 200); an item whose purge stopped halfway is finished, any other id that is not trashed is skipped",
             "reads": [
               "result.ids?",
               "result.skipped?"
@@ -23255,7 +23281,7 @@
           "name": "media.selectTrash",
           "module": "media/default",
           "description": {
-            "summary": "Select the trashed items among body.ids into result.ids for media.purge, reporting the others in result.skipped",
+            "summary": "Select the trashed items among body.ids, and those whose purge stopped halfway, into result.ids for media.purge, reporting the others in result.skipped",
             "reads": [],
             "writes": [
               "result"
@@ -23371,7 +23397,7 @@
           "name": "media.purge",
           "module": "media/default",
           "description": {
-            "summary": "Delete trashed items for good, each as media.remove: the ids in result.ids when an earlier step selected them (its result.skipped is kept), otherwise body.ids (at most 200); an id that is not trashed is skipped",
+            "summary": "Delete trashed items for good, each as media.remove: the ids in result.ids when an earlier step selected them (its result.skipped is kept), otherwise body.ids (at most 200); an item whose purge stopped halfway is finished, any other id that is not trashed is skipped",
             "reads": [
               "result.ids?",
               "result.skipped?"
@@ -26145,6 +26171,13 @@
                     ]
                   }
                 },
+                "versions": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "number"
+                  },
+                  "description": "per id in ids, the item's trash version after the step; it rises with every move into or out of the trash, and images.hideMany and images.showMany ignore an id whose version a later move overtook"
+                },
                 "renamed": {
                   "type": "array",
                   "description": "restored items whose display name was taken and that came back as <stem>-<n>.<ext>; key and path are unchanged",
@@ -26173,7 +26206,8 @@
                 "ids",
                 "unchanged",
                 "skipped",
-                "renamed"
+                "renamed",
+                "versions"
               ]
             },
             "errors": {
@@ -26186,9 +26220,10 @@
           "name": "images.showMany",
           "module": "images/default",
           "description": {
-            "summary": "Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged",
+            "summary": "Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged; with result.versions, an id whose variants a later move already hid stays hidden",
             "reads": [
-              "result.ids"
+              "result.ids",
+              "result.versions?"
             ],
             "writes": []
           }
@@ -28659,12 +28694,20 @@
                       "reason"
                     ]
                   }
+                },
+                "versions": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "number"
+                  },
+                  "description": "per id in ids, the item's trash version after the step; it rises with every move into or out of the trash, and images.hideMany and images.showMany ignore an id whose version a later move overtook"
                 }
               },
               "required": [
                 "ids",
                 "unchanged",
-                "skipped"
+                "skipped",
+                "versions"
               ]
             },
             "errors": {
@@ -28677,9 +28720,10 @@
           "name": "images.hideMany",
           "module": "images/default",
           "description": {
-            "summary": "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged",
+            "summary": "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.versions (from the same steps), an id whose variants a later move already showed is left alone",
             "reads": [
-              "result.ids"
+              "result.ids",
+              "result.versions?"
             ],
             "writes": []
           }
@@ -28861,12 +28905,20 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "versions": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "number"
+                  },
+                  "description": "per id in ids, the item's trash version after the step; it rises with every move into or out of the trash, and images.hideMany and images.showMany ignore an id whose version a later move overtook"
                 }
               },
               "required": [
                 "path",
                 "ids",
-                "unchanged"
+                "unchanged",
+                "versions"
               ]
             },
             "errors": {
@@ -28880,9 +28932,10 @@
           "name": "images.hideMany",
           "module": "images/default",
           "description": {
-            "summary": "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged",
+            "summary": "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.versions (from the same steps), an id whose variants a later move already showed is left alone",
             "reads": [
-              "result.ids"
+              "result.ids",
+              "result.versions?"
             ],
             "writes": []
           }

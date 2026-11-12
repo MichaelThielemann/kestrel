@@ -57,6 +57,8 @@ export interface MediaItem extends Document {
   svgSanitized: boolean;
   /** The time of the move to the trash; `null` unless the item is trashed. */
   trashedAt: number | null;
+  /** Rises by one with every move of the item into or out of the trash; `null` for an item that was never moved. */
+  trashVersion: number | null;
 }
 
 /** The item's public shape: no storage key, checksum, status or location. */
@@ -121,6 +123,8 @@ export interface TrashOutcome {
 /** The outcome of a trash or restore: `ids` holds every id that is in the target state afterwards, so a repeated call hands on the ids an earlier, failed call already moved; `unchanged` names those among them that were in that state before. */
 export interface MoveOutcome extends TrashOutcome {
   unchanged: string[];
+  /** The `trashVersion` of each id in `ids` after the step (`0` for an item never moved), so `images.hide`/`images.show` can ignore a move a later one overtook. */
+  versions: Record<string, number>;
 }
 
 /** A restore also names every item that came back under another display name because its own was taken. */
@@ -262,7 +266,7 @@ export interface Media extends MediaFiles {
   /** Moves ready items to the trash: the library no longer shows them, their name is free and their public copy is removed, while media@1 still reads them as ready. */
   trash(ids: string[]): Promise<Result<MoveOutcome, MediaError>>;
   /** Trashes every ready item in a folder's subtree, deletes its failed and abandoned uploads, and drops the folder rows of that subtree; an upload still under way stays. Items of the subtree already in the trash are handed on in `ids` and named in `unchanged`, so a repeated call reaches them again even when the folder is gone. `null` for a path with neither a folder nor a trashed item. */
-  trashFolder(path: string): Promise<Result<{ path: string; ids: string[]; unchanged: string[] } | null, MediaError>>;
+  trashFolder(path: string): Promise<Result<{ path: string; ids: string[]; unchanged: string[]; versions: Record<string, number> } | null, MediaError>>;
   /** Brings trashed items back as they were, recreating their folder and public copy; a taken name becomes `<stem>-<n>.<ext>`, the key and public path never change. */
   restore(ids: string[]): Promise<Result<RestoreOutcome, MediaError>>;
   /** The trashed items, most recently trashed first. */
@@ -488,7 +492,7 @@ function copyKeyOf(config: Pick<Config, "publicPath" | "publicCopy">, id: string
 export async function createMediaDefault(config: Config, blobs: Blobstore, db: Persistence, logger: Logger, now: () => number = Date.now): Promise<Media> {
   const items = await db.ensureCollection(COLLECTION, {
     filename: "string", folder: "string", location: { type: "string", unique: true }, contentType: "string", size: "number", key: { type: "string", unique: true }, checksum: "string", status: "string", createdAt: "number", updatedAt: "number",
-    provenance: "json", width: "number", height: "number", alt: "json", title: "json", description: "json", svgSanitized: "boolean", trashedAt: "number",
+    provenance: "json", width: "number", height: "number", alt: "json", title: "json", description: "json", svgSanitized: "boolean", trashedAt: "number", trashVersion: "number",
   });
   if (isErr(items)) throw new Error(`media/default: cannot prepare collection "${COLLECTION}": ${items.error.message}`);
   const folders = await db.ensureCollection(FOLDERS, { path: "string", createdAt: "number" });
@@ -654,7 +658,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     return ok(locale);
   };
   const resolveWith = (row: Record<string, unknown>, key: string): MediaItem => {
-    const item: Record<string, unknown> = { ...row, provenance: row.provenance ?? { origin: "unknown" }, updatedAt: row.updatedAt ?? row.createdAt, width: row.width ?? null, height: row.height ?? null, checksum: row.checksum ?? null, svgSanitized: row.svgSanitized === true, trashedAt: row.trashedAt ?? null };
+    const item: Record<string, unknown> = { ...row, provenance: row.provenance ?? { origin: "unknown" }, updatedAt: row.updatedAt ?? row.createdAt, width: row.width ?? null, height: row.height ?? null, checksum: row.checksum ?? null, svgSanitized: row.svgSanitized === true, trashedAt: row.trashedAt ?? null, trashVersion: row.trashVersion ?? null };
     for (const field of TEXT_FIELDS) {
       const texts = boundaryCast<Texts | null | undefined>(row[field], "host");
       item[field] = texts?.[key] ?? null;
@@ -801,7 +805,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     if (isErr(still)) return still;
     return still.value === null ? blobs.remove(key) : ok();
   };
-  const bringBackInto = async (item: MediaItem): Promise<Result<string | null | MediaItem, MediaError>> => {
+  const bringBackInto = async (item: MediaItem): Promise<Result<{ filename: string; version: number } | { changed: MediaItem } | null, MediaError>> => {
     const folderReady = await ensureFolder(item.folder);
     if (isErr(folderReady)) return folderReady;
     for (let attempt = 1; attempt <= MAX_SUFFIX; attempt += 1) {
@@ -812,26 +816,44 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       const taken = await locationTaken(location, item.id);
       if (isErr(taken)) return taken;
       if (taken.value) continue;
-      const restored = await db.updateMany<Document>(COLLECTION, { id: item.id, status: TRASHED, folder: item.folder }, { status: "ready", trashedAt: null, location, filename, updatedAt: now() });
+      const version = (item.trashVersion ?? 0) + 1;
+      const restored = await db.updateMany<Document>(COLLECTION, { id: item.id, status: TRASHED, folder: item.folder, trashVersion: item.trashVersion }, { status: "ready", trashedAt: null, location, filename, updatedAt: now(), trashVersion: version });
       if (isErr(restored)) {
         if (restored.error.code === "CONFLICT") continue;
         return restored;
       }
-      if (restored.value > 0) return ok(filename);
+      if (restored.value > 0) return ok({ filename, version });
       const again = await db.findOne<MediaItem>(COLLECTION, { id: item.id });
       if (isErr(again)) return again;
-      return ok(again.value?.status === TRASHED ? again.value : null);
+      return ok(again.value?.status === TRASHED ? { changed: again.value } : null);
     }
     return err(locationConflict(keyFor(item.folder, item.filename)));
   };
-  const bringBack = async (read: MediaItem): Promise<Result<string | null, MediaError>> => {
+  const bringBack = async (read: MediaItem): Promise<Result<{ filename: string; version: number } | null, MediaError>> => {
     let item = read;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const back = await bringBackInto(item);
-      if (isErr(back) || back.value === null || typeof back.value === "string") return isErr(back) ? back : ok(back.value);
-      item = back.value;
+      if (isErr(back)) return back;
+      const outcome = back.value;
+      if (outcome === null || !("changed" in outcome)) return ok(outcome);
+      item = outcome.changed;
     }
-    return err(failure("TRANSIENT", `media/default: the folder of ${read.id} kept changing while it was restored – restore it again`));
+    return err(failure("TRANSIENT", `media/default: ${read.id} kept changing while it was restored – restore it again`));
+  };
+  const trashOne = async (id: string): Promise<Result<{ item: MediaItem; version: number; unchanged: boolean } | null, MediaError>> => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const found = await db.findOne<MediaItem>(COLLECTION, { id });
+      if (isErr(found)) return found;
+      const item = found.value;
+      if (item === null || (!isReady(item) && item.status !== TRASHED)) return ok(null);
+      if (item.status === TRASHED) return ok({ item, version: item.trashVersion ?? 0, unchanged: true });
+      const at = now();
+      const version = (item.trashVersion ?? 0) + 1;
+      const moved = await db.updateMany<Document>(COLLECTION, { id, ...READY, trashVersion: item.trashVersion }, { status: TRASHED, trashedAt: at, location: null, updatedAt: at, trashVersion: version });
+      if (isErr(moved)) return moved;
+      if (moved.value > 0) return ok({ item, version, unchanged: false });
+    }
+    return err(failure("TRANSIENT", `media/default: ${id} kept changing while it was trashed – trash it again`));
   };
 
   const moveToFolder = async (read: MediaItem, folder: string): Promise<Result<void, MediaError>> => {
@@ -1234,31 +1256,18 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       return ok({ ok: true, removed: ids.length, ids });
     },
     async trash(ids) {
-      const outcome: MoveOutcome = { ids: [], unchanged: [], skipped: [] };
+      const outcome: MoveOutcome = { ids: [], unchanged: [], skipped: [], versions: {} };
       for (const id of new Set(ids)) {
-        const found = await db.findOne<MediaItem>(COLLECTION, { id });
-        if (isErr(found)) return found;
-        const item = found.value;
-        if (item === null || (!isReady(item) && item.status !== TRASHED)) {
+        const moved = await trashOne(id);
+        if (isErr(moved)) return moved;
+        if (moved.value === null) {
           outcome.skipped.push({ id, reason: "not_found" });
           continue;
         }
-        if (isReady(item)) {
-          const at = now();
-          const moved = await db.updateMany<Document>(COLLECTION, { id, ...READY }, { status: TRASHED, trashedAt: at, location: null, updatedAt: at });
-          if (isErr(moved)) return moved;
-          if (moved.value === 0) {
-            const again = await db.findOne<MediaItem>(COLLECTION, { id });
-            if (isErr(again)) return again;
-            if (again.value?.status !== TRASHED) {
-              outcome.skipped.push({ id, reason: "not_found" });
-              continue;
-            }
-            outcome.unchanged.push(id);
-          }
-        } else outcome.unchanged.push(id);
+        if (moved.value.unchanged) outcome.unchanged.push(id);
         outcome.ids.push(id);
-        const dropped = await dropCopy(item);
+        outcome.versions[id] = moved.value.version;
+        const dropped = await dropCopy(moved.value.item);
         if (isErr(dropped)) return dropped;
         const restoredMeanwhile = await writeCopy(id);
         if (isErr(restoredMeanwhile)) return restoredMeanwhile;
@@ -1294,10 +1303,10 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         const removedSubfolders = await db.deleteMany(FOLDERS, { id: { in: subfolderIds } });
         if (isErr(removedSubfolders)) return removedSubfolders;
       }
-      return ok({ path: clean.value, ids: trashed.value.ids, unchanged: trashed.value.unchanged });
+      return ok({ path: clean.value, ids: trashed.value.ids, unchanged: trashed.value.unchanged, versions: trashed.value.versions });
     },
     async restore(ids) {
-      const outcome: RestoreOutcome = { ids: [], unchanged: [], skipped: [], renamed: [] };
+      const outcome: RestoreOutcome = { ids: [], unchanged: [], skipped: [], renamed: [], versions: {} };
       for (const id of new Set(ids)) {
         const found = await db.findOne<MediaItem>(COLLECTION, { id });
         if (isErr(found)) return found;
@@ -1306,6 +1315,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
           outcome.skipped.push({ id, reason: "not_found" });
           continue;
         }
+        let version = item.trashVersion ?? 0;
         if (item.status === TRASHED) {
           const back = await bringBack(item);
           if (isErr(back)) return back;
@@ -1317,9 +1327,14 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
               continue;
             }
             outcome.unchanged.push(id);
-          } else if (back.value !== item.filename) outcome.renamed.push({ id, from: item.filename, to: back.value });
+            version = again.value.trashVersion ?? 0;
+          } else {
+            version = back.value.version;
+            if (back.value.filename !== item.filename) outcome.renamed.push({ id, from: item.filename, to: back.value.filename });
+          }
         } else outcome.unchanged.push(id);
         outcome.ids.push(id);
+        outcome.versions[id] = version;
         const copied = await writeCopy(id);
         if (isErr(copied)) return copied;
       }
