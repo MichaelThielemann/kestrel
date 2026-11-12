@@ -501,3 +501,113 @@ describe("images/default publicCopy: a TRANSIENT failure at each call of a delet
     );
   });
 });
+
+describe("images/default publicCopy: writers of a hidden item", { timeout: 60_000 }, () => {
+  const copyPuts = new WeakMap<World, string[]>();
+
+  function hidden(make: () => Promise<World>): () => Promise<World> {
+    return async () => {
+      const w = await make();
+      expectOk(await w.writer.hide([w.id]));
+      const keys: string[] = [];
+      const put = w.blobs.put.bind(w.blobs);
+      w.blobs.put = async (key, data, options) => {
+        if (key.startsWith(`site/media/${w.id}/variants/`)) keys.push(key);
+        return put(key, data, options);
+      };
+      copyPuts.set(w, keys);
+      return w;
+    };
+  }
+
+  async function placedWithReformatElsewhere(): Promise<World> {
+    const w = await openWorld();
+    w.id = await upload(w);
+    expectOk(await w.writer.plan([w.id]));
+    const other = await createImages({ ...IMAGES_CONFIG, sizes: [THUMB, { ...HERO, format: "webp" }] }, { blobs: w.blobs, db: w.db, media: w.media, logger: noLogger, render: renderer }, () => 1000);
+    return gated({ ...w, deleter: other });
+  }
+
+  const writesNoCopy = async (w: World, label: string): Promise<void> => {
+    await settle(w);
+    expect(copyPuts.get(w), label).toEqual([]);
+    expect([...w.blobs.blobs.keys()].filter((key) => key.startsWith(`site/media/${w.id}/variants/`)), label).toEqual([]);
+  };
+
+  it("a render writes no copy whichever gap of it a plan in another process lands in", async () => {
+    await forEveryGap(hidden(placed), generateByWriter, planByOther, writesNoCopy);
+  });
+
+  it("a plan writes no placeholder whichever gap of it a render in another process lands in", async () => {
+    await forEveryGap(hidden(uploaded), planByWriter, generateByOther, writesNoCopy);
+  });
+
+  it("a render writes no copy at a retired path whichever gap of it a format change in another process lands in", async () => {
+    await forEveryGap(hidden(placedWithReformatElsewhere), generateByWriter, planByOther, writesNoCopy);
+  });
+
+  it("a format change writes no copy at the retired path whichever gap of it a render in another process lands in", async () => {
+    await forEveryGap(hidden(placedWithReformatElsewhere), planByOther, generateByWriter, writesNoCopy);
+  });
+
+  async function renderedAndHidden(): Promise<World> {
+    const w = await openWorld();
+    w.id = await upload(w);
+    expectOk(await w.writer.plan([w.id]));
+    expectOk(await w.writer.generate(w.id));
+    expectOk(await w.writer.hide([w.id]));
+    return gated(w);
+  }
+  async function renderedWithCopiesMissing(): Promise<World> {
+    const w = await openWorld();
+    w.id = await upload(w);
+    expectOk(await w.writer.plan([w.id]));
+    expectOk(await w.writer.generate(w.id));
+    for (const key of [...w.blobs.blobs.keys()]) if (key.startsWith(`site/media/${w.id}/variants/`)) w.blobs.blobs.delete(key);
+    return gated(w);
+  }
+  const showByWriter: Op = async (w) => {
+    expectOk(await w.writer.show([w.id]));
+  };
+  const hideByOther: Op = async (w) => {
+    expectOk(await w.deleter.hide([w.id]));
+  };
+  const hiddenMeansNoCopy = async (w: World, label: string): Promise<void> => {
+    await settle(w);
+    expect(expectOk(await w.writer.hidden([w.id])).has(w.id), label).toBe(true);
+    expect([...w.blobs.blobs.keys()].filter((key) => key.startsWith(`site/media/${w.id}/variants/`)), label).toEqual([]);
+  };
+
+  it("a show leaves no copy once a hide in another process has marked the item, whichever gap of the show it lands in", async () => {
+    await forEveryGap(renderedAndHidden, showByWriter, hideByOther, async (w, label) => {
+      await settle(w);
+      if (!expectOk(await w.writer.hidden([w.id])).has(w.id)) return;
+      await hiddenMeansNoCopy(w, label);
+    });
+  });
+
+  it("a sync leaves no copy of an item a hide in another process marked, whichever gap of the sync it lands in", async () => {
+    await forEveryGap(renderedWithCopiesMissing, syncByWriter, hideByOther, hiddenMeansNoCopy);
+  });
+
+  it("a show leaves no copy once a format change and a hide in another process landed in it, whichever gap of the show they land in", async () => {
+    const make = async (): Promise<World> => {
+      const w = await openWorld();
+      w.id = await upload(w);
+      expectOk(await w.writer.plan([w.id]));
+      expectOk(await w.writer.generate(w.id));
+      expectOk(await w.writer.hide([w.id]));
+      const other = await createImages({ ...IMAGES_CONFIG, sizes: [THUMB, { ...HERO, format: "webp" }] }, { blobs: w.blobs, db: w.db, media: w.media, logger: noLogger, render: renderer }, () => 1000);
+      return gated({ ...w, deleter: other });
+    };
+    const reformatThenHide: Op = async (w) => {
+      expectOk(await w.deleter.plan([w.id]));
+      expectOk(await w.deleter.hide([w.id]));
+    };
+    await forEveryGap(make, showByWriter, reformatThenHide, async (w, label) => {
+      await settle(w);
+      if (!expectOk(await w.writer.hidden([w.id])).has(w.id)) return;
+      await hiddenMeansNoCopy(w, label);
+    });
+  });
+});

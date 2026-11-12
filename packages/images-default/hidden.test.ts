@@ -90,6 +90,17 @@ function copiesOf(blobs: MemoryBlobs, mediaId: string): string[] {
   return [...blobs.blobs.keys()].filter((key) => key.startsWith(`site/media/${mediaId}/variants/`)).sort();
 }
 
+function recordCopyPuts(blobs: MemoryBlobs, mediaId: string): { from(): void; keys: string[] } {
+  const put = blobs.put.bind(blobs);
+  let recording = false;
+  const keys: string[] = [];
+  blobs.put = async (key, data, options) => {
+    if (recording && key.startsWith(`site/media/${mediaId}/variants/`)) keys.push(key);
+    return put(key, data, options);
+  };
+  return { from: () => { recording = true; }, keys };
+}
+
 async function rendered(w: World, sizes?: Size[]): Promise<Images> {
   const images = await w.open(sizes);
   for (const id of ["a", "b"]) expectOk(await images.generate(id));
@@ -157,14 +168,18 @@ describe("images/default hidden items", () => {
     };
     const images = await w.open([THUMB, HERO], slow);
     expectOk(await images.plan(["a"]));
+    const puts = recordCopyPuts(w.blobs, "a");
     const generating = images.generate("a");
     await running;
     const hiding = images.hide(["a"]);
+    while (!expectOk(await images.hidden(["a"])).has("a")) await Promise.resolve();
+    puts.from();
     release();
     expectOk(await generating);
     expectOk(await hiding);
     await whenIdle(images);
 
+    expect(puts.keys).toEqual([]);
     expect(copiesOf(w.blobs, "a")).toEqual([]);
     expect(expectOk(await w.db.findMany<Variant>(VARIANTS, { mediaId: "a" })).items.map((row) => row.state)).toEqual(["done", "done"]);
     await images.close();
@@ -174,10 +189,13 @@ describe("images/default hidden items", () => {
     const w = await world();
     const images = await w.open();
     expectOk(await images.hide(["a"]));
+    const puts = recordCopyPuts(w.blobs, "a");
+    puts.from();
 
     expectOk(await images.generate("a"));
     await whenIdle(images);
 
+    expect(puts.keys).toEqual([]);
     expect(copiesOf(w.blobs, "a")).toEqual([]);
     expect(expectOk(await w.db.findMany<Variant>(VARIANTS, { mediaId: "a" })).items.map((row) => row.state)).toEqual(["done", "done"]);
     expectOk(await images.show(["a"]));
@@ -223,6 +241,28 @@ describe("images/default hidden items", () => {
     expect(w.blobs.blobs.get("site/media/a/variants/hero.jpg")?.data).toEqual(w.original);
     expect(expectOk(await narrowed.read("a", "hero.jpg"))).toMatchObject({ variant: "original", fallback: true });
     await narrowed.close();
+  });
+
+  it("placing a hidden item again with a size whose format changed writes no copy at the retired path until the item is shown", async () => {
+    const w = await world();
+    const before = await rendered(w);
+    expectOk(await before.hide(["a"]));
+    await before.close();
+
+    const reformatted = await w.open([THUMB, { ...HERO, format: "webp" }]);
+    const puts = recordCopyPuts(w.blobs, "a");
+    puts.from();
+    expectOk(await reformatted.plan(["a"]));
+    expectOk(await reformatted.generate("a"));
+    await whenIdle(reformatted);
+    expect(expectOk(await w.db.count(RETIRED, { mediaId: "a", file: "hero.jpg" }))).toBe(1);
+    expect(puts.keys).toEqual([]);
+    expect(copiesOf(w.blobs, "a")).toEqual([]);
+
+    expectOk(await reformatted.show(["a"]));
+    expect(w.blobs.blobs.get("site/media/a/variants/hero.jpg")?.data).toEqual(w.original);
+    expect(copiesOf(w.blobs, "a")).toEqual(["site/media/a/variants/hero.jpg", "site/media/a/variants/hero.webp", "site/media/a/variants/thumb.webp"]);
+    await reformatted.close();
   });
 
   it("images.syncPublic writes no copy of a hidden item and removes one it finds, also at a retired path", async () => {
