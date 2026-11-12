@@ -5531,19 +5531,20 @@
                 ]
               }
             },
-            "versions": {
+            "trashVersions": {
               "type": "object",
               "additionalProperties": {
-                "type": "number"
+                "type": "integer",
+                "minimum": 0
               },
-              "description": "per id in ids, the item's trash version after the step; it rises with every move into or out of the trash, and images.hideMany and images.showMany ignore an id whose version a later move overtook"
+              "description": "per id in ids, the item's trash version after the step; it rises by one with every move into or out of the trash, which lets a later step tell which of two overlapping moves came last"
             }
           },
           "required": [
             "ids",
             "unchanged",
             "skipped",
-            "versions"
+            "trashVersions"
           ]
         },
         "errors": {
@@ -5581,19 +5582,20 @@
                 "type": "string"
               }
             },
-            "versions": {
+            "trashVersions": {
               "type": "object",
               "additionalProperties": {
-                "type": "number"
+                "type": "integer",
+                "minimum": 0
               },
-              "description": "per id in ids, the item's trash version after the step; it rises with every move into or out of the trash, and images.hideMany and images.showMany ignore an id whose version a later move overtook"
+              "description": "per id in ids, the item's trash version after the step; it rises by one with every move into or out of the trash, which lets a later step tell which of two overlapping moves came last"
             }
           },
           "required": [
             "path",
             "ids",
             "unchanged",
-            "versions"
+            "trashVersions"
           ]
         },
         "errors": {
@@ -5665,12 +5667,13 @@
                 ]
               }
             },
-            "versions": {
+            "trashVersions": {
               "type": "object",
               "additionalProperties": {
-                "type": "number"
+                "type": "integer",
+                "minimum": 0
               },
-              "description": "per id in ids, the item's trash version after the step; it rises with every move into or out of the trash, and images.hideMany and images.showMany ignore an id whose version a later move overtook"
+              "description": "per id in ids, the item's trash version after the step; it rises by one with every move into or out of the trash, which lets a later step tell which of two overlapping moves came last"
             },
             "renamed": {
               "type": "array",
@@ -5701,7 +5704,7 @@
             "unchanged",
             "skipped",
             "renamed",
-            "versions"
+            "trashVersions"
           ]
         },
         "errors": {
@@ -7443,10 +7446,10 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.versions (from the same steps), an id whose variants a later move already showed is left alone",
+        "summary": "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.trashVersions (from the same steps), an id whose variants a later move already showed is left alone",
         "reads": [
           "result.ids",
-          "result.versions?"
+          "result.trashVersions?"
         ],
         "writes": []
       }
@@ -7456,10 +7459,10 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged; with result.versions, an id whose variants a later move already hid stays hidden",
+        "summary": "Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged; with result.trashVersions, an id whose variants a later move already hid stays hidden",
         "reads": [
           "result.ids",
-          "result.versions?"
+          "result.trashVersions?"
         ],
         "writes": []
       }
@@ -26171,12 +26174,13 @@
                     ]
                   }
                 },
-                "versions": {
+                "trashVersions": {
                   "type": "object",
                   "additionalProperties": {
-                    "type": "number"
+                    "type": "integer",
+                    "minimum": 0
                   },
-                  "description": "per id in ids, the item's trash version after the step; it rises with every move into or out of the trash, and images.hideMany and images.showMany ignore an id whose version a later move overtook"
+                  "description": "per id in ids, the item's trash version after the step; it rises by one with every move into or out of the trash, which lets a later step tell which of two overlapping moves came last"
                 },
                 "renamed": {
                   "type": "array",
@@ -26207,7 +26211,7 @@
                 "unchanged",
                 "skipped",
                 "renamed",
-                "versions"
+                "trashVersions"
               ]
             },
             "errors": {
@@ -26220,10 +26224,10 @@
           "name": "images.showMany",
           "module": "images/default",
           "description": {
-            "summary": "Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged; with result.versions, an id whose variants a later move already hid stays hidden",
+            "summary": "Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged; with result.trashVersions, an id whose variants a later move already hid stays hidden",
             "reads": [
               "result.ids",
-              "result.versions?"
+              "result.trashVersions?"
             ],
             "writes": []
           }
@@ -28695,19 +28699,20 @@
                     ]
                   }
                 },
-                "versions": {
+                "trashVersions": {
                   "type": "object",
                   "additionalProperties": {
-                    "type": "number"
+                    "type": "integer",
+                    "minimum": 0
                   },
-                  "description": "per id in ids, the item's trash version after the step; it rises with every move into or out of the trash, and images.hideMany and images.showMany ignore an id whose version a later move overtook"
+                  "description": "per id in ids, the item's trash version after the step; it rises by one with every move into or out of the trash, which lets a later step tell which of two overlapping moves came last"
                 }
               },
               "required": [
                 "ids",
                 "unchanged",
                 "skipped",
-                "versions"
+                "trashVersions"
               ]
             },
             "errors": {
@@ -28720,10 +28725,10 @@
           "name": "images.hideMany",
           "module": "images/default",
           "description": {
-            "summary": "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.versions (from the same steps), an id whose variants a later move already showed is left alone",
+            "summary": "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.trashVersions (from the same steps), an id whose variants a later move already showed is left alone",
             "reads": [
               "result.ids",
-              "result.versions?"
+              "result.trashVersions?"
             ],
             "writes": []
           }
@@ -28906,19 +28911,20 @@
                     "type": "string"
                   }
                 },
-                "versions": {
+                "trashVersions": {
                   "type": "object",
                   "additionalProperties": {
-                    "type": "number"
+                    "type": "integer",
+                    "minimum": 0
                   },
-                  "description": "per id in ids, the item's trash version after the step; it rises with every move into or out of the trash, and images.hideMany and images.showMany ignore an id whose version a later move overtook"
+                  "description": "per id in ids, the item's trash version after the step; it rises by one with every move into or out of the trash, which lets a later step tell which of two overlapping moves came last"
                 }
               },
               "required": [
                 "path",
                 "ids",
                 "unchanged",
-                "versions"
+                "trashVersions"
               ]
             },
             "errors": {
@@ -28932,10 +28938,10 @@
           "name": "images.hideMany",
           "module": "images/default",
           "description": {
-            "summary": "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.versions (from the same steps), an id whose variants a later move already showed is left alone",
+            "summary": "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.trashVersions (from the same steps), an id whose variants a later move already showed is left alone",
             "reads": [
               "result.ids",
-              "result.versions?"
+              "result.trashVersions?"
             ],
             "writes": []
           }

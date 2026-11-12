@@ -113,12 +113,12 @@ describe("images/default with a media-default item in the trash", () => {
     const item = expectOk(await media.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: photo })).item;
     expectOk(await images.generate(item.id));
     const first = expectOk(await media.trash([item.id]));
-    expectOk(await images.hide(first.ids, first.versions));
+    expectOk(await images.hide(first.ids, first.trashVersions));
 
     const restored = expectOk(await media.restore([item.id]));
     const trashedAgain = expectOk(await media.trash([item.id]));
-    expectOk(await images.hide(trashedAgain.ids, trashedAgain.versions));
-    expectOk(await images.show(restored.ids, restored.versions));
+    expectOk(await images.hide(trashedAgain.ids, trashedAgain.trashVersions));
+    expectOk(await images.show(restored.ids, restored.trashVersions));
 
     const publicVariant = `site/media/${item.id}/variants/thumb.webp`;
     expect(expectOk(await media.get(item.id))).toBeNull();
@@ -140,8 +140,8 @@ describe("images/default with a media-default item in the trash", () => {
 
     const trashed = expectOk(await media.trash([item.id]));
     const restored = expectOk(await media.restore([item.id]));
-    expectOk(await images.show(restored.ids, restored.versions));
-    expectOk(await images.hide(trashed.ids, trashed.versions));
+    expectOk(await images.show(restored.ids, restored.trashVersions));
+    expectOk(await images.hide(trashed.ids, trashed.trashVersions));
 
     const publicVariant = `site/media/${item.id}/variants/thumb.webp`;
     expect(expectOk(await media.get(item.id))).not.toBeNull();

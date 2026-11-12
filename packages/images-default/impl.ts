@@ -153,7 +153,7 @@ export interface Images {
   publicPath(mediaId: string, variant: Variant): string;
   publicCopyEnabled(): boolean;
   syncPublic(): Promise<Result<PublicSync, KestrelError>>;
-  /** Withdraws the public copies of each known item's variants and retired paths; they are not served, exported or copied again until {@link Images.show}. Rows and private variants stay. Unknown ids are ignored. With `versions` (the media item's trash version per id), an id whose last hide or show carried a higher version is left alone, so the move that happened last decides. */
+  /** Withdraws the public copies of each known item's variants and retired paths; they are not served, exported or copied again until {@link Images.show}. Rows and private variants stay. Unknown ids are ignored. With `versions` (the media item's trash version per id), an id whose last hide or show carried a higher version is left alone, so the move that happened last decides; an entry that is not a whole number of at least zero counts as missing. */
   hide(mediaIds: string[], versions?: Readonly<Record<string, number>>): Promise<Result<void, KestrelError>>;
   /** Lifts {@link Images.hide} and writes the public copies of each item again; `versions` as for {@link Images.hide}. */
   show(mediaIds: string[], versions?: Readonly<Record<string, number>>): Promise<Result<void, KestrelError>>;
@@ -228,6 +228,11 @@ async function pool<T>(tasks: Array<() => Promise<Result<T, KestrelError>>>, lim
   }
   await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, () => worker()));
   return failureError !== undefined ? err(failureError) : ok(results);
+}
+
+function trashVersionOf(versions: Readonly<Record<string, number>> | undefined, mediaId: string): number | undefined {
+  const version = versions?.[mediaId];
+  return version !== undefined && Number.isSafeInteger(version) && version >= 0 ? version : undefined;
 }
 
 export async function createImages(config: Config, deps: { blobs: Blobstore; db: Persistence; media: MediaFiles; logger: Logger; render?: Renderer; events?: Events }, now: () => number = Date.now): Promise<Images> {
@@ -1671,11 +1676,12 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     },
 
     async hide(mediaIds, versions) {
+      const versionOf = (mediaId: string): number | undefined => trashVersionOf(versions, mediaId);
       for (const mediaId of new Set(mediaIds)) {
         const media = await readMedia(mediaId);
         if (isErr(media)) return media;
         if (media.value === null) continue;
-        const marked = await markHidden(mediaId, true, versions?.[mediaId]);
+        const marked = await markHidden(mediaId, true, versionOf(mediaId));
         if (isErr(marked)) return marked;
         if (!marked.value) continue;
         const withdrawn = await exclusive(mediaId, async (): Promise<Result<number, KestrelError>> => {
@@ -1689,8 +1695,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     },
 
     async show(mediaIds, versions) {
+      const versionOf = (mediaId: string): number | undefined => trashVersionOf(versions, mediaId);
       for (const mediaId of new Set(mediaIds)) {
-        const unmarked = await markHidden(mediaId, false, versions?.[mediaId]);
+        const unmarked = await markHidden(mediaId, false, versionOf(mediaId));
         if (isErr(unmarked)) return unmarked;
         if (!unmarked.value || config.publicCopy === undefined) continue;
         const rewritten = await exclusive(mediaId, async (): Promise<Result<void, KestrelError>> => {

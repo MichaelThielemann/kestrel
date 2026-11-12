@@ -160,12 +160,13 @@ marked.
 
 When a trash and a restore of the same item run at the same time, their `images.hideMany` and
 `images.showMany` can arrive in the other order than the moves they follow. Both steps therefore also
-read `result.versions`, which `media.trash`, `media.trashFolder` and `media.restore` write: the
+read `result.trashVersions`, which `media.trash`, `media.trashFolder` and `media.restore` write: the
 item's trash version, which rises with every move into or out of the trash. The row in
 `images_hidden` keeps the version of the last hide or show, also after a show, and a hide or show
 with a lower version leaves the item as it is. So the move that happened last decides, and the
-variants end up hidden exactly when the item ended up in the trash. Without `result.versions` (or
-through `Images.hide` and `Images.show` without `versions`), each call applies as it comes.
+variants end up hidden exactly when the item ended up in the trash. Without `result.trashVersions` (or
+through `Images.hide` and `Images.show` without `versions`), each call applies as it comes. An entry
+that is not a whole number of at least zero counts as missing.
 
 Both steps read `result.ids`, leave the result as it is, raise no `images.variantsChanged` (the
 `media.trashed` and `media.restored` events already mark the pages that show the item) and can run
@@ -293,8 +294,8 @@ cursor.
 | `images.readStatus` | Sizes with usage/variant counts, current job, the variants that gave up with their last error, and sizes whose variants are left over from a size the code no longer declares | – | `result` | – | { sizes: object[], job: object \| null, orphaned: object, registrySeen: boolean, failed: object, … } | – | – | no |
 | `images.remove` | Delete one media item's variants and retired paths (blob + rows) | `params.id` | – | – | – | 400 missing id | – | no |
 | `images.removeMany` | Delete variants for every id in result.ids (from media.listFolderItems, media.removeFolder or media.purge) | `result.ids` | – | – | – | – | – | no |
-| `images.hideMany` | Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.versions (from the same steps), an id whose variants a later move already showed is left alone | `result.ids`, `result.versions?` | – | – | – | – | – | no |
-| `images.showMany` | Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged; with result.versions, an id whose variants a later move already hid stays hidden | `result.ids`, `result.versions?` | – | – | – | – | – | no |
+| `images.hideMany` | Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.trashVersions (from the same steps), an id whose variants a later move already showed is left alone | `result.ids`, `result.trashVersions?` | – | – | – | – | – | no |
+| `images.showMany` | Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged; with result.trashVersions, an id whose variants a later move already hid stays hidden | `result.ids`, `result.trashVersions?` | – | – | – | – | – | no |
 | `images.attach` | Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, and a hidden item lists no variants and is not available | `result` | `result.available?`, `result.variants?`, `result.variantCounts?` | – | { available: boolean, variants: object[], variantCounts: object, … } | – | – | no |
 | `images.serve` | The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback | `params.id`, `params.file` | `result` | – | – | 400 missing id or file; 404 media item not found, not ready or hidden, or the file is neither a current nor a retired size | – | no |
 | `images.syncPublic` | Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted or hidden items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result) | – | `result._publicVariants` | – | { _publicVariants: object, … } | – | – | no |

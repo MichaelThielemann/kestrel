@@ -366,19 +366,33 @@ describe("images/default hideMany, showMany and attach steps", () => {
     await images.close();
   });
 
-  it("hideMany and showMany leave an id alone whose result.versions entry a later move overtook", async () => {
+  it("hideMany and showMany leave an id alone whose result.trashVersions entry a later move overtook", async () => {
     const w = await world();
     const images = await rendered(w);
     const steps = boundaryCast<Steps>(module.steps!(images), "host");
 
-    expectOk(await steps.hideMany(ctxWith({ ids: ["a"], versions: { a: 3 } })));
-    expectOk(await steps.showMany(ctxWith({ ids: ["a"], versions: { a: 2 } })));
+    expectOk(await steps.hideMany(ctxWith({ ids: ["a"], trashVersions: { a: 3 } })));
+    expectOk(await steps.showMany(ctxWith({ ids: ["a"], trashVersions: { a: 2 } })));
     expect(copiesOf(w.blobs, "a")).toEqual([]);
     expect(expectOk(await images.hidden(["a"])).has("a")).toBe(true);
 
-    expectOk(await steps.showMany(ctxWith({ ids: ["a"], versions: { a: 4 } })));
-    expectOk(await steps.hideMany(ctxWith({ ids: ["a"], versions: { a: 3 } })));
+    expectOk(await steps.showMany(ctxWith({ ids: ["a"], trashVersions: { a: 4 } })));
+    expectOk(await steps.hideMany(ctxWith({ ids: ["a"], trashVersions: { a: 3 } })));
     expect(copiesOf(w.blobs, "a")).toHaveLength(2);
+    expect(expectOk(await images.hidden(["a"])).has("a")).toBe(false);
+    await images.close();
+  });
+
+  it("hideMany and showMany apply an id whose result.trashVersions entry is not a whole number of at least zero as if it had none", async () => {
+    const w = await world();
+    const images = await rendered(w);
+    const steps = boundaryCast<Steps>(module.steps!(images), "host");
+    expectOk(await steps.hideMany(ctxWith({ ids: ["a", "b"], trashVersions: { a: 3, b: 3 } })));
+
+    expectOk(await steps.showMany(ctxWith({ ids: ["a", "b"], trashVersions: { a: 1.5, b: -1 } })));
+    expect(expectOk(await images.hidden(["a", "b"])).size).toBe(0);
+    expectOk(await steps.hideMany(ctxWith({ ids: ["a"], trashVersions: { a: "9" } })));
+    expectOk(await steps.showMany(ctxWith({ ids: ["a"], trashVersions: { a: Number.MAX_SAFE_INTEGER + 2 } })));
     expect(expectOk(await images.hidden(["a"])).has("a")).toBe(false);
     await images.close();
   });

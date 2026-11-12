@@ -71,10 +71,10 @@ describe("media/default trash steps", () => {
     const id = await put(media, "a.png");
     const res = await run(media, ["media.trash"], { body: { ids: [id, "no-such-id"] } });
     expect(res.status).toBe(200);
-    expect(res.result).toEqual({ ids: [id], unchanged: [], skipped: [{ id: "no-such-id", reason: "not_found" }], versions: { [id]: 1 } });
+    expect(res.result).toEqual({ ids: [id], unchanged: [], skipped: [{ id: "no-such-id", reason: "not_found" }], trashVersions: { [id]: 1 } });
     expect(expectOk(await media.get(id))).toBeNull();
     const again = await run(media, ["media.trash"], { body: { ids: [id] } });
-    expect(again.result).toEqual({ ids: [id], unchanged: [id], skipped: [], versions: { [id]: 1 } });
+    expect(again.result).toEqual({ ids: [id], unchanged: [id], skipped: [], trashVersions: { [id]: 1 } });
   });
 
   it("media.trash, media.restore, media.selectTrash and media.purge refuse more than 200 ids or none with 400", async () => {
@@ -92,7 +92,7 @@ describe("media/default trash steps", () => {
     const b = await put(media, "b.png", "box/inner");
     const res = await run(media, ["media.trashFolder"], { params: { path: "box" } });
     expect(res.status).toBe(200);
-    expect(res.result).toEqual({ path: "box", ids: [a, b], unchanged: [], versions: { [a]: 1, [b]: 1 } });
+    expect(res.result).toEqual({ path: "box", ids: [a, b], unchanged: [], trashVersions: { [a]: 1, [b]: 1 } });
     expect((await run(media, ["media.trashFolder"], { params: { path: "nowhere" } })).status).toBe(404);
   });
 
@@ -103,7 +103,7 @@ describe("media/default trash steps", () => {
     await put(media, "a.png");
     const res = await run(media, ["media.restore"], { body: { ids: [id] } });
     expect(res.status).toBe(200);
-    expect(res.result).toEqual({ ids: [id], unchanged: [], skipped: [], renamed: [{ id, from: "a.png", to: "a-2.png" }], versions: { [id]: 2 } });
+    expect(res.result).toEqual({ ids: [id], unchanged: [], skipped: [], renamed: [{ id, from: "a.png", to: "a-2.png" }], trashVersions: { [id]: 2 } });
   });
 
   it("media.listTrash pages the trash with trashedAt and expiresAt and no public path", async () => {

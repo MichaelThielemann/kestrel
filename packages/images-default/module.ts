@@ -52,10 +52,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function resultVersions(ctx: Context): Record<string, number> | undefined {
-  const versions = boundaryCast<{ versions?: unknown } | undefined>(ctx.result, "host")?.versions;
+  const versions = boundaryCast<{ trashVersions?: unknown } | undefined>(ctx.result, "host")?.trashVersions;
   if (!isRecord(versions)) return undefined;
   const out: Record<string, number> = {};
-  for (const [id, version] of Object.entries(versions)) if (typeof version === "number") out[id] = version;
+  for (const [id, version] of Object.entries(versions)) if (typeof version === "number" && Number.isSafeInteger(version) && version >= 0) out[id] = version;
   return out;
 }
 
@@ -305,8 +305,8 @@ export default defineModule({
     },
     remove: { summary: "Delete one media item's variants and retired paths (blob + rows)", reads: ["params.id"], writes: [], errors: { 400: "missing id" } },
     removeMany: { summary: "Delete variants for every id in result.ids (from media.listFolderItems, media.removeFolder or media.purge)", reads: ["result.ids"], writes: [] },
-    hideMany: { summary: "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.versions (from the same steps), an id whose variants a later move already showed is left alone", reads: ["result.ids", "result.versions?"], writes: [] },
-    showMany: { summary: "Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged; with result.versions, an id whose variants a later move already hid stays hidden", reads: ["result.ids", "result.versions?"], writes: [] },
+    hideMany: { summary: "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.trashVersions (from the same steps), an id whose variants a later move already showed is left alone", reads: ["result.ids", "result.trashVersions?"], writes: [] },
+    showMany: { summary: "Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged; with result.trashVersions, an id whose variants a later move already hid stays hidden", reads: ["result.ids", "result.trashVersions?"], writes: [] },
     attach: {
       summary: "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, and a hidden item lists no variants and is not available",
       reads: ["result"],

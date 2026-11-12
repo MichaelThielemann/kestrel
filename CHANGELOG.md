@@ -1184,13 +1184,13 @@ Net changes since 5.8.1.
   folder is gone, so a repeated request reaches the steps after them again. New config `trashRetentionDays` (default 30). A trashed item
   stays ready for `media@1` until it is purged, so modules reading media through it keep what they
   derived; `media.remove` and `media.removeFolder` stay final deletes (see Breaking for the type
-  changes). `media.trash`, `media.trashFolder` and `media.restore` also answer `versions`, each item's
+  changes). `media.trash`, `media.trashFolder` and `media.restore` also answer `trashVersions`, each item's
   trash version, which rises with every move into or out of the trash. A repeated purge finishes an
   item whose purge stopped halfway. `media.syncPublic` reads an item again before it removes its copy.
 - `images/default` gains `images.hideMany` and `images.showMany` (on `result.ids`) and the collection
   `images_hidden`: a hidden item's variants are not served, exported, attached or copied publicly
   until it is shown again, while its rows and stored variants stay. Neither step raises
-  `images.variantsChanged`. Both read `result.versions` as well, so when a trash and a restore of the
+  `images.variantsChanged`. Both read `result.trashVersions` as well, so when a trash and a restore of the
   same item overlap, the move that happened last decides whether its variants are hidden. `Images`
   gains `hide`, `show` and `hidden`.
 - `references/default` gains `references.dropReferenced:<target>`: it keeps the unreferenced ids in

@@ -442,7 +442,7 @@ describe("examples/minimal media: the trash", { timeout: 30_000 }, () => {
       const publicDir = join(example.blobRoot, "site", "media", item.id);
 
       const trashed = await run(example, "trashMedia", token, { payload: { ids: [item.id, "missing"] } });
-      expect(trashed).toEqual({ status: 200, result: { ids: [item.id], unchanged: [], skipped: [{ id: "missing", reason: "not_found" }], versions: { [item.id]: 1 } } });
+      expect(trashed).toEqual({ status: 200, result: { ids: [item.id], unchanged: [], skipped: [{ id: "missing", reason: "not_found" }], trashVersions: { [item.id]: 1 } } });
       expect(noted(example, "media.trashed")).toEqual([[item.id]]);
       expect((await example.kestrel.run("getMedia", { trigger, headers: bearer(token), params: { id: item.id } })).status).toBe(404);
       expect(boundaryCast<{ items: Item[] }>((await run(example, "listMedia", token)).result, "json").items).toEqual([]);
@@ -460,7 +460,7 @@ describe("examples/minimal media: the trash", { timeout: 30_000 }, () => {
       expect(again.id).not.toBe(item.id);
 
       const restored = await run(example, "restoreMedia", token, { payload: { ids: [item.id] } });
-      expect(restored).toEqual({ status: 200, result: { ids: [item.id], unchanged: [], skipped: [], renamed: [{ id: item.id, from: "photo.jpg", to: "photo-2.jpg" }], versions: { [item.id]: 2 } } });
+      expect(restored).toEqual({ status: 200, result: { ids: [item.id], unchanged: [], skipped: [], renamed: [{ id: item.id, from: "photo.jpg", to: "photo-2.jpg" }], trashVersions: { [item.id]: 2 } } });
       expect(noted(example, "media.restored")).toEqual([[item.id]]);
       const back = await getItem(example, item.id, token);
       expect(back.path).toBe(item.path);
@@ -486,7 +486,7 @@ describe("examples/minimal media: the trash", { timeout: 30_000 }, () => {
       expect(noted(example, "media.trashed")).toEqual([]);
 
       const again = await run(example, "trashMedia", token, { payload: { ids: [item.id] } });
-      expect(again).toEqual({ status: 200, result: { ids: [item.id], unchanged: [item.id], skipped: [], versions: { [item.id]: 1 } } });
+      expect(again).toEqual({ status: 200, result: { ids: [item.id], unchanged: [item.id], skipped: [], trashVersions: { [item.id]: 1 } } });
       expect((await serveVariant(example, item.id, variant)).status).toBe(404);
       expect(filesUnder(join(example.blobRoot, "site", "media", item.id))).toEqual([]);
       expect(noted(example, "media.trashed")).toEqual([[item.id]]);
@@ -509,7 +509,7 @@ describe("examples/minimal media: the trash", { timeout: 30_000 }, () => {
       expect((await serveVariant(example, item.id, variant)).status).toBe(404);
 
       const again = await run(example, "restoreMedia", token, { payload: { ids: [item.id] } });
-      expect(again).toEqual({ status: 200, result: { ids: [item.id], unchanged: [item.id], skipped: [], renamed: [], versions: { [item.id]: 2 } } });
+      expect(again).toEqual({ status: 200, result: { ids: [item.id], unchanged: [item.id], skipped: [], renamed: [], trashVersions: { [item.id]: 2 } } });
       expect((await serveVariant(example, item.id, variant)).status).toBe(200);
       expect((await getItem(example, item.id, token)).available).toBe(true);
     } finally {
@@ -531,7 +531,7 @@ describe("examples/minimal media: the trash", { timeout: 30_000 }, () => {
       expect(noted(example, "media.trashed")).toEqual([]);
 
       const again = await run(example, "trashMediaFolder", token, { params: { path: "shoot" } });
-      expect(again).toEqual({ status: 200, result: { path: "shoot", ids: [item.id], unchanged: [item.id], versions: { [item.id]: 1 } } });
+      expect(again).toEqual({ status: 200, result: { path: "shoot", ids: [item.id], unchanged: [item.id], trashVersions: { [item.id]: 1 } } });
       expect((await serveVariant(example, item.id, variant)).status).toBe(404);
       expect(filesUnder(join(example.blobRoot, "site", "media", item.id))).toEqual([]);
       expect(noted(example, "media.trashed")).toEqual([[item.id]]);

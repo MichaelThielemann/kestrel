@@ -123,8 +123,8 @@ export interface TrashOutcome {
 /** The outcome of a trash or restore: `ids` holds every id that is in the target state afterwards, so a repeated call hands on the ids an earlier, failed call already moved; `unchanged` names those among them that were in that state before. */
 export interface MoveOutcome extends TrashOutcome {
   unchanged: string[];
-  /** The `trashVersion` of each id in `ids` after the step (`0` for an item never moved), so `images.hide`/`images.show` can ignore a move a later one overtook. */
-  versions: Record<string, number>;
+  /** The `trashVersion` of each id in `ids` after the step (`0` for an item never moved), which lets a later step tell which of two overlapping moves came last. */
+  trashVersions: Record<string, number>;
 }
 
 /** A restore also names every item that came back under another display name because its own was taken. */
@@ -266,7 +266,7 @@ export interface Media extends MediaFiles {
   /** Moves ready items to the trash: the library no longer shows them, their name is free and their public copy is removed, while media@1 still reads them as ready. */
   trash(ids: string[]): Promise<Result<MoveOutcome, MediaError>>;
   /** Trashes every ready item in a folder's subtree, deletes its failed and abandoned uploads, and drops the folder rows of that subtree; an upload still under way stays. Items of the subtree already in the trash are handed on in `ids` and named in `unchanged`, so a repeated call reaches them again even when the folder is gone. `null` for a path with neither a folder nor a trashed item. */
-  trashFolder(path: string): Promise<Result<{ path: string; ids: string[]; unchanged: string[]; versions: Record<string, number> } | null, MediaError>>;
+  trashFolder(path: string): Promise<Result<{ path: string; ids: string[]; unchanged: string[]; trashVersions: Record<string, number> } | null, MediaError>>;
   /** Brings trashed items back as they were, recreating their folder and public copy; a taken name becomes `<stem>-<n>.<ext>`, the key and public path never change. */
   restore(ids: string[]): Promise<Result<RestoreOutcome, MediaError>>;
   /** The trashed items, most recently trashed first. */
@@ -1255,7 +1255,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       return ok({ ok: true, removed: ids.length, ids });
     },
     async trash(ids) {
-      const outcome: MoveOutcome = { ids: [], unchanged: [], skipped: [], versions: {} };
+      const outcome: MoveOutcome = { ids: [], unchanged: [], skipped: [], trashVersions: {} };
       for (const id of new Set(ids)) {
         const moved = await trashOne(id);
         if (isErr(moved)) return moved;
@@ -1265,7 +1265,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         }
         if (moved.value.unchanged) outcome.unchanged.push(id);
         outcome.ids.push(id);
-        outcome.versions[id] = moved.value.version;
+        outcome.trashVersions[id] = moved.value.version;
         const dropped = await dropCopy(moved.value.item);
         if (isErr(dropped)) return dropped;
         const restoredMeanwhile = await writeCopy(id);
@@ -1302,10 +1302,10 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         const removedSubfolders = await db.deleteMany(FOLDERS, { id: { in: subfolderIds } });
         if (isErr(removedSubfolders)) return removedSubfolders;
       }
-      return ok({ path: clean.value, ids: trashed.value.ids, unchanged: trashed.value.unchanged, versions: trashed.value.versions });
+      return ok({ path: clean.value, ids: trashed.value.ids, unchanged: trashed.value.unchanged, trashVersions: trashed.value.trashVersions });
     },
     async restore(ids) {
-      const outcome: RestoreOutcome = { ids: [], unchanged: [], skipped: [], renamed: [], versions: {} };
+      const outcome: RestoreOutcome = { ids: [], unchanged: [], skipped: [], renamed: [], trashVersions: {} };
       for (const id of new Set(ids)) {
         const found = await db.findOne<MediaItem>(COLLECTION, { id });
         if (isErr(found)) return found;
@@ -1333,7 +1333,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
           }
         } else outcome.unchanged.push(id);
         outcome.ids.push(id);
-        outcome.versions[id] = version;
+        outcome.trashVersions[id] = version;
         const copied = await writeCopy(id);
         if (isErr(copied)) return copied;
       }
