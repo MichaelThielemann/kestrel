@@ -2,26 +2,6 @@ import { randomUUID } from "node:crypto";
 import { appendResponseHeader, eventHandler, getRequestHeaders, getRequestURL, readRawBody, setResponseHeaders, setResponseStatus, type EventHandler, type H3Event } from "h3";
 import { BodyTooLarge, UnsupportedMediaType, clientIpResolver, errorResponse, hasDotSegment, matchRoute, multipartRefusal, parseQuery, parseRequestBody, readRequestBody, requestIdOf, responseForRun, type ClientIpOptions, type ContextInput, type MultipartLimits, type HttpResponse, type Kestrel, type Logger } from "@michaelthielemann/kestrel";
 
-/** A request the handler answered before any pipeline ran: the fields of its `http` log line, plus the error code it answered with. */
-export interface RequestRefusal {
-  /** Epoch ms when the handler finished with the request. */
-  at: number;
-  /** The run id of the error response (`X-Kestrel-Run-Id`); no run exists for it. */
-  runId: string;
-  requestId?: string;
-  method: string;
-  /** The URL path without its query string. */
-  path: string;
-  /** The pipeline the route names; absent when no route matched or the path was refused before routing. */
-  pipeline?: string;
-  status: number;
-  code: string;
-  /** Why the request was refused, without any request content: `no route`, `invalid path: dot segment`, `body exceeds <n> bytes`, `invalid body: <cause>`, `unsupported content type`, a multipart limit. */
-  reason: string;
-  ms: number;
-  ip?: string;
-}
-
 export interface KestrelHandlerOptions extends ClientIpOptions {
   mountPath?: string;
   maxBodyBytes?: number;
@@ -29,8 +9,6 @@ export interface KestrelHandlerOptions extends ClientIpOptions {
   inlineTypes?: readonly string[];
   /** Writes one `logger.info("http", …)` line per request, the same fields as the core server's line; a refusal before the pipeline adds `reason`. Without it the handler logs nothing. */
   logger?: Logger;
-  /** Called once for every request refused before its pipeline ran; a throw is reported to `logger` and never changes the response. */
-  onRefusal?: (refusal: RequestRefusal) => void;
 }
 
 export type KestrelRunner = Pick<Kestrel, "run" | "triggers">;
@@ -69,7 +47,6 @@ async function respond(event: H3Event, response: HttpResponse): Promise<Buffer |
   return typeof response.body === "string" ? response.body : Buffer.from(response.body);
 }
 
-const REFUSAL_CODE: Readonly<Record<number, string>> = { 400: "VALIDATION", 404: "NOT_FOUND", 413: "PAYLOAD_TOO_LARGE", 415: "UNSUPPORTED" };
 const REASON_LIMIT = 200;
 
 interface Handled {
@@ -101,7 +78,7 @@ export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHan
   const mountPath = (options.mountPath ?? "").replace(/\/+$/, "");
   const maxBodyBytes = options.maxBodyBytes ?? 10 * 1024 * 1024;
   const resolveClient = clientIpResolver(options);
-  const { logger, onRefusal } = options;
+  const { logger } = options;
 
   async function handle(event: H3Event, headers: Record<string, string>, requestId: string | undefined, ip: string | undefined): Promise<Handled> {
     if (hasDotSegment(event.node.req.originalUrl ?? event.path)) return { response: errorResponse(400, "invalid path: dot segment", requestId), reason: "invalid path: dot segment" };
@@ -152,42 +129,20 @@ export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHan
   }
 
   function report(event: H3Event, begin: number, requestId: string | undefined, ip: string | undefined, handled: Handled): void {
-    if (logger === undefined && onRefusal === undefined) return;
+    if (logger === undefined) return;
     const { response, pipeline, reason, declaredBytes } = handled;
-    const runId = response.headers["x-kestrel-run-id"] ?? randomUUID();
-    const path = reason === "invalid path: dot segment" ? rawPathname(event) : getRequestURL(event).pathname;
-    const ms = Math.round((performance.now() - begin) * 100) / 100;
-    logger?.info("http", {
-      runId,
+    logger.info("http", {
+      runId: response.headers["x-kestrel-run-id"] ?? randomUUID(),
       ...(requestId === undefined ? {} : { requestId }),
       method: event.method,
-      path,
+      path: reason === "invalid path: dot segment" ? rawPathname(event) : getRequestURL(event).pathname,
       ...(pipeline === undefined ? {} : { pipeline }),
       status: response.status,
-      ms,
+      ms: Math.round((performance.now() - begin) * 100) / 100,
       ...(ip === undefined ? {} : { ip }),
       ...(reason === undefined ? {} : { reason: bounded(reason) }),
       ...(declaredBytes === undefined ? {} : { declaredBytes }),
     });
-    if (reason === undefined || onRefusal === undefined) return;
-    const refusal: RequestRefusal = {
-      at: Date.now(),
-      runId,
-      ...(requestId === undefined ? {} : { requestId }),
-      method: event.method,
-      path,
-      ...(pipeline === undefined ? {} : { pipeline }),
-      status: response.status,
-      code: REFUSAL_CODE[response.status] ?? "INTERNAL",
-      reason: bounded(reason),
-      ms,
-      ...(ip === undefined ? {} : { ip }),
-    };
-    try {
-      onRefusal(refusal);
-    } catch (err) {
-      logger?.error("onRefusal threw", { error: err instanceof Error ? err.message : String(err) });
-    }
   }
 
   return eventHandler(async (event) => {
@@ -201,8 +156,10 @@ export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHan
       handled = await handle(event, headers, requestId, ip);
     } catch (err) {
       const pipeline = routed.get(event);
+      const runId = randomUUID();
+      if (!event.node.res.headersSent) setResponseHeaders(event, requestId === undefined ? { "x-kestrel-run-id": runId } : { "x-kestrel-run-id": runId, "x-request-id": requestId });
       logger?.info("http", {
-        runId: randomUUID(),
+        runId,
         ...(requestId === undefined ? {} : { requestId }),
         method: event.method,
         path: rawPathname(event),

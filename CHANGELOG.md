@@ -655,7 +655,8 @@ Net changes since 5.8.1.
   `status`, `ms`, `ip`). A request refused before its pipeline (unknown route, dot segment, body too
   large, unreadable body, unsupported content type) gets a line too, with a `reason` and, for a body
   too large, the `declaredBytes`; a line never holds a body, a header value, a cookie or the query
-  string. `onRefusal` receives each such refusal as a `RequestRefusal`.
+  string. A handler that throws writes a line with status 500 and answers with that line's
+  `X-Kestrel-Run-Id` and the echoed `X-Request-Id`.
 - `kestrel check`, `kestrel explain` and `kestrel manifest` inspect a project without starting it,
   in a sandboxed scratch copy, through the project's own core. `check` lists every load issue, boot
   problem, warning and not-checked item with module and cause (`--json`, `--fail-on`) and is meant

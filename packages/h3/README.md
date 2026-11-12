@@ -35,13 +35,14 @@ matched, no `pipeline`:
 | 413 | `body exceeds <n> bytes` or `multipart body has more than <n> <parts>`, with `declaredBytes` when the request sent a `Content-Length` |
 | 415 | `unsupported content type`, `this route does not accept multipart/form-data` |
 
-A handler that throws writes a line with status 500 and `reason: "handler failed"` before the error
-reaches h3. A line never holds a body, a header value (the declared length aside), a cookie or the
-query string; `reason` is at most 200 characters. Without `logger` the handler writes nothing.
+A handler that throws writes a line with status 500 and `reason: "handler failed"`, sets the line's
+`runId` as `X-Kestrel-Run-Id` and echoes `X-Request-Id`, then rethrows, so the host's error handler
+answers. Every response, refusals included, echoes a valid `X-Request-Id` (printable ASCII, at most
+200 characters); an invalid one is neither echoed nor logged. A line never holds a body, a header
+value (the declared length aside), a cookie or the query string; `reason` is at most 200 characters.
+Without `logger` the handler writes nothing.
 
-`onRefusal(refusal)` receives each refusal before the pipeline as a `RequestRefusal`: the fields of
-its line (`reason` included, `declaredBytes` left out), `at` (epoch ms) and the error `code` the
-client received (`VALIDATION`, `NOT_FOUND`, `PAYLOAD_TOO_LARGE`, `UNSUPPORTED`). A throwing callback
-is reported to `logger` as `onRefusal threw` and does not change the response.
+Refusals before the pipeline start no run, so they do not reach a run observer such as
+`insights/default`; the log line is their only record.
 
 Knows no contracts and no modules.

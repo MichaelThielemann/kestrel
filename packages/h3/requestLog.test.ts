@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boot, defineModule, definePipeline, ok, silentLogger, type Context, type Kestrel, type Logger } from "@michaelthielemann/kestrel";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { createKestrelHandler, type KestrelHandlerOptions, type KestrelRunner, type RequestRefusal } from "./index.ts";
+import { createKestrelHandler, type KestrelHandlerOptions, type KestrelRunner } from "./index.ts";
 
 interface Line {
   message: string;
@@ -156,25 +156,23 @@ describe("kestrel-h3 request log", () => {
     }
   });
 
-  it("hands every refusal before the pipeline to onRefusal, and no run", async () => {
-    const refused: RequestRefusal[] = [];
-    const base = await serve({ maxBodyBytes: 64, onRefusal: (refusal) => refused.push(refusal) });
-    await fetch(`${base}/notes/1`);
-    await fetch(`${base}/locked`);
-    const tooLarge = await fetch(`${base}/notes`, { method: "POST", headers: { ...json, "x-request-id": "req-9" }, body: JSON.stringify({ text: "x".repeat(200) }) });
-    const missing = await fetch(`${base}/nowhere`);
-    expect(refused).toEqual([
-      { at: expect.any(Number) as unknown, runId: tooLarge.headers.get("x-kestrel-run-id"), requestId: "req-9", method: "POST", path: "/notes", pipeline: "echo", status: 413, code: "PAYLOAD_TOO_LARGE", reason: "body exceeds 64 bytes", ms: expect.any(Number) as unknown, ip: "127.0.0.1" },
-      { at: expect.any(Number) as unknown, runId: missing.headers.get("x-kestrel-run-id"), method: "GET", path: "/nowhere", status: 404, code: "NOT_FOUND", reason: "no route", ms: expect.any(Number) as unknown, ip: "127.0.0.1" },
-    ]);
+  it("logs the request id it echoes, and neither logs nor echoes an invalid one", async () => {
+    const { logger, lines } = collectingLogger();
+    const base = await serve({ logger });
+    const refused = await fetch(`${base}/nowhere`, { headers: { "x-request-id": "req-404" } });
+    const invalid = await fetch(`${base}/notes/1`, { headers: { "x-request-id": "x".repeat(201) } });
+    expect(refused.headers.get("x-request-id")).toBe("req-404");
+    expect(invalid.headers.get("x-request-id")).toBeNull();
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatchObject({ requestId: "req-404", status: 404, reason: "no route" });
+    expect(lines[1]).not.toHaveProperty("requestId");
   });
 
-  it("keeps serving when onRefusal throws and reports the throw to the logger", async () => {
+  it("names a JSON body that is not an object in the reason", async () => {
     const { logger, lines } = collectingLogger();
-    const base = await serve({ logger, onRefusal: () => { throw new Error("sink down"); } });
-    expect((await fetch(`${base}/nowhere`)).status).toBe(404);
-    expect(lines.map((l) => l.message)).toEqual(["http", "onRefusal threw"]);
-    expect(lines[1]).toMatchObject({ error: "sink down" });
+    const base = await serve({ logger });
+    expect((await fetch(`${base}/notes`, { method: "POST", headers: json, body: "[1,2]" })).status).toBe(400);
+    expect(lines).toEqual([expect.objectContaining({ status: 400, pipeline: "echo", reason: "invalid body: body must be a JSON object" })]);
   });
 
   it("writes a line with status 500 when the handler throws, and rethrows", async () => {
@@ -182,8 +180,10 @@ describe("kestrel-h3 request log", () => {
     kestrel = await boot({ config, modules: [notes], pipelines, logger: silentLogger });
     const failing: KestrelRunner = { triggers: kestrel.triggers, run: () => Promise.reject(new Error("store gone")) };
     const base = await listen(failing, { logger });
-    expect((await fetch(`${base}/notes/1`)).status).toBe(500);
-    expect(lines).toEqual([expect.objectContaining({ message: "http", method: "GET", path: "/notes/1", pipeline: "echo", status: 500, reason: "handler failed" })]);
-    expect(lines[0]?.runId).toEqual(expect.any(String));
+    const res = await fetch(`${base}/notes/1?token=query-secret`, { headers: { "x-request-id": "req-500" } });
+    expect(res.status).toBe(500);
+    expect(lines).toEqual([expect.objectContaining({ message: "http", requestId: "req-500", method: "GET", path: "/notes/1", pipeline: "echo", status: 500, reason: "handler failed" })]);
+    expect(lines[0]?.runId).toEqual(res.headers.get("x-kestrel-run-id"));
+    expect(res.headers.get("x-request-id")).toBe("req-500");
   });
 });
