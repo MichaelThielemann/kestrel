@@ -193,6 +193,6 @@ persistence settings:
 | `site.previewPath:<arg>` | The public path a <arg> would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing | – | `result` | { id?: string, locale?: string, slug: string, parent?: string \| null, … } | { path: string, reachable: boolean, reason: string \| null, conflict: object \| null, shadows: object[], exposesParentSlug: object \| null, … } | 400 slug is missing; 503 the store is unavailable | – | no |
 | `site.attachPaths:<arg>` | Add _paths (locale → path) to the <arg> result, every valid path including drafts | `result` | `result` | – | { _paths: object, … } | – | – | no |
 
-Used by 13 of 102 pipelines in `examples/minimal`.
+Used by 13 of 109 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

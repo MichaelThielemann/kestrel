@@ -261,6 +261,41 @@ describe("media folders wiring", () => {
   });
 });
 
+describe("media trash wiring", () => {
+  it("declares the trash routes before the single-item routes and empties expired items nightly", async () => {
+    const config = await loadConfig(join(root, "kestrel.config.ts"));
+    const routes = config.triggers.filter((t) => "http" in t).map((t) => [(t as { http: string }).http, t.pipeline]);
+    expect(routes).toEqual(
+      expect.arrayContaining([
+        ["GET /media/trash", "listMediaTrash"],
+        ["POST /media/trash", "trashMedia"],
+        ["POST /media/trash/folders/*path", "trashMediaFolder"],
+        ["POST /media/trash/restore", "restoreMedia"],
+        ["POST /media/trash/purge", "purgeMedia"],
+        ["POST /media/trash/empty", "emptyMediaTrash"],
+        ["DELETE /media/:id", "deleteMedia"],
+      ]),
+    );
+    const http = routes.map(([route]) => route);
+    expect(http.indexOf("GET /media/trash")).toBeLessThan(http.indexOf("GET /media/:id"));
+    const crons = config.triggers.filter((t) => "cron" in t).map((t) => [(t as { cron: string }).cron, t.pipeline]);
+    expect(crons).toEqual(expect.arrayContaining([["0 4 * * *", "purgeExpiredMedia"]]));
+  });
+
+  it("guards moving and purging with media.delete, viewing and restoring with media.write, and purges only unreferenced items before their variants", async () => {
+    const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
+    const signedIn = ["authn.requireUser", "authz.requireRole"];
+    const purge = ["references.dropReferenced:media", "media.purge", "images.removeMany", "events.emit:media.deleted"];
+    expect(pipelines.get("trashMedia")).toEqual([...signedIn, "authz.require:media.delete", "media.trash", "images.hideMany", "events.emit:media.trashed", "events.relay"]);
+    expect(pipelines.get("trashMediaFolder")).toEqual([...signedIn, "authz.require:media.delete", "media.trashFolder", "images.hideMany", "events.emit:media.trashed", "events.relay"]);
+    expect(pipelines.get("restoreMedia")).toEqual([...signedIn, "authz.require:media.write", "media.restore", "images.showMany", "events.emit:media.restored", "events.relay"]);
+    expect(pipelines.get("listMediaTrash")).toEqual([...signedIn, "authz.require:media.write", "media.listTrash"]);
+    expect(pipelines.get("purgeMedia")).toEqual([...signedIn, "authz.require:media.delete", "media.selectTrash", ...purge, "events.relay"]);
+    expect(pipelines.get("emptyMediaTrash")).toEqual([...signedIn, "authz.require:media.delete", "media.selectAllTrash", ...purge, "events.relay"]);
+    expect(pipelines.get("purgeExpiredMedia")).toEqual(["media.selectExpiredTrash", ...purge]);
+  });
+});
+
 describe("image variants wiring", () => {
   it("declares the module, authz and routes", async () => {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
@@ -285,10 +320,10 @@ describe("image variants wiring", () => {
     const crons = config.triggers.filter((t) => "cron" in t).map((t) => [(t as { cron: string }).cron, t.pipeline]);
     expect(crons).toEqual(expect.arrayContaining([["*/5 * * * *", "resumeImages"]]));
   });
-  it("marks the pages that show a medium on media.updated, media.deleted and images.variantsChanged alike", async () => {
+  it("marks the pages that show a medium on media.updated, media.deleted, media.trashed, media.restored and images.variantsChanged alike", async () => {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
     const events = config.triggers.filter((t) => "event" in t).map((t) => [(t as { event: string }).event, t.pipeline]);
-    expect(events.filter(([, pipeline]) => pipeline === "mediaDependents").map(([event]) => event).sort()).toEqual(["images.variantsChanged", "media.deleted", "media.updated"]);
+    expect(events.filter(([, pipeline]) => pipeline === "mediaDependents").map(([event]) => event).sort()).toEqual(["images.variantsChanged", "media.deleted", "media.restored", "media.trashed", "media.updated"]);
   });
 
   it("wires the image pipelines", async () => {

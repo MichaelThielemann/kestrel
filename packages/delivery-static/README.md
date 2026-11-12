@@ -277,7 +277,7 @@ Not included: sitemap, CDN invalidation.
 
 Pipelines in `examples/minimal` using these steps:
 
-- **mediaDependents** (event media.updated, event media.deleted, event images.variantsChanged): **`delivery.markDependents:media`**
+- **mediaDependents** (event media.updated, event media.deleted, event media.trashed, event media.restored, event images.variantsChanged): **`delivery.markDependents:media`**
 - **pageDependents** (event page.created, event page.updated, event page.restored, event page.translationRemoved, event page.deleted): **`delivery.markDependents:pages`**
 - **pagePublishStatus** (GET /admin/publish-status/pages/:id): `authn.requireUser` → `authz.requireRole` → `authz.require:pages.manage` → **`delivery.readStatus:pages`**
 - **pathsMovedDelivery** (event site.pathsMoved): **`delivery.markMoved`**

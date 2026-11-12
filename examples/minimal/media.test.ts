@@ -76,7 +76,7 @@ function gate(): Gate {
 interface Options {
   lanes?: Record<string, string[]>;
   holdVariantWrites?: Gate;
-  noteMediaDeleted?: boolean;
+  noteEvents?: string[];
   extraRoles?: Record<string, string[]>;
   anonymous?: string[];
 }
@@ -148,12 +148,13 @@ async function bootExample(options: Options = {}): Promise<Example> {
     triggers.push({ event: "media.uploaded", pipeline: "planImageVariants" }, { event: "images.planned", pipeline: "generateImageVariants" });
     pipelines.push(definePipeline({ name: "planImageVariants", steps: ["images.plan", "events.emit:images.planned"] }), definePipeline({ name: "queueStatus", steps: ["events.readQueueStatus"] }));
   }
-  if (options.noteMediaDeleted === true) {
-    triggers.push({ event: "media.deleted", pipeline: "noteMediaDeleted" });
-    pipelines.push(definePipeline({ name: "noteMediaDeleted", steps: ["probe.note"] }));
+  const noting = (options.noteEvents ?? []).length > 0;
+  if (noting) {
+    for (const event of options.noteEvents ?? []) triggers.push({ event, pipeline: "noteEvent" });
+    pipelines.push(definePipeline({ name: "noteEvent", steps: ["probe.note"] }));
   }
-  const config: KestrelConfigInput = { ...configInput, http: null, modules: [...modulesConfig, ...(options.noteMediaDeleted === true ? [{ use: "probe/events", config: {} }] : [])], triggers };
-  const kestrel = await boot({ config, modules: options.noteMediaDeleted === true ? [...modules, probe] : modules, pipelines, root, validateOutput: true });
+  const config: KestrelConfigInput = { ...configInput, http: null, modules: [...modulesConfig, ...(noting ? [{ use: "probe/events", config: {} }] : [])], triggers };
+  const kestrel = await boot({ config, modules: noting ? [...modules, probe] : modules, pipelines, root, validateOutput: true });
   await kestrel.start();
   return {
     kestrel,
@@ -362,7 +363,7 @@ describe("examples/minimal media: an image whose render fails", () => {
 
 describe("examples/minimal media: deleting a folder", () => {
   it("raises media.deleted once with id null and the ids of both items it removed, and leaves none of their files", async () => {
-    const example = await bootExample({ noteMediaDeleted: true });
+    const example = await bootExample({ noteEvents: ["media.deleted"] });
     try {
       const token = await adminToken(example);
       const first = await upload(example, token, "a.jpg", "image/jpeg", TEST_JPEG, "shoot");
@@ -379,6 +380,105 @@ describe("examples/minimal media: deleting a folder", () => {
         expect(existsSync(join(example.blobRoot, "media-variants", id))).toBe(false);
       }
       expect(existsSync(join(example.blobRoot, "site", "media", kept.id, "c.jpg"))).toBe(true);
+    } finally {
+      await example.dispose();
+    }
+  });
+});
+
+function noted(example: Example, event: string): string[][] {
+  return example.notes.filter((note) => note.event === event).map((note) => boundaryCast<{ ids: string[] }>(note, "host").ids);
+}
+
+async function run(example: Example, pipeline: string, token: string, input: { payload?: Record<string, unknown>; params?: Record<string, string> } = {}): Promise<{ status: number; result: unknown }> {
+  const ran = await example.kestrel.run(pipeline, { trigger, headers: bearer(token), ...input });
+  const result = typeof ran.result === "object" && ran.result !== null && !Array.isArray(ran.result) ? Object.fromEntries(Object.entries(ran.result).filter(([key]) => key !== "_events")) : ran.result;
+  return { status: ran.status, result };
+}
+
+describe("examples/minimal media: the trash", { timeout: 30_000 }, () => {
+  it("withdraws a trashed item from the library and the public tree, frees its name, and restore brings it back under a new name when the name was taken", async () => {
+    const example = await bootExample({ noteEvents: ["media.trashed", "media.restored"] });
+    try {
+      const token = await adminToken(example);
+      const item = await upload(example, token, "photo.jpg", "image/jpeg", TEST_JPEG, "shoot");
+      await pollUntil(async () => (await getItem(example, item.id, token)).variantCounts.done === 5);
+      const variants = (await getItem(example, item.id, token)).variants;
+      const publicDir = join(example.blobRoot, "site", "media", item.id);
+
+      const trashed = await run(example, "trashMedia", token, { payload: { ids: [item.id, "missing"] } });
+      expect(trashed).toEqual({ status: 200, result: { ids: [item.id], skipped: [{ id: "missing", reason: "not_found" }] } });
+      expect(noted(example, "media.trashed")).toEqual([[item.id]]);
+      expect((await example.kestrel.run("getMedia", { trigger, headers: bearer(token), params: { id: item.id } })).status).toBe(404);
+      expect(boundaryCast<{ items: Item[] }>((await run(example, "listMedia", token)).result, "json").items).toEqual([]);
+      expect((await serveVariant(example, item.id, fileOf(variants[0]!.path))).status).toBe(404);
+      expect((await example.kestrel.run("serveMediaFile", { trigger, params: { id: item.id, name: "photo.jpg" } })).status).toBe(404);
+      expect(filesUnder(publicDir)).toEqual([]);
+      expect(filesUnder(join(example.blobRoot, "media-variants", item.id))).toHaveLength(5);
+
+      const listed = boundaryCast<{ items: Array<Record<string, unknown>>; total: number }>((await run(example, "listMediaTrash", token)).result, "json");
+      expect(listed.total).toBe(1);
+      expect(listed.items[0]).toMatchObject({ id: item.id, filename: "photo.jpg", folder: "shoot", path: null });
+      expect(boundaryCast<number>(listed.items[0]!.expiresAt, "json") - boundaryCast<number>(listed.items[0]!.trashedAt, "json")).toBe(30 * 86_400_000);
+
+      const again = await upload(example, token, "photo.jpg", "image/jpeg", TEST_JPEG, "shoot");
+      expect(again.id).not.toBe(item.id);
+
+      const restored = await run(example, "restoreMedia", token, { payload: { ids: [item.id] } });
+      expect(restored).toEqual({ status: 200, result: { ids: [item.id], skipped: [], renamed: [{ id: item.id, from: "photo.jpg", to: "photo-2.jpg" }] } });
+      expect(noted(example, "media.restored")).toEqual([[item.id]]);
+      const back = await getItem(example, item.id, token);
+      expect(back.path).toBe(item.path);
+      expect(back.variants.map((variant) => variant.path)).toEqual(variants.map((variant) => variant.path));
+      for (const variant of back.variants) expect((await serveVariant(example, item.id, fileOf(variant.path))).status).toBe(200);
+      expect(filesUnder(publicDir)).toHaveLength(6);
+    } finally {
+      await example.dispose();
+    }
+  });
+
+  it("trashes a whole folder and restores its items into it", async () => {
+    const example = await bootExample();
+    try {
+      const token = await adminToken(example);
+      const first = await upload(example, token, "a.jpg", "image/jpeg", TEST_JPEG, "shoot/day-1");
+      const second = await upload(example, token, "b.jpg", "image/jpeg", TEST_JPEG, "shoot");
+      const trashed = await run(example, "trashMediaFolder", token, { params: { path: "shoot" } });
+      expect(trashed.status).toBe(200);
+      expect(boundaryCast<{ ids: string[] }>(trashed.result, "json").ids.sort()).toEqual([first.id, second.id].sort());
+      const folders = (await run(example, "listMediaFolders", token)).result;
+      expect(JSON.stringify(folders)).not.toContain("shoot");
+
+      expect((await run(example, "restoreMedia", token, { payload: { ids: [first.id, second.id] } })).status).toBe(200);
+      expect(JSON.stringify((await run(example, "listMediaFolders", token)).result)).toContain("shoot/day-1");
+      expect((await getItem(example, first.id, token)).path).toBe(first.path);
+    } finally {
+      await example.dispose();
+    }
+  });
+
+  it("purging leaves an item a page still references in the trash, reports it, and deletes the others with all their files", async () => {
+    const example = await bootExample({ noteEvents: ["media.deleted"] });
+    try {
+      const token = await adminToken(example);
+      const used = await upload(example, token, "used.jpg", "image/jpeg", TEST_JPEG);
+      const unused = await upload(example, token, "unused.jpg", "image/jpeg", TEST_JPEG);
+      const live = await upload(example, token, "live.jpg", "image/jpeg", TEST_JPEG);
+      await pollUntil(async () => (await getItem(example, unused.id, token)).variantCounts.done === 5);
+      const fields = { slug: "about", title: "About", status: "published", hero: used.id };
+      expect((await example.kestrel.run("createPage", { trigger, headers: bearer(token), payload: fields, body: fields })).status).toBe(200);
+      expect((await run(example, "trashMedia", token, { payload: { ids: [used.id, unused.id] } })).status).toBe(200);
+
+      const purged = await run(example, "purgeMedia", token, { payload: { ids: [used.id, unused.id, live.id] } });
+      expect(purged).toEqual({ status: 200, result: { ids: [unused.id], skipped: [{ id: live.id, reason: "not_trashed" }, { id: used.id, reason: "referenced" }] } });
+      expect(noted(example, "media.deleted")).toEqual([[unused.id]]);
+      for (const dir of ["media", "media-variants", join("site", "media")]) expect(existsSync(join(example.blobRoot, dir, unused.id)), dir).toBe(false);
+      expect(boundaryCast<{ items: Array<{ id: string }> }>((await run(example, "listMediaTrash", token)).result, "json").items.map((entry) => entry.id)).toEqual([used.id]);
+
+      expect((await run(example, "emptyMediaTrash", token)).result).toEqual({ ids: [], skipped: [{ id: used.id, reason: "referenced" }] });
+      expect((await example.kestrel.run("purgeExpiredMedia", { trigger: { kind: "cron", name: "0 4 * * *" } })).result).toEqual({ ids: [], skipped: [] });
+      expect((await example.kestrel.run("deleteMedia", { trigger, headers: bearer(token), params: { id: used.id } })).status).toBe(409);
+      expect(filesUnder(join(example.blobRoot, "media", used.id))).toHaveLength(1);
     } finally {
       await example.dispose();
     }
