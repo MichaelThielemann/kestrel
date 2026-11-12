@@ -31,6 +31,7 @@ matched, no `pipeline`:
 |---|---|
 | 400 | `invalid path: dot segment` (no `pipeline`; `path` is the raw path) |
 | 400 | `invalid body: malformed JSON`, `invalid body: body must be a JSON object`, `invalid multipart body: <cause>` |
+| 400 | `invalid body: malformed HTTP framing`: the HTTP parser rejected the request's framing while the body was read |
 | 400 | `body not received: connection closed`, with `declaredBytes`: the client closed the connection before the body was complete |
 | 404 | `no route` |
 | 408 | `body not received: request timeout`, with `declaredBytes`: the server's `requestTimeout` ended the upload and Node answered 408 |

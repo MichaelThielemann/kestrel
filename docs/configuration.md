@@ -331,6 +331,7 @@ The `http` line has the same fields in the core server and in `kestrel-h3`'s han
 |---|---|
 | 204 | core server only: `cors preflight` (an `OPTIONS` request with `corsOrigin` set; no `pipeline`) |
 | 400 | `invalid path: dot segment` (no `pipeline`, `path` as sent), `invalid body: malformed JSON`, `invalid body: body must be a JSON object`, `invalid multipart body: <cause>` |
+| 400 | `invalid body: malformed HTTP framing` (the HTTP parser rejected the request's framing while the body was read; a connection that ends early stays `body not received: connection closed`) |
 | 400 | `body not received: connection closed` (the client closed the connection before the body was complete, so no answer reaches it) |
 | 403 | core server only: `client not allowed` (outside `http.allow`), `missing trusted client header` |
 | 404 | `no route` |
@@ -343,7 +344,9 @@ The `http` line has the same fields in the core server and in `kestrel-h3`'s han
 holds no body, no cookie, no query string and no header value except a valid `X-Request-Id`
 (`requestId`), the declared `Content-Length` (`declaredBytes`) and the client address derived under
 the peer policy (`ip`, which may come from `X-Forwarded-For` or the trusted header). The health path
-writes no line. A refusal starts no run, so it writes no `step` line and
+writes no line, and neither does a request Node refuses before the request handler runs (header
+section too large, malformed request line, header timeout): it never reaches kestrel, so the proxy's
+log is its only record. A refusal starts no run, so it writes no `step` line and
 does not reach a run observer such as `insights/default`; its `http` line is its only record. A
 request that never reaches kestrel (refused or timed out by a proxy in front of it) is in that
 proxy's log only; passing `X-Request-Id` through the proxy and writing it to the proxy's access log

@@ -181,6 +181,8 @@ describe("http server request log", () => {
     const base = await serve(logger);
     expect(await partialPost(base, "X-Request-Id: req-gone\r\n", 50)).toBe("");
     await vi.waitFor(() => expect(lines).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(lines).toHaveLength(1);
     expect(lines[0]).toEqual({ message: "http", runId: expect.any(String) as unknown, requestId: "req-gone", method: "POST", path: "/notes", pipeline: "createNote", status: 400, ms: duration, ip: "127.0.0.1", reason: "body not received: connection closed", declaredBytes: 1000 });
   });
 
@@ -189,6 +191,8 @@ describe("http server request log", () => {
     const base = await serve(logger, echo, { timeouts: { requestMs: 300, headersMs: 300 } }, 50);
     expect(await partialPost(base, "X-Request-Id: req-slow\r\n")).toMatch(/^HTTP\/1\.1 408 /);
     await vi.waitFor(() => expect(lines).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ requestId: "req-slow", pipeline: "createNote", status: 408, reason: "body not received: request timeout", declaredBytes: 1000 });
     expect(lines[0]?.ms).toBeGreaterThanOrEqual(300);
   });

@@ -214,6 +214,7 @@ describe("kestrel-h3 request log", () => {
     const base = await listen(failing, { logger });
     const res = await fetch(`${base}/notes/1?token=query-secret`, { headers: { "x-request-id": "req-500" } });
     expect(res.status).toBe(500);
+    expect(hostErrors).toEqual([expect.objectContaining({ message: "store gone" })]);
     expect(lines).toEqual([expect.objectContaining({ message: "http", requestId: "req-500", method: "GET", path: "/notes/1", pipeline: "echo", status: 500, reason: "handler failed" })]);
     expect(lines[0]?.runId).toEqual(res.headers.get("x-kestrel-run-id"));
     expect(res.headers.get("x-request-id")).toBe("req-500");
@@ -246,6 +247,8 @@ describe("kestrel-h3 request log", () => {
     const base = await serve({ logger });
     expect(await partialPost(base, "X-Request-Id: req-gone\r\n", 50)).toBe("");
     await vi.waitFor(() => expect(lines).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(lines).toHaveLength(1);
     expect(lines[0]).toEqual({ message: "http", runId: expect.any(String) as unknown, requestId: "req-gone", method: "POST", path: "/notes", pipeline: "echo", status: 400, ms: duration, ip: "127.0.0.1", reason: "body not received: connection closed", declaredBytes: 1000 });
     expect(hostErrors).toEqual([]);
   });

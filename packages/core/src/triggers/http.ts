@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { boundaryCast } from "../cast.ts";
 import { isBinaryResult, requestIdOf, type ContextInput, type UploadedFile } from "../context.ts";
 import type { InstanceHealth } from "../defineModule.ts";
-import type { CoreCode } from "../errors.ts";
+import { failure, type CoreCode } from "../errors.ts";
 import { logWarn, type Logger } from "../logger.ts";
 import type { RunResult, Runner } from "../runner.ts";
 import { createAllowlist } from "./allowlist.ts";
@@ -390,7 +390,7 @@ export function multipartRefusal(route: Route, contentType: string, requestId?: 
 export function errorResponse(status: number, error: string, requestId?: string): HttpResponse {
   const runId = randomUUID();
   const code = EDGE_CODE_BY_STATUS[status] ?? "INTERNAL";
-  const body = { error, code, retryable: false, runId };
+  const body = { error, code, retryable: failure(code, error).retryable, runId };
   return buildResponse(status, body, requestId === undefined ? { runId } : { runId, requestId });
 }
 
@@ -609,7 +609,8 @@ function bodyReason(err: unknown): string {
 /**
  * Maps an error thrown by `readRequestBody` or `parseRequestBody` to the refusal for it: 413 for
  * `BodyTooLarge`, 415 for `UnsupportedMediaType`, 408 when the server's request timeout ended the
- * read, 400 `body not received: connection closed` when the client closed the connection first, and
+ * read, 400 `invalid body: malformed HTTP framing` when the HTTP parser rejected the framing (not a connection that ended early), 400
+ * `body not received: connection closed` when the client closed the connection first, and
  * 400 `invalid body: …` for a body that arrived but does not parse.
  */
 export function bodyRefusal(err: unknown, req: BodyRequest, requestId?: string): BodyRefusal {
@@ -620,6 +621,8 @@ export function bodyRefusal(err: unknown, req: BodyRequest, requestId?: string):
   if (err instanceof UnsupportedMediaType) return { response: errorResponse(415, err.message, requestId), reason: "unsupported content type" };
   const socketError = req.socket?.errored ?? null;
   if (errorCode(socketError) === "ERR_HTTP_REQUEST_TIMEOUT") return withDeclared({ response: errorResponse(408, "request timeout", requestId), reason: "body not received: request timeout" });
+  const socketCode = errorCode(socketError);
+  if (socketCode?.startsWith("HPE_") === true && socketCode !== "HPE_INVALID_EOF_STATE") return { response: errorResponse(400, "invalid body: malformed HTTP framing", requestId), reason: "invalid body: malformed HTTP framing" };
   if (socketError !== null || errorCode(err) === "ECONNRESET") return withDeclared({ response: errorResponse(400, "connection closed", requestId), reason: "body not received: connection closed" });
   return { response: errorResponse(400, `invalid body: ${err instanceof Error ? err.message : String(err)}`, requestId), reason: bodyReason(err) };
 }

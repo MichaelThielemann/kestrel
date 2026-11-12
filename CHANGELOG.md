@@ -1167,6 +1167,9 @@ Net changes since 5.8.1.
 
 ### Changed
 
+- `kestrel-h3` answers a request body it could not read (closed connection, request timeout, other read
+  error) itself with 400 or 408 and an `http` line, instead of rethrowing to the host's error handler,
+  as the core server does.
 - `media-default`: `media.list` without `limit` answers at most `defaultLimit` items (new config keys
   `maxLimit`, default 200, and `defaultLimit`, default `maxLimit`) with the full `total`, instead of the
   whole library; a `limit` above `maxLimit` answers 400, and a list by `ids` reads at most `maxLimit` of

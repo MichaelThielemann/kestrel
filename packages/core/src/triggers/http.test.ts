@@ -3,7 +3,7 @@ import { afterEach, describe, it, expect } from "vitest";
 import { binaryResult } from "../context.ts";
 import { silentLogger } from "../logger.ts";
 import type { RunResult, Runner } from "../runner.ts";
-import { BodyTooLarge, buildResponse, clientIpResolver, forwardingWarner, createHttpServer, disposition, errorResponse, hasDotSegment, listen, matchRoute, parseQuery, parseRequestBody, parseRoute, readRequestBody, responseForRun, routePattern, UnsupportedMediaType } from "./http.ts";
+import { BodyTooLarge, bodyRefusal, buildResponse, clientIpResolver, forwardingWarner, createHttpServer, disposition, errorResponse, hasDotSegment, listen, matchRoute, parseQuery, parseRequestBody, parseRoute, readRequestBody, responseForRun, routePattern, UnsupportedMediaType } from "./http.ts";
 
 describe("http routes", () => {
   const routes = [parseRoute("GET /pages/:id", "readPage"), parseRoute("POST /pages", "createPage"), parseRoute("GET /", "home")];
@@ -188,6 +188,7 @@ describe("http error format", () => {
     expect(JSON.parse(String(errorResponse(404, "no route").body))).toMatchObject({ code: "NOT_FOUND", retryable: false });
     expect(JSON.parse(String(errorResponse(413, "too big").body))).toMatchObject({ code: "PAYLOAD_TOO_LARGE", retryable: false });
     expect(JSON.parse(String(errorResponse(500, "internal error").body))).toMatchObject({ code: "INTERNAL", retryable: false });
+    expect(JSON.parse(String(errorResponse(408, "request timeout").body))).toMatchObject({ code: "TRANSIENT", retryable: true });
   });
 
   it("sets Retry-After on a retryable 429 or 503, using details.retryAfterSeconds", () => {
@@ -569,5 +570,22 @@ describe("http server", () => {
     const base = await serve(ok);
     const res = await fetch(`${base}/echo`, { headers: { "x-request-id": "a".repeat(300) } });
     expect(res.headers.get("x-request-id")).toBeNull();
+  });
+});
+
+describe("bodyRefusal", () => {
+  const request = (code?: string) => ({ headers: {}, socket: code === undefined ? null : { errored: Object.assign(new Error("socket"), { code }) } });
+
+  it("answers an HTTP parser error on the socket as malformed framing", () => {
+    const refusal = bodyRefusal(new Error("aborted"), request("HPE_INVALID_CHUNK_SIZE"));
+    expect(refusal.response.status).toBe(400);
+    expect(refusal.reason).toBe("invalid body: malformed HTTP framing");
+    expect(JSON.parse(String(refusal.response.body))).toMatchObject({ error: "invalid body: malformed HTTP framing" });
+  });
+
+  it("keeps the closed-connection reason for a reset and other socket errors", () => {
+    expect(bodyRefusal(new Error("aborted"), request("ECONNRESET")).reason).toBe("body not received: connection closed");
+    expect(bodyRefusal(new Error("aborted"), request("EPIPE")).reason).toBe("body not received: connection closed");
+    expect(bodyRefusal(new Error("aborted"), request("HPE_INVALID_EOF_STATE")).reason).toBe("body not received: connection closed");
   });
 });
