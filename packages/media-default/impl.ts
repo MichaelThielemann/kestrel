@@ -397,6 +397,11 @@ function exportTargetPath(base: string, folder: string, filename: string, used: 
 
 const MAX_NAME_BYTES = 200;
 
+function namePrefilter(query: string): { filename?: { like: string } } {
+  const longest = query.split(/[%_]/).reduce((a, b) => (b.length > a.length ? b : a), "");
+  return longest === "" ? {} : { filename: { like: `%${longest}%` } };
+}
+
 function capName(name: string): string {
   if (Buffer.byteLength(name) <= MAX_NAME_BYTES) return name;
   const ext = extname(name);
@@ -796,23 +801,37 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     if (isErr(still)) return still;
     return still.value === null ? blobs.remove(key) : ok();
   };
-  const bringBack = async (item: MediaItem): Promise<Result<string | null, MediaError>> => {
+  const bringBackInto = async (item: MediaItem): Promise<Result<string | null | MediaItem, MediaError>> => {
     const folderReady = await ensureFolder(item.folder);
     if (isErr(folderReady)) return folderReady;
     for (let attempt = 1; attempt <= MAX_SUFFIX; attempt += 1) {
       const filename = attempt === 1 ? item.filename : suffixedName(item.filename, attempt);
       const location = keyFor(item.folder, filename);
+      const released = await releaseFailed(location);
+      if (isErr(released)) return released;
       const taken = await locationTaken(location, item.id);
       if (isErr(taken)) return taken;
       if (taken.value) continue;
-      const restored = await db.updateMany<Document>(COLLECTION, { id: item.id, status: TRASHED }, { status: "ready", trashedAt: null, location, filename, updatedAt: now() });
+      const restored = await db.updateMany<Document>(COLLECTION, { id: item.id, status: TRASHED, folder: item.folder }, { status: "ready", trashedAt: null, location, filename, updatedAt: now() });
       if (isErr(restored)) {
         if (restored.error.code === "CONFLICT") continue;
         return restored;
       }
-      return ok(restored.value === 0 ? null : filename);
+      if (restored.value > 0) return ok(filename);
+      const again = await db.findOne<MediaItem>(COLLECTION, { id: item.id });
+      if (isErr(again)) return again;
+      return ok(again.value?.status === TRASHED ? again.value : null);
     }
     return err(locationConflict(keyFor(item.folder, item.filename)));
+  };
+  const bringBack = async (read: MediaItem): Promise<Result<string | null, MediaError>> => {
+    let item = read;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const back = await bringBackInto(item);
+      if (isErr(back) || back.value === null || typeof back.value === "string") return isErr(back) ? back : ok(back.value);
+      item = back.value;
+    }
+    return err(failure("TRANSIENT", `media/default: the folder of ${read.id} kept changing while it was restored – restore it again`));
   };
 
   const moveToFolder = async (read: MediaItem, folder: string): Promise<Result<void, MediaError>> => {
@@ -944,7 +963,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (mediaKind === "image" || mediaKind === "video") filter.contentType = { like: `${mediaKind}/%` };
       const sort: Record<string, "asc" | "desc"> = { [sortBy ?? "createdAt"]: direction ?? (sortBy === undefined ? "desc" : "asc") };
       if (query !== undefined || mediaKind === "other") {
-        if (query !== undefined) filter.filename = { like: `%${query.replace(/[%_]/g, "")}%` };
+        if (query !== undefined) Object.assign(filter, namePrefilter(query));
         const scanned = await scanAll(filter, sort);
         if (isErr(scanned)) return scanned;
         const candidates = scanned.value.filter((i) => (query === undefined || String(i.filename).includes(query)) && matchesKind(i.contentType));
@@ -1311,7 +1330,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (isErr(key)) return key;
       const filter: Record<string, unknown> = { status: TRASHED };
       const query = options.q?.trim() || undefined;
-      if (query !== undefined) filter.filename = { like: `%${query.replace(/[%_]/g, "")}%` };
+      if (query !== undefined) Object.assign(filter, namePrefilter(query));
       const sort: Record<string, "asc" | "desc"> = { trashedAt: "desc", id: "asc" };
       const scanned = await scanAll(filter, sort);
       if (isErr(scanned)) return scanned;

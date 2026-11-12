@@ -352,6 +352,44 @@ describe("media/default restore", () => {
   });
 });
 
+describe("media/default restore around other writes", () => {
+  it("keeps its name when only a failed upload holds it", async () => {
+    const { media, blobs, db } = await setup();
+    const item = await put(media, "a.png", "box");
+    expectOk(await media.trash([item.id]));
+    const putBlob = blobs.put.bind(blobs);
+    blobs.put = async (key, data, options) => (key.startsWith("media/") ? err(failure("TRANSIENT", "store down")) : putBlob(key, data, options));
+    expectErr(await media.upload({ filename: "a.png", contentType: "image/png", data: bytes(8) }, "box"), "TRANSIENT");
+    blobs.put = putBlob;
+    expect(expectOk(await db.count(COLLECTION, { location: "box/a.png", status: "failed" }))).toBe(1);
+
+    expect(expectOk(await media.restore([item.id]))).toEqual({ ids: [item.id], unchanged: [], skipped: [], renamed: [] });
+    expect(expectOk(await media.get(item.id))).toMatchObject({ filename: "a.png", location: "box/a.png" });
+    expect(expectOk(await media.list({ folder: "box" })).items.map((i) => i.id)).toEqual([item.id]);
+  });
+
+  it("follows a folder rename that runs while it looks for a free name", async () => {
+    const { media, db } = await setup();
+    const item = await put(media, "a.png", "old");
+    const neighbour = await put(media, "b.png", "old");
+    expectOk(await media.trash([item.id]));
+    const findOne = db.findOne.bind(db);
+    let renamedMidway = false;
+    db.findOne = async <T extends Document>(collection: string, filter: Filter) => {
+      if (!renamedMidway && collection === COLLECTION && filter.location === "old/a.png") {
+        renamedMidway = true;
+        expectOk(await media.renameFolder("old", "new"));
+      }
+      return findOne<T>(collection, filter);
+    };
+    expect(expectOk(await media.restore([item.id])).ids).toEqual([item.id]);
+    expect(renamedMidway).toBe(true);
+    expect(await rowOf(db, item.id)).toMatchObject({ status: "ready", folder: "new", location: "new/a.png", filename: "a.png" });
+    expect(expectOk(await media.list({ folder: "new" })).items.map((i) => i.id).sort()).toEqual([item.id, neighbour.id].sort());
+    expect(expectOk(await media.list({ folder: "old" })).total).toBe(0);
+  });
+});
+
 describe("media/default listTrash", () => {
   it("lists trashed items newest first with trashedAt and expiresAt, searchable and paged, and nothing else", async () => {
     const { media, clock } = await setup();
@@ -368,6 +406,24 @@ describe("media/default listTrash", () => {
     expect(all.items.map((i) => [i.id, i.folder, i.trashedAt, i.expiresAt])).toEqual([[newer.id, "", 9_000, 9_000 + 30 * DAY], [older.id, "x", 5_000, 5_000 + 30 * DAY]]);
     expect(expectOk(await media.listTrash({ q: "old" })).items.map((i) => i.id)).toEqual([older.id]);
     expect(expectOk(await media.listTrash({ limit: 1, offset: 1 }))).toMatchObject({ total: 2, items: [{ id: older.id }] });
+  });
+});
+
+describe("media/default search for names with an underscore", () => {
+  it("finds them in the library and in the trash, and only them", async () => {
+    const { media } = await setup();
+    const underscore = await put(media, "my_file.png");
+    await put(media, "myxfile.png");
+    await put(media, "myfile.png");
+    expect(expectOk(await media.list({ q: "my_file" })).items.map((i) => i.id)).toEqual([underscore.id]);
+    expect(expectOk(await media.list({ q: "_" })).items.map((i) => i.id)).toEqual([underscore.id]);
+    expectOk(await media.trash([underscore.id]));
+    await put(media, "my_file.png", "", bytes(7));
+    const again = expectOk(await media.list({ q: "my_file" })).items;
+    expect(again.map((i) => i.id)).not.toContain(underscore.id);
+    expect(again).toHaveLength(1);
+    expect(expectOk(await media.listTrash({ q: "my_file" })).items.map((i) => i.id)).toEqual([underscore.id]);
+    expect(expectOk(await media.listTrash({ q: "_" })).items.map((i) => i.id)).toEqual([underscore.id]);
   });
 });
 

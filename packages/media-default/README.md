@@ -243,7 +243,9 @@ trash before going back to one.
 `media.restore` brings items back with the same id, key, `path`, folder, texts and provenance,
 recreates their folder and writes their public copy again. When another item took the name
 meanwhile, the restored one becomes `<stem>-<n>.<ext>` (the first free `n` from 2 on, cut to 200
-bytes) and is listed in `renamed`; only the display name changes, never the `path`.
+bytes) and is listed in `renamed`; only the display name changes, never the `path`. A name held only
+by a failed or abandoned upload is freed first, as an upload does, so it does not count as taken. A
+restore that meets a folder rename of its item's folder restores the item into the renamed folder.
 `media.trashFolder` trashes every ready item in a folder's subtree, deletes its failed uploads and
 those abandoned for `uploadStaleAfterMs`, and removes the folder rows of that subtree. An upload still
 under way keeps its row, so the folder stays listed until that upload ends. Items of the subtree that
