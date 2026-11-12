@@ -1,5 +1,5 @@
-import { Agent, createServer, request, type Server } from "node:http";
-import type { AddressInfo, Socket } from "node:net";
+import { createServer, request, type Server } from "node:http";
+import { connect, type AddressInfo } from "node:net";
 import { createApp, toNodeListener, toWebHandler } from "h3";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -93,24 +93,20 @@ function form(files: number, fields: number): FormData {
 interface Upload {
   contentLength?: number;
   send: number;
-  keepWriting?: boolean;
-  agent?: Agent;
 }
 
-function upload(base: string, { contentLength, send, keepWriting = false, agent }: Upload): Promise<{ status: number; body: string; socket: Socket | null }> {
+function upload(base: string, { contentLength, send }: Upload): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (contentLength !== undefined) headers["content-length"] = String(contentLength);
-    const req = request(`${base}/upload`, { method: "POST", headers, ...(agent === undefined ? {} : { agent }) });
+    const req = request(`${base}/upload`, { method: "POST", headers });
     let answered = false;
-    const total = keepWriting && contentLength !== undefined ? contentLength : send;
     req.on("response", (res) => {
       answered = true;
-      const socket = res.socket;
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (chunk: string) => { body += chunk; });
-      res.on("end", () => resolve({ status: res.statusCode ?? 0, body, socket }));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
       res.on("error", reject);
     });
     req.on("error", (err) => {
@@ -119,19 +115,90 @@ function upload(base: string, { contentLength, send, keepWriting = false, agent 
     let sent = 0;
     const chunk = Buffer.alloc(CHUNK, 0x20);
     const pump = () => {
-      while ((keepWriting || !answered) && sent < total) {
-        const size = Math.min(CHUNK, total - sent);
-        sent += size;
-        if (!req.write(size === CHUNK ? chunk : chunk.subarray(0, size))) {
+      while (!answered && sent < send) {
+        sent += CHUNK;
+        if (!req.write(chunk)) {
           req.once("drain", pump);
           return;
         }
       }
-      if (sent >= total && keepWriting) req.end();
-      else if (!answered && contentLength === undefined) req.end();
+      if (!answered && contentLength === undefined) req.end();
     };
     req.flushHeaders();
     pump();
+  });
+}
+
+interface Answer {
+  status: number;
+  body: string;
+}
+
+function readAnswers(raw: Buffer, count: number): Answer[] | null {
+  const answers: Answer[] = [];
+  let at = 0;
+  while (answers.length < count) {
+    const end = raw.indexOf("\r\n\r\n", at);
+    if (end < 0) return null;
+    const head = raw.subarray(at, end).toString("latin1").toLowerCase().split("\r\n");
+    const status = Number(head[0]?.split(" ")[1]);
+    at = end + 4;
+    let body: Buffer = Buffer.alloc(0);
+    if (head.includes("transfer-encoding: chunked")) {
+      for (;;) {
+        const line = raw.indexOf("\r\n", at);
+        if (line < 0) return null;
+        const size = Number.parseInt(raw.subarray(at, line).toString("latin1"), 16);
+        if (raw.length < line + 2 + size + 2) return null;
+        body = Buffer.concat([body, raw.subarray(line + 2, line + 2 + size)]);
+        at = line + 2 + size + 2;
+        if (size === 0) break;
+      }
+    } else {
+      const length = Number(head.find((field) => field.startsWith("content-length:"))?.split(":")[1] ?? "0");
+      if (raw.length < at + length) return null;
+      body = raw.subarray(at, at + length);
+      at += length;
+    }
+    answers.push({ status, body: body.toString("utf8") });
+  }
+  return answers;
+}
+
+function oversizeThenValid(base: string, declared: number): Promise<{ answers: Answer[]; writtenAfterAnswer: number }> {
+  const { hostname, port } = new URL(base);
+  return new Promise((resolve, reject) => {
+    const socket = connect(Number(port), hostname);
+    let raw: Buffer = Buffer.alloc(0);
+    let written = 0;
+    let writtenAtAnswer: number | null = null;
+    socket.on("data", (data: Buffer) => {
+      raw = Buffer.concat([raw, data]);
+      writtenAtAnswer ??= written;
+      const answers = readAnswers(raw, 2);
+      if (answers !== null) {
+        socket.end();
+        resolve({ answers, writtenAfterAnswer: declared - (writtenAtAnswer ?? declared) });
+      }
+    });
+    socket.on("error", reject);
+    socket.on("close", () => reject(new Error(`connection closed after ${written} body bytes`)));
+    const chunk = Buffer.alloc(CHUNK, 0x20);
+    const pump = () => {
+      while (written < declared) {
+        const size = Math.min(CHUNK, declared - written);
+        written += size;
+        if (!socket.write(size === CHUNK ? chunk : chunk.subarray(0, size))) {
+          socket.once("drain", pump);
+          return;
+        }
+      }
+      socket.write(`POST /upload HTTP/1.1\r\nhost: ${hostname}\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n{}`);
+    };
+    socket.once("connect", () => {
+      socket.write(`POST /upload HTTP/1.1\r\nhost: ${hostname}\r\ncontent-type: application/json\r\ncontent-length: ${declared}\r\n\r\n`);
+      pump();
+    });
   });
 }
 
@@ -161,20 +228,14 @@ describe.each([
     expect(served.runs()).toBe(0);
   });
 
-  it("a 413 to a declared oversize body leaves the connection usable for the next request", async () => {
+  it("keeps the connection usable when the client writes the whole oversize body after the 413", async () => {
     served = await start();
-    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
-    try {
-      const over = await upload(served.base, { contentLength: 2 * 1024 * 1024, send: 2 * 1024 * 1024, keepWriting: true, agent });
-      expect(over.status).toBe(413);
-      const next = await upload(served.base, { contentLength: 2, send: 2, keepWriting: true, agent });
-      expect(next.status).toBe(200);
-      expect(next.socket).not.toBeNull();
-      expect(next.socket).toBe(over.socket);
-      expect(served.runs()).toBe(1);
-    } finally {
-      agent.destroy();
-    }
+    const declared = 64 * 1024 * 1024;
+    const { answers, writtenAfterAnswer } = await oversizeThenValid(served.base, declared);
+    expect(answers.map((answer) => answer.status)).toEqual([413, 200]);
+    expect(JSON.parse(answers[0]?.body ?? "")).toMatchObject({ code: "PAYLOAD_TOO_LARGE" });
+    expect(writtenAfterAnswer).toBeGreaterThan(declared / 2);
+    expect(served.runs()).toBe(1);
   });
 
   it("accepts a body of exactly the limit", async () => {
