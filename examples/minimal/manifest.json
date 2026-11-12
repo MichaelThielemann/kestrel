@@ -6128,7 +6128,7 @@
       "module": "media/default",
       "factory": false,
       "description": {
-        "summary": "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result)",
+        "summary": "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed, trashed or deleted items and foreign files, re-reading an item before its copy goes (adds _publicMedia: { written, removed, missing } to the result)",
         "reads": [],
         "writes": [
           "result._publicMedia"
@@ -24004,7 +24004,7 @@
           "name": "media.syncPublic",
           "module": "media/default",
           "description": {
-            "summary": "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result)",
+            "summary": "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed, trashed or deleted items and foreign files, re-reading an item before its copy goes (adds _publicMedia: { written, removed, missing } to the result)",
             "reads": [],
             "writes": [
               "result._publicMedia"
@@ -27034,7 +27034,7 @@
           "name": "media.syncPublic",
           "module": "media/default",
           "description": {
-            "summary": "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result)",
+            "summary": "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed, trashed or deleted items and foreign files, re-reading an item before its copy goes (adds _publicMedia: { written, removed, missing } to the result)",
             "reads": [],
             "writes": [
               "result._publicMedia"

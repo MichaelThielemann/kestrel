@@ -441,7 +441,7 @@ export default defineModule({
     reconcile: { summary: "Compare the blobs under the media prefix with the media_items rows; with `delete` also removes blobs that no row points at (rows are never deleted)", reads: [], writes: ["result"], input: { type: "object", properties: { delete: { type: "boolean" } }, additionalProperties: false }, output: RECONCILE_SCHEMA },
     reconcileDelete: { summary: "Like media.reconcile, but always deletes the orphan blobs – the deletion is in the pipeline, not in the request", reads: [], writes: ["result"], output: RECONCILE_SCHEMA },
     syncPublic: {
-      summary: "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result)",
+      summary: "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed, trashed or deleted items and foreign files, re-reading an item before its copy goes (adds _publicMedia: { written, removed, missing } to the result)",
       reads: [],
       writes: ["result._publicMedia"],
       extendsOutput: { type: "object", properties: { _publicMedia: PUBLIC_SYNC_SCHEMA }, required: ["_publicMedia"] },
