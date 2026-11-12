@@ -20,7 +20,7 @@ const TEST_JPEG = Buffer.from(
   "base64",
 );
 const SENTINELS = ["SENTINEL-EN-DRAFT", "SENTINEL-DRAFT-PAGE", "sentinel-folder"];
-const CORE_FILE_HEADERS = new Set(["x-content-type-options", "cache-control", "x-kestrel-run-id", "x-request-id", "content-type", "content-length", "content-disposition", "content-security-policy", "access-control-allow-origin", "access-control-allow-methods", "access-control-allow-headers", "vary", "date", "connection", "keep-alive", "transfer-encoding"]);
+const CORE_FILE_HEADERS = new Set(["x-content-type-options", "cache-control", "x-kestrel-run-id", "x-request-id", "content-type", "content-length", "content-disposition", "content-security-policy", "access-control-allow-origin", "access-control-allow-methods", "access-control-allow-headers", "access-control-expose-headers", "vary", "date", "connection", "keep-alive", "transfer-encoding"]);
 
 type Grant = Map<string, Grant | true>;
 

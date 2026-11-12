@@ -181,4 +181,17 @@ describe("http server request log", () => {
     expect(lines[0]).toMatchObject({ requestId: "req-slow", pipeline: "createNote", status: 408, reason: "body not received: request timeout", declaredBytes: 1000 });
     expect(lines[0]?.ms).toBeGreaterThanOrEqual(300);
   });
+
+  it("logs a CORS preflight and lets a browser send and read the correlation headers", async () => {
+    const { logger, lines } = collectingLogger();
+    const base = await serve(logger, echo, { corsOrigin: "https://admin.example" });
+    const preflight = await fetch(`${base}/notes?token=query-secret`, { method: "OPTIONS", headers: { origin: "https://admin.example", "access-control-request-headers": "x-request-id" } });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-headers")?.split(/,\s*/)).toContain("x-request-id");
+    const res = await fetch(`${base}/notes/1`, { headers: { origin: "https://admin.example", "x-request-id": "req-cors" } });
+    expect(res.headers.get("access-control-expose-headers")?.split(/,\s*/)).toEqual(expect.arrayContaining(["x-kestrel-run-id", "x-request-id"]));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toEqual({ message: "http", runId: preflight.headers.get("x-kestrel-run-id"), method: "OPTIONS", path: "/notes", status: 204, ms: duration, ip: "127.0.0.1", reason: "cors preflight" });
+    expect(lines[1]).toMatchObject({ requestId: "req-cors", pipeline: "readNote", status: 200 });
+  });
 });

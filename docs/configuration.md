@@ -124,7 +124,7 @@ event and cron triggers still run.
 |---|---|---|---|
 | `port` | integer 0–65535 | `3000` | `0` picks a free port |
 | `host` | string | `"127.0.0.1"` | Interface to bind |
-| `corsOrigin` | string | – | Single allowed origin; omitted means no CORS headers. |
+| `corsOrigin` | string | – | Single allowed origin; omitted means no CORS headers. The browser may send `Content-Type`, `Authorization` and `X-Request-Id` and may read `X-Kestrel-Run-Id`, `X-Request-Id` and `Retry-After` |
 | `maxBodyBytes` | integer | `10485760` | A larger body answers 413, checked against `Content-Length` and while reading |
 | `multipart.maxParts` | integer | `120` | Parts per `multipart/form-data` body; one more answers 413 |
 | `multipart.maxFiles` | integer | `20` | Parts with a `filename` per body; one more answers 413 |
@@ -329,6 +329,7 @@ The `http` line has the same fields in the core server and in `kestrel-h3`'s han
 
 | Status | `reason` |
 |---|---|
+| 204 | core server only: `cors preflight` (an `OPTIONS` request with `corsOrigin` set; no `pipeline`) |
 | 400 | `invalid path: dot segment` (no `pipeline`, `path` as sent), `invalid body: malformed JSON`, `invalid body: body must be a JSON object`, `invalid multipart body: <cause>` |
 | 400 | `body not received: connection closed` (the client closed the connection before the body was complete, so no answer reaches it) |
 | 403 | core server only: `client not allowed` (outside `http.allow`), `missing trusted client header` |

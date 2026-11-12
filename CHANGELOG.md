@@ -661,13 +661,17 @@ Net changes since 5.8.1.
   `X-Kestrel-Run-Id` and the echoed `X-Request-Id`.
 - The core server's `http` log line also covers requests answered without running a pipeline:
   unknown route (404), dot segment, unreadable body (400), client refused by `http.allow` (403),
-  body too large (413, with `declaredBytes`), unsupported content type (415) and a failing handler
-  (500), each with a `reason`. The line of a 500 carries the run id of the response. A body the
-  client stops sending is logged as `body not received: connection closed` (400), one ended by
-  `http.timeouts.requestMs` as `body not received: request timeout` with the 408 Node answers.
+  body too large (413, with `declaredBytes`), unsupported content type (415), a CORS preflight (204)
+  and a failing handler (500), each with a `reason`. The line of a 500 carries the run id of the
+  response. A body the client stops sending is logged as `body not received: connection closed`
+  (400), one ended by `http.timeouts.requestMs` as `body not received: request timeout` with the
+  408 Node answers.
 - `bodyRefusal(err, req, requestId)` maps an error from `readRequestBody` or `parseRequestBody` to
   the answer and log reason both HTTP paths use; `httpLogLine(entry)` builds the fields of the
   `http` line.
+- With `corsOrigin` set, the core server allows the `X-Request-Id` request header and exposes
+  `X-Kestrel-Run-Id`, `X-Request-Id` and `Retry-After` to the browser; a preflight answer carries an
+  `X-Kestrel-Run-Id`.
 - `kestrel check`, `kestrel explain` and `kestrel manifest` inspect a project without starting it,
   in a sandboxed scratch copy, through the project's own core. `check` lists every load issue, boot
   problem, warning and not-checked item with module and cause (`--json`, `--fail-on`) and is meant

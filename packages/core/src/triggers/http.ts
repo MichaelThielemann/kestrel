@@ -652,12 +652,15 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
     }
     if (options.corsOrigin !== undefined) {
       res.setHeader("access-control-allow-origin", options.corsOrigin);
-      res.setHeader("access-control-allow-headers", "content-type, authorization");
+      res.setHeader("access-control-allow-headers", "content-type, authorization, x-request-id");
       res.setHeader("access-control-allow-methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+      res.setHeader("access-control-expose-headers", "x-kestrel-run-id, x-request-id, retry-after");
       res.setHeader("vary", "origin");
       if (req.method === "OPTIONS") {
-        res.writeHead(204, { "x-content-type-options": "nosniff", "cache-control": "no-store", "access-control-max-age": "600" });
+        const runId = randomUUID();
+        res.writeHead(204, { "x-content-type-options": "nosniff", "cache-control": "no-store", "access-control-max-age": "600", "x-kestrel-run-id": runId, ...(requestId === undefined ? {} : { "x-request-id": requestId }) });
         res.end();
+        logger.info("http", httpLogLine({ runId, requestId, method: req.method, path: rawPath(req), status: 204, begin, ip, reason: "cors preflight" }));
         return;
       }
     }
