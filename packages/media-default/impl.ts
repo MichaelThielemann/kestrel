@@ -269,9 +269,9 @@ export interface Media extends MediaFiles {
   listTrash(options?: TrashListOptions): Promise<Result<{ items: TrashedItem[]; total: number }, MediaError>>;
   /** The ids of every trashed item, or with `expired` only of those whose retention has run out. */
   trashIds(options?: { expired?: boolean }): Promise<Result<string[], MediaError>>;
-  /** Keeps the trashed ids among `ids`, reporting every other id as not found or not trashed. */
+  /** Keeps the trashed ids among `ids`, and those whose purge stopped halfway, reporting every other id as not found or not trashed. */
   selectTrash(ids: string[]): Promise<Result<TrashOutcome, MediaError>>;
-  /** Deletes trashed items for good, each as `remove` does; any other id is left alone. */
+  /** Deletes trashed items for good, each as `remove` does, and finishes the delete of an item whose purge stopped halfway; any other id is left alone. */
   purge(ids: string[]): Promise<Result<TrashOutcome, MediaError>>;
   reconcile(options?: { delete?: boolean }): Promise<Result<Reconciliation, MediaError>>;
   syncPublic(): Promise<Result<PublicSync, MediaError>>;
@@ -1340,7 +1340,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       for (const id of new Set(ids)) {
         const found = await db.findOne<MediaItem>(COLLECTION, { id });
         if (isErr(found)) return found;
-        if (found.value?.status === TRASHED) outcome.ids.push(id);
+        if (found.value?.status === TRASHED || found.value?.status === REMOVING) outcome.ids.push(id);
         else outcome.skipped.push({ id, reason: found.value !== null && isReady(found.value) ? "not_trashed" : "not_found" });
       }
       return ok(outcome);
@@ -1353,8 +1353,10 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         if (ended.value === 0) {
           const found = await db.findOne<MediaItem>(COLLECTION, { id });
           if (isErr(found)) return found;
-          outcome.skipped.push({ id, reason: found.value !== null && isReady(found.value) ? "not_trashed" : "not_found" });
-          continue;
+          if (found.value?.status !== REMOVING) {
+            outcome.skipped.push({ id, reason: found.value !== null && isReady(found.value) ? "not_trashed" : "not_found" });
+            continue;
+          }
         }
         const removed = await removeItem(id);
         if (isErr(removed)) return removed;

@@ -259,7 +259,9 @@ A purge is a selection followed by `media.purge`, so a step in between can narro
 least `trashRetentionDays` ago) put ids into `result.ids`, `references.dropReferenced:media` leaves
 the referenced ones in the trash, and `media.purge` deletes the rest for good, each as `media.remove`.
 Without a selection before it, `media.purge` takes `body.ids`. An item restored between the
-selection and the purge is never deleted.
+selection and the purge is never deleted. When a purge stops halfway (the blob store fails after the
+item's readiness ended), repeating it finishes the delete: `media.selectTrash` and `media.purge` take
+such an item like a trashed one, so it reaches `images.removeMany` and `media.deleted` as well.
 
 `media.trash`, `media.restore`, `media.selectTrash` and `media.purge` with `body.ids` take 1 to 200
 ids (`VALIDATION` otherwise) and answer per id with `{ ids, skipped: [{ id, reason }] }`, where

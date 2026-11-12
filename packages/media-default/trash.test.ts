@@ -400,6 +400,20 @@ describe("media/default purge", () => {
     expect(blobs.blobs.has(gone.key)).toBe(false);
   });
 
+  it("a purge that stopped halfway is selected and finished by a repeated purge", async () => {
+    const { media, blobs, db } = await setup();
+    const gone = await put(media, "gone.png");
+    expectOk(await media.trash([gone.id]));
+    const remove = blobs.remove.bind(blobs);
+    blobs.remove = async (key) => (key === gone.key ? err(failure("TRANSIENT", "store down")) : remove(key));
+    expectErr(await media.purge([gone.id]), "TRANSIENT");
+    blobs.remove = remove;
+    expect(expectOk(await media.selectTrash([gone.id]))).toEqual({ ids: [gone.id], skipped: [] });
+    expect(expectOk(await media.purge([gone.id]))).toEqual({ ids: [gone.id], skipped: [] });
+    expect(await rowOf(db, gone.id)).toBeNull();
+    expect([...blobs.blobs.keys()].filter((key) => key.includes(gone.id))).toEqual([]);
+  });
+
   it("does not purge an item restored before its turn", async () => {
     const { media } = await setup();
     const item = await put(media, "a.png");
@@ -524,8 +538,9 @@ describe("media/default syncPublic with trashed items", () => {
   it("keeps the copy of an item restored while the run is under way", async () => {
     const { media, blobs, db } = await setup();
     const item = await put(media, "a.png");
+    const key = copyKeyOf(item.id, item.filename);
     expectOk(await media.trash([item.id]));
-    expectOk(await blobs.put(copyKeyOf(item.id, item.filename), bytes(1), { contentType: "image/png" }));
+    expectOk(await blobs.put(key, bytes(1), { contentType: "image/png" }));
     const findMany = db.findMany.bind(db);
     let restoredMidway = false;
     db.findMany = async <T extends Document>(collection: string, filter: Filter, options?: FindOptions) => {
@@ -536,9 +551,16 @@ describe("media/default syncPublic with trashed items", () => {
       }
       return page;
     };
+    const remove = blobs.remove.bind(blobs);
+    const removedDuringSync: string[] = [];
+    blobs.remove = async (removed) => {
+      removedDuringSync.push(removed);
+      return remove(removed);
+    };
     expectOk(await media.syncPublic());
     expect(restoredMidway).toBe(true);
-    expect(blobs.blobs.has(copyKeyOf(item.id, item.filename))).toBe(true);
+    expect(removedDuringSync).not.toContain(key);
+    expect(blobs.blobs.has(key)).toBe(true);
   });
 });
 
