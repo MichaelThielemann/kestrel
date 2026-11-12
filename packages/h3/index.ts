@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { appendResponseHeader, eventHandler, getRequestHeaders, getRequestURL, readRawBody, setResponseHeaders, setResponseStatus, type EventHandler, type H3Event } from "h3";
-import { BodyTooLarge, UnsupportedMediaType, clientIpResolver, errorResponse, hasDotSegment, matchRoute, multipartRefusal, parseQuery, parseRequestBody, readRequestBody, requestIdOf, responseForRun, type ClientIpOptions, type ContextInput, type MultipartLimits, type HttpResponse, type Kestrel, type Logger } from "@michaelthielemann/kestrel";
+import { bodyRefusal, clientIpResolver, errorResponse, hasDotSegment, httpLogLine, matchRoute, multipartRefusal, parseQuery, parseRequestBody, readRequestBody, requestIdOf, responseForRun, type ClientIpOptions, type ContextInput, type MultipartLimits, type HttpResponse, type Kestrel, type Logger } from "@michaelthielemann/kestrel";
 
 export interface KestrelHandlerOptions extends ClientIpOptions {
   mountPath?: string;
@@ -47,27 +47,11 @@ async function respond(event: H3Event, response: HttpResponse): Promise<Buffer |
   return typeof response.body === "string" ? response.body : Buffer.from(response.body);
 }
 
-const REASON_LIMIT = 200;
-
 interface Handled {
   response: HttpResponse;
   pipeline?: string;
   reason?: string;
   declaredBytes?: number;
-}
-
-function declaredLength(value: string | undefined): number | undefined {
-  return value !== undefined && /^\d{1,15}$/.test(value) ? Number(value) : undefined;
-}
-
-function bodyReason(err: unknown): string {
-  if (err instanceof SyntaxError) return "invalid body: malformed JSON";
-  const message = err instanceof Error ? err.message : "unreadable";
-  return message.startsWith("invalid ") ? message : `invalid body: ${message}`;
-}
-
-function bounded(reason: string): string {
-  return reason.length > REASON_LIMIT ? `${reason.slice(0, REASON_LIMIT)}…` : reason;
 }
 
 function rawPathname(event: H3Event): string {
@@ -93,24 +77,12 @@ export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHan
     const contentType = headers["content-type"] ?? "";
     const refusal = multipartRefusal(match.route, contentType, requestId);
     if (refusal !== undefined) return { response: refusal, pipeline, reason: "this route does not accept multipart/form-data" };
-    const tooLarge = (err: BodyTooLarge): Handled => {
-      const declaredBytes = declaredLength(headers["content-length"]);
-      return { response: errorResponse(413, err.message, requestId), pipeline, reason: err.message, ...(declaredBytes === undefined ? {} : { declaredBytes }) };
-    };
-    let raw: Uint8Array | undefined;
-    try {
-      raw = WITH_BODY.has(event.method) ? await readBody(event, maxBodyBytes) : undefined;
-    } catch (err) {
-      if (err instanceof BodyTooLarge) return tooLarge(err);
-      throw err;
-    }
     let parsed;
     try {
+      const raw = WITH_BODY.has(event.method) ? await readBody(event, maxBodyBytes) : undefined;
       parsed = await parseRequestBody(contentType, raw ?? new Uint8Array(), options.multipart);
     } catch (err) {
-      if (err instanceof BodyTooLarge) return tooLarge(err);
-      if (err instanceof UnsupportedMediaType) return { response: errorResponse(415, err.message, requestId), pipeline, reason: "unsupported content type" };
-      return { response: errorResponse(400, `invalid body: ${err instanceof Error ? err.message : String(err)}`, requestId), pipeline, reason: bodyReason(err) };
+      return { ...bodyRefusal(err, event.node.req, requestId), pipeline };
     }
 
     const query = parseQuery(url.searchParams);
@@ -131,18 +103,8 @@ export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHan
   function report(event: H3Event, begin: number, requestId: string | undefined, ip: string | undefined, handled: Handled): void {
     if (logger === undefined) return;
     const { response, pipeline, reason, declaredBytes } = handled;
-    logger.info("http", {
-      runId: response.headers["x-kestrel-run-id"] ?? randomUUID(),
-      ...(requestId === undefined ? {} : { requestId }),
-      method: event.method,
-      path: reason === "invalid path: dot segment" ? rawPathname(event) : getRequestURL(event).pathname,
-      ...(pipeline === undefined ? {} : { pipeline }),
-      status: response.status,
-      ms: Math.round((performance.now() - begin) * 100) / 100,
-      ...(ip === undefined ? {} : { ip }),
-      ...(reason === undefined ? {} : { reason: bounded(reason) }),
-      ...(declaredBytes === undefined ? {} : { declaredBytes }),
-    });
+    const path = reason === "invalid path: dot segment" ? rawPathname(event) : getRequestURL(event).pathname;
+    logger.info("http", httpLogLine({ runId: response.headers["x-kestrel-run-id"] ?? randomUUID(), requestId, method: event.method, path, pipeline, status: response.status, begin, ip, reason, declaredBytes }));
   }
 
   return eventHandler(async (event) => {
@@ -158,17 +120,7 @@ export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHan
       const pipeline = routed.get(event);
       const runId = randomUUID();
       if (!event.node.res.headersSent) setResponseHeaders(event, requestId === undefined ? { "x-kestrel-run-id": runId } : { "x-kestrel-run-id": runId, "x-request-id": requestId });
-      logger?.info("http", {
-        runId,
-        ...(requestId === undefined ? {} : { requestId }),
-        method: event.method,
-        path: rawPathname(event),
-        ...(pipeline === undefined ? {} : { pipeline }),
-        status: 500,
-        ms: Math.round((performance.now() - begin) * 100) / 100,
-        ...(ip === undefined ? {} : { ip }),
-        reason: "handler failed",
-      });
+      logger?.info("http", httpLogLine({ runId, requestId, method: event.method, path: rawPathname(event), pipeline, status: 500, begin, ip, reason: "handler failed" }));
       throw err;
     }
     report(event, begin, requestId, ip, handled);

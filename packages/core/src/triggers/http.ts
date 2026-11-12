@@ -374,6 +374,7 @@ const EDGE_CODE_BY_STATUS: Readonly<Record<number, CoreCode>> = {
   400: "VALIDATION",
   403: "FORBIDDEN",
   404: "NOT_FOUND",
+  408: "TRANSIENT",
   413: "PAYLOAD_TOO_LARGE",
   415: "UNSUPPORTED",
   500: "INTERNAL",
@@ -540,18 +541,87 @@ interface Answer {
 
 const REASON_LIMIT = 200;
 
-function bounded(reason: string): string {
-  return reason.length > REASON_LIMIT ? `${reason.slice(0, REASON_LIMIT)}…` : reason;
+/** One request as its `http` log line records it. */
+export interface HttpLogEntry {
+  /** The `X-Kestrel-Run-Id` of the response. */
+  runId: string | undefined;
+  requestId?: string | undefined;
+  method: string | undefined;
+  /** The URL path, without the query string. */
+  path: string;
+  pipeline?: string | undefined;
+  status: number;
+  /** The `performance.now()` at which the request arrived; `ms` runs from it. */
+  begin: number;
+  ip?: string | undefined;
+  reason?: string | undefined;
+  declaredBytes?: number | undefined;
+}
+
+/**
+ * The fields of the `http` line both HTTP paths log for one request: absent values are left out,
+ * `reason` is cut to 200 characters and `ms` is the time since `begin`, rounded to 0.01.
+ */
+export function httpLogLine(entry: HttpLogEntry): Record<string, unknown> {
+  const { runId, requestId, method, path, pipeline, status, begin, ip, reason, declaredBytes } = entry;
+  return {
+    runId,
+    ...(requestId === undefined ? {} : { requestId }),
+    method,
+    path,
+    ...(pipeline === undefined ? {} : { pipeline }),
+    status,
+    ms: Math.round((performance.now() - begin) * 100) / 100,
+    ...(ip === undefined ? {} : { ip }),
+    ...(reason === undefined ? {} : { reason: reason.length > REASON_LIMIT ? `${reason.slice(0, REASON_LIMIT)}…` : reason }),
+    ...(declaredBytes === undefined ? {} : { declaredBytes }),
+  };
+}
+
+/** A request whose body could not be read or parsed, as both HTTP paths answer and log it. */
+export interface BodyRefusal {
+  response: HttpResponse;
+  reason: string;
+  /** The `Content-Length` the request declared; set when the body was too large or did not arrive. */
+  declaredBytes?: number;
+}
+
+/** The parts of a Node request `bodyRefusal` reads. */
+export interface BodyRequest {
+  headers: IncomingHttpHeaders;
+  socket?: { errored?: Error | null } | null;
 }
 
 function declaredLength(value: string | undefined): number | undefined {
   return value !== undefined && /^\d{1,15}$/.test(value) ? Number(value) : undefined;
 }
 
+function errorCode(value: unknown): string | undefined {
+  return isRecord(value) && typeof value.code === "string" ? value.code : undefined;
+}
+
 function bodyReason(err: unknown): string {
   if (err instanceof SyntaxError) return "invalid body: malformed JSON";
   const message = err instanceof Error ? err.message : "unreadable";
   return message.startsWith("invalid ") ? message : `invalid body: ${message}`;
+}
+
+/**
+ * Maps an error thrown by `readRequestBody` or `parseRequestBody` to the refusal for it: 413 for
+ * `BodyTooLarge`, 415 for `UnsupportedMediaType`, 408 when the server's request timeout ended the
+ * read, 400 `body not received: connection closed` when the client closed the connection first, and
+ * 400 `invalid body: …` for a body that arrived but does not parse.
+ */
+export function bodyRefusal(err: unknown, req: BodyRequest, requestId?: string): BodyRefusal {
+  const contentLength = req.headers["content-length"];
+  const declared = declaredLength(contentLength);
+  const withDeclared = (refusal: BodyRefusal): BodyRefusal => (declared === undefined ? refusal : { ...refusal, declaredBytes: declared });
+  if (err instanceof BodyTooLarge) return withDeclared({ response: errorResponse(413, err.message, requestId), reason: err.message });
+  if (err instanceof UnsupportedMediaType) return { response: errorResponse(415, err.message, requestId), reason: "unsupported content type" };
+  const socketError = req.socket?.errored ?? null;
+  if (errorCode(socketError) === "ERR_HTTP_REQUEST_TIMEOUT") return withDeclared({ response: errorResponse(408, "request timeout", requestId), reason: "body not received: request timeout" });
+  if (socketError !== null || errorCode(err) === "ECONNRESET") return withDeclared({ response: errorResponse(400, "connection closed", requestId), reason: "body not received: connection closed" });
+  return { response: errorResponse(400, `invalid body: ${err instanceof Error ? err.message : String(err)}`, requestId), reason: bodyReason(err) };
 }
 
 function rawPath(req: IncomingMessage): string {
@@ -637,12 +707,7 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
     try {
       body = await parseRequestBody(contentType, await readRequestBody(req, options.maxBodyBytes ?? 10 * 1024 * 1024, req.headers["content-length"]), options.multipart);
     } catch (err) {
-      if (err instanceof BodyTooLarge) {
-        const declaredBytes = declaredLength(req.headers["content-length"]);
-        return refused(413, err.message, requestId, err.message, { pipeline, path, ...(declaredBytes === undefined ? {} : { declaredBytes }) });
-      }
-      if (err instanceof UnsupportedMediaType) return refused(415, err.message, requestId, "unsupported content type", { pipeline, path });
-      return refused(400, `invalid body: ${err instanceof Error ? err.message : String(err)}`, requestId, bodyReason(err), { pipeline, path });
+      return { ...bodyRefusal(err, req, requestId), pipeline, path };
     }
     const query = parseQuery(url.searchParams);
     const headers: Record<string, string> = {};
@@ -655,18 +720,7 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
 
   function logRequest(req: IncomingMessage, begin: number, requestId: string | undefined, ip: string | undefined, answer: Answer): void {
     const { response, pipeline, reason, declaredBytes } = answer;
-    logger.info("http", {
-      runId: response.headers["x-kestrel-run-id"],
-      ...(requestId === undefined ? {} : { requestId }),
-      method: req.method,
-      path: answer.path ?? rawPath(req),
-      ...(pipeline === undefined ? {} : { pipeline }),
-      status: response.status,
-      ms: Math.round((performance.now() - begin) * 100) / 100,
-      ...(ip === undefined ? {} : { ip }),
-      ...(reason === undefined ? {} : { reason: bounded(reason) }),
-      ...(declaredBytes === undefined ? {} : { declaredBytes }),
-    });
+    logger.info("http", httpLogLine({ runId: response.headers["x-kestrel-run-id"], requestId, method: req.method, path: answer.path ?? rawPath(req), pipeline, status: response.status, begin, ip, reason, declaredBytes }));
   }
 }
 

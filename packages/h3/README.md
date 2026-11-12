@@ -31,15 +31,19 @@ matched, no `pipeline`:
 |---|---|
 | 400 | `invalid path: dot segment` (no `pipeline`; `path` is the raw path) |
 | 400 | `invalid body: malformed JSON`, `invalid body: body must be a JSON object`, `invalid multipart body: <cause>` |
+| 400 | `body not received: connection closed`, with `declaredBytes`: the client closed the connection before the body was complete |
 | 404 | `no route` |
+| 408 | `body not received: request timeout`, with `declaredBytes`: the server's `requestTimeout` ended the upload and Node answered 408 |
 | 413 | `body exceeds <n> bytes` or `multipart body has more than <n> <parts>`, with `declaredBytes` when the request sent a `Content-Length` |
 | 415 | `unsupported content type`, `this route does not accept multipart/form-data` |
 
 A handler that throws writes a line with status 500 and `reason: "handler failed"`, sets the line's
 `runId` as `X-Kestrel-Run-Id` and echoes `X-Request-Id`, then rethrows, so the host's error handler
 answers. Every response, refusals included, echoes a valid `X-Request-Id` (printable ASCII, at most
-200 characters); an invalid one is neither echoed nor logged. A line never holds a body, a header
-value (the declared length aside), a cookie or the query string; `reason` is at most 200 characters.
+200 characters); an invalid one is neither echoed nor logged. `ms` includes the time the body took to
+arrive. A line holds no body, no cookie, no query string and no header value except a valid
+`X-Request-Id` (`requestId`), the declared `Content-Length` (`declaredBytes`) and the client address
+derived under the peer policy (`ip`); `reason` is at most 200 characters.
 Without `logger` the handler writes nothing.
 
 Refusals before the pipeline start no run, so they do not reach a run observer such as

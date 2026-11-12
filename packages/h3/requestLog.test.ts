@@ -1,7 +1,7 @@
-import { createServer, request } from "node:http";
-import type { AddressInfo } from "node:net";
+import { createServer, request, type ServerOptions } from "node:http";
+import { connect, type AddressInfo } from "node:net";
 import { createApp, toNodeListener } from "h3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { boot, defineModule, definePipeline, ok, silentLogger, type Context, type Kestrel, type Logger } from "@michaelthielemann/kestrel";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -56,18 +56,49 @@ afterEach(async () => {
   kestrel = undefined;
 });
 
-async function listen(runner: KestrelRunner, options: KestrelHandlerOptions): Promise<string> {
-  const app = createApp({ onError: (_error, event) => { event.node.res.end(); } });
+const duration = { asymmetricMatch: (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0, toString: () => "a duration in ms" };
+
+let hostErrors: unknown[] = [];
+
+async function listen(runner: KestrelRunner, options: KestrelHandlerOptions, serverOptions: ServerOptions = {}): Promise<string> {
+  hostErrors = [];
+  const app = createApp({ onError: (error, event) => { hostErrors.push(error); event.node.res.end(); } });
   app.use(createKestrelHandler(runner, options));
-  const server = createServer(toNodeListener(app));
+  const server = createServer(serverOptions, toNodeListener(app));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   close = () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
   return `http://127.0.0.1:${boundaryCast<AddressInfo>(server.address(), "host").port}`;
 }
 
-async function serve(options: KestrelHandlerOptions = {}): Promise<string> {
+async function serve(options: KestrelHandlerOptions = {}, serverOptions: ServerOptions = {}): Promise<string> {
   kestrel = await boot({ config, modules: [notes], pipelines, logger: silentLogger });
-  return listen(kestrel, options);
+  return listen(kestrel, options, serverOptions);
+}
+
+function partialPost(base: string, headers: string, abortAfterMs?: number): Promise<string> {
+  const { hostname, port } = new URL(base);
+  return new Promise((resolve) => {
+    let received = "";
+    const socket = connect(Number(port), hostname, () => {
+      socket.write(`POST /notes HTTP/1.1\r\nHost: notes.test\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n${headers}\r\n{"text":`);
+      if (abortAfterMs !== undefined) setTimeout(() => socket.destroy(), abortAfterMs);
+    });
+    socket.on("data", (chunk: Buffer) => { received += chunk.toString("latin1"); });
+    socket.on("error", () => {});
+    socket.on("close", () => resolve(received));
+  });
+}
+
+function slowPost(base: string, pauseMs: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = request(`${base}/notes`, { method: "POST", headers: { "content-type": "application/json", "content-length": "15" } }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode ?? 0));
+    });
+    req.on("error", reject);
+    req.write('{"text":');
+    setTimeout(() => req.end('"slow"}'), pauseMs);
+  });
 }
 
 function rawGet(base: string, path: string): Promise<number> {
@@ -92,8 +123,8 @@ describe("kestrel-h3 request log", () => {
     const denied = await fetch(`${base}/locked`);
     expect(denied.status).toBe(403);
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toEqual({ message: "http", runId: res.headers.get("x-kestrel-run-id"), requestId: "req-1", method: "GET", path: "/notes/7", pipeline: "echo", status: 200, ms: expect.any(Number) as unknown, ip: "127.0.0.1" });
-    expect(lines[1]).toEqual({ message: "http", runId: denied.headers.get("x-kestrel-run-id"), method: "GET", path: "/locked", pipeline: "deny", status: 403, ms: expect.any(Number) as unknown, ip: "127.0.0.1" });
+    expect(lines[0]).toEqual({ message: "http", runId: res.headers.get("x-kestrel-run-id"), requestId: "req-1", method: "GET", path: "/notes/7", pipeline: "echo", status: 200, ms: duration, ip: "127.0.0.1" });
+    expect(lines[1]).toEqual({ message: "http", runId: denied.headers.get("x-kestrel-run-id"), method: "GET", path: "/locked", pipeline: "deny", status: 403, ms: duration, ip: "127.0.0.1" });
   });
 
   it("logs the full path under a mount path", async () => {
@@ -115,7 +146,7 @@ describe("kestrel-h3 request log", () => {
     expect(refusals.map((r) => r.status)).toEqual([404, 400, 413, 415]);
     expect(lines).toHaveLength(4);
     const [notFound, invalid, tooLarge, unsupported] = lines;
-    expect(notFound).toEqual({ message: "http", runId: refusals[0]?.headers.get("x-kestrel-run-id"), method: "GET", path: "/nowhere", status: 404, ms: expect.any(Number) as unknown, ip: "127.0.0.1", reason: "no route" });
+    expect(notFound).toEqual({ message: "http", runId: refusals[0]?.headers.get("x-kestrel-run-id"), method: "GET", path: "/nowhere", status: 404, ms: duration, ip: "127.0.0.1", reason: "no route" });
     expect(invalid).toMatchObject({ runId: refusals[1]?.headers.get("x-kestrel-run-id"), method: "POST", path: "/notes", pipeline: "echo", status: 400, reason: "invalid body: malformed JSON" });
     expect(tooLarge).toMatchObject({ runId: refusals[2]?.headers.get("x-kestrel-run-id"), pipeline: "echo", status: 413, reason: "body exceeds 64 bytes", declaredBytes: 211 });
     expect(unsupported).toMatchObject({ runId: refusals[3]?.headers.get("x-kestrel-run-id"), pipeline: "echo", status: 415, reason: "unsupported content type" });
@@ -145,11 +176,12 @@ describe("kestrel-h3 request log", () => {
     const secretHeaders = { authorization: "Bearer tok-secret-1", cookie: "session=cookie-secret-2", "x-api-key": "key-secret-3" };
     await fetch(`${base}/notes/1?token=query-secret-4`, { headers: secretHeaders });
     await fetch(`${base}/notes?token=query-secret-4`, { method: "POST", headers: { ...json, ...secretHeaders }, body: JSON.stringify({ password: "body-secret-5" }) });
-    await fetch(`${base}/notes`, { method: "POST", headers: { ...json, ...secretHeaders }, body: '{"password":"body-secret-6"' });
+    await fetch(`${base}/notes`, { method: "POST", headers: { ...json, ...secretHeaders }, body: '{"password": body-secret-6}' });
     await fetch(`${base}/notes`, { method: "POST", headers: { "content-type": "text/secret-type-7", ...secretHeaders }, body: "body-secret-8" });
     await fetch(`${base}/notes`, { method: "POST", headers: { ...json, ...secretHeaders }, body: JSON.stringify({ password: "body-secret-9".repeat(100) }) });
     await fetch(`${base}/nowhere?token=query-secret-4`, { headers: secretHeaders });
     expect(lines).toHaveLength(6);
+    expect(lines[2]).toMatchObject({ status: 400, reason: "invalid body: malformed JSON" });
     const written = JSON.stringify(lines);
     for (const secret of ["tok-secret-1", "cookie-secret-2", "key-secret-3", "query-secret-4", "body-secret-5", "body-secret-6", "secret-type-7", "body-secret-8", "body-secret-9", "token="]) {
       expect(written).not.toContain(secret);
@@ -185,5 +217,32 @@ describe("kestrel-h3 request log", () => {
     expect(lines).toEqual([expect.objectContaining({ message: "http", requestId: "req-500", method: "GET", path: "/notes/1", pipeline: "echo", status: 500, reason: "handler failed" })]);
     expect(lines[0]?.runId).toEqual(res.headers.get("x-kestrel-run-id"));
     expect(res.headers.get("x-request-id")).toBe("req-500");
+  });
+
+  it("counts the time spent reading the body in ms", async () => {
+    const { logger, lines } = collectingLogger();
+    const base = await serve({ logger });
+    expect(await slowPost(base, 200)).toBe(200);
+    expect(lines).toEqual([expect.objectContaining({ pipeline: "echo", status: 200, ms: duration })]);
+    expect(lines[0]?.ms).toBeGreaterThanOrEqual(150);
+  });
+
+  it("logs a body the client stops sending as a closed connection, as the core server does", async () => {
+    const { logger, lines } = collectingLogger();
+    const base = await serve({ logger });
+    expect(await partialPost(base, "X-Request-Id: req-gone\r\n", 50)).toBe("");
+    await vi.waitFor(() => expect(lines).toHaveLength(1));
+    expect(lines[0]).toEqual({ message: "http", runId: expect.any(String) as unknown, requestId: "req-gone", method: "POST", path: "/notes", pipeline: "echo", status: 400, ms: duration, ip: "127.0.0.1", reason: "body not received: connection closed", declaredBytes: 1000 });
+    expect(hostErrors).toEqual([]);
+  });
+
+  it("logs a body cut off by the server's request timeout as the 408 the client receives", async () => {
+    const { logger, lines } = collectingLogger();
+    const base = await serve({ logger }, { requestTimeout: 300, headersTimeout: 300, connectionsCheckingInterval: 50 });
+    expect(await partialPost(base, "X-Request-Id: req-slow\r\n")).toMatch(/^HTTP\/1\.1 408 /);
+    await vi.waitFor(() => expect(lines).toHaveLength(1));
+    expect(lines[0]).toMatchObject({ requestId: "req-slow", pipeline: "echo", status: 408, reason: "body not received: request timeout", declaredBytes: 1000 });
+    expect(lines[0]?.ms).toBeGreaterThanOrEqual(300);
+    expect(hostErrors).toEqual([]);
   });
 });

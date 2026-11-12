@@ -1,5 +1,6 @@
 import { request } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { connect } from "node:net";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "../logger.ts";
 import type { Runner } from "../runner.ts";
 import { createHttpServer, listen, parseRoute, type HttpOptions } from "./http.ts";
@@ -25,8 +26,11 @@ afterEach(async () => {
   close = undefined;
 });
 
-async function serve(logger: Logger, run: Runner = echo, options: HttpOptions = {}): Promise<string> {
+const duration = { asymmetricMatch: (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0, toString: () => "a duration in ms" };
+
+async function serve(logger: Logger, run: Runner = echo, options: HttpOptions = {}, checkEveryMs?: number): Promise<string> {
   const server = createHttpServer(routes, run, logger, options);
+  if (checkEveryMs !== undefined) Object.assign(server, { connectionsCheckingInterval: checkEveryMs });
   const address = await listen(server, 0, "127.0.0.1");
   close = () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
   return `http://127.0.0.1:${address.port}`;
@@ -43,13 +47,39 @@ function rawGet(base: string, path: string): Promise<number> {
   });
 }
 
+function partialPost(base: string, headers: string, abortAfterMs?: number): Promise<string> {
+  const { hostname, port } = new URL(base);
+  return new Promise((resolve) => {
+    let received = "";
+    const socket = connect(Number(port), hostname, () => {
+      socket.write(`POST /notes HTTP/1.1\r\nHost: notes.test\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n${headers}\r\n{"text":`);
+      if (abortAfterMs !== undefined) setTimeout(() => socket.destroy(), abortAfterMs);
+    });
+    socket.on("data", (chunk: Buffer) => { received += chunk.toString("latin1"); });
+    socket.on("error", () => {});
+    socket.on("close", () => resolve(received));
+  });
+}
+
+function slowPost(base: string, pauseMs: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = request(`${base}/notes`, { method: "POST", headers: { "content-type": "application/json", "content-length": "15" } }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode ?? 0));
+    });
+    req.on("error", reject);
+    req.write('{"text":');
+    setTimeout(() => req.end('"slow"}'), pauseMs);
+  });
+}
+
 describe("http server request log", () => {
   it("writes one http line per routed request", async () => {
     const { logger, lines } = collectingLogger();
     const base = await serve(logger);
     const res = await fetch(`${base}/notes/7?x=1`, { headers: { "x-request-id": "req-1" } });
     expect(res.status).toBe(200);
-    expect(lines).toEqual([{ message: "http", runId: "run-1", requestId: "req-1", method: "GET", path: "/notes/7", pipeline: "readNote", status: 200, ms: expect.any(Number) as unknown, ip: "127.0.0.1" }]);
+    expect(lines).toEqual([{ message: "http", runId: "run-1", requestId: "req-1", method: "GET", path: "/notes/7", pipeline: "readNote", status: 200, ms: duration, ip: "127.0.0.1" }]);
   });
 
   it("writes one line with a reason for every refusal before the pipeline", async () => {
@@ -67,7 +97,7 @@ describe("http server request log", () => {
     ];
     expect(refusals.map((r) => r.status)).toEqual([404, 400, 400, 413, 415, 415]);
     expect(lines).toHaveLength(6);
-    expect(lines[0]).toEqual({ message: "http", runId: refusals[0]?.headers.get("x-kestrel-run-id"), requestId: "req-404", method: "GET", path: "/nowhere", status: 404, ms: expect.any(Number) as unknown, ip: "127.0.0.1", reason: "no route" });
+    expect(lines[0]).toEqual({ message: "http", runId: refusals[0]?.headers.get("x-kestrel-run-id"), requestId: "req-404", method: "GET", path: "/nowhere", status: 404, ms: duration, ip: "127.0.0.1", reason: "no route" });
     expect(refusals[0]?.headers.get("x-request-id")).toBe("req-404");
     expect(lines[1]).toMatchObject({ runId: refusals[1]?.headers.get("x-kestrel-run-id"), method: "POST", path: "/notes", pipeline: "createNote", status: 400, reason: "invalid body: malformed JSON" });
     expect(lines[2]).toMatchObject({ pipeline: "createNote", status: 400, reason: "invalid body: body must be a JSON object" });
@@ -89,7 +119,7 @@ describe("http server request log", () => {
     const base = await serve(logger, echo, { allow: ["203.0.113.0/24"] });
     const res = await fetch(`${base}/notes/1?token=query-secret`);
     expect(res.status).toBe(403);
-    expect(lines).toEqual([{ message: "http", runId: res.headers.get("x-kestrel-run-id"), method: "GET", path: "/notes/1", status: 403, ms: expect.any(Number) as unknown, ip: "127.0.0.1", reason: "client not allowed" }]);
+    expect(lines).toEqual([{ message: "http", runId: res.headers.get("x-kestrel-run-id"), method: "GET", path: "/notes/1", status: 403, ms: duration, ip: "127.0.0.1", reason: "client not allowed" }]);
   });
 
   it("writes no line for the health path", async () => {
@@ -115,14 +145,40 @@ describe("http server request log", () => {
     const secretHeaders = { authorization: "Bearer tok-secret-1", cookie: "session=cookie-secret-2", "x-api-key": "key-secret-3" };
     await fetch(`${base}/notes/1?token=query-secret-4`, { headers: secretHeaders });
     await fetch(`${base}/notes?token=query-secret-4`, { method: "POST", headers: { ...json, ...secretHeaders }, body: JSON.stringify({ password: "body-secret-5" }) });
-    await fetch(`${base}/notes`, { method: "POST", headers: { ...json, ...secretHeaders }, body: '{"password":"body-secret-6"' });
+    await fetch(`${base}/notes`, { method: "POST", headers: { ...json, ...secretHeaders }, body: '{"password": body-secret-6}' });
     await fetch(`${base}/notes`, { method: "POST", headers: { "content-type": "text/secret-type-7", ...secretHeaders }, body: "body-secret-8" });
     await fetch(`${base}/notes`, { method: "POST", headers: { ...json, ...secretHeaders }, body: JSON.stringify({ password: "body-secret-9".repeat(100) }) });
     await fetch(`${base}/nowhere?token=query-secret-4`, { headers: secretHeaders });
     expect(lines).toHaveLength(6);
+    expect(lines[2]).toMatchObject({ status: 400, reason: "invalid body: malformed JSON" });
     const written = JSON.stringify(lines);
     for (const secret of ["tok-secret-1", "cookie-secret-2", "key-secret-3", "query-secret-4", "body-secret-5", "body-secret-6", "secret-type-7", "body-secret-8", "body-secret-9", "token="]) {
       expect(written).not.toContain(secret);
     }
+  });
+
+  it("counts the time spent reading the body in ms", async () => {
+    const { logger, lines } = collectingLogger();
+    const base = await serve(logger);
+    expect(await slowPost(base, 200)).toBe(200);
+    expect(lines).toEqual([expect.objectContaining({ pipeline: "createNote", status: 200, ms: duration })]);
+    expect(lines[0]?.ms).toBeGreaterThanOrEqual(150);
+  });
+
+  it("logs a body the client stops sending as a closed connection", async () => {
+    const { logger, lines } = collectingLogger();
+    const base = await serve(logger);
+    expect(await partialPost(base, "X-Request-Id: req-gone\r\n", 50)).toBe("");
+    await vi.waitFor(() => expect(lines).toHaveLength(1));
+    expect(lines[0]).toEqual({ message: "http", runId: expect.any(String) as unknown, requestId: "req-gone", method: "POST", path: "/notes", pipeline: "createNote", status: 400, ms: duration, ip: "127.0.0.1", reason: "body not received: connection closed", declaredBytes: 1000 });
+  });
+
+  it("logs a body cut off by the request timeout as the 408 the client receives", async () => {
+    const { logger, lines } = collectingLogger();
+    const base = await serve(logger, echo, { timeouts: { requestMs: 300, headersMs: 300 } }, 50);
+    expect(await partialPost(base, "X-Request-Id: req-slow\r\n")).toMatch(/^HTTP\/1\.1 408 /);
+    await vi.waitFor(() => expect(lines).toHaveLength(1));
+    expect(lines[0]).toMatchObject({ requestId: "req-slow", pipeline: "createNote", status: 408, reason: "body not received: request timeout", declaredBytes: 1000 });
+    expect(lines[0]?.ms).toBeGreaterThanOrEqual(300);
   });
 });

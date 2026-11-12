@@ -124,7 +124,7 @@ event and cron triggers still run.
 |---|---|---|---|
 | `port` | integer 0–65535 | `3000` | `0` picks a free port |
 | `host` | string | `"127.0.0.1"` | Interface to bind |
-| `corsOrigin` | string | – | Single allowed origin; omitted means no CORS headers |
+| `corsOrigin` | string | – | Single allowed origin; omitted means no CORS headers. |
 | `maxBodyBytes` | integer | `10485760` | A larger body answers 413, checked against `Content-Length` and while reading |
 | `multipart.maxParts` | integer | `120` | Parts per `multipart/form-data` body; one more answers 413 |
 | `multipart.maxFiles` | integer | `20` | Parts with a `filename` per body; one more answers 413 |
@@ -325,19 +325,24 @@ The `http` line has the same fields in the core server and in `kestrel-h3`'s han
 | `pipeline` | The pipeline the route names; absent when no route matched |
 | `status`, `ms`, `ip` | The response status, the time to answer, the client address (see `http`) |
 | `reason` | Only on a request answered without running its pipeline, at most 200 characters |
-| `declaredBytes` | Only on a 413, the `Content-Length` the request declared |
+| `declaredBytes` | Only on a 413, 408 or closed connection: the `Content-Length` the request declared |
 
 | Status | `reason` |
 |---|---|
 | 400 | `invalid path: dot segment` (no `pipeline`, `path` as sent), `invalid body: malformed JSON`, `invalid body: body must be a JSON object`, `invalid multipart body: <cause>` |
+| 400 | `body not received: connection closed` (the client closed the connection before the body was complete, so no answer reaches it) |
 | 403 | core server only: `client not allowed` (outside `http.allow`), `missing trusted client header` |
 | 404 | `no route` |
+| 408 | `body not received: request timeout` (the server's request timeout, `http.timeouts.requestMs` in the core server, ended the upload; Node answers the 408) |
 | 413 | `body exceeds <n> bytes`, `multipart body has more than <n> <parts>` |
 | 415 | `unsupported content type`, `this route does not accept multipart/form-data` |
 | 500 | `handler failed` (the handler threw; the core server also logs `http handler failed` with the stack) |
 
-A line never holds a body, a cookie, a header value other than the declared length, or the query
-string. The health path writes no line. A refusal starts no run, so it writes no `step` line and
+`ms` runs from the arrival of the request, so it includes the time the body took to arrive. A line
+holds no body, no cookie, no query string and no header value except a valid `X-Request-Id`
+(`requestId`), the declared `Content-Length` (`declaredBytes`) and the client address derived under
+the peer policy (`ip`, which may come from `X-Forwarded-For` or the trusted header). The health path
+writes no line. A refusal starts no run, so it writes no `step` line and
 does not reach a run observer such as `insights/default`; its `http` line is its only record. A
 request that never reaches kestrel (refused or timed out by a proxy in front of it) is in that
 proxy's log only; passing `X-Request-Id` through the proxy and writing it to the proxy's access log
