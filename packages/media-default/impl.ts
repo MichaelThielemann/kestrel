@@ -261,8 +261,8 @@ export interface Media extends MediaFiles {
   removeFolder(path: string): Promise<Result<{ ok: true; removed: number; ids: string[] } | null, MediaError>>;
   /** Moves ready items to the trash: the library no longer shows them, their name is free and their public copy is removed, while media@1 still reads them as ready. */
   trash(ids: string[]): Promise<Result<MoveOutcome, MediaError>>;
-  /** Trashes every ready item in a folder's subtree, deletes its failed and abandoned uploads, and drops the folder rows of that subtree; an upload still under way stays. `null` for a folder that does not exist. */
-  trashFolder(path: string): Promise<Result<{ path: string; ids: string[] } | null, MediaError>>;
+  /** Trashes every ready item in a folder's subtree, deletes its failed and abandoned uploads, and drops the folder rows of that subtree; an upload still under way stays. Items of the subtree already in the trash are handed on in `ids` and named in `unchanged`, so a repeated call reaches them again even when the folder is gone. `null` for a path with neither a folder nor a trashed item. */
+  trashFolder(path: string): Promise<Result<{ path: string; ids: string[]; unchanged: string[] } | null, MediaError>>;
   /** Brings trashed items back as they were, recreating their folder and public copy; a taken name becomes `<stem>-<n>.<ext>`, the key and public path never change. */
   restore(ids: string[]): Promise<Result<RestoreOutcome, MediaError>>;
   /** The trashed items, most recently trashed first. */
@@ -1252,11 +1252,11 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (clean.value === "") return ok(null);
       const exists = await folderExists(clean.value);
       if (isErr(exists)) return exists;
-      if (!exists.value) return ok(null);
       const inSubtree = await subtreeItems(clean.value);
       if (isErr(inSubtree)) return inSubtree;
-      const ready = inSubtree.value.filter(isReady).map((item) => item.id);
-      const trashed = await api.trash(ready);
+      const movable = inSubtree.value.filter((item) => isReady(item) || item.status === TRASHED).map((item) => item.id);
+      if (!exists.value && movable.length === 0) return ok(null);
+      const trashed = await api.trash(movable);
       if (isErr(trashed)) return trashed;
       for (const item of inSubtree.value) {
         if (isReady(item) || !isLive(item) || item.location === null) continue;
@@ -1275,7 +1275,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         const removedSubfolders = await db.deleteMany(FOLDERS, { id: { in: subfolderIds } });
         if (isErr(removedSubfolders)) return removedSubfolders;
       }
-      return ok({ path: clean.value, ids: trashed.value.ids });
+      return ok({ path: clean.value, ids: trashed.value.ids, unchanged: trashed.value.unchanged });
     },
     async restore(ids) {
       const outcome: RestoreOutcome = { ids: [], unchanged: [], skipped: [], renamed: [] };

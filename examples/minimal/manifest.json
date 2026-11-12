@@ -5548,7 +5548,7 @@
       "module": "media/default",
       "factory": false,
       "description": {
-        "summary": "Move every ready item in a folder's subtree to the trash, delete its failed and abandoned uploads, and drop the folder rows of that subtree; an upload still under way keeps its folder listed; media.restore recreates the folders of the items it restores",
+        "summary": "Move every ready item in a folder's subtree to the trash, delete its failed and abandoned uploads, and drop the folder rows of that subtree; an upload still under way keeps its folder listed; media.restore recreates the folders of the items it restores; result.ids also holds the items of the subtree already in the trash, named in result.unchanged, so a repeated request reaches them again after the folder is gone",
         "reads": [
           "params.path"
         ],
@@ -5566,16 +5566,23 @@
               "items": {
                 "type": "string"
               }
+            },
+            "unchanged": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": [
             "path",
-            "ids"
+            "ids",
+            "unchanged"
           ]
         },
         "errors": {
           "400": "missing or invalid path",
-          "404": "folder not found"
+          "404": "neither a folder nor a trashed item at this path"
         }
       }
     },
@@ -28830,7 +28837,7 @@
           "name": "media.trashFolder",
           "module": "media/default",
           "description": {
-            "summary": "Move every ready item in a folder's subtree to the trash, delete its failed and abandoned uploads, and drop the folder rows of that subtree; an upload still under way keeps its folder listed; media.restore recreates the folders of the items it restores",
+            "summary": "Move every ready item in a folder's subtree to the trash, delete its failed and abandoned uploads, and drop the folder rows of that subtree; an upload still under way keeps its folder listed; media.restore recreates the folders of the items it restores; result.ids also holds the items of the subtree already in the trash, named in result.unchanged, so a repeated request reaches them again after the folder is gone",
             "reads": [
               "params.path"
             ],
@@ -28848,16 +28855,23 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "unchanged": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               },
               "required": [
                 "path",
-                "ids"
+                "ids",
+                "unchanged"
               ]
             },
             "errors": {
               "400": "missing or invalid path",
-              "404": "folder not found"
+              "404": "neither a folder nor a trashed item at this path"
             }
           }
         },

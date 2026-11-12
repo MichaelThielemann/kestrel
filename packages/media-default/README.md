@@ -246,7 +246,11 @@ meanwhile, the restored one becomes `<stem>-<n>.<ext>` (the first free `n` from 
 bytes) and is listed in `renamed`; only the display name changes, never the `path`.
 `media.trashFolder` trashes every ready item in a folder's subtree, deletes its failed uploads and
 those abandoned for `uploadStaleAfterMs`, and removes the folder rows of that subtree. An upload still
-under way keeps its row, so the folder stays listed until that upload ends. `media.listTrash` lists the trashed items, most recently trashed first, with `trashedAt`,
+under way keeps its row, so the folder stays listed until that upload ends. Items of the subtree that
+are already in the trash are handed on in `ids` as well and named in `unchanged`, and a path whose
+folder is gone but whose trashed items still carry it answers with those ids instead of 404, so
+repeating the request after a later step failed reaches `images.hideMany` and the event for every
+item again. `media.listTrash` lists the trashed items, most recently trashed first, with `trashedAt`,
 `expiresAt` (`trashedAt` plus `trashRetentionDays`, default 30) and `path: null`; it takes `q`,
 `limit`, `offset` and `locale` like `media.list`.
 
@@ -446,7 +450,7 @@ Not included: image resizing, tags, linking media to content documents.
 | `media.serve` | The file at its public URL (params.id, params.name); the name must be the one it was uploaded under | `params.id`, `params.name` | `result` | – | – | 404 not found, not ready, or not the name the file was uploaded under | – | no |
 | `media.remove` | Delete file and metadata: end the item's readiness, then remove copy, blob and row, then a final sweep | `params.id` | `result` | – | { ok: boolean, … } | 400 missing id | – | no |
 | `media.trash` | Move the items in body.ids to the trash: the library no longer shows them, their names are free and their public copies are removed, while media@1 still reads them as ready until media.purge; per-id answer: result.ids holds every id that is trashed afterwards, an already trashed one also in result.unchanged (its public copy is removed again), an unknown one is skipped | – | `result` | { ids: string[] } | { ids: string[], unchanged: string[], skipped: object[], … } | 400 no ids or more than 200 | – | no |
-| `media.trashFolder` | Move every ready item in a folder's subtree to the trash, delete its failed and abandoned uploads, and drop the folder rows of that subtree; an upload still under way keeps its folder listed; media.restore recreates the folders of the items it restores | `params.path` | `result` | – | { path: string, ids: string[], … } | 400 missing or invalid path; 404 folder not found | – | no |
+| `media.trashFolder` | Move every ready item in a folder's subtree to the trash, delete its failed and abandoned uploads, and drop the folder rows of that subtree; an upload still under way keeps its folder listed; media.restore recreates the folders of the items it restores; result.ids also holds the items of the subtree already in the trash, named in result.unchanged, so a repeated request reaches them again after the folder is gone | `params.path` | `result` | – | { path: string, ids: string[], unchanged: string[], … } | 400 missing or invalid path; 404 neither a folder nor a trashed item at this path | – | no |
 | `media.restore` | Bring the trashed items in body.ids back with the same id, key, path, folder and texts; a display name taken meanwhile becomes <stem>-<n>.<ext> (listed in renamed); per-id answer: result.ids holds every id that is ready afterwards, an already ready one also in result.unchanged (its public copy is ensured), an unknown one is skipped | – | `result` | { ids: string[] } | { ids: string[], unchanged: string[], skipped: object[], renamed: object[], … } | 400 no ids or more than 200 | – | no |
 | `media.listTrash` | The trashed items, most recently trashed first, with trashedAt and expiresAt and no public path | – | `result` | ?q: string, limit: integer, offset: integer, locale: string | { items: object[], total: number, … } | 400 unknown locale or limit above maxLimit | – | no |
 | `media.selectTrash` | Select the trashed items among body.ids into result.ids for media.purge, reporting the others in result.skipped | – | `result` | { ids: string[] } | { ids: string[], skipped: object[], … } | 400 no ids or more than 200 | – | no |

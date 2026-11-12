@@ -517,6 +517,29 @@ describe("examples/minimal media: the trash", { timeout: 30_000 }, () => {
     }
   });
 
+  it("a folder trash repeated after images.hideMany failed withdraws the variants and raises media.trashed", async () => {
+    const fault: StoreFault = { method: "createOne", collection: "images_hidden", armed: false };
+    const example = await bootExample({ noteEvents: ["media.trashed"], storeFault: fault });
+    try {
+      const token = await adminToken(example);
+      const item = await upload(example, token, "photo.jpg", "image/jpeg", TEST_JPEG, "shoot");
+      await pollUntil(async () => (await getItem(example, item.id, token)).variantCounts.done === 5);
+      const variant = fileOf((await getItem(example, item.id, token)).variants[0]!.path);
+      fault.armed = true;
+      expect((await run(example, "trashMediaFolder", token, { params: { path: "shoot" } })).status).toBe(503);
+      expect((await serveVariant(example, item.id, variant)).status).toBe(200);
+      expect(noted(example, "media.trashed")).toEqual([]);
+
+      const again = await run(example, "trashMediaFolder", token, { params: { path: "shoot" } });
+      expect(again).toEqual({ status: 200, result: { path: "shoot", ids: [item.id], unchanged: [item.id] } });
+      expect((await serveVariant(example, item.id, variant)).status).toBe(404);
+      expect(filesUnder(join(example.blobRoot, "site", "media", item.id))).toEqual([]);
+      expect(noted(example, "media.trashed")).toEqual([[item.id]]);
+    } finally {
+      await example.dispose();
+    }
+  });
+
   it("trashes a whole folder and restores its items into it", async () => {
     const example = await bootExample();
     try {

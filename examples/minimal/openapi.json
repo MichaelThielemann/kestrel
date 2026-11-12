@@ -11345,7 +11345,7 @@
     "/media/trash/folders/{path}": {
       "post": {
         "operationId": "trashMediaFolder",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission media.delete → Move every ready item in a folder's subtree to the trash, delete its failed and abandoned uploads, and drop the folder rows of that subtree; an upload still under way keeps its folder listed; media.restore recreates the folders of the items it restores → Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged → Emit event \"media.trashed\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission media.delete → Move every ready item in a folder's subtree to the trash, delete its failed and abandoned uploads, and drop the folder rows of that subtree; an upload still under way keeps its folder listed; media.restore recreates the folders of the items it restores; result.ids also holds the items of the subtree already in the trash, named in result.unchanged, so a repeated request reaches them again after the folder is gone → Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged → Emit event \"media.trashed\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "media"
         ],
@@ -11382,6 +11382,12 @@
                       "type": "string"
                     },
                     "ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "unchanged": {
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -11452,7 +11458,8 @@
                   "required": [
                     "_events",
                     "ids",
-                    "path"
+                    "path",
+                    "unchanged"
                   ]
                 }
               }
@@ -11489,7 +11496,7 @@
             }
           },
           "404": {
-            "description": "folder not found",
+            "description": "neither a folder nor a trashed item at this path",
             "content": {
               "application/json": {
                 "schema": {

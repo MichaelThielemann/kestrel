@@ -169,6 +169,57 @@ describe("media/default trash and restore repeated after a partial failure", () 
     expect((await rowOf(db, a.id))?.status).toBe("ready");
     expect(expectOk(await media.restore([a.id, b.id]))).toEqual({ ids: [a.id, b.id], unchanged: [a.id], skipped: [], renamed: [] });
   });
+
+  it("a repeated trashFolder hands on the items it trashed, also when the folder is gone", async () => {
+    const { media } = await setup();
+    const a = await put(media, "a.png", "trip");
+    const b = await put(media, "b.png", "trip/day1");
+    expectOk(await media.trashFolder("trip"));
+    expect(expectOk(await media.trashFolder("trip"))).toEqual({ path: "trip", ids: [a.id, b.id], unchanged: [a.id, b.id] });
+    expect(expectOk(await media.trashFolder("trip/day1"))).toEqual({ path: "trip/day1", ids: [b.id], unchanged: [b.id] });
+  });
+
+  it("a trashFolder repeated after a public copy could not be removed hands on the items the failed run trashed", async () => {
+    const { media, blobs, db } = await setup();
+    const a = await put(media, "a.png", "trip");
+    const b = await put(media, "b.png", "trip");
+    const c = await put(media, "c.png", "trip");
+    const all = [a.id, b.id, c.id];
+    const remove = blobs.remove.bind(blobs);
+    let failed = false;
+    blobs.remove = async (key) => {
+      if (!failed && key === copyKeyOf(b.id, b.filename)) {
+        failed = true;
+        return err(failure("TRANSIENT", "store busy"));
+      }
+      return remove(key);
+    };
+    expectErr(await media.trashFolder("trip"), "TRANSIENT");
+    const trashedBefore: string[] = [];
+    for (const id of all) if ((await rowOf(db, id))?.status === "trashed") trashedBefore.push(id);
+    expect(trashedBefore).toContain(b.id);
+    const again = expectOk(await media.trashFolder("trip"));
+    expect([...(again?.ids ?? [])].sort()).toEqual([...all].sort());
+    expect([...(again?.unchanged ?? [])].sort()).toEqual([...trashedBefore].sort());
+  });
+
+  it("a trashFolder repeated after its folder rows could not be dropped hands on every item it trashed", async () => {
+    const { media, db } = await setup();
+    const a = await put(media, "a.png", "trip");
+    const b = await put(media, "b.png", "trip/day1");
+    const deleteMany = db.deleteMany.bind(db);
+    let failed = false;
+    db.deleteMany = async (collection, filter) => {
+      if (!failed && collection === FOLDERS) {
+        failed = true;
+        return err(failure("TRANSIENT", "store busy"));
+      }
+      return deleteMany(collection, filter);
+    };
+    expectErr(await media.trashFolder("trip"), "TRANSIENT");
+    expect(expectOk(await media.trashFolder("trip"))).toEqual({ path: "trip", ids: [a.id, b.id], unchanged: [a.id, b.id] });
+    expect(expectOk(await media.folders())).toEqual([]);
+  });
 });
 
 describe("media/default writes that race a trash", () => {
@@ -419,7 +470,7 @@ describe("media/default folders around trashed items", () => {
     const other = await put(media, "c.png", "tripping");
     clock.now = 4_000;
     const trashed = expectOk(await media.trashFolder("trip"));
-    expect(trashed).toEqual({ path: "trip", ids: [a.id, b.id] });
+    expect(trashed).toEqual({ path: "trip", ids: [a.id, b.id], unchanged: [] });
     expect(expectOk(await media.folders()).map((f) => f.folder)).toEqual(["tripping"]);
     expect(expectOk(await db.count(FOLDERS, { path: { like: "trip/%" } }))).toBe(0);
     expect(expectOk(await media.listTrash()).items.map((i) => [i.id, i.trashedAt]).sort()).toEqual([[a.id, 4_000], [b.id, 4_000]].sort());
@@ -440,7 +491,7 @@ describe("media/default trashFolder with items that are not ready", () => {
     expectOk(await db.updateMany(COLLECTION, { id: failed.id }, { status: "failed" }));
     expectOk(await db.updateMany(COLLECTION, { id: abandoned.id }, { status: "uploading", updatedAt: clock.now }));
     clock.now += CONFIG.uploadStaleAfterMs;
-    expect(expectOk(await media.trashFolder("shoot"))).toEqual({ path: "shoot", ids: [ready.id] });
+    expect(expectOk(await media.trashFolder("shoot"))).toEqual({ path: "shoot", ids: [ready.id], unchanged: [] });
     expect(await rowOf(db, failed.id)).toBeNull();
     expect(await rowOf(db, abandoned.id)).toBeNull();
     expect(blobs.blobs.has(failed.key)).toBe(false);

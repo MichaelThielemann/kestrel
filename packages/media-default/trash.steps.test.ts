@@ -92,7 +92,7 @@ describe("media/default trash steps", () => {
     const b = await put(media, "b.png", "box/inner");
     const res = await run(media, ["media.trashFolder"], { params: { path: "box" } });
     expect(res.status).toBe(200);
-    expect(res.result).toEqual({ path: "box", ids: [a, b] });
+    expect(res.result).toEqual({ path: "box", ids: [a, b], unchanged: [] });
     expect((await run(media, ["media.trashFolder"], { params: { path: "nowhere" } })).status).toBe(404);
   });
 
