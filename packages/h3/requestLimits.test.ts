@@ -1,5 +1,5 @@
-import { createServer, request, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { Agent, createServer, request, type Server } from "node:http";
+import type { AddressInfo, Socket } from "node:net";
 import { createApp, toNodeListener, toWebHandler } from "h3";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -93,20 +93,24 @@ function form(files: number, fields: number): FormData {
 interface Upload {
   contentLength?: number;
   send: number;
+  keepWriting?: boolean;
+  agent?: Agent;
 }
 
-function upload(base: string, { contentLength, send }: Upload): Promise<{ status: number; body: string }> {
+function upload(base: string, { contentLength, send, keepWriting = false, agent }: Upload): Promise<{ status: number; body: string; socket: Socket | null }> {
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (contentLength !== undefined) headers["content-length"] = String(contentLength);
-    const req = request(`${base}/upload`, { method: "POST", headers });
+    const req = request(`${base}/upload`, { method: "POST", headers, ...(agent === undefined ? {} : { agent }) });
     let answered = false;
+    const total = keepWriting && contentLength !== undefined ? contentLength : send;
     req.on("response", (res) => {
       answered = true;
+      const socket = res.socket;
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (chunk: string) => { body += chunk; });
-      res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body, socket }));
       res.on("error", reject);
     });
     req.on("error", (err) => {
@@ -115,14 +119,16 @@ function upload(base: string, { contentLength, send }: Upload): Promise<{ status
     let sent = 0;
     const chunk = Buffer.alloc(CHUNK, 0x20);
     const pump = () => {
-      while (!answered && sent < send) {
-        sent += CHUNK;
-        if (!req.write(chunk)) {
+      while ((keepWriting || !answered) && sent < total) {
+        const size = Math.min(CHUNK, total - sent);
+        sent += size;
+        if (!req.write(size === CHUNK ? chunk : chunk.subarray(0, size))) {
           req.once("drain", pump);
           return;
         }
       }
-      if (!answered && contentLength === undefined) req.end();
+      if (sent >= total && keepWriting) req.end();
+      else if (!answered && contentLength === undefined) req.end();
     };
     req.flushHeaders();
     pump();
@@ -153,6 +159,22 @@ describe.each([
     expect(answer.status).toBe(413);
     expect(JSON.parse(answer.body)).toMatchObject({ code: "PAYLOAD_TOO_LARGE" });
     expect(served.runs()).toBe(0);
+  });
+
+  it("a 413 to a declared oversize body leaves the connection usable for the next request", async () => {
+    served = await start();
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    try {
+      const over = await upload(served.base, { contentLength: 2 * 1024 * 1024, send: 2 * 1024 * 1024, keepWriting: true, agent });
+      expect(over.status).toBe(413);
+      const next = await upload(served.base, { contentLength: 2, send: 2, keepWriting: true, agent });
+      expect(next.status).toBe(200);
+      expect(next.socket).not.toBeNull();
+      expect(next.socket).toBe(over.socket);
+      expect(served.runs()).toBe(1);
+    } finally {
+      agent.destroy();
+    }
   });
 
   it("accepts a body of exactly the limit", async () => {
