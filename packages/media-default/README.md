@@ -410,7 +410,8 @@ Filenames are capped at 200 bytes, and only after truncation checked for a trail
 which is rewritten to `-meta.json`; this order means truncating a filename can never accidentally
 produce the internal metadata-sidecar suffix.
 
-`media.list`'s `q` is a case-sensitive substring match on the filename.
+`media.list`'s `q` is a substring match on the filename that ignores case, and so is
+`media.listTrash`'s; `_` and `%` in it match themselves.
 
 `media.update` validates the whole patch, text fields included, before touching the row; it never
 calls the blobstore, since neither a rename nor a move ever changes a key.

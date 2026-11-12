@@ -1311,7 +1311,8 @@ Net changes since 5.8.1.
 
 - `media-default`: `media.list` with a `q` containing `_` found no item, because the wildcard was
   dropped from the store's prefilter (`my_file` searched for `myfile`); a `q` with `_` or `%` now
-  finds exactly the names that contain it. `media.listTrash` searches the same way.
+  finds exactly the names that contain it. `q` also ignores case now (`Photo` finds `photo.jpg`); it
+  was case-sensitive. `media.listTrash` searches the same way.
 - `references-default`: a bare id inside a `json` field — a block's image or relation field such as
   `"a1b2"` or `["a1b2", "c3d4"]` — was never indexed, so `references.guard` let a media file or page
   be deleted while a block still used it. The new optional `schemas` config maps `"<type>.<field>"`

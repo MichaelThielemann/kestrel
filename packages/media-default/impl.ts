@@ -401,9 +401,8 @@ function exportTargetPath(base: string, folder: string, filename: string, used: 
 
 const MAX_NAME_BYTES = 200;
 
-function namePrefilter(query: string): { filename?: { like: string } } {
-  const longest = query.split(/[%_]/).reduce((a, b) => (b.length > a.length ? b : a), "");
-  return longest === "" ? {} : { filename: { like: `%${longest}%` } };
+function nameMatches(filename: unknown, query: string): boolean {
+  return String(filename).toLowerCase().includes(query.toLowerCase());
 }
 
 function capName(name: string): string {
@@ -969,7 +968,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         if (prefix.value !== "") {
           const found = await recursiveFolderItems(prefix.value);
           if (isErr(found)) return found;
-          const matched = found.value.filter((i) => (query === undefined || i.filename.includes(query)) && matchesKind(i.contentType));
+          const matched = found.value.filter((i) => (query === undefined || nameMatches(i.filename, query)) && matchesKind(i.contentType));
           const sorted = sortItems(matched, sortBy, direction);
           const offset = find.offset ?? 0;
           const sliced = find.limit === undefined ? sorted.slice(offset) : sorted.slice(offset, offset + find.limit);
@@ -985,10 +984,10 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (mediaKind === "image" || mediaKind === "video") filter.contentType = { like: `${mediaKind}/%` };
       const sort: Record<string, "asc" | "desc"> = { [sortBy ?? "createdAt"]: direction ?? (sortBy === undefined ? "desc" : "asc") };
       if (query !== undefined || mediaKind === "other") {
-        if (query !== undefined) Object.assign(filter, namePrefilter(query));
+        if (query !== undefined) filter.filename = { like: `%${query}%` };
         const scanned = await scanAll(filter, sort);
         if (isErr(scanned)) return scanned;
-        const candidates = scanned.value.filter((i) => (query === undefined || String(i.filename).includes(query)) && matchesKind(i.contentType));
+        const candidates = scanned.value.filter((i) => (query === undefined || nameMatches(i.filename, query)) && matchesKind(i.contentType));
         const offset = find.offset ?? 0;
         const sliced = find.limit === undefined ? candidates.slice(offset) : candidates.slice(offset, offset + find.limit);
         return ok({ items: sliced.map((i) => resolveWith(i, key.value)), total: candidates.length });
@@ -1345,11 +1344,11 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (isErr(key)) return key;
       const filter: Record<string, unknown> = { status: TRASHED };
       const query = options.q?.trim() || undefined;
-      if (query !== undefined) Object.assign(filter, namePrefilter(query));
+      if (query !== undefined) filter.filename = { like: `%${query}%` };
       const sort: Record<string, "asc" | "desc"> = { trashedAt: "desc", id: "asc" };
       const scanned = await scanAll(filter, sort);
       if (isErr(scanned)) return scanned;
-      const matched = scanned.value.filter((row) => query === undefined || String(row.filename).includes(query));
+      const matched = scanned.value.filter((row) => query === undefined || nameMatches(row.filename, query));
       const offset = options.offset ?? 0;
       const sliced = options.limit === undefined ? matched.slice(offset) : matched.slice(offset, offset + options.limit);
       const items = sliced.map((row): TrashedItem => {

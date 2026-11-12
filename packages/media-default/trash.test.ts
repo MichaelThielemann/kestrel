@@ -427,6 +427,33 @@ describe("media/default search for names with an underscore", () => {
   });
 });
 
+describe("media/default search ignores case", () => {
+  it("finds a name whatever the case of the query, in the library, a recursive folder list and the trash", async () => {
+    const { media } = await setup();
+    const photo = await put(media, "photo.png", "album/2024");
+    await put(media, "other.png", "album/2024");
+    expect(expectOk(await media.list({ q: "Photo" })).items.map((i) => i.id)).toEqual([photo.id]);
+    expect(expectOk(await media.list({ q: "PHOTO.PNG" })).items.map((i) => i.id)).toEqual([photo.id]);
+    expect(expectOk(await media.list({ folder: "album", recursive: true, q: "Photo" })).items.map((i) => i.id)).toEqual([photo.id]);
+    expectOk(await media.trash([photo.id]));
+    expect(expectOk(await media.listTrash({ q: "pHoTo" })).items.map((i) => i.id)).toEqual([photo.id]);
+  });
+
+  it("prefilters the store with the whole query as the pattern", async () => {
+    const { media, db } = await setup();
+    await put(media, "my_file.png");
+    const findMany = db.findMany.bind(db);
+    const patterns: unknown[] = [];
+    db.findMany = async <T extends Document>(collection: string, filter: Filter, options?: FindOptions) => {
+      if (collection === COLLECTION && filter.filename !== undefined) patterns.push(filter.filename);
+      return findMany<T>(collection, filter, options);
+    };
+    expectOk(await media.list({ q: "my_file" }));
+    expectOk(await media.listTrash({ q: "my_file" }));
+    expect(patterns).toEqual([{ like: "%my_file%" }, { like: "%my_file%" }]);
+  });
+});
+
 describe("media/default purge", () => {
   it("removes only trashed ids: copy, blob, then row; media@1 then answers null", async () => {
     const { media, blobs, db } = await setup();

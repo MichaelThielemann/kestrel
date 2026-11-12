@@ -555,9 +555,9 @@ describe("media/default", () => {
     const a = expectOk(await media.upload({ ...png, filename: "alpha.png" }, "2026/press")).item;
     const b = expectOk(await media.upload({ ...png, filename: "beta.png", data: new Uint8Array(10) }, "2026")).item;
     const c = expectOk(await media.upload({ ...png, filename: "gamma.png" }, "archive")).item;
-    expect(expectOk(await media.list({ q: "ALPH" })).items.map((i) => i.id)).toEqual([]);
+    expect(expectOk(await media.list({ q: "ALPH" })).items.map((i) => i.id)).toEqual([a.id]);
     expect(expectOk(await media.list({ q: "alph" })).items.map((i) => i.id)).toEqual([a.id]);
-    expect(expectOk(await media.list({ folder: "2026", recursive: true, q: "ALPH" })).items.map((i) => i.id)).toEqual([]);
+    expect(expectOk(await media.list({ folder: "2026", recursive: true, q: "ALPH" })).items.map((i) => i.id)).toEqual([a.id]);
     expect(expectOk(await media.list({ folder: "2026", recursive: true, q: "alph" })).items.map((i) => i.id)).toEqual([a.id]);
     expect(expectOk(await media.list({ sortBy: "filename" })).items.map((i) => i.filename)).toEqual(["alpha.png", "beta.png", "gamma.png"]);
     expect(expectOk(await media.list({ sortBy: "size", direction: "desc" })).items[0]?.id).toBe(b.id);
