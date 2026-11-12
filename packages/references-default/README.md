@@ -75,6 +75,7 @@ Not included: cascading deletes, automatic clearing of dangling references, expa
 | `references.referrers:<arg>` | Documents referencing a <arg> | `params.id` | `result` | – | object[] | 400 missing id | – | yes |
 | `references.referrersMany:<arg>` | Documents referencing each of up to 200 <arg> ids | – | `result` | ?ids: string | object | 400 missing ids or more than 200 ids | – | yes |
 | `references.guardAll:<arg>` | Refuse while any of result.ids of <arg> is referenced | `result.ids` | – | – | – | 409 still referenced | – | no |
+| `references.dropReferenced:<arg>` | Keep only the <arg> ids in result.ids that nothing references and add each referenced one to result.skipped as { id, reason: "referenced" }, so a following delete leaves it alone | `result.ids`, `result.skipped?` | `result.ids`, `result.skipped` | – | { ids: string[], skipped: object[], … } | – | – | no |
 | `references.scan` | Re-check every reference | – | `result` | – | { checked: number, broken: number, … } | – | – | no |
 | `references.report` | Broken references | – | `result` | ?target: string | object[] | – | – | yes |
 | `references.rebuild` | Rebuild the reference index | – | `result` | – | { documents: number, entries: number, … } | – | – | no |

@@ -118,6 +118,7 @@ prefix).
 | `references.referrers` | none |
 | `references.referrersMany` | none |
 | `references.guardAll` | none |
+| `references.dropReferenced` | none |
 | `references.scan` | none |
 | `references.report` | none |
 | `references.rebuild` | none |

@@ -129,6 +129,36 @@ describe("references/default module steps", () => {
     expect(res.code).toBe("CONFLICT");
   });
 
+  it("dropReferenced keeps the unreferenced ids in result.ids and adds each referenced id to result.skipped", async () => {
+    const { instance, content, media } = await boot();
+    media.add({ id: "m2", contentType: "image/png", data: new Uint8Array([2]), filename: "b.png" });
+    const page = expectOk(await content.create("pages", { title: "A", hero: "m1" }));
+    await run(["test.seed", "references.index:pages"], {}, instance, seed({ id: page.id }));
+
+    const res = await run(["test.seed", "references.dropReferenced:media"], {}, instance, seed({ ids: ["m1", "m2", "gone"], skipped: [{ id: "x", reason: "not_trashed" }], total: 3 }));
+
+    expect(res.status).toBe(200);
+    expect(res.result).toEqual({ ids: ["m2", "gone"], skipped: [{ id: "x", reason: "not_trashed" }, { id: "m1", reason: "referenced" }], total: 3 });
+  });
+
+  it("dropReferenced starts result.skipped when an earlier step left none and passes an empty selection on", async () => {
+    const { instance, content } = await boot();
+    const page = expectOk(await content.create("pages", { title: "A", hero: "m1" }));
+    await run(["test.seed", "references.index:pages"], {}, instance, seed({ id: page.id }));
+
+    const referenced = await run(["test.seed", "references.dropReferenced:media"], {}, instance, seed({ ids: ["m1"] }));
+    expect(referenced.result).toEqual({ ids: [], skipped: [{ id: "m1", reason: "referenced" }] });
+
+    const empty = await run(["test.seed", "references.dropReferenced:media"], {}, instance, seed({ ids: [] }));
+    expect(empty.result).toEqual({ ids: [], skipped: [] });
+  });
+
+  it("dropReferenced throws when the pipeline put no ids in result", async () => {
+    const { instance } = await boot();
+    const res = await run(["test.seed", "references.dropReferenced:media"], {}, instance, seed({ id: "m1" }));
+    expect(res.status).toBe(500);
+  });
+
   it("scan and rebuild recompute the index, report lists broken references", async () => {
     const { instance, content, media } = await boot();
     const page = expectOk(await content.create("pages", { title: "A", hero: "m1" }));
@@ -183,6 +213,7 @@ describe("references/default: atomicSafe is pinned", () => {
       referrersMany: true,
       report: true,
       guardAll: false,
+      dropReferenced: false,
       scan: false,
       rebuild: false,
     };

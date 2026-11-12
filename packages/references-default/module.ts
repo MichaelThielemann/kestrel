@@ -17,6 +17,10 @@ export const configSchema = z
   })
   .strict();
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export default defineModule({
   name: "references/default",
   provides: [],
@@ -102,6 +106,19 @@ export default defineModule({
       if (referenced.length > 0) return ctx.fail("CONFLICT", `${referenced.length} ${target} item(s) are still referenced: ${referenced.slice(0, 5).map((id) => `${target}/${id}`).join(", ")}${referenced.length > 5 ? ", …" : ""}`, { referenced });
       return ok(ctx);
     }),
+    dropReferenced: stepFactory((target: string) => async (ctx: Context) => {
+      const result = isRecord(ctx.result) ? ctx.result : undefined;
+      if (!Array.isArray(result?.ids)) throw new Error(`references.dropReferenced:${target}: no ids in result`);
+      const kept: string[] = [];
+      const skipped: unknown[] = Array.isArray(result.skipped) ? result.skipped.map((entry: unknown) => entry) : [];
+      for (const id of result.ids.filter((value): value is string => typeof value === "string")) {
+        const referrers = await refs.referrers(target, id);
+        if (isErr(referrers)) return ctx.fail(referrers.error);
+        if (referrers.value.length > 0) skipped.push({ id, reason: "referenced" });
+        else kept.push(id);
+      }
+      return ok({ ...ctx, result: { ...result, ids: kept, skipped } });
+    }),
     scan: async (ctx: Context) => {
       const result = await refs.scan();
       if (isErr(result)) return ctx.fail(result.error);
@@ -142,6 +159,12 @@ export default defineModule({
       atomicSafe: true,
     }),
     guardAll: (target: string) => ({ summary: `Refuse while any of result.ids of ${target} is referenced`, reads: ["result.ids"], writes: [], errors: { 409: "still referenced" } }),
+    dropReferenced: (target: string) => ({
+      summary: `Keep only the ${target} ids in result.ids that nothing references and add each referenced one to result.skipped as { id, reason: "referenced" }, so a following delete leaves it alone`,
+      reads: ["result.ids", "result.skipped?"],
+      writes: ["result.ids", "result.skipped"],
+      extendsOutput: { type: "object", properties: { ids: { type: "array", items: { type: "string" } }, skipped: { type: "array", items: { type: "object", properties: { id: { type: "string" }, reason: { type: "string" } }, required: ["id", "reason"] } } }, required: ["ids", "skipped"] },
+    }),
     scan: { summary: "Re-check every reference", reads: [], writes: ["result"], output: { type: "object", properties: { checked: { type: "number" }, broken: { type: "number" } }, required: ["checked", "broken"] } },
     report: {
       summary: "Broken references",

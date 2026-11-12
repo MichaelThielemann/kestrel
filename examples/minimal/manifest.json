@@ -1998,6 +1998,7 @@
         "references.referrers",
         "references.referrersMany",
         "references.guardAll",
+        "references.dropReferenced",
         "references.scan",
         "references.report",
         "references.rebuild"
@@ -9667,6 +9668,55 @@
         "writes": [],
         "errors": {
           "409": "still referenced"
+        }
+      }
+    },
+    {
+      "name": "references.dropReferenced",
+      "module": "references/default",
+      "factory": true,
+      "description": {
+        "summary": "Keep only the <arg> ids in result.ids that nothing references and add each referenced one to result.skipped as { id, reason: \"referenced\" }, so a following delete leaves it alone",
+        "reads": [
+          "result.ids",
+          "result.skipped?"
+        ],
+        "writes": [
+          "result.ids",
+          "result.skipped"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "skipped": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "reason"
+                ]
+              }
+            }
+          },
+          "required": [
+            "ids",
+            "skipped"
+          ]
         }
       }
     },
