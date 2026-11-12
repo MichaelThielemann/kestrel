@@ -264,6 +264,8 @@ export interface Media extends MediaFiles {
   listTrash(options?: TrashListOptions): Promise<Result<{ items: TrashedItem[]; total: number }, MediaError>>;
   /** The ids of every trashed item, or with `expired` only of those whose retention has run out. */
   trashIds(options?: { expired?: boolean }): Promise<Result<string[], MediaError>>;
+  /** Keeps the trashed ids among `ids`, reporting every other id as not found or not trashed. */
+  selectTrash(ids: string[]): Promise<Result<TrashOutcome, MediaError>>;
   /** Deletes trashed items for good, each as `remove` does; any other id is left alone. */
   purge(ids: string[]): Promise<Result<TrashOutcome, MediaError>>;
   reconcile(options?: { delete?: boolean }): Promise<Result<Reconciliation, MediaError>>;
@@ -1307,6 +1309,16 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         return ok();
       });
       return isErr(walked) ? walked : ok(ids);
+    },
+    async selectTrash(ids) {
+      const outcome: TrashOutcome = { ids: [], skipped: [] };
+      for (const id of new Set(ids)) {
+        const found = await db.findOne<MediaItem>(COLLECTION, { id });
+        if (isErr(found)) return found;
+        if (found.value?.status === TRASHED) outcome.ids.push(id);
+        else outcome.skipped.push({ id, reason: found.value !== null && isReady(found.value) ? "not_trashed" : "not_found" });
+      }
+      return ok(outcome);
     },
     async purge(ids) {
       const outcome: TrashOutcome = { ids: [], skipped: [] };

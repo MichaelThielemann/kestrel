@@ -442,6 +442,12 @@
               "minLength": 1,
               "default": "media.list",
               "description": "The permission a signed-in caller needs to list the library or its folders when an authz module is loaded"
+            },
+            "trashRetentionDays": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 30,
+              "description": "How many days a trashed item is kept before media.selectExpiredTrash selects it for media.purge"
             }
           },
           "additionalProperties": false
@@ -614,6 +620,17 @@
             "value": "media.list",
             "redacted": false,
             "default": "media.list"
+          },
+          {
+            "path": "trashRetentionDays",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 30,
+            "redacted": false,
+            "default": 30
           }
         ]
       },
@@ -630,6 +647,14 @@
         "media.download",
         "media.serve",
         "media.remove",
+        "media.trash",
+        "media.trashFolder",
+        "media.restore",
+        "media.listTrash",
+        "media.selectTrash",
+        "media.selectAllTrash",
+        "media.selectExpiredTrash",
+        "media.purge",
         "media.reconcile",
         "media.reconcileDelete",
         "media.syncPublic",
@@ -5437,6 +5462,589 @@
         },
         "errors": {
           "400": "missing id"
+        }
+      }
+    },
+    {
+      "name": "media.trash",
+      "module": "media/default",
+      "factory": false,
+      "description": {
+        "summary": "Move the items in body.ids to the trash: the library no longer shows them, their names are free and their public copies are removed, while media@1 still reads them as ready until media.purge; per-id answer, an unknown or already trashed id is skipped",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 200
+            }
+          },
+          "required": [
+            "ids"
+          ],
+          "additionalProperties": false
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "the ids the step acted on or selected"
+            },
+            "skipped": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "not_found, already_trashed or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced"
+                  }
+                },
+                "required": [
+                  "id",
+                  "reason"
+                ]
+              }
+            }
+          },
+          "required": [
+            "ids",
+            "skipped"
+          ]
+        },
+        "errors": {
+          "400": "no ids or more than 200"
+        }
+      }
+    },
+    {
+      "name": "media.trashFolder",
+      "module": "media/default",
+      "factory": false,
+      "description": {
+        "summary": "Move every live item in a folder's subtree to the trash and drop the folder rows of that subtree; media.restore recreates the folders of the items it restores",
+        "reads": [
+          "params.path"
+        ],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "path",
+            "ids"
+          ]
+        },
+        "errors": {
+          "400": "missing or invalid path",
+          "404": "folder not found"
+        }
+      }
+    },
+    {
+      "name": "media.restore",
+      "module": "media/default",
+      "factory": false,
+      "description": {
+        "summary": "Bring the trashed items in body.ids back with the same id, key, path, folder and texts; a display name taken meanwhile becomes <stem>-<n>.<ext> (listed in renamed); per-id answer, an id that is not trashed gets its public copy ensured and is skipped",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 200
+            }
+          },
+          "required": [
+            "ids"
+          ],
+          "additionalProperties": false
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "the ids the step acted on or selected"
+            },
+            "skipped": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "not_found, already_trashed or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced"
+                  }
+                },
+                "required": [
+                  "id",
+                  "reason"
+                ]
+              }
+            },
+            "renamed": {
+              "type": "array",
+              "description": "restored items whose display name was taken and that came back as <stem>-<n>.<ext>; key and path are unchanged",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "from",
+                  "to"
+                ]
+              }
+            }
+          },
+          "required": [
+            "ids",
+            "skipped",
+            "renamed"
+          ]
+        },
+        "errors": {
+          "400": "no ids or more than 200"
+        }
+      }
+    },
+    {
+      "name": "media.listTrash",
+      "module": "media/default",
+      "factory": false,
+      "description": {
+        "summary": "The trashed items, most recently trashed first, with trashedAt and expiresAt and no public path",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "query": {
+          "q": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "locale": {
+            "type": "string"
+          }
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "null",
+                    "description": "a trashed item has no public URL until it is restored"
+                  },
+                  "filename": {
+                    "type": "string"
+                  },
+                  "folder": {
+                    "type": "string",
+                    "description": "the folder the item is restored to"
+                  },
+                  "contentType": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "number"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "provenance": {
+                    "type": "object",
+                    "properties": {
+                      "origin": {
+                        "type": "string",
+                        "enum": [
+                          "human",
+                          "ai",
+                          "mixed",
+                          "unknown"
+                        ]
+                      },
+                      "tool": {
+                        "type": "string"
+                      },
+                      "model": {
+                        "type": "string"
+                      },
+                      "at": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "origin"
+                    ],
+                    "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
+                  },
+                  "width": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "height": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "alt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "title": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "trashedAt": {
+                    "type": "number"
+                  },
+                  "expiresAt": {
+                    "type": "number",
+                    "description": "trashedAt plus trashRetentionDays; from then on media.selectExpiredTrash selects the item"
+                  }
+                },
+                "required": [
+                  "id",
+                  "path",
+                  "filename",
+                  "folder",
+                  "contentType",
+                  "size",
+                  "createdAt",
+                  "updatedAt",
+                  "provenance",
+                  "width",
+                  "height",
+                  "alt",
+                  "title",
+                  "description",
+                  "trashedAt",
+                  "expiresAt"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "total": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "items",
+            "total"
+          ]
+        },
+        "errors": {
+          "400": "unknown locale or limit above maxLimit"
+        }
+      }
+    },
+    {
+      "name": "media.selectTrash",
+      "module": "media/default",
+      "factory": false,
+      "description": {
+        "summary": "Select the trashed items among body.ids into result.ids for media.purge, reporting the others in result.skipped",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 200
+            }
+          },
+          "required": [
+            "ids"
+          ],
+          "additionalProperties": false
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "the ids the step acted on or selected"
+            },
+            "skipped": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "not_found, already_trashed or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced"
+                  }
+                },
+                "required": [
+                  "id",
+                  "reason"
+                ]
+              }
+            }
+          },
+          "required": [
+            "ids",
+            "skipped"
+          ]
+        },
+        "errors": {
+          "400": "no ids or more than 200"
+        }
+      }
+    },
+    {
+      "name": "media.selectAllTrash",
+      "module": "media/default",
+      "factory": false,
+      "description": {
+        "summary": "Select every trashed item into result.ids for media.purge",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "the ids the step acted on or selected"
+            },
+            "skipped": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "not_found, already_trashed or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced"
+                  }
+                },
+                "required": [
+                  "id",
+                  "reason"
+                ]
+              }
+            }
+          },
+          "required": [
+            "ids",
+            "skipped"
+          ]
+        }
+      }
+    },
+    {
+      "name": "media.selectExpiredTrash",
+      "module": "media/default",
+      "factory": false,
+      "description": {
+        "summary": "Select the trashed items whose trashRetentionDays have run out into result.ids for media.purge",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "the ids the step acted on or selected"
+            },
+            "skipped": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "not_found, already_trashed or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced"
+                  }
+                },
+                "required": [
+                  "id",
+                  "reason"
+                ]
+              }
+            }
+          },
+          "required": [
+            "ids",
+            "skipped"
+          ]
+        }
+      }
+    },
+    {
+      "name": "media.purge",
+      "module": "media/default",
+      "factory": false,
+      "description": {
+        "summary": "Delete trashed items for good, each as media.remove: the ids in result.ids when an earlier step selected them (its result.skipped is kept), otherwise body.ids (at most 200); an id that is not trashed is skipped",
+        "reads": [
+          "result.ids?",
+          "result.skipped?"
+        ],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 200
+            }
+          },
+          "additionalProperties": false
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "the ids the step acted on or selected"
+            },
+            "skipped": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "not_found, already_trashed or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced"
+                  }
+                },
+                "required": [
+                  "id",
+                  "reason"
+                ]
+              }
+            }
+          },
+          "required": [
+            "ids",
+            "skipped"
+          ]
+        },
+        "errors": {
+          "400": "no ids selected and no body.ids, or more than 200 body.ids"
         }
       }
     },

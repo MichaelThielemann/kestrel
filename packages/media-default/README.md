@@ -330,6 +330,7 @@ Not included: image resizing, tags, linking media to content documents.
 | `maxLimit` | integer | no | `200` |
 | `defaultLimit` | integer | no | – |
 | `listPermission` | string | no | `"media.list"` |
+| `trashRetentionDays` | integer | no | `30` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
@@ -345,6 +346,14 @@ Not included: image resizing, tags, linking media to content documents.
 | `media.download` | The file itself | `params.id` | `result` | – | – | 404 not found | – | no |
 | `media.serve` | The file at its public URL (params.id, params.name); the name must be the one it was uploaded under | `params.id`, `params.name` | `result` | – | – | 404 not found, not ready, or not the name the file was uploaded under | – | no |
 | `media.remove` | Delete file and metadata: end the item's readiness, then remove copy, blob and row, then a final sweep | `params.id` | `result` | – | { ok: boolean, … } | 400 missing id | – | no |
+| `media.trash` | Move the items in body.ids to the trash: the library no longer shows them, their names are free and their public copies are removed, while media@1 still reads them as ready until media.purge; per-id answer, an unknown or already trashed id is skipped | – | `result` | { ids: string[] } | { ids: string[], skipped: object[], … } | 400 no ids or more than 200 | – | no |
+| `media.trashFolder` | Move every live item in a folder's subtree to the trash and drop the folder rows of that subtree; media.restore recreates the folders of the items it restores | `params.path` | `result` | – | { path: string, ids: string[], … } | 400 missing or invalid path; 404 folder not found | – | no |
+| `media.restore` | Bring the trashed items in body.ids back with the same id, key, path, folder and texts; a display name taken meanwhile becomes <stem>-<n>.<ext> (listed in renamed); per-id answer, an id that is not trashed gets its public copy ensured and is skipped | – | `result` | { ids: string[] } | { ids: string[], skipped: object[], renamed: object[], … } | 400 no ids or more than 200 | – | no |
+| `media.listTrash` | The trashed items, most recently trashed first, with trashedAt and expiresAt and no public path | – | `result` | ?q: string, limit: integer, offset: integer, locale: string | { items: object[], total: number, … } | 400 unknown locale or limit above maxLimit | – | no |
+| `media.selectTrash` | Select the trashed items among body.ids into result.ids for media.purge, reporting the others in result.skipped | – | `result` | { ids: string[] } | { ids: string[], skipped: object[], … } | 400 no ids or more than 200 | – | no |
+| `media.selectAllTrash` | Select every trashed item into result.ids for media.purge | – | `result` | – | { ids: string[], skipped: object[], … } | – | – | no |
+| `media.selectExpiredTrash` | Select the trashed items whose trashRetentionDays have run out into result.ids for media.purge | – | `result` | – | { ids: string[], skipped: object[], … } | – | – | no |
+| `media.purge` | Delete trashed items for good, each as media.remove: the ids in result.ids when an earlier step selected them (its result.skipped is kept), otherwise body.ids (at most 200); an id that is not trashed is skipped | `result.ids?`, `result.skipped?` | `result` | { ids?: string[] } | { ids: string[], skipped: object[], … } | 400 no ids selected and no body.ids, or more than 200 body.ids | – | no |
 | `media.reconcile` | Compare the blobs under the media prefix with the media_items rows; with `delete` also removes blobs that no row points at (rows are never deleted) | – | `result` | { delete?: boolean } | { blobsWithoutRow: string[], rowsWithoutBlob: string[], … } | – | – | no |
 | `media.reconcileDelete` | Like media.reconcile, but always deletes the orphan blobs – the deletion is in the pipeline, not in the request | – | `result` | – | { blobsWithoutRow: string[], rowsWithoutBlob: string[], … } | – | – | no |
 | `media.syncPublic` | Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result) | – | `result._publicMedia` | – | { _publicMedia: object, … } | – | – | no |

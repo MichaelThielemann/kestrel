@@ -7,7 +7,7 @@ import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { binaryResult, first, stepFactory, type Context, type StepResult } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
-import { createMediaDefault, MEDIA_KINDS, publishedFileOf, SORTABLE, type ListOptions, type Media, type MediaItem, type MediaKind, type SortField } from "./impl.ts";
+import { createMediaDefault, MEDIA_KINDS, publishedFileOf, SORTABLE, type ListOptions, type Media, type MediaItem, type MediaKind, type SortField, type TrashListOptions, type TrashOutcome } from "./impl.ts";
 
 export const configSchema = z
   .object({
@@ -29,6 +29,7 @@ export const configSchema = z
     maxLimit: z.number().int().min(1).default(200),
     defaultLimit: z.number().int().min(1).optional(),
     listPermission: z.string().min(1).default("media.list").describe("The permission a signed-in caller needs to list the library or its folders when an authz module is loaded"),
+    trashRetentionDays: z.number().int().min(1).default(30).describe("How many days a trashed item is kept before media.selectExpiredTrash selects it for media.purge"),
   })
   .strict()
   .refine((config) => config.defaultLimit === undefined || config.defaultLimit <= config.maxLimit, { message: "defaultLimit must not exceed maxLimit", path: ["defaultLimit"] });
@@ -82,6 +83,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const MAX_REQUEST_IDS = 200;
+const IDS_REFUSAL = `ids must name 1 to ${MAX_REQUEST_IDS} media items`;
+
+function requestedIds(ctx: Context): string[] | null {
+  const ids = idsFrom(ctx.payload.ids);
+  return ids.length === 0 || ids.length > MAX_REQUEST_IDS ? null : ids;
+}
+
+function earlierSelection(ctx: Context): TrashOutcome | null {
+  if (!isRecord(ctx.result) || !Array.isArray(ctx.result.ids)) return null;
+  const ids = ctx.result.ids.filter((id): id is string => typeof id === "string");
+  const skipped = Array.isArray(ctx.result.skipped) ? ctx.result.skipped.filter((entry): entry is TrashOutcome["skipped"][number] => isRecord(entry) && typeof entry.id === "string" && typeof entry.reason === "string") : [];
+  return { ids, skipped };
+}
+
+function trashListOptions(payload: Record<string, unknown>, fallback: number): TrashListOptions {
+  const options: TrashListOptions = { limit: fallback };
+  const limit = Number(first(payload.limit));
+  const offset = Number(first(payload.offset));
+  if (Number.isInteger(limit) && limit > 0) options.limit = limit;
+  if (Number.isInteger(offset) && offset >= 0) options.offset = offset;
+  const q = first(payload.q);
+  if (q !== undefined) options.q = q;
+  const locale = first(payload.locale);
+  if (locale !== undefined) options.locale = locale;
+  return options;
+}
+
 type Instance = Media & { listAccess?: (identity: Identity) => Promise<Result<boolean, AuthzError>> };
 
 async function listRefusal(media: Instance, ctx: Context): Promise<StepResult | undefined> {
@@ -124,6 +153,21 @@ const UPLOAD_RESULT_SCHEMA = {
     MEDIA_ITEM_SCHEMA,
     { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, errors: { type: "array", items: { type: "object", properties: { filename: { type: "string" }, status: { type: "number" }, code: { type: "string" }, message: { type: "string" } }, required: ["filename", "status", "code", "message"] } }, ids: { type: "array", items: { type: "string" }, description: "the newly stored items only; an unchanged re-upload is in `items` but not here, and is not announced as an event" } }, required: ["items", "errors", "ids"] },
   ],
+};
+const IDS_INPUT = { type: "object", properties: { ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: MAX_REQUEST_IDS } }, required: ["ids"], additionalProperties: false };
+const SKIPPED_SCHEMA = { type: "array", items: { type: "object", properties: { id: { type: "string" }, reason: { type: "string", description: "not_found, already_trashed or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced" } }, required: ["id", "reason"] } };
+const TRASH_RESULT_SCHEMA = { type: "object", properties: { ids: { type: "array", items: { type: "string" }, description: "the ids the step acted on or selected" }, skipped: SKIPPED_SCHEMA }, required: ["ids", "skipped"] };
+const RESTORE_RESULT_SCHEMA = { type: "object", properties: { ...TRASH_RESULT_SCHEMA.properties, renamed: { type: "array", description: "restored items whose display name was taken and that came back as <stem>-<n>.<ext>; key and path are unchanged", items: { type: "object", properties: { id: { type: "string" }, from: { type: "string" }, to: { type: "string" } }, required: ["id", "from", "to"] } } }, required: ["ids", "skipped", "renamed"] };
+const TRASH_ITEM_SCHEMA = {
+  ...MEDIA_ITEM_SCHEMA,
+  properties: {
+    ...MEDIA_ITEM_SCHEMA.properties,
+    path: { type: "null", description: "a trashed item has no public URL until it is restored" },
+    folder: { type: "string", description: "the folder the item is restored to" },
+    trashedAt: { type: "number" },
+    expiresAt: { type: "number", description: "trashedAt plus trashRetentionDays; from then on media.selectExpiredTrash selects the item" },
+  },
+  required: [...MEDIA_ITEM_SCHEMA.required, "trashedAt", "expiresAt"],
 };
 const FOLDER_ITEMS_SUMMARY = "Item ids in a folder, for use with references.guardAll:media before removeFolder";
 
@@ -286,6 +330,58 @@ export default defineModule({
       if (isErr(removed)) return ctx.fail(removed.error);
       return ok({ ...ctx, result: { ok: true } });
     },
+    trash: async (ctx: Context): Promise<StepResult> => {
+      const ids = requestedIds(ctx);
+      if (ids === null) return ctx.fail("VALIDATION", IDS_REFUSAL);
+      const trashed = await media.trash(ids);
+      if (isErr(trashed)) return ctx.fail(trashed.error);
+      return ok({ ...ctx, result: trashed.value });
+    },
+    trashFolder: async (ctx: Context): Promise<StepResult> => {
+      if (!ctx.params.path) return ctx.fail("VALIDATION", "missing path");
+      const trashed = await media.trashFolder(ctx.params.path);
+      if (isErr(trashed)) return ctx.fail(trashed.error);
+      if (trashed.value === null) return ctx.fail("NOT_FOUND", `media folder ${ctx.params.path} not found`);
+      return ok({ ...ctx, result: trashed.value });
+    },
+    restore: async (ctx: Context): Promise<StepResult> => {
+      const ids = requestedIds(ctx);
+      if (ids === null) return ctx.fail("VALIDATION", IDS_REFUSAL);
+      const restored = await media.restore(ids);
+      if (isErr(restored)) return ctx.fail(restored.error);
+      return ok({ ...ctx, result: restored.value });
+    },
+    listTrash: async (ctx: Context): Promise<StepResult> => {
+      const page = await media.listTrash(trashListOptions(ctx.payload, media.listLimits().fallback));
+      if (isErr(page)) return ctx.fail(page.error);
+      const items = page.value.items.map((item) => ({ ...media.toPublicItem(item), path: null, trashedAt: item.trashedAt, expiresAt: item.expiresAt }));
+      return ok({ ...ctx, result: { items, total: page.value.total } });
+    },
+    selectTrash: async (ctx: Context): Promise<StepResult> => {
+      const ids = requestedIds(ctx);
+      if (ids === null) return ctx.fail("VALIDATION", IDS_REFUSAL);
+      const selected = await media.selectTrash(ids);
+      if (isErr(selected)) return ctx.fail(selected.error);
+      return ok({ ...ctx, result: selected.value });
+    },
+    selectAllTrash: async (ctx: Context): Promise<StepResult> => {
+      const ids = await media.trashIds();
+      if (isErr(ids)) return ctx.fail(ids.error);
+      return ok({ ...ctx, result: { ids: ids.value, skipped: [] } });
+    },
+    selectExpiredTrash: async (ctx: Context): Promise<StepResult> => {
+      const ids = await media.trashIds({ expired: true });
+      if (isErr(ids)) return ctx.fail(ids.error);
+      return ok({ ...ctx, result: { ids: ids.value, skipped: [] } });
+    },
+    purge: async (ctx: Context): Promise<StepResult> => {
+      const earlier = earlierSelection(ctx);
+      const ids = earlier?.ids ?? requestedIds(ctx);
+      if (ids === null) return ctx.fail("VALIDATION", IDS_REFUSAL);
+      const purged = await media.purge(ids);
+      if (isErr(purged)) return ctx.fail(purged.error);
+      return ok({ ...ctx, result: { ids: purged.value.ids, skipped: [...(earlier?.skipped ?? []), ...purged.value.skipped] } });
+    },
     reconcile: async (ctx: Context): Promise<StepResult> => {
       const report = await media.reconcile({ delete: ctx.payload.delete === true || first(ctx.payload.delete) === "true" });
       if (isErr(report)) return ctx.fail(report.error);
@@ -354,6 +450,14 @@ export default defineModule({
     createFolder: { summary: "Create a folder (idempotent: an existing folder is returned unchanged)", reads: [], writes: ["result"], input: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }, output: { type: "object", properties: { folder: { type: "string" }, count: { type: "number" } }, required: ["folder", "count"] }, errors: { 400: "missing or invalid path" } },
     renameFolder: { summary: "Rename or move a folder (metadata only: keys and paths do not change)", reads: ["params.path"], writes: ["result"], input: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }, output: { type: "object", properties: { folder: { type: "string" }, moved: { type: "number" } }, required: ["folder", "moved"] }, errors: { 400: "missing or invalid path", 404: "folder not found", 409: "target folder already exists" } },
     listFolderItems: { summary: FOLDER_ITEMS_SUMMARY, reads: ["params.path"], writes: ["result"], query: { recursive: { type: "boolean" } }, output: { type: "object", properties: { path: { type: "string" }, ids: { type: "array", items: { type: "string" } } }, required: ["path", "ids"] }, errors: { 400: "missing or invalid path", 404: "folder not found", 409: "folder not empty (without `recursive`)" } },
+    trash: { summary: "Move the items in body.ids to the trash: the library no longer shows them, their names are free and their public copies are removed, while media@1 still reads them as ready until media.purge; per-id answer, an unknown or already trashed id is skipped", reads: [], writes: ["result"], input: IDS_INPUT, output: TRASH_RESULT_SCHEMA, errors: { 400: `no ids or more than ${MAX_REQUEST_IDS}` } },
+    trashFolder: { summary: "Move every live item in a folder's subtree to the trash and drop the folder rows of that subtree; media.restore recreates the folders of the items it restores", reads: ["params.path"], writes: ["result"], output: { type: "object", properties: { path: { type: "string" }, ids: { type: "array", items: { type: "string" } } }, required: ["path", "ids"] }, errors: { 400: "missing or invalid path", 404: "folder not found" } },
+    restore: { summary: "Bring the trashed items in body.ids back with the same id, key, path, folder and texts; a display name taken meanwhile becomes <stem>-<n>.<ext> (listed in renamed); per-id answer, an id that is not trashed gets its public copy ensured and is skipped", reads: [], writes: ["result"], input: IDS_INPUT, output: RESTORE_RESULT_SCHEMA, errors: { 400: `no ids or more than ${MAX_REQUEST_IDS}` } },
+    listTrash: { summary: "The trashed items, most recently trashed first, with trashedAt and expiresAt and no public path", reads: [], writes: ["result"], query: { q: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: media.listLimits().max }, offset: { type: "integer", minimum: 0 }, locale: { type: "string" } }, output: { type: "object", properties: { items: { type: "array", items: TRASH_ITEM_SCHEMA }, total: { type: "number" } }, required: ["items", "total"] }, errors: { 400: "unknown locale or limit above maxLimit" } },
+    selectTrash: { summary: "Select the trashed items among body.ids into result.ids for media.purge, reporting the others in result.skipped", reads: [], writes: ["result"], input: IDS_INPUT, output: TRASH_RESULT_SCHEMA, errors: { 400: `no ids or more than ${MAX_REQUEST_IDS}` } },
+    selectAllTrash: { summary: "Select every trashed item into result.ids for media.purge", reads: [], writes: ["result"], output: TRASH_RESULT_SCHEMA },
+    selectExpiredTrash: { summary: "Select the trashed items whose trashRetentionDays have run out into result.ids for media.purge", reads: [], writes: ["result"], output: TRASH_RESULT_SCHEMA },
+    purge: { summary: `Delete trashed items for good, each as media.remove: the ids in result.ids when an earlier step selected them (its result.skipped is kept), otherwise body.ids (at most ${MAX_REQUEST_IDS}); an id that is not trashed is skipped`, reads: ["result.ids?", "result.skipped?"], writes: ["result"], input: { type: "object", properties: { ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: MAX_REQUEST_IDS } }, additionalProperties: false }, output: TRASH_RESULT_SCHEMA, errors: { 400: `no ids selected and no body.ids, or more than ${MAX_REQUEST_IDS} body.ids` } },
     removeFolder: { summary: "Delete a folder and everything in it (each item as media.remove)", reads: ["params.path"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" }, removed: { type: "number" }, ids: { type: "array", items: { type: "string" } } }, required: ["ok", "removed", "ids"] }, errors: { 400: "invalid path", 404: "folder not found", 409: "folder not empty or still referenced" } },
   }),
 });
