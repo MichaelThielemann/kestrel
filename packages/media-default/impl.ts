@@ -109,17 +109,22 @@ export interface Config {
   trashRetentionDays?: number | undefined;
 }
 
-/** Why a trash, restore or purge left an id alone. */
-export type TrashSkipReason = "not_found" | "already_trashed" | "not_trashed";
+/** Why a trash, restore, selection or purge left an id alone. */
+export type TrashSkipReason = "not_found" | "not_trashed";
 
-/** The ids a trash, restore or purge acted on, and the ids it left alone with the reason. */
+/** The ids a selection or purge acted on, and the ids it left alone with the reason. */
 export interface TrashOutcome {
   ids: string[];
   skipped: Array<{ id: string; reason: TrashSkipReason }>;
 }
 
+/** The outcome of a trash or restore: `ids` holds every id that is in the target state afterwards, so a repeated call hands on the ids an earlier, failed call already moved; `unchanged` names those among them that were in that state before. */
+export interface MoveOutcome extends TrashOutcome {
+  unchanged: string[];
+}
+
 /** A restore also names every item that came back under another display name because its own was taken. */
-export interface RestoreOutcome extends TrashOutcome {
+export interface RestoreOutcome extends MoveOutcome {
   renamed: Array<{ id: string; from: string; to: string }>;
 }
 
@@ -255,8 +260,8 @@ export interface Media extends MediaFiles {
   folderItems(path: string, recursive: boolean): Promise<Result<{ path: string; ids: string[] } | null, MediaError>>;
   removeFolder(path: string): Promise<Result<{ ok: true; removed: number; ids: string[] } | null, MediaError>>;
   /** Moves ready items to the trash: the library no longer shows them, their name is free and their public copy is removed, while media@1 still reads them as ready. */
-  trash(ids: string[]): Promise<Result<TrashOutcome, MediaError>>;
-  /** Trashes every live item in a folder's subtree and drops the folder rows of that subtree; `null` for a folder that does not exist. */
+  trash(ids: string[]): Promise<Result<MoveOutcome, MediaError>>;
+  /** Trashes every ready item in a folder's subtree, deletes its failed and abandoned uploads, and drops the folder rows of that subtree; an upload still under way stays. `null` for a folder that does not exist. */
   trashFolder(path: string): Promise<Result<{ path: string; ids: string[] } | null, MediaError>>;
   /** Brings trashed items back as they were, recreating their folder and public copy; a taken name becomes `<stem>-<n>.<ext>`, the key and public path never change. */
   restore(ids: string[]): Promise<Result<RestoreOutcome, MediaError>>;
@@ -810,6 +815,19 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     return err(locationConflict(keyFor(item.folder, item.filename)));
   };
 
+  const moveToFolder = async (read: MediaItem, folder: string): Promise<Result<void, MediaError>> => {
+    let item: MediaItem | null = read;
+    for (let attempt = 0; attempt < 3 && item !== null && item.status !== REMOVING; attempt += 1) {
+      const moved: Result<number, MediaError> = item.status === TRASHED
+        ? await db.updateMany<Document>(COLLECTION, { id: item.id, status: TRASHED }, { folder })
+        : await db.updateMany<Document>(COLLECTION, { id: item.id, ...LIVE }, { folder, location: keyFor(folder, item.filename), updatedAt: now() });
+      if (isErr(moved) || moved.value > 0) return isErr(moved) ? moved : ok();
+      const again: Result<MediaItem | null, MediaError> = await db.findOne<MediaItem>(COLLECTION, { id: item.id });
+      if (isErr(again)) return again;
+      item = again.value;
+    }
+    return ok();
+  };
   const finishRemoving = async (items: readonly MediaItem[]): Promise<Result<MediaItem[], MediaError>> => {
     const present: MediaItem[] = [];
     for (const item of items) {
@@ -1017,9 +1035,12 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
           fields.location = nextLocation;
         }
       }
-      const row = await db.updateOne<Document>(COLLECTION, id, fields);
+      const written = await db.updateMany<Document>(COLLECTION, { id, ...LIVE }, fields);
+      if (isErr(written)) return written;
+      if (written.value === 0) return ok(null);
+      const row = await db.findOne<Document>(COLLECTION, { id });
       if (isErr(row)) return row;
-      return ok(resolveWith(row.value, key.value));
+      return ok(row.value === null ? null : resolveWith(row.value, key.value));
     },
     async read(id) {
       noteRead({ kind: "document", type: MEDIA_READ_TYPE, id });
@@ -1125,10 +1146,8 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         if (isErr(free)) return free;
       }
       for (const item of found.value) {
-        const folder = retarget(item.folder);
-        const fields: Record<string, unknown> = item.status === TRASHED ? { folder } : { folder, location: keyFor(folder, item.filename), updatedAt: now() };
-        const updated = await db.updateOne(COLLECTION, item.id, fields);
-        if (isErr(updated)) return updated;
+        const moved = await moveToFolder(item, retarget(item.folder));
+        if (isErr(moved)) return moved;
       }
       const page = await db.findMany<{ id: string; path: string }>(FOLDERS, { path: source.value }, { limit: 1 });
       if (isErr(page)) return page;
@@ -1196,7 +1215,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       return ok({ ok: true, removed: ids.length, ids });
     },
     async trash(ids) {
-      const outcome: TrashOutcome = { ids: [], skipped: [] };
+      const outcome: MoveOutcome = { ids: [], unchanged: [], skipped: [] };
       for (const id of new Set(ids)) {
         const found = await db.findOne<MediaItem>(COLLECTION, { id });
         if (isErr(found)) return found;
@@ -1216,11 +1235,14 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
               outcome.skipped.push({ id, reason: "not_found" });
               continue;
             }
-            outcome.skipped.push({ id, reason: "already_trashed" });
-          } else outcome.ids.push(id);
-        } else outcome.skipped.push({ id, reason: "already_trashed" });
+            outcome.unchanged.push(id);
+          }
+        } else outcome.unchanged.push(id);
+        outcome.ids.push(id);
         const dropped = await dropCopy(item);
         if (isErr(dropped)) return dropped;
+        const restoredMeanwhile = await writeCopy(id);
+        if (isErr(restoredMeanwhile)) return restoredMeanwhile;
       }
       return ok(outcome);
     },
@@ -1236,6 +1258,11 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       const ready = inSubtree.value.filter(isReady).map((item) => item.id);
       const trashed = await api.trash(ready);
       if (isErr(trashed)) return trashed;
+      for (const item of inSubtree.value) {
+        if (isReady(item) || !isLive(item) || item.location === null) continue;
+        const released = await releaseFailed(item.location);
+        if (isErr(released)) return released;
+      }
       const removed = await db.deleteMany(FOLDERS, { path: clean.value });
       if (isErr(removed)) return removed;
       const subfolderIds: string[] = [];
@@ -1251,7 +1278,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       return ok({ path: clean.value, ids: trashed.value.ids });
     },
     async restore(ids) {
-      const outcome: RestoreOutcome = { ids: [], skipped: [], renamed: [] };
+      const outcome: RestoreOutcome = { ids: [], unchanged: [], skipped: [], renamed: [] };
       for (const id of new Set(ids)) {
         const found = await db.findOne<MediaItem>(COLLECTION, { id });
         if (isErr(found)) return found;
@@ -1270,12 +1297,10 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
               outcome.skipped.push({ id, reason: "not_found" });
               continue;
             }
-            outcome.skipped.push({ id, reason: "not_trashed" });
-          } else {
-            outcome.ids.push(id);
-            if (back.value !== item.filename) outcome.renamed.push({ id, from: item.filename, to: back.value });
-          }
-        } else outcome.skipped.push({ id, reason: "not_trashed" });
+            outcome.unchanged.push(id);
+          } else if (back.value !== item.filename) outcome.renamed.push({ id, from: item.filename, to: back.value });
+        } else outcome.unchanged.push(id);
+        outcome.ids.push(id);
         const copied = await writeCopy(id);
         if (isErr(copied)) return copied;
       }
@@ -1458,6 +1483,13 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         if (current.value !== null && copyKey(entry.id, publishedFileOf(current.value).name) === key) continue;
         const dropped = await blobs.remove(key);
         if (isErr(dropped)) return dropped;
+        const after = await readyRow(entry.id);
+        if (isErr(after)) return after;
+        if (after.value !== null && copyKey(entry.id, publishedFileOf(after.value).name) === key) {
+          const rewritten = await writeCopy(entry.id);
+          if (isErr(rewritten)) return rewritten;
+          continue;
+        }
         removed += 1;
       }
       return ok({ written, removed, missing });

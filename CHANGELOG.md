@@ -1171,7 +1171,9 @@ Net changes since 5.8.1.
   lists them with `trashedAt` and `expiresAt`. A purge is a selection — `media.selectTrash`,
   `media.selectAllTrash` or `media.selectExpiredTrash` — followed by `media.purge`, which deletes for
   good. The steps that take `body.ids` accept 1 to 200 and answer per id with
-  `{ ids, skipped: [{ id, reason }] }`. New config `trashRetentionDays` (default 30). A trashed item
+  `{ ids, skipped: [{ id, reason }] }`; `media.trash` and `media.restore` put every id that is in the
+  target state afterwards into `ids` and name the ones that already were in `unchanged`, so a repeated
+  request reaches the steps after them again. New config `trashRetentionDays` (default 30). A trashed item
   stays ready for `media@1` until it is purged, so modules reading media through it keep what they
   derived; `media.remove` and `media.removeFolder` stay final deletes. `MediaStatus` gains
   `"trashed"`, `MediaItem` gains `trashedAt`, and its `location` may be `null`. `media.syncPublic`

@@ -10912,7 +10912,7 @@
       },
       "post": {
         "operationId": "trashMedia",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission media.delete → Move the items in body.ids to the trash: the library no longer shows them, their names are free and their public copies are removed, while media@1 still reads them as ready until media.purge; per-id answer, an unknown or already trashed id is skipped → Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged → Emit event \"media.trashed\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission media.delete → Move the items in body.ids to the trash: the library no longer shows them, their names are free and their public copies are removed, while media@1 still reads them as ready until media.purge; per-id answer: result.ids holds every id that is trashed afterwards, an already trashed one also in result.unchanged (its public copy is removed again), an unknown one is skipped → Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged → Emit event \"media.trashed\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "media"
         ],
@@ -10940,7 +10940,14 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "the ids the step acted on or selected"
+                      "description": "every id that is in the target state after the step, whether the step moved it or found it there"
+                    },
+                    "unchanged": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "the ids in ids that were already in the target state before the step; they are handed on in ids, so a repeated step reaches every later step again"
                     },
                     "skipped": {
                       "type": "array",
@@ -10952,7 +10959,7 @@
                           },
                           "reason": {
                             "type": "string",
-                            "description": "not_found, already_trashed or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced"
+                            "description": "not_found or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced"
                           }
                         },
                         "required": [
@@ -11026,7 +11033,8 @@
                   "required": [
                     "_events",
                     "ids",
-                    "skipped"
+                    "skipped",
+                    "unchanged"
                   ]
                 }
               }
@@ -11167,7 +11175,7 @@
                           },
                           "reason": {
                             "type": "string",
-                            "description": "not_found, already_trashed or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced"
+                            "description": "not_found or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced"
                           }
                         },
                         "required": [
@@ -11337,7 +11345,7 @@
     "/media/trash/folders/{path}": {
       "post": {
         "operationId": "trashMediaFolder",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission media.delete → Move every live item in a folder's subtree to the trash and drop the folder rows of that subtree; media.restore recreates the folders of the items it restores → Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged → Emit event \"media.trashed\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission media.delete → Move every ready item in a folder's subtree to the trash, delete its failed and abandoned uploads, and drop the folder rows of that subtree; an upload still under way keeps its folder listed; media.restore recreates the folders of the items it restores → Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged → Emit event \"media.trashed\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "media"
         ],
@@ -11571,7 +11579,7 @@
                           },
                           "reason": {
                             "type": "string",
-                            "description": "not_found, already_trashed or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced"
+                            "description": "not_found or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced"
                           }
                         },
                         "required": [
@@ -11744,7 +11752,7 @@
     "/media/trash/restore": {
       "post": {
         "operationId": "restoreMedia",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission media.write → Bring the trashed items in body.ids back with the same id, key, path, folder and texts; a display name taken meanwhile becomes <stem>-<n>.<ext> (listed in renamed); per-id answer, an id that is not trashed gets its public copy ensured and is skipped → Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged → Emit event \"media.restored\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission media.write → Bring the trashed items in body.ids back with the same id, key, path, folder and texts; a display name taken meanwhile becomes <stem>-<n>.<ext> (listed in renamed); per-id answer: result.ids holds every id that is ready afterwards, an already ready one also in result.unchanged (its public copy is ensured), an unknown one is skipped → Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged → Emit event \"media.restored\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "media"
         ],
@@ -11772,7 +11780,14 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "the ids the step acted on or selected"
+                      "description": "every id that is in the target state after the step, whether the step moved it or found it there"
+                    },
+                    "unchanged": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "the ids in ids that were already in the target state before the step; they are handed on in ids, so a repeated step reaches every later step again"
                     },
                     "skipped": {
                       "type": "array",
@@ -11784,7 +11799,7 @@
                           },
                           "reason": {
                             "type": "string",
-                            "description": "not_found, already_trashed or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced"
+                            "description": "not_found or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced"
                           }
                         },
                         "required": [
@@ -11882,7 +11897,8 @@
                     "_events",
                     "ids",
                     "renamed",
-                    "skipped"
+                    "skipped",
+                    "unchanged"
                   ]
                 }
               }

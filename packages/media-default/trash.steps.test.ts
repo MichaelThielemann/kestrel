@@ -71,8 +71,10 @@ describe("media/default trash steps", () => {
     const id = await put(media, "a.png");
     const res = await run(media, ["media.trash"], { body: { ids: [id, "no-such-id"] } });
     expect(res.status).toBe(200);
-    expect(res.result).toEqual({ ids: [id], skipped: [{ id: "no-such-id", reason: "not_found" }] });
+    expect(res.result).toEqual({ ids: [id], unchanged: [], skipped: [{ id: "no-such-id", reason: "not_found" }] });
     expect(expectOk(await media.get(id))).toBeNull();
+    const again = await run(media, ["media.trash"], { body: { ids: [id] } });
+    expect(again.result).toEqual({ ids: [id], unchanged: [id], skipped: [] });
   });
 
   it("media.trash, media.restore, media.selectTrash and media.purge refuse more than 200 ids or none with 400", async () => {
@@ -101,7 +103,7 @@ describe("media/default trash steps", () => {
     await put(media, "a.png");
     const res = await run(media, ["media.restore"], { body: { ids: [id] } });
     expect(res.status).toBe(200);
-    expect(res.result).toEqual({ ids: [id], skipped: [], renamed: [{ id, from: "a.png", to: "a-2.png" }] });
+    expect(res.result).toEqual({ ids: [id], unchanged: [], skipped: [], renamed: [{ id, from: "a.png", to: "a-2.png" }] });
   });
 
   it("media.listTrash pages the trash with trashedAt and expiresAt and no public path", async () => {

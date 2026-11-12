@@ -244,8 +244,9 @@ trash before going back to one.
 recreates their folder and writes their public copy again. When another item took the name
 meanwhile, the restored one becomes `<stem>-<n>.<ext>` (the first free `n` from 2 on, cut to 200
 bytes) and is listed in `renamed`; only the display name changes, never the `path`.
-`media.trashFolder` trashes every live item in a folder's subtree and removes the folder rows of that
-subtree. `media.listTrash` lists the trashed items, most recently trashed first, with `trashedAt`,
+`media.trashFolder` trashes every ready item in a folder's subtree, deletes its failed uploads and
+those abandoned for `uploadStaleAfterMs`, and removes the folder rows of that subtree. An upload still
+under way keeps its row, so the folder stays listed until that upload ends. `media.listTrash` lists the trashed items, most recently trashed first, with `trashedAt`,
 `expiresAt` (`trashedAt` plus `trashRetentionDays`, default 30) and `path: null`; it takes `q`,
 `limit`, `offset` and `locale` like `media.list`.
 
@@ -257,17 +258,25 @@ Without a selection before it, `media.purge` takes `body.ids`. An item restored 
 selection and the purge is never deleted.
 
 `media.trash`, `media.restore`, `media.selectTrash` and `media.purge` with `body.ids` take 1 to 200
-ids (`VALIDATION` otherwise) and answer per id with `{ ids, skipped: [{ id, reason }] }`: `ids` are
-the ids the step acted on, and `reason` is `not_found`, `already_trashed` (`media.trash`),
-`not_trashed` (`media.restore`, `media.selectTrash`, `media.purge`) or `referenced` (added by
-`references.dropReferenced`, kept by `media.purge`). `media.restore` adds `renamed: [{ id, from, to
-}]`. Repeating a step is safe: `media.trash` of a trashed item removes its copy again,
-`media.restore` of a ready one writes its copy again.
+ids (`VALIDATION` otherwise) and answer per id with `{ ids, skipped: [{ id, reason }] }`, where
+`reason` is `not_found`, `not_trashed` (`media.selectTrash`, `media.purge`) or `referenced` (added by
+`references.dropReferenced`, kept by `media.purge`). For `media.selectTrash` and `media.purge`, `ids`
+are the ids the step selected or deleted. For `media.trash` and `media.restore`, `ids` are every id
+that is in the target state afterwards, trashed or ready, whether the step moved it or found it
+there, and `unchanged` names those it found there; `media.restore` adds `renamed: [{ id, from, to
+}]`. Repeating a step is safe, and it reaches every later step again: when a trash or restore stops
+halfway, or a step after it fails, running the same pipeline with the same ids hands every id on to
+`images.hideMany` or `images.showMany` and the event, including the ones the first run already moved.
+`media.trash` of a trashed item removes its copy again, and `media.restore` of a ready one writes its
+copy again.
 
 `media.remove` and `media.removeFolder` stay final deletes. `media.removeFolder` leaves the trashed
 items of the folder in the trash, `media.renameFolder` moves them along (their `folder` only, without
 taking a name), and `media.syncPublic` removes the copy of a trashed item, reading the item again
-before it does, so an item restored during the sync keeps its copy. Nothing withdraws a copy a CDN or
+before and after it does, so an item restored during the sync keeps its copy. `media.trash` likewise
+reads an item again after it removed its copy and writes the copy back when a restore came in
+between. `media.update` and `media.renameFolder` write only to a row that is still live, so an item
+trashed while they run keeps no name; `media.update` then answers 404. Nothing withdraws a copy a CDN or
 browser cached under `public, max-age=31536000, immutable`, and a trashed file keeps its storage until
 it is purged.
 
@@ -436,9 +445,9 @@ Not included: image resizing, tags, linking media to content documents.
 | `media.download` | The file itself | `params.id` | `result` | – | – | 404 not found | – | no |
 | `media.serve` | The file at its public URL (params.id, params.name); the name must be the one it was uploaded under | `params.id`, `params.name` | `result` | – | – | 404 not found, not ready, or not the name the file was uploaded under | – | no |
 | `media.remove` | Delete file and metadata: end the item's readiness, then remove copy, blob and row, then a final sweep | `params.id` | `result` | – | { ok: boolean, … } | 400 missing id | – | no |
-| `media.trash` | Move the items in body.ids to the trash: the library no longer shows them, their names are free and their public copies are removed, while media@1 still reads them as ready until media.purge; per-id answer, an unknown or already trashed id is skipped | – | `result` | { ids: string[] } | { ids: string[], skipped: object[], … } | 400 no ids or more than 200 | – | no |
-| `media.trashFolder` | Move every live item in a folder's subtree to the trash and drop the folder rows of that subtree; media.restore recreates the folders of the items it restores | `params.path` | `result` | – | { path: string, ids: string[], … } | 400 missing or invalid path; 404 folder not found | – | no |
-| `media.restore` | Bring the trashed items in body.ids back with the same id, key, path, folder and texts; a display name taken meanwhile becomes <stem>-<n>.<ext> (listed in renamed); per-id answer, an id that is not trashed gets its public copy ensured and is skipped | – | `result` | { ids: string[] } | { ids: string[], skipped: object[], renamed: object[], … } | 400 no ids or more than 200 | – | no |
+| `media.trash` | Move the items in body.ids to the trash: the library no longer shows them, their names are free and their public copies are removed, while media@1 still reads them as ready until media.purge; per-id answer: result.ids holds every id that is trashed afterwards, an already trashed one also in result.unchanged (its public copy is removed again), an unknown one is skipped | – | `result` | { ids: string[] } | { ids: string[], unchanged: string[], skipped: object[], … } | 400 no ids or more than 200 | – | no |
+| `media.trashFolder` | Move every ready item in a folder's subtree to the trash, delete its failed and abandoned uploads, and drop the folder rows of that subtree; an upload still under way keeps its folder listed; media.restore recreates the folders of the items it restores | `params.path` | `result` | – | { path: string, ids: string[], … } | 400 missing or invalid path; 404 folder not found | – | no |
+| `media.restore` | Bring the trashed items in body.ids back with the same id, key, path, folder and texts; a display name taken meanwhile becomes <stem>-<n>.<ext> (listed in renamed); per-id answer: result.ids holds every id that is ready afterwards, an already ready one also in result.unchanged (its public copy is ensured), an unknown one is skipped | – | `result` | { ids: string[] } | { ids: string[], unchanged: string[], skipped: object[], renamed: object[], … } | 400 no ids or more than 200 | – | no |
 | `media.listTrash` | The trashed items, most recently trashed first, with trashedAt and expiresAt and no public path | – | `result` | ?q: string, limit: integer, offset: integer, locale: string | { items: object[], total: number, … } | 400 unknown locale or limit above maxLimit | – | no |
 | `media.selectTrash` | Select the trashed items among body.ids into result.ids for media.purge, reporting the others in result.skipped | – | `result` | { ids: string[] } | { ids: string[], skipped: object[], … } | 400 no ids or more than 200 | – | no |
 | `media.selectAllTrash` | Select every trashed item into result.ids for media.purge | – | `result` | – | { ids: string[], skipped: object[], … } | – | – | no |

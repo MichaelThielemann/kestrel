@@ -7,7 +7,7 @@ import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { binaryResult, first, stepFactory, type Context, type StepResult } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
-import { createMediaDefault, MEDIA_KINDS, publishedFileOf, SORTABLE, type ListOptions, type Media, type MediaItem, type MediaKind, type SortField, type TrashListOptions, type TrashOutcome } from "./impl.ts";
+import { createMediaDefault, MEDIA_KINDS, publishedFileOf, SORTABLE, type ListOptions, type Media, type MediaItem, type MediaKind, type SortField, type TrashListOptions } from "./impl.ts";
 
 export const configSchema = z
   .object({
@@ -91,10 +91,19 @@ function requestedIds(ctx: Context): string[] | null {
   return ids.length === 0 || ids.length > MAX_REQUEST_IDS ? null : ids;
 }
 
-function earlierSelection(ctx: Context): TrashOutcome | null {
+interface Skipped {
+  id: string;
+  reason: string;
+}
+
+function isSkipped(entry: unknown): entry is Skipped {
+  return isRecord(entry) && typeof entry.id === "string" && typeof entry.reason === "string";
+}
+
+function earlierSelection(ctx: Context): { ids: string[]; skipped: Skipped[] } | null {
   if (!isRecord(ctx.result) || !Array.isArray(ctx.result.ids)) return null;
   const ids = ctx.result.ids.filter((id): id is string => typeof id === "string");
-  const skipped = Array.isArray(ctx.result.skipped) ? ctx.result.skipped.filter((entry): entry is TrashOutcome["skipped"][number] => isRecord(entry) && typeof entry.id === "string" && typeof entry.reason === "string") : [];
+  const skipped = Array.isArray(ctx.result.skipped) ? ctx.result.skipped.filter(isSkipped) : [];
   return { ids, skipped };
 }
 
@@ -155,9 +164,11 @@ const UPLOAD_RESULT_SCHEMA = {
   ],
 };
 const IDS_INPUT = { type: "object", properties: { ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: MAX_REQUEST_IDS } }, required: ["ids"], additionalProperties: false };
-const SKIPPED_SCHEMA = { type: "array", items: { type: "object", properties: { id: { type: "string" }, reason: { type: "string", description: "not_found, already_trashed or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced" } }, required: ["id", "reason"] } };
+const SKIPPED_SCHEMA = { type: "array", items: { type: "object", properties: { id: { type: "string" }, reason: { type: "string", description: "not_found or not_trashed from media-default; an earlier step of a purge may add its own, such as referenced" } }, required: ["id", "reason"] } };
 const TRASH_RESULT_SCHEMA = { type: "object", properties: { ids: { type: "array", items: { type: "string" }, description: "the ids the step acted on or selected" }, skipped: SKIPPED_SCHEMA }, required: ["ids", "skipped"] };
-const RESTORE_RESULT_SCHEMA = { type: "object", properties: { ...TRASH_RESULT_SCHEMA.properties, renamed: { type: "array", description: "restored items whose display name was taken and that came back as <stem>-<n>.<ext>; key and path are unchanged", items: { type: "object", properties: { id: { type: "string" }, from: { type: "string" }, to: { type: "string" } }, required: ["id", "from", "to"] } } }, required: ["ids", "skipped", "renamed"] };
+const UNCHANGED_SCHEMA = { type: "array", items: { type: "string" }, description: "the ids in ids that were already in the target state before the step; they are handed on in ids, so a repeated step reaches every later step again" };
+const MOVE_RESULT_SCHEMA = { type: "object", properties: { ids: { type: "array", items: { type: "string" }, description: "every id that is in the target state after the step, whether the step moved it or found it there" }, unchanged: UNCHANGED_SCHEMA, skipped: SKIPPED_SCHEMA }, required: ["ids", "unchanged", "skipped"] };
+const RESTORE_RESULT_SCHEMA = { type: "object", properties: { ...MOVE_RESULT_SCHEMA.properties, renamed: { type: "array", description: "restored items whose display name was taken and that came back as <stem>-<n>.<ext>; key and path are unchanged", items: { type: "object", properties: { id: { type: "string" }, from: { type: "string" }, to: { type: "string" } }, required: ["id", "from", "to"] } } }, required: ["ids", "unchanged", "skipped", "renamed"] };
 const TRASH_ITEM_SCHEMA = {
   ...MEDIA_ITEM_SCHEMA,
   properties: {
@@ -450,9 +461,9 @@ export default defineModule({
     createFolder: { summary: "Create a folder (idempotent: an existing folder is returned unchanged)", reads: [], writes: ["result"], input: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }, output: { type: "object", properties: { folder: { type: "string" }, count: { type: "number" } }, required: ["folder", "count"] }, errors: { 400: "missing or invalid path" } },
     renameFolder: { summary: "Rename or move a folder (metadata only: keys and paths do not change)", reads: ["params.path"], writes: ["result"], input: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }, output: { type: "object", properties: { folder: { type: "string" }, moved: { type: "number" } }, required: ["folder", "moved"] }, errors: { 400: "missing or invalid path", 404: "folder not found", 409: "target folder already exists" } },
     listFolderItems: { summary: FOLDER_ITEMS_SUMMARY, reads: ["params.path"], writes: ["result"], query: { recursive: { type: "boolean" } }, output: { type: "object", properties: { path: { type: "string" }, ids: { type: "array", items: { type: "string" } } }, required: ["path", "ids"] }, errors: { 400: "missing or invalid path", 404: "folder not found", 409: "folder not empty (without `recursive`)" } },
-    trash: { summary: "Move the items in body.ids to the trash: the library no longer shows them, their names are free and their public copies are removed, while media@1 still reads them as ready until media.purge; per-id answer, an unknown or already trashed id is skipped", reads: [], writes: ["result"], input: IDS_INPUT, output: TRASH_RESULT_SCHEMA, errors: { 400: `no ids or more than ${MAX_REQUEST_IDS}` } },
-    trashFolder: { summary: "Move every live item in a folder's subtree to the trash and drop the folder rows of that subtree; media.restore recreates the folders of the items it restores", reads: ["params.path"], writes: ["result"], output: { type: "object", properties: { path: { type: "string" }, ids: { type: "array", items: { type: "string" } } }, required: ["path", "ids"] }, errors: { 400: "missing or invalid path", 404: "folder not found" } },
-    restore: { summary: "Bring the trashed items in body.ids back with the same id, key, path, folder and texts; a display name taken meanwhile becomes <stem>-<n>.<ext> (listed in renamed); per-id answer, an id that is not trashed gets its public copy ensured and is skipped", reads: [], writes: ["result"], input: IDS_INPUT, output: RESTORE_RESULT_SCHEMA, errors: { 400: `no ids or more than ${MAX_REQUEST_IDS}` } },
+    trash: { summary: "Move the items in body.ids to the trash: the library no longer shows them, their names are free and their public copies are removed, while media@1 still reads them as ready until media.purge; per-id answer: result.ids holds every id that is trashed afterwards, an already trashed one also in result.unchanged (its public copy is removed again), an unknown one is skipped", reads: [], writes: ["result"], input: IDS_INPUT, output: MOVE_RESULT_SCHEMA, errors: { 400: `no ids or more than ${MAX_REQUEST_IDS}` } },
+    trashFolder: { summary: "Move every ready item in a folder's subtree to the trash, delete its failed and abandoned uploads, and drop the folder rows of that subtree; an upload still under way keeps its folder listed; media.restore recreates the folders of the items it restores", reads: ["params.path"], writes: ["result"], output: { type: "object", properties: { path: { type: "string" }, ids: { type: "array", items: { type: "string" } } }, required: ["path", "ids"] }, errors: { 400: "missing or invalid path", 404: "folder not found" } },
+    restore: { summary: "Bring the trashed items in body.ids back with the same id, key, path, folder and texts; a display name taken meanwhile becomes <stem>-<n>.<ext> (listed in renamed); per-id answer: result.ids holds every id that is ready afterwards, an already ready one also in result.unchanged (its public copy is ensured), an unknown one is skipped", reads: [], writes: ["result"], input: IDS_INPUT, output: RESTORE_RESULT_SCHEMA, errors: { 400: `no ids or more than ${MAX_REQUEST_IDS}` } },
     listTrash: { summary: "The trashed items, most recently trashed first, with trashedAt and expiresAt and no public path", reads: [], writes: ["result"], query: { q: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: media.listLimits().max }, offset: { type: "integer", minimum: 0 }, locale: { type: "string" } }, output: { type: "object", properties: { items: { type: "array", items: TRASH_ITEM_SCHEMA }, total: { type: "number" } }, required: ["items", "total"] }, errors: { 400: "unknown locale or limit above maxLimit" } },
     selectTrash: { summary: "Select the trashed items among body.ids into result.ids for media.purge, reporting the others in result.skipped", reads: [], writes: ["result"], input: IDS_INPUT, output: TRASH_RESULT_SCHEMA, errors: { 400: `no ids or more than ${MAX_REQUEST_IDS}` } },
     selectAllTrash: { summary: "Select every trashed item into result.ids for media.purge", reads: [], writes: ["result"], output: TRASH_RESULT_SCHEMA },

@@ -12,7 +12,8 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Context } from "@michaelthielemann/kestrel/context";
 import type { KestrelConfigInput } from "@michaelthielemann/kestrel/defineConfig";
 import { loadConfig, loadModules, loadPipelines } from "@michaelthielemann/kestrel/load";
-import { ok } from "@michaelthielemann/kestrel/result";
+import { failure } from "@michaelthielemann/kestrel/errors";
+import { err, ok } from "@michaelthielemann/kestrel/result";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const trigger = { kind: "http", name: "test" } as const;
@@ -79,6 +80,31 @@ interface Options {
   noteEvents?: string[];
   extraRoles?: Record<string, string[]>;
   anonymous?: string[];
+  storeFault?: StoreFault;
+}
+
+interface StoreFault {
+  method: "createOne" | "deleteMany";
+  collection: string;
+  armed: boolean;
+}
+
+function failingOnce(real: object, fault: StoreFault): object {
+  return new Proxy(real, {
+    get(target, prop) {
+      const value: unknown = Reflect.get(target, prop, target);
+      if (typeof value !== "function") return value;
+      const method = boundaryCast<(...args: unknown[]) => unknown>(value, "host").bind(target);
+      if (prop !== fault.method) return method;
+      return async (collection: unknown, ...rest: unknown[]) => {
+        if (fault.armed && collection === fault.collection) {
+          fault.armed = false;
+          return err(failure("TRANSIENT", "store busy"));
+        }
+        return method(collection, ...rest);
+      };
+    },
+  });
 }
 
 interface Example {
@@ -105,7 +131,16 @@ async function bootExample(options: Options = {}): Promise<Example> {
   });
   const loaded = await loadModules(root, { ...configInput, modules: modulesConfig });
   const hold = options.holdVariantWrites;
+  const fault = options.storeFault;
   const modules = loaded.map((mod) => {
+    if (fault !== undefined && mod.name === "persistence/sqlite") {
+      return defineModule({
+        ...mod,
+        async setup(config, deps) {
+          return failingOnce(boundaryCast<object>(await mod.setup(config, deps), "host"), fault);
+        },
+      });
+    }
     if (hold === undefined || mod.name !== "blobstore/filesystem") return mod;
     return defineModule({
       ...mod,
@@ -407,7 +442,7 @@ describe("examples/minimal media: the trash", { timeout: 30_000 }, () => {
       const publicDir = join(example.blobRoot, "site", "media", item.id);
 
       const trashed = await run(example, "trashMedia", token, { payload: { ids: [item.id, "missing"] } });
-      expect(trashed).toEqual({ status: 200, result: { ids: [item.id], skipped: [{ id: "missing", reason: "not_found" }] } });
+      expect(trashed).toEqual({ status: 200, result: { ids: [item.id], unchanged: [], skipped: [{ id: "missing", reason: "not_found" }] } });
       expect(noted(example, "media.trashed")).toEqual([[item.id]]);
       expect((await example.kestrel.run("getMedia", { trigger, headers: bearer(token), params: { id: item.id } })).status).toBe(404);
       expect(boundaryCast<{ items: Item[] }>((await run(example, "listMedia", token)).result, "json").items).toEqual([]);
@@ -425,13 +460,58 @@ describe("examples/minimal media: the trash", { timeout: 30_000 }, () => {
       expect(again.id).not.toBe(item.id);
 
       const restored = await run(example, "restoreMedia", token, { payload: { ids: [item.id] } });
-      expect(restored).toEqual({ status: 200, result: { ids: [item.id], skipped: [], renamed: [{ id: item.id, from: "photo.jpg", to: "photo-2.jpg" }] } });
+      expect(restored).toEqual({ status: 200, result: { ids: [item.id], unchanged: [], skipped: [], renamed: [{ id: item.id, from: "photo.jpg", to: "photo-2.jpg" }] } });
       expect(noted(example, "media.restored")).toEqual([[item.id]]);
       const back = await getItem(example, item.id, token);
       expect(back.path).toBe(item.path);
       expect(back.variants.map((variant) => variant.path)).toEqual(variants.map((variant) => variant.path));
       for (const variant of back.variants) expect((await serveVariant(example, item.id, fileOf(variant.path))).status).toBe(200);
       expect(filesUnder(publicDir)).toHaveLength(6);
+    } finally {
+      await example.dispose();
+    }
+  });
+
+  it("a trash repeated after images.hideMany failed withdraws the variants and raises media.trashed", async () => {
+    const fault: StoreFault = { method: "createOne", collection: "images_hidden", armed: false };
+    const example = await bootExample({ noteEvents: ["media.trashed"], storeFault: fault });
+    try {
+      const token = await adminToken(example);
+      const item = await upload(example, token, "photo.jpg", "image/jpeg", TEST_JPEG);
+      await pollUntil(async () => (await getItem(example, item.id, token)).variantCounts.done === 5);
+      const variant = fileOf((await getItem(example, item.id, token)).variants[0]!.path);
+      fault.armed = true;
+      expect((await run(example, "trashMedia", token, { payload: { ids: [item.id] } })).status).toBe(503);
+      expect((await serveVariant(example, item.id, variant)).status).toBe(200);
+      expect(noted(example, "media.trashed")).toEqual([]);
+
+      const again = await run(example, "trashMedia", token, { payload: { ids: [item.id] } });
+      expect(again).toEqual({ status: 200, result: { ids: [item.id], unchanged: [item.id], skipped: [] } });
+      expect((await serveVariant(example, item.id, variant)).status).toBe(404);
+      expect(filesUnder(join(example.blobRoot, "site", "media", item.id))).toEqual([]);
+      expect(noted(example, "media.trashed")).toEqual([[item.id]]);
+    } finally {
+      await example.dispose();
+    }
+  });
+
+  it("a restore repeated after images.showMany failed serves the variants again", async () => {
+    const fault: StoreFault = { method: "deleteMany", collection: "images_hidden", armed: false };
+    const example = await bootExample({ storeFault: fault });
+    try {
+      const token = await adminToken(example);
+      const item = await upload(example, token, "photo.jpg", "image/jpeg", TEST_JPEG);
+      await pollUntil(async () => (await getItem(example, item.id, token)).variantCounts.done === 5);
+      const variant = fileOf((await getItem(example, item.id, token)).variants[0]!.path);
+      expect((await run(example, "trashMedia", token, { payload: { ids: [item.id] } })).status).toBe(200);
+      fault.armed = true;
+      expect((await run(example, "restoreMedia", token, { payload: { ids: [item.id] } })).status).toBe(503);
+      expect((await serveVariant(example, item.id, variant)).status).toBe(404);
+
+      const again = await run(example, "restoreMedia", token, { payload: { ids: [item.id] } });
+      expect(again).toEqual({ status: 200, result: { ids: [item.id], unchanged: [item.id], skipped: [], renamed: [] } });
+      expect((await serveVariant(example, item.id, variant)).status).toBe(200);
+      expect((await getItem(example, item.id, token)).available).toBe(true);
     } finally {
       await example.dispose();
     }

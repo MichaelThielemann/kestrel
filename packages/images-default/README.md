@@ -160,7 +160,9 @@ Both steps read `result.ids`, leave the result as it is, raise no `images.varian
 `media.trashed` and `media.restored` events already mark the pages that show the item) and can run
 again without harm. Hiding waits for a placement or render of the item that is under way in this
 process; a crash between `media.trash` and `images.hideMany` leaves the variants public until the
-step runs again, and nothing finds such an item on its own, since `media@1` reports it as ready.
+pipeline runs again with the same ids. That works because `media.trash` and `media.restore` put an
+id that is already trashed or ready into `result.ids` too. Nothing finds such an item on its own,
+since `media@1` reports it as ready.
 
 ## `images.variantsChanged`
 
