@@ -665,7 +665,8 @@ Net changes since 5.8.1.
   and a failing handler (500), each with a `reason`. The line of a 500 carries the run id of the
   response. A body the client stops sending is logged as `body not received: connection closed`
   (400), one ended by `http.timeouts.requestMs` as `body not received: request timeout` with the
-  408 Node answers.
+  408 Node answers. In both HTTP paths `path` is the URL path alone, also for an absolute-form
+  request target, so neither its host nor its userinfo reaches the line.
 - `bodyRefusal(err, req, requestId)` maps an error from `readRequestBody` or `parseRequestBody` to
   the answer and log reason both HTTP paths use; `httpLogLine(entry)` builds the fields of the
   `http` line.

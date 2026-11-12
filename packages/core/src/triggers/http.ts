@@ -625,7 +625,7 @@ export function bodyRefusal(err: unknown, req: BodyRequest, requestId?: string):
 }
 
 function rawPath(req: IncomingMessage): string {
-  return (req.url ?? "/").split("?", 1)[0] ?? "/";
+  return (req.url ?? "/").replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i, "").split(/[?#]/, 1)[0] || "/";
 }
 
 function refused(status: number, error: string, requestId: string | undefined, reason: string, extra: Omit<Answer, "response" | "reason"> = {}): Answer {

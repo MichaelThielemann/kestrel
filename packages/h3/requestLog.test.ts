@@ -219,6 +219,20 @@ describe("kestrel-h3 request log", () => {
     expect(res.headers.get("x-request-id")).toBe("req-500");
   });
 
+  it("logs only the path of an absolute-form request target, without userinfo or host", async () => {
+    const { logger, lines } = collectingLogger();
+    kestrel = await boot({ config, modules: [notes], pipelines, logger: silentLogger });
+    const failing: KestrelRunner = { triggers: kestrel.triggers, run: () => Promise.reject(new Error("store gone")) };
+    const base = await listen(failing, { logger });
+    const target = (path: string) => `http://alice:hunter2@notes.test${path}?token=query-secret`;
+    expect(await rawGet(base, target("/notes/1"))).toBe(500);
+    expect(await rawGet(base, target("/notes/../locked"))).toBe(400);
+    expect(await rawGet(base, target("/nowhere"))).toBe(404);
+    expect(lines.map((l) => [l.status, l.path])).toEqual([[500, "/notes/1"], [400, "/notes/../locked"], [404, "/nowhere"]]);
+    const written = JSON.stringify(lines);
+    for (const secret of ["alice", "hunter2", "notes.test", "query-secret"]) expect(written).not.toContain(secret);
+  });
+
   it("counts the time spent reading the body in ms", async () => {
     const { logger, lines } = collectingLogger();
     const base = await serve({ logger });

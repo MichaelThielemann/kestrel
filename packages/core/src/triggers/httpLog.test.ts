@@ -47,6 +47,17 @@ function rawGet(base: string, path: string): Promise<number> {
   });
 }
 
+function rawRequest(base: string, method: string, path: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = request(`${base}/`, { method, path }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode ?? 0));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 function partialPost(base: string, headers: string, abortAfterMs?: number): Promise<string> {
   const { hostname, port } = new URL(base);
   return new Promise((resolve) => {
@@ -180,6 +191,24 @@ describe("http server request log", () => {
     await vi.waitFor(() => expect(lines).toHaveLength(1));
     expect(lines[0]).toMatchObject({ requestId: "req-slow", pipeline: "createNote", status: 408, reason: "body not received: request timeout", declaredBytes: 1000 });
     expect(lines[0]?.ms).toBeGreaterThanOrEqual(300);
+  });
+
+  it("logs only the path of an absolute-form request target, without userinfo or host", async () => {
+    const target = (path: string) => `http://alice:hunter2@notes.test${path}?token=query-secret`;
+    const allowed = collectingLogger();
+    const base = await serve(allowed.logger, echo, { allow: ["203.0.113.0/24"] });
+    expect(await rawRequest(base, "GET", target("/notes/1"))).toBe(403);
+    await close?.();
+    const failing = collectingLogger();
+    const failingBase = await serve(failing.logger, () => Promise.reject(new Error("store gone")), { corsOrigin: "https://admin.example" });
+    expect(await rawRequest(failingBase, "GET", target("/notes/1"))).toBe(500);
+    expect(await rawRequest(failingBase, "GET", target("/notes/../notes/1"))).toBe(400);
+    expect(await rawRequest(failingBase, "OPTIONS", target("/notes"))).toBe(204);
+    expect(await rawRequest(failingBase, "GET", "http://alice:hunter2@notes.test")).toBe(404);
+    const lines = [...allowed.lines, ...failing.lines.filter((l) => l.message === "http")];
+    expect(lines.map((l) => [l.status, l.path])).toEqual([[403, "/notes/1"], [500, "/notes/1"], [400, "/notes/../notes/1"], [204, "/notes"], [404, "/"]]);
+    const written = JSON.stringify(lines);
+    for (const secret of ["alice", "hunter2", "notes.test", "query-secret"]) expect(written).not.toContain(secret);
   });
 
   it("logs a CORS preflight and lets a browser send and read the correlation headers", async () => {

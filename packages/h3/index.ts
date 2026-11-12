@@ -55,7 +55,7 @@ interface Handled {
 }
 
 function rawPathname(event: H3Event): string {
-  return (event.node.req.originalUrl ?? event.path).split("?", 1)[0] ?? "/";
+  return (event.node.req.originalUrl ?? event.path).replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i, "").split(/[?#]/, 1)[0] || "/";
 }
 
 export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHandlerOptions = {}): EventHandler {
