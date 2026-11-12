@@ -566,7 +566,7 @@ No data migration: setup fails on start if a stored item's key is not `<prefix><
 the first such item. A store from before this change must start empty.
 
 **Trash.** `POST /media/trash` takes items out of the library without deleting them: `GET /media`
-(also with `?ids=`), the folder counts and the picker no longer list them, `GET /media/:id`,
+(also with `?ids=` and `?q=`) and the folder counts no longer list them, `GET /media/:id`,
 `GET /media/:id/file`, `GET /media/:id/:name` and their variant URLs answer 404, `PATCH /media/:id`
 answers 404, the public copies of the original and its variants are removed, and the item's name in
 its folder is free for a new upload at once. Pages that show the item are re-rendered without it
@@ -584,7 +584,8 @@ leaves the referenced ones in the trash. `DELETE /media/:id` and `DELETE /media/
 the final deletes. A trashed file still takes up storage, and a copy a browser or CDN cached under
 `immutable` is not withdrawn by the trash. Every request body with `ids` takes 1 to 200 ids (400
 otherwise), and every answer is per id, so a client working through a larger selection sends it in
-blocks and shows each skipped id with its reason.
+blocks and shows each skipped id with its reason. A purge that stopped halfway (the store failed
+mid-delete) is finished by sending the same `POST /media/trash/purge` again.
 
 ## Image variants
 

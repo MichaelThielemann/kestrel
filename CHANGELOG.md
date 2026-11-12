@@ -647,6 +647,13 @@ Net changes since 5.8.1.
   when an `authz@1` module is loaded, instead of any signed-in identity; 403 otherwise. `media.*` grants it.
   `kestrel upgrade`'s new `authz/media-list` adds it to each role in authz-roles' config that grants
   `media.read`.
+- The media trash changes exported types of `media-default` and `images-default` (`/impl`):
+  `MediaStatus` gains `"trashed"`, so an exhaustive `switch` over it needs the case; `MediaItem` gains
+  `trashedAt` and `trashVersion`, and its `location` is `null` while the item is trashed, so code that
+  reads it as a string needs a check; `Media` gains `trash`, `trashFolder`, `restore`, `listTrash`,
+  `trashIds`, `selectTrash` and `purge`, and `Images` gains `hide`, `show` and `hidden`, which a
+  hand-built implementation or test double must add. `kestrel upgrade`'s `types/breaking-signatures`
+  names them.
 
 ### Added
 
@@ -1176,13 +1183,16 @@ Net changes since 5.8.1.
   `media.trashFolder` answers `{ path, ids, unchanged }` the same way for its subtree, also once the
   folder is gone, so a repeated request reaches the steps after them again. New config `trashRetentionDays` (default 30). A trashed item
   stays ready for `media@1` until it is purged, so modules reading media through it keep what they
-  derived; `media.remove` and `media.removeFolder` stay final deletes. `MediaStatus` gains
-  `"trashed"`, `MediaItem` gains `trashedAt`, and its `location` may be `null`. `media.syncPublic`
-  reads an item again before it removes its copy.
+  derived; `media.remove` and `media.removeFolder` stay final deletes (see Breaking for the type
+  changes). `media.trash`, `media.trashFolder` and `media.restore` also answer `versions`, each item's
+  trash version, which rises with every move into or out of the trash. A repeated purge finishes an
+  item whose purge stopped halfway. `media.syncPublic` reads an item again before it removes its copy.
 - `images/default` gains `images.hideMany` and `images.showMany` (on `result.ids`) and the collection
   `images_hidden`: a hidden item's variants are not served, exported, attached or copied publicly
   until it is shown again, while its rows and stored variants stay. Neither step raises
-  `images.variantsChanged`. `Images` gains `hide`, `show` and `hidden`.
+  `images.variantsChanged`. Both read `result.versions` as well, so when a trash and a restore of the
+  same item overlap, the move that happened last decides whether its variants are hidden. `Images`
+  gains `hide`, `show` and `hidden`.
 - `references/default` gains `references.dropReferenced:<target>`: it keeps the unreferenced ids in
   `result.ids` and adds each referenced one to `result.skipped` as `{ id, reason: "referenced" }`, so a
   purge leaves files a page still uses in the trash and reports them.
@@ -1299,6 +1309,9 @@ Net changes since 5.8.1.
 
 ### Fixed
 
+- `media-default`: `media.list` with a `q` containing `_` found no item, because the wildcard was
+  dropped from the store's prefilter (`my_file` searched for `myfile`); a `q` with `_` or `%` now
+  finds exactly the names that contain it. `media.listTrash` searches the same way.
 - `references-default`: a bare id inside a `json` field — a block's image or relation field such as
   `"a1b2"` or `["a1b2", "c3d4"]` — was never indexed, so `references.guard` let a media file or page
   be deleted while a block still used it. The new optional `schemas` config maps `"<type>.<field>"`

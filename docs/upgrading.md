@@ -503,7 +503,12 @@ of the project.
 `Manifest`, `Kestrel["contracts"]`, `Media` and `Images` all gained required members or new ones
 worth knowing about — among them `createImages`'s required `deps.media`, `Media` extending
 `MediaFiles` and `MediaStatus`'s `removing`; only the consumer's own typecheck sees a violation in a hand-built
-implementation of one of them.
+implementation of one of them. The media trash adds to this: `MediaStatus` gains `trashed`, so an
+exhaustive `switch` over it needs the case; `MediaItem` gains `trashedAt` and `trashVersion`, and its
+`location` may be `null` (while the item is trashed), so code that reads `item.location` as a string
+needs a check; `Media` gains `trash`, `trashFolder`, `restore`, `listTrash`, `trashIds`,
+`selectTrash` and `purge`, and `Images` gains `hide`, `show` and `hidden`, which a hand-built test
+double of either must add.
 
 #### responses-breaking-step-shapes
 A pipeline runs a step whose 6.0.0 response or manifest shape differs from 5.8's — `redirects.lookup`,
