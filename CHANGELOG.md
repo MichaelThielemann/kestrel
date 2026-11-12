@@ -657,6 +657,10 @@ Net changes since 5.8.1.
   too large, the `declaredBytes`; a line never holds a body, a header value, a cookie or the query
   string. A handler that throws writes a line with status 500 and answers with that line's
   `X-Kestrel-Run-Id` and the echoed `X-Request-Id`.
+- The core server's `http` log line also covers requests answered without running a pipeline:
+  unknown route (404), dot segment, unreadable body (400), client refused by `http.allow` (403),
+  body too large (413, with `declaredBytes`), unsupported content type (415) and a failing handler
+  (500), each with a `reason`. The line of a 500 carries the run id of the response.
 - `kestrel check`, `kestrel explain` and `kestrel manifest` inspect a project without starting it,
   in a sandboxed scratch copy, through the project's own core. `check` lists every load issue, boot
   problem, warning and not-checked item with module and cause (`--json`, `--fail-on`) and is meant

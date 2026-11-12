@@ -406,10 +406,6 @@ export function disposition(contentType: string, filename: string | undefined, e
   return `${ascii}; filename*=UTF-8''${encoded}`;
 }
 
-function sendError(res: ServerResponse, status: number, error: string, requestId?: string): void {
-  write(res, errorResponse(status, error, requestId));
-}
-
 function write(res: ServerResponse, response: HttpResponse): void {
   const cookies = responseCookies(response);
   res.writeHead(response.status, cookies.length > 0 ? { ...response.headers, "set-cookie": cookies } : response.headers);
@@ -534,18 +530,54 @@ export function clientIp(req: PeerRequest, options: boolean | ClientIpOptions = 
   return clientIpResolver(options)(req).ip;
 }
 
+interface Answer {
+  response: HttpResponse;
+  pipeline?: string;
+  reason?: string;
+  declaredBytes?: number;
+  path?: string;
+}
+
+const REASON_LIMIT = 200;
+
+function bounded(reason: string): string {
+  return reason.length > REASON_LIMIT ? `${reason.slice(0, REASON_LIMIT)}…` : reason;
+}
+
+function declaredLength(value: string | undefined): number | undefined {
+  return value !== undefined && /^\d{1,15}$/.test(value) ? Number(value) : undefined;
+}
+
+function bodyReason(err: unknown): string {
+  if (err instanceof SyntaxError) return "invalid body: malformed JSON";
+  const message = err instanceof Error ? err.message : "unreadable";
+  return message.startsWith("invalid ") ? message : `invalid body: ${message}`;
+}
+
+function rawPath(req: IncomingMessage): string {
+  return (req.url ?? "/").split("?", 1)[0] ?? "/";
+}
+
+function refused(status: number, error: string, requestId: string | undefined, reason: string, extra: Omit<Answer, "response" | "reason"> = {}): Answer {
+  return { response: errorResponse(status, error, requestId), reason, ...extra };
+}
+
 export function createHttpServer(routes: readonly Route[], run: Runner, logger: Logger, options: HttpOptions = {}): Server {
   const healthPath = options.healthPath === undefined ? "/health" : options.healthPath;
   const allowlist = createAllowlist(options.allow ?? []);
   const resolveClient = clientIpResolver(options);
   const warnForwarding = forwardingWarner((message) => logWarn(logger, message));
   const server = createServer((req, res) => {
+    const begin = performance.now();
+    const requestId = requestIdOf(req.headers["x-request-id"]);
     const client = resolveClient(req);
     if (client.forwardingIgnored) warnForwarding(req.socket.remoteAddress);
-    const probe = healthPath !== null && req.method === "GET" && (req.url ?? "/").split("?", 1)[0] === healthPath;
+    const probe = healthPath !== null && req.method === "GET" && rawPath(req) === healthPath;
     const ip = client.missingHeader && probe ? req.socket.remoteAddress : client.ip;
     if ((client.missingHeader && !probe) || (allowlist !== null && !allowlist.check(ip))) {
-      sendError(res, 403, "forbidden", requestIdOf(req.headers["x-request-id"]));
+      const answer = refused(403, "forbidden", requestId, client.missingHeader ? "missing trusted client header" : "client not allowed", { path: rawPath(req) });
+      logRequest(req, begin, requestId, ip, answer);
+      write(res, answer.response);
       return;
     }
     if (options.corsOrigin !== undefined) {
@@ -559,9 +591,9 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
         return;
       }
     }
-    void handle(req, res, ip).catch((err: unknown) => {
+    void answer(req, res, begin, requestId, ip).catch((err: unknown) => {
       logger.error("http handler failed", { error: err instanceof Error ? err.stack : String(err) });
-      if (!res.headersSent) sendError(res, 500, "internal error", requestIdOf(req.headers["x-request-id"]));
+      if (!res.headersSent) write(res, errorResponse(500, "internal error", requestId));
     });
   });
   server.requestTimeout = options.timeouts?.requestMs ?? 30_000;
@@ -569,29 +601,48 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
   server.keepAliveTimeout = options.timeouts?.keepAliveMs ?? 5_000;
   return server;
 
-  async function handle(req: IncomingMessage, res: ServerResponse, ip: string | undefined): Promise<void> {
-    const requestId = requestIdOf(req.headers["x-request-id"]);
-    if (hasDotSegment(req.url ?? "/")) return sendError(res, 400, "invalid path: dot segment", requestId);
+  async function answer(req: IncomingMessage, res: ServerResponse, begin: number, requestId: string | undefined, ip: string | undefined): Promise<void> {
+    let pipeline: string | undefined;
+    let answered: Answer | undefined;
+    try {
+      answered = await handle(req, res, requestId, ip, (name) => { pipeline = name; });
+    } catch (err) {
+      logger.error("http handler failed", { error: err instanceof Error ? err.stack : String(err) });
+      answered = refused(500, "internal error", requestId, "handler failed", { path: rawPath(req), ...(pipeline === undefined ? {} : { pipeline }) });
+    }
+    if (answered === undefined) return;
+    logRequest(req, begin, requestId, ip, answered);
+    if (!res.headersSent) write(res, answered.response);
+  }
+
+  async function handle(req: IncomingMessage, res: ServerResponse, requestId: string | undefined, ip: string | undefined, routedTo: (pipeline: string) => void): Promise<Answer | undefined> {
+    if (hasDotSegment(req.url ?? "/")) return refused(400, "invalid path: dot segment", requestId, "invalid path: dot segment", { path: rawPath(req) });
     const url = new URL(req.url ?? "/", "http://localhost");
     if (healthPath && url.pathname === healthPath && req.method === "GET") {
       const meta: ResponseMeta = requestId === undefined ? { runId: randomUUID() } : { runId: randomUUID(), requestId };
       const { ok, restartRequired } = options.health?.() ?? { ok: true, restartRequired: false };
-      return write(res, buildResponse(restartRequired ? 503 : 200, { ok, restartRequired }, meta));
+      write(res, buildResponse(restartRequired ? 503 : 200, { ok, restartRequired }, meta));
+      return undefined;
     }
-    const begin = performance.now();
+    const path = url.pathname;
     const match = matchRoute(routes, req.method ?? "GET", url.pathname);
-    if (!match) return sendError(res, 404, `no route for ${req.method} ${url.pathname}`, requestId);
+    if (!match) return refused(404, `no route for ${req.method} ${url.pathname}`, requestId, "no route", { path });
+    const pipeline = match.route.pipeline;
+    routedTo(pipeline);
 
     const contentType = req.headers["content-type"] ?? "";
     const refusal = multipartRefusal(match.route, contentType, requestId);
-    if (refusal !== undefined) return write(res, refusal);
+    if (refusal !== undefined) return { response: refusal, pipeline, path, reason: "this route does not accept multipart/form-data" };
     let body: ParsedBody;
     try {
       body = await parseRequestBody(contentType, await readRequestBody(req, options.maxBodyBytes ?? 10 * 1024 * 1024, req.headers["content-length"]), options.multipart);
     } catch (err) {
-      if (err instanceof BodyTooLarge) return sendError(res, 413, err.message, requestId);
-      if (err instanceof UnsupportedMediaType) return sendError(res, 415, err.message, requestId);
-      return sendError(res, 400, `invalid body: ${err instanceof Error ? err.message : String(err)}`, requestId);
+      if (err instanceof BodyTooLarge) {
+        const declaredBytes = declaredLength(req.headers["content-length"]);
+        return refused(413, err.message, requestId, err.message, { pipeline, path, ...(declaredBytes === undefined ? {} : { declaredBytes }) });
+      }
+      if (err instanceof UnsupportedMediaType) return refused(415, err.message, requestId, "unsupported content type", { pipeline, path });
+      return refused(400, `invalid body: ${err instanceof Error ? err.message : String(err)}`, requestId, bodyReason(err), { pipeline, path });
     }
     const query = parseQuery(url.searchParams);
     const headers: Record<string, string> = {};
@@ -599,9 +650,23 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
     const input: ContextInput = { trigger: { kind: "http", name: `${req.method} ${url.pathname}` }, payload: { ...query, ...body.payload }, body: body.payload, query, params: match.params, headers, files: body.files };
     if (ip !== undefined) input.ip = ip;
 
-    const result = await run(match.route.pipeline, input);
-    logger.info("http", { runId: result.runId, ...(requestId === undefined ? {} : { requestId }), method: req.method, path: url.pathname, pipeline: match.route.pipeline, status: result.status, ms: Math.round((performance.now() - begin) * 100) / 100, ip });
-    write(res, responseForRun(result, options.inlineTypes));
+    return { response: responseForRun(await run(pipeline, input), options.inlineTypes), pipeline, path };
+  }
+
+  function logRequest(req: IncomingMessage, begin: number, requestId: string | undefined, ip: string | undefined, answer: Answer): void {
+    const { response, pipeline, reason, declaredBytes } = answer;
+    logger.info("http", {
+      runId: response.headers["x-kestrel-run-id"],
+      ...(requestId === undefined ? {} : { requestId }),
+      method: req.method,
+      path: answer.path ?? rawPath(req),
+      ...(pipeline === undefined ? {} : { pipeline }),
+      status: response.status,
+      ms: Math.round((performance.now() - begin) * 100) / 100,
+      ...(ip === undefined ? {} : { ip }),
+      ...(reason === undefined ? {} : { reason: bounded(reason) }),
+      ...(declaredBytes === undefined ? {} : { declaredBytes }),
+    });
   }
 }
 

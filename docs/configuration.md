@@ -311,5 +311,34 @@ const result = await checkBoot(box.input, { setup: box.setup });
 ## Logging
 
 The `kestrel` binary logs JSON lines to stdout: one `step` line per step (`runId`, pipeline, step,
-duration, outcome) and one `info` line per request. There is no log level or format setting —
-an embedded host passes its own `Logger` to `boot({ logger })` instead.
+duration, outcome) and one `info` line with the message `http` per request. There is no log level or
+format setting — an embedded host passes its own `Logger` to `boot({ logger })` instead.
+
+The `http` line has the same fields in the core server and in `kestrel-h3`'s handler (given a
+`logger`):
+
+| Field | Value |
+|---|---|
+| `runId` | The `X-Kestrel-Run-Id` of the response; a refusal has one too, though no run exists for it |
+| `requestId` | A valid incoming `X-Request-Id` (printable ASCII, at most 200 characters), echoed in the response; absent otherwise |
+| `method`, `path` | The request method and URL path, without the query string |
+| `pipeline` | The pipeline the route names; absent when no route matched |
+| `status`, `ms`, `ip` | The response status, the time to answer, the client address (see `http`) |
+| `reason` | Only on a request answered without running its pipeline, at most 200 characters |
+| `declaredBytes` | Only on a 413, the `Content-Length` the request declared |
+
+| Status | `reason` |
+|---|---|
+| 400 | `invalid path: dot segment` (no `pipeline`, `path` as sent), `invalid body: malformed JSON`, `invalid body: body must be a JSON object`, `invalid multipart body: <cause>` |
+| 403 | core server only: `client not allowed` (outside `http.allow`), `missing trusted client header` |
+| 404 | `no route` |
+| 413 | `body exceeds <n> bytes`, `multipart body has more than <n> <parts>` |
+| 415 | `unsupported content type`, `this route does not accept multipart/form-data` |
+| 500 | `handler failed` (the handler threw; the core server also logs `http handler failed` with the stack) |
+
+A line never holds a body, a cookie, a header value other than the declared length, or the query
+string. The health path writes no line. A refusal starts no run, so it writes no `step` line and
+does not reach a run observer such as `insights/default`; its `http` line is its only record. A
+request that never reaches kestrel (refused or timed out by a proxy in front of it) is in that
+proxy's log only; passing `X-Request-Id` through the proxy and writing it to the proxy's access log
+lets both logs be joined on it.
