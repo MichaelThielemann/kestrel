@@ -27,7 +27,8 @@ every `ref` field must point to a configured target (checked at boot). A target 
 collection of the consumer's own (`{ collection: "<name>" }`) — never another module's collection,
 whose storage is that module's alone. A media target counts a file as existing exactly while
 `media@1` reports it as ready, so an upload still in flight or a file being deleted is a dangling
-reference for `references.check` and `references.scan`; `media@1` is an optional dependency, and
+reference for `references.check` and `references.scan`, while a file in `media-default`'s trash,
+which `media@1` still reports as ready, is not; `media@1` is an optional dependency, and
 setup fails, naming the target, when a media target is configured and no module provides it.
 Every method returns a `Result`: a failure is an `Err(KestrelError)`, never an exception. Only
 wiring bugs throw (unknown type, unknown target).
@@ -41,6 +42,7 @@ wiring bugs throw (unknown type, unknown target).
 | `references.referrers:<target>` | `params.id` | `result` | VALIDATION (missing id), TRANSIENT |
 | `references.referrersMany:<target>` | – | `result` | VALIDATION, TRANSIENT |
 | `references.guardAll:<target>` | `result.ids` | – | CONFLICT (`details.referenced`), TRANSIENT |
+| `references.dropReferenced:<target>` | `result.ids`, `result.skipped?` | `result.ids`, `result.skipped` | TRANSIENT |
 | `references.scan` | – | `result` | TRANSIENT |
 | `references.report` | – | `result` | TRANSIENT |
 | `references.rebuild` | – | `result` | TRANSIENT |
@@ -54,6 +56,13 @@ payload); `references.rebuild` clears and refills the index from all content;
 `references.referrers:<target>` answers "who references `params.id`" (for delete dialogs);
 `references.referrersMany:<target>` answers the same question for up to 200 comma-separated
 `payload.ids` at once, `{ [id]: Referrer[] }`.
+`references.guardAll:<target>` refuses a whole batch when one of `result.ids` is referenced;
+`references.dropReferenced:<target>` lets the batch go on without them instead: it keeps the
+unreferenced ids in `result.ids` and appends `{ id, reason: "referenced" }` per referenced one to
+`result.skipped` (started when the result has none), leaving every other field of the result as it
+is. Between `media.selectTrash` (or `media.selectAllTrash`, `media.selectExpiredTrash`) and
+`media.purge` it keeps a purge from deleting a file that a page still uses and reports that file to
+the caller.
 Not included: cascading deletes, automatic clearing of dangling references, expanding refs on read.
 
 <!-- kestrel-docs:start -->

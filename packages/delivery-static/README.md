@@ -139,6 +139,8 @@ triggers: [
   { event: "settings.updated", pipeline: "settingsDependents" },
   { event: "media.updated", pipeline: "mediaDependents" },
   { event: "media.deleted", pipeline: "mediaDependents" },
+  { event: "media.trashed", pipeline: "mediaDependents" },
+  { event: "media.restored", pipeline: "mediaDependents" },
   { event: "images.variantsChanged", pipeline: "mediaDependents" },
   { event: "delivery.outputStale", pipeline: "republishOutput" },
   { event: "delivery.llmsStale", pipeline: "refreshLlms" },
@@ -157,7 +159,9 @@ definePipeline({ name: "resumeStalePages", steps: ["delivery.resumeStale"] });
 
 Every other page event (`created`, `restored`, `translationRemoved`, `deleted`) and every collection a page can
 show needs its own dependents trigger the same way, and the pipeline that writes it must emit the event
-(`examples/minimal`'s `setSettings` emits `settings.updated` after its atomic group).
+(`examples/minimal`'s `setSettings` emits `settings.updated` after its atomic group). The
+`media.trashed` and `media.restored` triggers belong to a deployment that composes `media-default`'s
+trash pipelines; without a pipeline that raises them, boot warns about each.
 
 Boot fails with `"events"` unless both job triggers exist, and under `events-direct`, which would run every
 re-render inside the request that marked it.

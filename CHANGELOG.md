@@ -1164,6 +1164,31 @@ Net changes since 5.8.1.
   `secretKey`, `previousSecretKeys`, `enforce`, `recoveryCodes`, `maxFailures`, `lockSeconds`, `requireEnrollmentCode`.
   `authn-multi` adds `authn.endSessions`, and both authn modules accept a `code` in the login body for
   such a step.
+- A trash for `media/default`. `media.trash` and `media.trashFolder` take items out of the library
+  (list, search, folder counts, `media.get`, download, `media.serve`, export, public copy) and free
+  their names, `media.restore` brings them back with the same id, key, `path`, folder and texts (as
+  `<stem>-<n>.<ext>` when the name was taken meanwhile, listed in `renamed`), and `media.listTrash`
+  lists them with `trashedAt` and `expiresAt`. A purge is a selection — `media.selectTrash`,
+  `media.selectAllTrash` or `media.selectExpiredTrash` — followed by `media.purge`, which deletes for
+  good. The steps that take `body.ids` accept 1 to 200 and answer per id with
+  `{ ids, skipped: [{ id, reason }] }`. New config `trashRetentionDays` (default 30). A trashed item
+  stays ready for `media@1` until it is purged, so modules reading media through it keep what they
+  derived; `media.remove` and `media.removeFolder` stay final deletes. `MediaStatus` gains
+  `"trashed"`, `MediaItem` gains `trashedAt`, and its `location` may be `null`. `media.syncPublic`
+  reads an item again before it removes its copy.
+- `images/default` gains `images.hideMany` and `images.showMany` (on `result.ids`) and the collection
+  `images_hidden`: a hidden item's variants are not served, exported, attached or copied publicly
+  until it is shown again, while its rows and stored variants stay. Neither step raises
+  `images.variantsChanged`. `Images` gains `hide`, `show` and `hidden`.
+- `references/default` gains `references.dropReferenced:<target>`: it keeps the unreferenced ids in
+  `result.ids` and adds each referenced one to `result.skipped` as `{ id, reason: "referenced" }`, so a
+  purge leaves files a page still uses in the trash and reports them.
+- `kestrel upgrade`'s `pipelines/media-delete-order` also checks that `media.purge` runs before
+  `images.removeMany`.
+- `examples/minimal` wires the trash: `GET /media/trash`, `POST /media/trash`,
+  `POST /media/trash/folders/*path`, `POST /media/trash/restore`, `POST /media/trash/purge`,
+  `POST /media/trash/empty` and a nightly `purgeExpiredMedia`; `media.trashed` and `media.restored`
+  mark the pages that show a medium. `DELETE /media/:id` stays a final delete.
 
 ### Changed
 

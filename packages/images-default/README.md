@@ -14,7 +14,7 @@ through it: whether an item exists and is ready, its type, the type the provider
 its size, stored dimensions, folder and display name, and its bytes. It never reads another module's
 collection or a storage key of the original. The module's setup wraps the `persistence@1` handle
 with `ownedPersistence` before `createImages` ever sees it, so the only handle the implementation
-holds reaches `images_sizes`, `images_variants`, `images_jobs` and `images_retired` (`COLLECTIONS`),
+holds reaches `images_sizes`, `images_variants`, `images_jobs`, `images_retired` and `images_hidden` (`COLLECTIONS`),
 and any other collection is a wiring error that names this module. Boot fails when no active module provides `media@1`
 (`missing-provider`), and a config that still sets the removed `media` option fails its schema.
 
@@ -138,6 +138,29 @@ it touched. `images.serve` and the content rule below treat a retired file exact
 that never got its render: always the original's bytes and type. This is what lets a page published
 before a size or format changed keep working without a republish; only `images.attach`'s own
 `variants[]` stops listing the retired path for pages rendered afterwards.
+
+## Hidden items
+
+`images.hideMany` hides the variants of every id in `result.ids`, typically right after
+`media.trash` or `media.trashFolder`: a row in `images_hidden` marks the item, and its public copies
+under `<id>/variants/` — current sizes and retired paths alike — are removed. Until
+`images.showMany` (after `media.restore`) lifts the mark, `images.serve` answers 404 for each of its
+paths, `images.export:<dir>` leaves its variants out, `images.attach` lists no variants for it and
+reports it as not `available`, and nothing writes a public copy for it again: not the placeholder of
+a new size, not the end of a render, not a retired path, not `images.syncPublic`, which also removes
+any copy of it that it finds. Its rows, its private variants and its renders stay and go on as
+usual, so `images.showMany` only writes the copies again, from the stored renders or, where none is
+done yet and for a retired path, from the original. A media trash keeps the item ready for
+`media@1`, so its variants survive restarts and `images.syncPublic` either way; the hidden mark is
+what keeps them off the public paths. The mark goes with the item's variants when it is deleted, and
+the start sweeps it away for an item `media@1` no longer has. An id `media@1` does not know is not
+marked.
+
+Both steps read `result.ids`, leave the result as it is, raise no `images.variantsChanged` (the
+`media.trashed` and `media.restored` events already mark the pages that show the item) and can run
+again without harm. Hiding waits for a placement or render of the item that is under way in this
+process; a crash between `media.trash` and `images.hideMany` leaves the variants public until the
+step runs again, and nothing finds such an item on its own, since `media@1` reports it as ready.
 
 ## `images.variantsChanged`
 

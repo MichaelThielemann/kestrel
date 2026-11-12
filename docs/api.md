@@ -441,6 +441,12 @@ builds a media URL from an id; it always reads `path` from the response.
 | POST | `/media/folders` | `{ path }` | `{ folder, count }` – creates the folder (idempotent), including implicit parent folders (`media.write`); `count` is the number of files already there (0 for a new folder, otherwise the existing count) |
 | PATCH | `/media/folders/*path` | `{ path }` | `{ folder, moved }` – renames or moves the folder; a metadata-only change: no blob moves, and no file's `path` changes (`media.write`); 404 if the folder doesn't exist, 409 on a target conflict |
 | DELETE | `/media/folders/*path` | `?recursive=true` | `{ ok: true, removed, ids }` – deletes a folder (`media.delete`); 409 if it isn't empty (without `recursive`); 409 if one of the contained files is referenced (nothing gets deleted); `ids` lists the removed items, for a step after it (e.g. removing their image variants) |
+| GET | `/media/trash` | `?q=&limit=&offset=&locale=` | `{ items, total }` – the trashed items, most recently trashed first; each item has the fields of `GET /media/:id` with `path: null`, plus `trashedAt` and `expiresAt` (`media.write`); no `variants[]`, since a trashed item's variants are not served |
+| POST | `/media/trash` | `{ ids }` (1–200) | `{ ids, skipped: [{ id, reason }] }` – moves the items to the trash (`media.delete`); `reason` is `not_found` or `already_trashed`; raises `media.trashed` with the moved `ids`. A referenced item may be trashed: the server does not refuse it, so a client asks first (`GET /admin/references/to/media?ids=`) |
+| POST | `/media/trash/folders/*path` | – | `{ path, ids }` – moves every item in the folder and its subfolders to the trash and removes those folders (`media.delete`); 404 if the folder doesn't exist; raises `media.trashed` |
+| POST | `/media/trash/restore` | `{ ids }` (1–200) | `{ ids, skipped, renamed: [{ id, from, to }] }` – brings the items back with the same `id`, `path`, folder and texts, and their variants (`media.write`); an item whose name was taken meanwhile comes back as `<stem>-<n>.<ext>` and is listed in `renamed`; `reason` is `not_found` or `not_trashed`; raises `media.restored` |
+| POST | `/media/trash/purge` | `{ ids }` (1–200) | `{ ids, skipped }` – deletes the trashed items for good, with their files and variants (`media.delete`); an item a page still references stays in the trash with `reason: "referenced"`, an id not in the trash is skipped as `not_trashed` or `not_found`; raises `media.deleted` with the deleted `ids` |
+| POST | `/media/trash/empty` | – | `{ ids, skipped }` – like `/media/trash/purge` for every trashed item (`media.delete`) |
 | GET | `/media` | `?folder=&recursive=true&q=&sort=&limit=&offset=` | `{ items, total }`; `folder` matches exactly, with `recursive=true` the exact subtree (`2026` → `2026` and `2026/…`, not `2026x` or `2026-alt`); `q` = substring match on `filename` (case-sensitive); `sort` = `createdAt`, `filename`, `size`, a leading `-` = descending (default `-createdAt`); every item also carries `variants[]`, and for a signed-in caller `available`, see [Image variants](#image-variants). Without a signed-in caller and without `ids`, 401 (`UNAUTHENTICATED`) — anonymous callers read media by id only |
 | GET | `/media?ids=a,b,c` | – | `{ items, total }` – exactly these items in the requested order (missing ones are skipped, max. 200); other parameters ignored; this form is anonymous |
 | GET | `/media/:id` | `?locale=` | metadata incl. `path` (the file's one public URL), `updatedAt` (signed-in callers only), `width`/`height` (from the file header for PNG/JPEG/GIF/WebP, otherwise `null`), `alt`/`title`/`description` for the requested language (`null` if not set; default language `de`), `available` (signed-in callers only) and `variants[]` (see [Image variants](#image-variants)); anonymous, with the public fields |
@@ -448,7 +454,7 @@ builds a media URL from an id; it always reads `path` from the response.
 | GET | `/media/:id/:name` | – | the file at its one public URL; `:name` must be the exact name it was uploaded under, else 404; `Cache-Control: public, max-age=31536000, immutable`; anonymous (`media.read`, `identifyUser`), and so open to every signed-in caller as well |
 | GET | `/media/:id/variants/:file` | – | image variant, `:file` = `<size>.<ext>` (e.g. `thumb.webp`), see [Image variants](#image-variants); anonymous, like `/media/:id/:name` |
 | PATCH | `/media/:id` | `{ filename?, folder?, provenance?, locale?, alt?, title?, description? }` | metadata (`media.write`); a metadata-only change: renaming or moving never touches the blob or `path`, 409 on a name clash within the folder (`details.field: "location"`); text fields apply to `locale` (body or query, default `de`), `null` or `""` clears that language's text; `updatedAt` advances on every PATCH |
-| DELETE | `/media/:id` | – | `{ ok: true }`; removes the public copy (if configured), then the blob, then the row, then sweeps the item's files once more, so a retry after a partial failure completes; a failed blob delete now fails the request instead of only logging it; 409 if a page references it — via a `ref` field (`hero`) or via an internal link in a `json` field (a block tree, e.g. `body`), e.g. `media/<id> is referenced by pages/<id2> (hero)` (`media.delete`); also deletes every image variant of that item |
+| DELETE | `/media/:id` | – | `{ ok: true }`; deletes for good, also a trashed item; removes the public copy (if configured), then the blob, then the row, then sweeps the item's files once more, so a retry after a partial failure completes; a failed blob delete now fails the request instead of only logging it; 409 if a page references it — via a `ref` field (`hero`) or via an internal link in a `json` field (a block tree, e.g. `body`), e.g. `media/<id> is referenced by pages/<id2> (hero)` (`media.delete`); also deletes every image variant of that item |
 
 **POST `/media`.** The body is `multipart/form-data` with a repeatable `file` field (send several
 for a multi-file upload), an optional `folder`, and an optional `provenance` (`human`/`ai`/`mixed`/
@@ -558,6 +564,27 @@ cron for it yet.
 
 No data migration: setup fails on start if a stored item's key is not `<prefix><id>/<name>`, naming
 the first such item. A store from before this change must start empty.
+
+**Trash.** `POST /media/trash` takes items out of the library without deleting them: `GET /media`
+(also with `?ids=`), the folder counts and the picker no longer list them, `GET /media/:id`,
+`GET /media/:id/file`, `GET /media/:id/:name` and their variant URLs answer 404, `PATCH /media/:id`
+answers 404, the public copies of the original and its variants are removed, and the item's name in
+its folder is free for a new upload at once. Pages that show the item are re-rendered without it
+(`media.trashed` marks them, as `media.deleted` does). `POST /media/trash/restore` undoes all of
+that: same `id`, same `path` and variant URLs, same folder (recreated if it was removed), texts,
+provenance and references; only when another upload took the name meanwhile does the display name
+change, which the response reports in `renamed`. The pages are re-rendered with the item again
+(`media.restored`). A page may still reference a trashed item, and `PATCH /pages/:id` accepts a new
+reference to one, since the server counts it as existing until it is purged; the page renders
+without it meanwhile.
+
+The example instance keeps trashed items for 30 days (`trashRetentionDays` on `media-default`); a
+cron at 04:00 (`purgeExpiredMedia`) then deletes the expired ones that nothing references, and
+leaves the referenced ones in the trash. `DELETE /media/:id` and `DELETE /media/folders/*path` stay
+the final deletes. A trashed file still takes up storage, and a copy a browser or CDN cached under
+`immutable` is not withdrawn by the trash. Every request body with `ids` takes 1 to 200 ids (400
+otherwise), and every answer is per id, so a client working through a larger selection sends it in
+blocks and shows each skipped id with its reason.
 
 ## Image variants
 

@@ -176,8 +176,8 @@ error and leaves the row `uploading`. Such a row, and one left by a blob store t
 as abandoned once it is older than `uploadStaleAfterMs`: the next upload of the same name, and with
 `publicCopy` the next `media.syncPublic`, mark it `failed` and remove its copy and blob, which frees
 the name. Only `ready` items are returned by `media.get`,
-`media.list`, `media.download`, `media.serve`, `media.export:<dir>` and `media@1` (`NOT_FOUND` /
-filtered out otherwise), and a `failed` row is replaced when the same name is uploaded again, so a
+`media.list`, `media.download`, `media.serve` and `media.export:<dir>` (`NOT_FOUND` / filtered out
+otherwise), `media@1` returns `ready` and `trashed` ones (see [Trash](#trash)), and a `failed` row is replaced when the same name is uploaded again, so a
 broken attempt never blocks a filename. `media.remove` and `media.removeFolder` first end the item's
 readiness (`status: "removing"`), then remove the public copy, then the private blob, then the row,
 then sweep the item's own files once more. From the first of these writes on the item is answered by
@@ -207,7 +207,7 @@ on an image library.
 The instance is also a `media@1` provider (`@michaelthielemann/kestrel-contracts/media`): `file`,
 `files`, `load` (the description and the stored bytes, from one read of the item), `scan` (ready
 files by type pattern and creation time, paged by id, so a cursor resumes in another process) and
-`count`. Only a `ready` item is visible; `uploading`, `failed` and `removing` rows never are. A
+`count`. A `ready` or `trashed` item is visible; `uploading`, `failed` and `removing` rows never are. A
 `MediaFile` carries `contentType` as stored, `publishedType` — the type `media.serve`,
 `media.download` and the public copy send (`application/octet-stream` for a name stored as `.bin`) —
 `size`, the `width`/`height` read at upload, `folder`, the display `filename` and `createdAt`; never
@@ -220,6 +220,89 @@ type) without `excludeTypes` is a single store count, any other filter counts th
 method notes its reads like `media.get` and `media.list` do: a `document` read per id asked of
 `file`, `files` and `load`, a `type` read per `scan` and `count`.
 
+## Trash
+
+`media.trash` moves items to the trash instead of deleting them. The row gets `status: "trashed"`,
+`trashedAt` and no `location`, so the item leaves the library at once: `media.get`, `media.list`
+(search and `ids` included), `media.download`, `media.serve`, `media.export:<dir>`, the folder
+counts and `media.listFolderItems` no longer see it, `media.update` answers 404, and another upload
+may take its name in its folder. With `publicCopy`, its public copy is removed. Its key, blob,
+`folder`, `filename`, texts and provenance stay.
+
+For `media@1` a trashed item stays ready until it is purged: `file`, `files`, `load`, `scan` and
+`count` still answer it, with its bytes. The contract's readiness ends before any of the stored
+bytes go, and that happens at the purge; removing the public copy only changes what is published.
+Modules that read media through `media@1` keep what they derived from it: `images-default` keeps the
+variants of a trashed item across restarts and `images.syncPublic`, `references-default` counts a
+reference to it as neither dangling nor broken, and `references.check` accepts a new reference to
+it. Run `images.hideMany` after `media.trash` and `images.showMany` after `media.restore` to
+withdraw the variants as well. A `media-default` that does not know `trashed` reads such rows as not
+ready, and `images-default` then removes their variants at its next start; restore or purge the
+trash before going back to one.
+
+`media.restore` brings items back with the same id, key, `path`, folder, texts and provenance,
+recreates their folder and writes their public copy again. When another item took the name
+meanwhile, the restored one becomes `<stem>-<n>.<ext>` (the first free `n` from 2 on, cut to 200
+bytes) and is listed in `renamed`; only the display name changes, never the `path`.
+`media.trashFolder` trashes every live item in a folder's subtree and removes the folder rows of that
+subtree. `media.listTrash` lists the trashed items, most recently trashed first, with `trashedAt`,
+`expiresAt` (`trashedAt` plus `trashRetentionDays`, default 30) and `path: null`; it takes `q`,
+`limit`, `offset` and `locale` like `media.list`.
+
+A purge is a selection followed by `media.purge`, so a step in between can narrow it: `media.selectTrash`
+(the trashed ones among `body.ids`), `media.selectAllTrash` or `media.selectExpiredTrash` (trashed at
+least `trashRetentionDays` ago) put ids into `result.ids`, `references.dropReferenced:media` leaves
+the referenced ones in the trash, and `media.purge` deletes the rest for good, each as `media.remove`.
+Without a selection before it, `media.purge` takes `body.ids`. An item restored between the
+selection and the purge is never deleted.
+
+`media.trash`, `media.restore`, `media.selectTrash` and `media.purge` with `body.ids` take 1 to 200
+ids (`VALIDATION` otherwise) and answer per id with `{ ids, skipped: [{ id, reason }] }`: `ids` are
+the ids the step acted on, and `reason` is `not_found`, `already_trashed` (`media.trash`),
+`not_trashed` (`media.restore`, `media.selectTrash`, `media.purge`) or `referenced` (added by
+`references.dropReferenced`, kept by `media.purge`). `media.restore` adds `renamed: [{ id, from, to
+}]`. Repeating a step is safe: `media.trash` of a trashed item removes its copy again,
+`media.restore` of a ready one writes its copy again.
+
+`media.remove` and `media.removeFolder` stay final deletes. `media.removeFolder` leaves the trashed
+items of the folder in the trash, `media.renameFolder` moves them along (their `folder` only, without
+taking a name), and `media.syncPublic` removes the copy of a trashed item, reading the item again
+before it does, so an item restored during the sync keeps its copy. Nothing withdraws a copy a CDN or
+browser cached under `public, max-age=31536000, immutable`, and a trashed file keeps its storage until
+it is purged.
+
+`examples/minimal` wires it like this, next to `DELETE /media/:id`:
+
+```ts
+triggers: [
+  { http: "GET /media/trash", pipeline: "listMediaTrash" },
+  { http: "POST /media/trash", pipeline: "trashMedia" },
+  { http: "POST /media/trash/folders/*path", pipeline: "trashMediaFolder" },
+  { http: "POST /media/trash/restore", pipeline: "restoreMedia" },
+  { http: "POST /media/trash/purge", pipeline: "purgeMedia" },
+  { http: "POST /media/trash/empty", pipeline: "emptyMediaTrash" },
+  { cron: "0 4 * * *", pipeline: "purgeExpiredMedia" },
+  { event: "media.trashed", pipeline: "mediaDependents" },
+  { event: "media.restored", pipeline: "mediaDependents" },
+],
+```
+
+```ts
+const signedIn = ["authn.requireUser", "authz.requireRole"];
+const purge = ["references.dropReferenced:media", "media.purge", "images.removeMany", "events.emit:media.deleted"];
+definePipeline({ name: "trashMedia", steps: [...signedIn, "authz.require:media.delete", "media.trash", "images.hideMany", "events.emit:media.trashed", "events.relay"] });
+definePipeline({ name: "trashMediaFolder", steps: [...signedIn, "authz.require:media.delete", "media.trashFolder", "images.hideMany", "events.emit:media.trashed", "events.relay"] });
+definePipeline({ name: "restoreMedia", steps: [...signedIn, "authz.require:media.write", "media.restore", "images.showMany", "events.emit:media.restored", "events.relay"] });
+definePipeline({ name: "listMediaTrash", steps: [...signedIn, "authz.require:media.write", "media.listTrash"] });
+definePipeline({ name: "purgeMedia", steps: [...signedIn, "authz.require:media.delete", "media.selectTrash", ...purge, "events.relay"] });
+definePipeline({ name: "emptyMediaTrash", steps: [...signedIn, "authz.require:media.delete", "media.selectAllTrash", ...purge, "events.relay"] });
+definePipeline({ name: "purgeExpiredMedia", steps: ["media.selectExpiredTrash", ...purge] });
+```
+
+Moving an item that is still referenced to the trash is allowed (a page then renders without it
+until it is restored); purging one is not. A deployment without a trash simply does not compose these
+pipelines.
+
 Config: `allowedTypes` (`image/*`, `application/pdf`, `*` or `*/*`), `deniedTypes` (default
 `image/svg+xml`, `text/html`, `application/xhtml+xml` — they can carry scripts; both lists are
 patterns matched against the media type without parameters, ignoring case, see above), `maxBytes`,
@@ -228,7 +311,8 @@ patterns matched against the media type without parameters, ignoring case, see a
 or `"all"` for a public catalogue), `listPermission` (default `media.list`), `maxLimit` (default 200) and `defaultLimit` (default `maxLimit`, never
 above it, or setup fails), `locales`/`defaultLocale`. `media.list` without `limit` answers at most
 `defaultLimit` items with the full `total`, refuses a `limit` above `maxLimit` (400), and reads at most
-`maxLimit` of the `ids` it is given.
+`maxLimit` of the `ids` it is given. `trashRetentionDays` (default 30, a whole number of at least
+1) is how long an item stays in the trash before `media.selectExpiredTrash` selects it.
 
 ## Anonymous reads
 
@@ -254,7 +338,9 @@ rest, so the response is still 200. A `TRANSIENT` blobstore or database failure 
 is not per file, and fails the whole request. Other steps: `media.get`, `media.list` (folder, recursive, search, sort, canonical type, ids, paging),
 `media.listFolders`, `media.createFolder`, `media.renameFolder`, `media.listFolderItems` (for
 `references.guardAll:media`), `media.removeFolder`, `media.update`, `media.download`, `media.serve`,
-`media.remove`, `media.reconcile`, `media.reconcileDelete`, `media.syncPublic`, `media.export:<dir>`.
+`media.remove`, `media.reconcile`, `media.reconcileDelete`, `media.syncPublic`, `media.export:<dir>`,
+and the trash steps `media.trash`, `media.trashFolder`, `media.restore`, `media.listTrash`,
+`media.selectTrash`, `media.selectAllTrash`, `media.selectExpiredTrash` and `media.purge`.
 
 `media.list`'s `image`/`video` kind filters at the store, one content-type prefix, with a store-counted
 total. Its text query (`q`) and its `other` kind cannot be expressed as a store filter, so each scans
@@ -278,6 +364,10 @@ unavailable):
 | `media.renameFolder` | `VALIDATION`, `NOT_FOUND`, `CONFLICT` (target exists or is inside the source) |
 | `media.listFolderItems` | `VALIDATION`, `NOT_FOUND`, `CONFLICT` (folder not empty and no `recursive`) |
 | `media.removeFolder` | `VALIDATION`, `NOT_FOUND` |
+| `media.trash`, `media.restore`, `media.selectTrash`, `media.purge` | `VALIDATION` (no ids, or more than 200) |
+| `media.trashFolder` | `VALIDATION`, `NOT_FOUND` |
+| `media.listTrash` | `VALIDATION` (unknown locale, limit above `maxLimit`) |
+| `media.selectAllTrash`, `media.selectExpiredTrash` | – |
 | `media.reconcile`, `media.reconcileDelete`, `media.syncPublic`, `media.export:<dir>` | – |
 
 `media.reconcile` lists the blobs under `prefix` and compares them with the `media_items` keys:
