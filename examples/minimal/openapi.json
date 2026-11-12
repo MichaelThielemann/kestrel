@@ -2629,7 +2629,7 @@
     "/admin/media/export": {
       "post": {
         "operationId": "exportMedia",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission media.manage → Copy every ready media item to ./data/export/<folder>/<filename> → Copy every done variant of a ready media item to ./data/export/<folder>/<filename>.<size>.<ext>",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission media.manage → Copy every ready media item to ./data/export/<folder>/<filename> → Copy every done variant of a ready, not hidden media item to ./data/export/<folder>/<filename>.<size>.<ext>",
         "tags": [
           "admin"
         ],
@@ -2758,7 +2758,7 @@
     "/admin/media/repair-public": {
       "post": {
         "operationId": "repairPublicMedia",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission media.manage → Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed, trashed or deleted items and foreign files, re-reading an item before its copy goes (adds _publicMedia: { written, removed, missing } to the result) → Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission media.manage → Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed, trashed or deleted items and foreign files, re-reading an item before its copy goes (adds _publicMedia: { written, removed, missing } to the result) → Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted or hidden items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
         "tags": [
           "admin"
         ],
@@ -8066,7 +8066,7 @@
     "/media": {
       "get": {
         "operationId": "listMedia",
-        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.read → List media, newest first; anonymous callers may only fetch by ids → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed → Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.read → List media, newest first; anonymous callers may only fetch by ids → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, and a hidden item lists no variants and is not available → Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -9225,7 +9225,7 @@
       },
       "get": {
         "operationId": "getMedia",
-        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.read → Media metadata → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed → Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.read → Media metadata → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, and a hidden item lists no variants and is not available → Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -10027,7 +10027,7 @@
             }
           },
           "404": {
-            "description": "media item not found, not ready, or the file is neither a current nor a retired size",
+            "description": "media item not found, not ready or hidden, or the file is neither a current nor a retired size",
             "content": {
               "application/json": {
                 "schema": {
@@ -10293,7 +10293,7 @@
     "/media/folders/{path}": {
       "delete": {
         "operationId": "deleteMediaFolder",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission media.delete → Item ids in a folder, for use with references.guardAll:media before removeFolder → Refuse while any of result.ids of media is referenced → Delete a folder and everything in it (each item as media.remove) → Delete variants for every id in result.ids (from media.listFolderItems or media.removeFolder) → Emit event \"media.deleted\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission media.delete → Item ids in a folder, for use with references.guardAll:media before removeFolder → Refuse while any of result.ids of media is referenced → Delete a folder and everything in it (each item as media.remove) → Delete variants for every id in result.ids (from media.listFolderItems, media.removeFolder or media.purge) → Emit event \"media.deleted\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "media"
         ],

@@ -8,7 +8,7 @@ import type { Introspection, Manifest } from "@michaelthielemann/kestrel";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
-import { DEFAULT_RENDER_TIMEOUT_MS, VARIANTS, createImages, whenIdle, type Config } from "./impl.ts";
+import { DEFAULT_RENDER_TIMEOUT_MS, HIDDEN, VARIANTS, createImages, whenIdle, type Config } from "./impl.ts";
 import type { Renderer } from "./generate.ts";
 
 type MemoryBlobs = Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> };
@@ -41,7 +41,7 @@ const serving: Manifest = {
 const introspection: Introspection = { describe: () => serving, observe: () => () => {}, health: () => ({ ok: true, restartRequired: false, modules: [] }) };
 
 describe("images/default with a media-default item in the trash", () => {
-  it("keeps the item's variant rows and private variants across a restart of both and images.syncPublic, and serves them again after restore", async () => {
+  it("keeps the item's variant rows and private variants hidden across a restart of both and images.syncPublic, and serves them again after restore", async () => {
     const store = createFakePersistence();
     const blobs = memoryBlobs();
     const media = await createMediaDefault(MEDIA_CONFIG, blobs, store, quiet);
@@ -51,8 +51,12 @@ describe("images/default with a media-default item in the trash", () => {
     expect(expectOk(await images.generate(item.id)).map((row) => row.state)).toEqual(["done"]);
     const privateVariant = `media-variants/${item.id}/thumb.webp`;
     expect(blobs.blobs.has(privateVariant)).toBe(true);
+    const publicVariant = `site/media/${item.id}/variants/thumb.webp`;
+    expect(blobs.blobs.has(publicVariant)).toBe(true);
 
-    expect(expectOk(await media.trash([item.id])).ids).toEqual([item.id]);
+    const trashed = expectOk(await media.trash([item.id]));
+    expect(trashed.ids).toEqual([item.id]);
+    expectOk(await images.hide(trashed.ids));
     await images.close();
 
     const restartedMedia = await createMediaDefault(MEDIA_CONFIG, blobs, store, quiet);
@@ -66,9 +70,14 @@ describe("images/default with a media-default item in the trash", () => {
     expect(blobs.blobs.has(privateVariant)).toBe(true);
     expect(blobs.blobs.has(item.key)).toBe(true);
     expect(expectOk(await restarted.exists(item.id))).toBe(true);
+    expect(blobs.blobs.has(publicVariant)).toBe(false);
+    expect(expectOk(await restarted.read(item.id, "thumb.webp"))).toBeNull();
 
-    expect(expectOk(await restartedMedia.restore([item.id])).ids).toEqual([item.id]);
+    const restored = expectOk(await restartedMedia.restore([item.id]));
+    expect(restored.ids).toEqual([item.id]);
+    expectOk(await restarted.show(restored.ids));
     expect(expectOk(await restarted.read(item.id, "thumb.webp"))).toMatchObject({ variant: "done", fallback: false });
+    expect(blobs.blobs.has(publicVariant)).toBe(true);
     expect(blobs.blobs.has(`site/media/${item.id}/${item.filename}`)).toBe(true);
     await restarted.close();
   });
@@ -81,7 +90,7 @@ describe("images/default with a media-default item in the trash", () => {
     const photo = await sharp({ create: { width: 64, height: 48, channels: 3, background: "#884466" } }).jpeg().toBuffer();
     const item = expectOk(await media.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: photo })).item;
     expectOk(await images.generate(item.id));
-    expectOk(await media.trash([item.id]));
+    expectOk(await images.hide(expectOk(await media.trash([item.id])).ids));
     expect(expectOk(await media.purge([item.id])).ids).toEqual([item.id]);
     await images.close();
 
@@ -91,6 +100,7 @@ describe("images/default with a media-default item in the trash", () => {
     await restarted.close();
 
     expect(expectOk(await store.count(VARIANTS, { mediaId: item.id }))).toBe(0);
+    expect(expectOk(await store.count(HIDDEN, { mediaId: item.id }))).toBe(0);
     expect([...blobs.blobs.keys()].filter((key) => key.includes(item.id))).toEqual([]);
   });
 });

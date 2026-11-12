@@ -16,7 +16,7 @@ import { failure } from "@michaelthielemann/kestrel/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import module, { configSchema } from "./module.ts";
-import { DEFAULT_RENDER_TIMEOUT_MS, JOBS, RETIRED, SIZES, VARIANTS, createImages, whenIdle, type Config, type Images } from "./impl.ts";
+import { DEFAULT_RENDER_TIMEOUT_MS, HIDDEN, JOBS, RETIRED, SIZES, VARIANTS, createImages, whenIdle, type Config, type Images } from "./impl.ts";
 import type { Renderer } from "./generate.ts";
 import type { Size } from "./sizes.ts";
 
@@ -210,7 +210,7 @@ describe("images/default: storage boundary", { timeout: 60_000 }, () => {
   it("reaches no collection but its own through a full lifecycle while media-default's collection holds ready items", async () => {
     const reached = new Set<string>();
     await runLifecycle(directly((store) => ownCollectionsOnly(store, reached)), false);
-    expect([...reached].sort()).toEqual([JOBS, RETIRED, SIZES, VARIANTS].sort());
+    expect([...reached].sort()).toEqual([HIDDEN, JOBS, RETIRED, SIZES, VARIANTS].sort());
   });
 
   it("runs the same lifecycle through the module's own setup on the store that holds media-default's collection, guarded only by the handle setup hands it", async () => {

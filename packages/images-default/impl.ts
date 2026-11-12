@@ -22,9 +22,10 @@ export const SIZES = "images_sizes";
 export const VARIANTS = "images_variants";
 export const JOBS = "images_jobs";
 export const RETIRED = "images_retired";
+export const HIDDEN = "images_hidden";
 
 /** Every collection this module stores; the persistence handle it is given reaches these and no other. */
-export const COLLECTIONS: readonly string[] = [SIZES, VARIANTS, JOBS, RETIRED];
+export const COLLECTIONS: readonly string[] = [SIZES, VARIANTS, JOBS, RETIRED, HIDDEN];
 
 export const DEFAULT_MAX_ATTEMPTS = 5;
 export const DEFAULT_RENDER_TIMEOUT_MS = 30000;
@@ -66,6 +67,12 @@ export interface Retired extends Document {
   /** `<mediaId>/<file>`; unique, so a file is retired at most once. */
   slot: string;
   retiredAt: number;
+}
+
+/** A media item whose variants have no public copies and are not served or exported until it is shown again. */
+export interface Hidden extends Document {
+  mediaId: string;
+  hiddenAt: number;
 }
 
 export interface Job extends Document {
@@ -143,6 +150,12 @@ export interface Images {
   publicPath(mediaId: string, variant: Variant): string;
   publicCopyEnabled(): boolean;
   syncPublic(): Promise<Result<PublicSync, KestrelError>>;
+  /** Withdraws the public copies of each known item's variants and retired paths; they are not served, exported or copied again until {@link Images.show}. Rows and private variants stay. Unknown ids are ignored. */
+  hide(mediaIds: string[]): Promise<Result<void, KestrelError>>;
+  /** Lifts {@link Images.hide} and writes the public copies of each item again. */
+  show(mediaIds: string[]): Promise<Result<void, KestrelError>>;
+  /** The ids among `mediaIds` that are hidden. */
+  hidden(mediaIds: string[]): Promise<Result<Set<string>, KestrelError>>;
   attach(kestrel: Introspection): void;
   close(): Promise<void>;
 }
@@ -225,6 +238,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     [VARIANTS, { mediaId: "string", size: "string", slot: { type: "string", unique: true }, spec: "string", width: "number", height: "number", format: "string", key: "string", bytes: "number", state: "string", error: "json", attempts: "number", updatedAt: "number" }],
     [JOBS, { state: "string", total: "number", done: "number", failed: "number", cursor: "string", startedAt: "number", updatedAt: "number", finishedAt: "json", error: "json" }],
     [RETIRED, { mediaId: "string", file: "string", slot: { type: "string", unique: true }, retiredAt: "number" }],
+    [HIDDEN, { mediaId: { type: "string", unique: true }, hiddenAt: "number" }],
   ];
   for (const [collection, schema] of collections) {
     const prepared = await db.ensureCollection(collection, schema);
@@ -371,6 +385,40 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return library.file(mediaId);
   }
 
+  async function isHidden(mediaId: string): Promise<Result<boolean, KestrelError>> {
+    const marked = await db.count(HIDDEN, { mediaId });
+    return isErr(marked) ? marked : ok(marked.value > 0);
+  }
+
+  async function hiddenAmong(mediaIds: string[]): Promise<Result<Set<string>, KestrelError>> {
+    const found = new Set<string>();
+    for (let i = 0; i < mediaIds.length; i += EVENT_CHUNK) {
+      const page = await db.findMany<Hidden>(HIDDEN, { mediaId: { in: mediaIds.slice(i, i + EVENT_CHUNK) } }, { limit: EVENT_CHUNK });
+      if (isErr(page)) return page;
+      for (const row of page.value.items) found.add(row.mediaId);
+    }
+    return ok(found);
+  }
+
+  async function putCopy(mediaId: string, file: string, data: Uint8Array, contentType: string): Promise<Result<boolean, KestrelError>> {
+    const hidden = await isHidden(mediaId);
+    if (isErr(hidden)) return hidden;
+    if (hidden.value) return ok(false);
+    const put = await blobs.put(copyKey(mediaId, file), data, { contentType });
+    return isErr(put) ? put : ok(true);
+  }
+
+  async function removeAllCopies(mediaId: string): Promise<Result<number, KestrelError>> {
+    if (config.publicCopy === undefined) return ok(0);
+    const listed = await blobs.list(`${publicTree()}${mediaId}/variants/`);
+    if (isErr(listed)) return listed;
+    for (const info of listed.value) {
+      const removed = await blobs.remove(info.key);
+      if (isErr(removed)) return removed;
+    }
+    return ok(listed.value.length);
+  }
+
   async function loadOriginal(mediaId: string): Promise<Result<Original | null, KestrelError>> {
     const loaded = await library.load(mediaId);
     if (isErr(loaded)) return loaded;
@@ -425,8 +473,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
 
   async function writeOwnedCopy(mediaId: string, file: string, content: Content, source: Variant | null): Promise<Result<boolean, KestrelError>> {
     const key = copyKey(mediaId, file);
-    const put = await blobs.put(key, content.data, { contentType: content.contentType });
-    if (isErr(put)) return put;
+    const put = await putCopy(mediaId, file, content.data, content.contentType);
+    if (isErr(put) || !put.value) return put;
     const media = await readMedia(mediaId);
     if (isErr(media)) return media;
     const owner = await ownerOf(mediaId, file);
@@ -440,8 +488,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const current = await contentFor(media.value, owner.value.row);
     if (isErr(current)) return current;
     if (current.value === null) return ok(true);
-    const rewritten = await blobs.put(key, current.value.data, { contentType: current.value.contentType });
-    return isErr(rewritten) ? rewritten : ok(true);
+    return putCopy(mediaId, file, current.value.data, current.value.contentType);
   }
 
   async function settleWrites<T>(mediaId: string, outcome: Result<T, KestrelError>, whenGone: T): Promise<Result<T, KestrelError>> {
@@ -583,7 +630,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const retired = await db.createOne<Retired>(RETIRED, { mediaId, file: oldFile, slot: slotOf(mediaId, oldFile), retiredAt: now() });
       if (isErr(retired) && retired.error.code !== "CONFLICT") return retired;
       if (config.publicCopy !== undefined) {
-        const overwritten = await blobs.put(copyKey(mediaId, oldFile), original.data, { contentType: original.publishedType });
+        const overwritten = await putCopy(mediaId, oldFile, original.data, original.publishedType);
         if (isErr(overwritten)) return overwritten;
       }
       const dropped = await blobs.remove(row.key);
@@ -619,7 +666,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       toPlace.map((row) => async (): Promise<Result<void, KestrelError>> => {
         touch();
         const file = fileOf(row);
-        const put = await blobs.put(copyKey(mediaId, file), original.data, { contentType: original.publishedType });
+        const put = await putCopy(mediaId, file, original.data, original.publishedType);
         if (isErr(put)) return put;
         const advanced = await db.updateMany<Variant>(VARIANTS, { id: row.id, key: row.key, state: "planned" }, { state: settledState, updatedAt: now() });
         if (isErr(advanced)) return advanced;
@@ -643,7 +690,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const content = await contentFor(item, owner.value.row);
     if (isErr(content)) return content;
     if (content.value === null || !content.value.rendered) return ok(undefined);
-    const put = await blobs.put(copyKey(item.id, file), content.value.data, { contentType: content.value.contentType });
+    const put = await putCopy(item.id, file, content.value.data, content.value.contentType);
     return isErr(put) ? put : ok(undefined);
   }
 
@@ -769,7 +816,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(stored)) return failWrite(stored.error);
     const writeCopy = async (): Promise<Result<void, KestrelError>> => {
       if (config.publicCopy === undefined) return ok(undefined);
-      return blobs.put(copyKey(mediaId, file), rendered.data, { contentType: publicTypeOf(rendered.contentType) });
+      const put = await putCopy(mediaId, file, rendered.data, publicTypeOf(rendered.contentType));
+      return isErr(put) ? put : ok(undefined);
     };
     const copied = await writeCopy();
     if (isErr(copied)) return failWrite(copied.error);
@@ -809,7 +857,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(owner)) return owner;
     if (owner.value.row !== null) return ok(undefined);
     if (owner.value.retired !== null) {
-      const put = await blobs.put(copyKey(item.id, file), original.data, { contentType: original.publishedType });
+      const put = await putCopy(item.id, file, original.data, original.publishedType);
       return isErr(put) ? put : ok(undefined);
     }
     const droppedCopy = await blobs.remove(copyKey(item.id, file));
@@ -1044,6 +1092,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const removedBlob = await blobs.remove(info.key);
       if (isErr(removedBlob)) return removedBlob;
     }
+    const unmarked = await db.deleteMany(HIDDEN, { mediaId });
+    if (isErr(unmarked)) return unmarked;
     return ok(removed);
   }
 
@@ -1068,9 +1118,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         const original = await loadOriginal(mediaId);
         if (isErr(original)) return original;
         if (original.value !== null) {
-          wrote = true;
-          const overwritten = await blobs.put(copyKey(mediaId, file), original.value.data, { contentType: original.value.publishedType });
+          const overwritten = await putCopy(mediaId, file, original.value.data, original.value.publishedType);
           if (isErr(overwritten)) return overwritten;
+          wrote = overwritten.value;
         }
       }
       const droppedBlob = await blobs.remove(variant.key);
@@ -1125,6 +1175,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(variants)) return variants;
     const retired = await eachRow<Retired>(RETIRED, {}, collect);
     if (isErr(retired)) return retired;
+    const marked = await eachRow<Hidden>(HIDDEN, {}, collect);
+    if (isErr(marked)) return marked;
     const all = [...ids];
     for (let i = 0; i < all.length && !closed; i += EVENT_CHUNK) {
       const chunk = all.slice(i, i + EVENT_CHUNK);
@@ -1142,6 +1194,12 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   }
 
   async function removeForeignCopy(key: string, mediaId: string, file: string): Promise<Result<boolean, KestrelError>> {
+    const hidden = await isHidden(mediaId);
+    if (isErr(hidden)) return hidden;
+    if (hidden.value) {
+      const dropped = await blobs.remove(key);
+      return isErr(dropped) ? dropped : ok(true);
+    }
     const media = await readMedia(mediaId);
     if (isErr(media)) return media;
     if (media.value !== null) {
@@ -1163,6 +1221,33 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const restored = await writeOwnedCopy(mediaId, file, content.value, owner.value.row);
     if (isErr(restored)) return restored;
     return ok(!restored.value);
+  }
+
+  async function writeCopiesOf(mediaId: string): Promise<Result<void, KestrelError>> {
+    const media = await readMedia(mediaId);
+    if (isErr(media)) return media;
+    if (media.value === null) return ok(undefined);
+    const item = media.value;
+    const stored = await rowsOfItem(mediaId);
+    if (isErr(stored)) return stored;
+    const written = new Set<string>();
+    for (const row of stored.value.values()) {
+      if (row.state === "planned") continue;
+      const content = await contentFor(item, row);
+      if (isErr(content)) return content;
+      if (content.value === null) continue;
+      const kept = await writeOwnedCopy(mediaId, fileOf(row), content.value, row);
+      if (isErr(kept)) return kept;
+      written.add(fileOf(row));
+    }
+    return eachRow<Retired>(RETIRED, { mediaId }, async (row) => {
+      if (written.has(row.file)) return ok(undefined);
+      const content = await contentFor(item, null);
+      if (isErr(content)) return content;
+      if (content.value === null) return ok(undefined);
+      const kept = await writeOwnedCopy(mediaId, row.file, content.value, null);
+      return isErr(kept) ? kept : ok(undefined);
+    });
   }
 
   const api: Images = {
@@ -1351,6 +1436,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     variantCounts,
 
     async read(mediaId, file) {
+      const hidden = await isHidden(mediaId);
+      if (isErr(hidden)) return hidden;
+      if (hidden.value) return ok(null);
       const media = await readMedia(mediaId);
       if (isErr(media)) return media;
       if (media.value === null) return ok(null);
@@ -1371,7 +1459,13 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       for (let offset = 0; ; offset += PAGE) {
         const page = await db.findMany<Variant>(VARIANTS, { state: "done" }, { sort: { id: "asc" }, limit: PAGE, offset });
         if (isErr(page)) return page;
+        const hidden = await hiddenAmong([...new Set(page.value.items.map((variant) => variant.mediaId))]);
+        if (isErr(hidden)) return hidden;
         for (const variant of page.value.items) {
+          if (hidden.value.has(variant.mediaId)) {
+            skipped += 1;
+            continue;
+          }
           const media = await readMedia(variant.mediaId);
           if (isErr(media)) return media;
           if (media.value === null) {
@@ -1428,7 +1522,14 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       });
       if (isErr(snapshot)) return snapshot;
 
+      const hidden = new Set<string>();
       const suspects = new Set<string>();
+      const surveyedHidden = await eachRow<Hidden>(HIDDEN, {}, async (row) => {
+        hidden.add(row.mediaId);
+        if (!ready.has(row.mediaId)) suspects.add(row.mediaId);
+        return ok(undefined);
+      });
+      if (isErr(surveyedHidden)) return surveyedHidden;
       const sizesOf = new Map<string, Set<string>>();
       const unplaced = new Set<string>();
       let renderOutstanding = false;
@@ -1513,13 +1614,13 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       };
       const copiedRows = await eachRow<Variant>(VARIANTS, {}, async (row) => {
         const media = ready.get(row.mediaId);
-        if (media === undefined || row.state === "planned") return ok(undefined);
+        if (media === undefined || row.state === "planned" || hidden.has(row.mediaId)) return ok(undefined);
         return ensureCopy(media, row, fileOf(row), privateSizes.get(row.key) ?? media.size);
       });
       if (isErr(copiedRows)) return copiedRows;
       const copiedRetired = await eachRow<Retired>(RETIRED, {}, async (row) => {
         const media = ready.get(row.mediaId);
-        if (media === undefined || owned.has(copyKey(row.mediaId, row.file))) return ok(undefined);
+        if (media === undefined || hidden.has(row.mediaId) || owned.has(copyKey(row.mediaId, row.file))) return ok(undefined);
         return ensureCopy(media, null, row.file, media.size);
       });
       if (isErr(copiedRetired)) return copiedRetired;
@@ -1537,6 +1638,36 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       }
       return ok({ written, removed, planned, missing });
     },
+
+    async hide(mediaIds) {
+      for (const mediaId of new Set(mediaIds)) {
+        const media = await readMedia(mediaId);
+        if (isErr(media)) return media;
+        if (media.value === null) continue;
+        const marked = await db.createOne<Hidden>(HIDDEN, { mediaId, hiddenAt: now() });
+        if (isErr(marked) && marked.error.code !== "CONFLICT") return marked;
+        const withdrawn = await exclusive(mediaId, async (): Promise<Result<number, KestrelError>> => {
+          const still = await isHidden(mediaId);
+          if (isErr(still)) return still;
+          return still.value ? removeAllCopies(mediaId) : ok(0);
+        });
+        if (isErr(withdrawn)) return withdrawn;
+      }
+      return ok(undefined);
+    },
+
+    async show(mediaIds) {
+      for (const mediaId of new Set(mediaIds)) {
+        const unmarked = await db.deleteMany(HIDDEN, { mediaId });
+        if (isErr(unmarked)) return unmarked;
+        if (config.publicCopy === undefined) continue;
+        const rewritten = await exclusive(mediaId, () => writeCopiesOf(mediaId));
+        if (isErr(rewritten)) return rewritten;
+      }
+      return ok(undefined);
+    },
+
+    hidden: hiddenAmong,
 
     attach(kestrel) {
       const detecting = removeRowsOfGoneItems()

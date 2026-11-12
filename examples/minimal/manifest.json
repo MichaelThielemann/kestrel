@@ -889,6 +889,8 @@
         "images.readStatus",
         "images.remove",
         "images.removeMany",
+        "images.hideMany",
+        "images.showMany",
         "images.attach",
         "images.serve",
         "images.syncPublic",
@@ -7381,7 +7383,31 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Delete variants for every id in result.ids (from media.listFolderItems or media.removeFolder)",
+        "summary": "Delete variants for every id in result.ids (from media.listFolderItems, media.removeFolder or media.purge)",
+        "reads": [
+          "result.ids"
+        ],
+        "writes": []
+      }
+    },
+    {
+      "name": "images.hideMany",
+      "module": "images/default",
+      "factory": false,
+      "description": {
+        "summary": "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged",
+        "reads": [
+          "result.ids"
+        ],
+        "writes": []
+      }
+    },
+    {
+      "name": "images.showMany",
+      "module": "images/default",
+      "factory": false,
+      "description": {
+        "summary": "Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged",
         "reads": [
           "result.ids"
         ],
@@ -7393,7 +7419,7 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed",
+        "summary": "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, and a hidden item lists no variants and is not available",
         "reads": [
           "result"
         ],
@@ -7500,7 +7526,7 @@
         "binary": true,
         "errors": {
           "400": "missing id or file",
-          "404": "media item not found, not ready, or the file is neither a current nor a retired size"
+          "404": "media item not found, not ready or hidden, or the file is neither a current nor a retired size"
         },
         "anonymous": "required"
       }
@@ -7510,7 +7536,7 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
+        "summary": "Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted or hidden items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
         "reads": [],
         "writes": [
           "result._publicVariants"
@@ -7553,7 +7579,7 @@
       "module": "images/default",
       "factory": true,
       "description": {
-        "summary": "Copy every done variant of a ready media item to <arg>/<folder>/<filename>.<size>.<ext>",
+        "summary": "Copy every done variant of a ready, not hidden media item to <arg>/<folder>/<filename>.<size>.<ext>",
         "reads": [],
         "writes": [
           "result.variants"
@@ -14931,7 +14957,7 @@
           "name": "images.removeMany",
           "module": "images/default",
           "description": {
-            "summary": "Delete variants for every id in result.ids (from media.listFolderItems or media.removeFolder)",
+            "summary": "Delete variants for every id in result.ids (from media.listFolderItems, media.removeFolder or media.purge)",
             "reads": [
               "result.ids"
             ],
@@ -16177,7 +16203,7 @@
           "name": "images.export",
           "module": "images/default",
           "description": {
-            "summary": "Copy every done variant of a ready media item to ./data/export/<folder>/<filename>.<size>.<ext>",
+            "summary": "Copy every done variant of a ready, not hidden media item to ./data/export/<folder>/<filename>.<size>.<ext>",
             "reads": [],
             "writes": [
               "result.variants"
@@ -16604,7 +16630,7 @@
           "name": "images.attach",
           "module": "images/default",
           "description": {
-            "summary": "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed",
+            "summary": "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, and a hidden item lists no variants and is not available",
             "reads": [
               "result"
             ],
@@ -19168,7 +19194,7 @@
           "name": "images.attach",
           "module": "images/default",
           "description": {
-            "summary": "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed",
+            "summary": "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, and a hidden item lists no variants and is not available",
             "reads": [
               "result"
             ],
@@ -24043,7 +24069,7 @@
           "name": "images.syncPublic",
           "module": "images/default",
           "description": {
-            "summary": "Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
+            "summary": "Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted or hidden items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
             "reads": [],
             "writes": [
               "result._publicVariants"
@@ -26090,7 +26116,7 @@
             "binary": true,
             "errors": {
               "400": "missing id or file",
-              "404": "media item not found, not ready, or the file is neither a current nor a retired size"
+              "404": "media item not found, not ready or hidden, or the file is neither a current nor a retired size"
             },
             "anonymous": "required"
           }
@@ -27073,7 +27099,7 @@
           "name": "images.syncPublic",
           "module": "images/default",
           "description": {
-            "summary": "Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
+            "summary": "Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted or hidden items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
             "reads": [],
             "writes": [
               "result._publicVariants"

@@ -41,6 +41,12 @@ function mediaIds(ctx: Context): string[] | undefined {
   return Array.isArray(idsPayload) ? idsPayload.filter((v): v is string => typeof v === "string") : undefined;
 }
 
+function resultIds(ctx: Context, step: string): string[] {
+  const ids = boundaryCast<{ ids?: unknown } | undefined>(ctx.result, "host")?.ids;
+  if (!Array.isArray(ids)) throw new Error(`images: ${step}: no ids in result`);
+  return ids.filter((id): id is string => typeof id === "string");
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -170,12 +176,22 @@ export default defineModule({
     },
 
     removeMany: async (ctx: Context) => {
-      const ids = boundaryCast<{ ids?: unknown } | undefined>(ctx.result, "host")?.ids;
-      if (!Array.isArray(ids)) throw new Error("images: removeMany: no ids in result");
-      for (const id of boundaryCast<string[]>(ids, "host")) {
+      for (const id of resultIds(ctx, "removeMany")) {
         const removed = await images.remove(id);
         if (isErr(removed)) return ctx.fail(removed.error);
       }
+      return ok(ctx);
+    },
+
+    hideMany: async (ctx: Context) => {
+      const hidden = await images.hide(resultIds(ctx, "hideMany"));
+      if (isErr(hidden)) return ctx.fail(hidden.error);
+      return ok(ctx);
+    },
+
+    showMany: async (ctx: Context) => {
+      const shown = await images.show(resultIds(ctx, "showMany"));
+      if (isErr(shown)) return ctx.fail(shown.error);
       return ok(ctx);
     },
 
@@ -186,10 +202,12 @@ export default defineModule({
         if (isErr(byMedia)) return ctx.fail(byMedia.error);
         const counts = await images.variantCounts([result.id]);
         if (isErr(counts)) return ctx.fail(counts.error);
-        const rows = byMedia.value.get(result.id) ?? [];
+        const hidden = await images.hidden([result.id]);
+        if (isErr(hidden)) return ctx.fail(hidden.error);
+        const rows = hidden.value.has(result.id) ? [] : (byMedia.value.get(result.id) ?? []);
         const contentType = boundaryCast<{ contentType?: unknown }>(result, "host").contentType;
         const isEligible = typeof contentType !== "string" || eligible(contentType);
-        const available = !isEligible || (rows.length > 0 && rows.every((v) => v.state !== "planned"));
+        const available = !hidden.value.has(result.id) && (!isEligible || (rows.length > 0 && rows.every((v) => v.state !== "planned")));
         const variants = rows.filter((v) => v.state !== "planned").map((v) => attachedVariant(images, v));
         return ok({ ...ctx, result: { ...result, available, variants, variantCounts: counts.value.get(result.id) ?? ZERO_VARIANT_COUNTS } });
       }
@@ -200,11 +218,14 @@ export default defineModule({
         if (isErr(byMedia)) return ctx.fail(byMedia.error);
         const counts = await images.variantCounts(ids);
         if (isErr(counts)) return ctx.fail(counts.error);
+        const hidden = await images.hidden(ids);
+        if (isErr(hidden)) return ctx.fail(hidden.error);
         const withVariants = items.map((item) => {
-          const rows = typeof item.id === "string" ? (byMedia.value.get(item.id) ?? []) : [];
+          const isHidden = typeof item.id === "string" && hidden.value.has(item.id);
+          const rows = typeof item.id === "string" && !isHidden ? (byMedia.value.get(item.id) ?? []) : [];
           const itemCounts = typeof item.id === "string" ? (counts.value.get(item.id) ?? ZERO_VARIANT_COUNTS) : ZERO_VARIANT_COUNTS;
           const isEligible = typeof item.contentType !== "string" || eligible(item.contentType);
-          const available = !isEligible || (rows.length > 0 && rows.every((v) => v.state !== "planned"));
+          const available = !isHidden && (!isEligible || (rows.length > 0 && rows.every((v) => v.state !== "planned")));
           const variants = rows.filter((v) => v.state !== "planned").map((v) => attachedVariant(images, v));
           return { ...item, available, variants, variantCounts: itemCounts };
         });
@@ -275,9 +296,11 @@ export default defineModule({
       },
     },
     remove: { summary: "Delete one media item's variants and retired paths (blob + rows)", reads: ["params.id"], writes: [], errors: { 400: "missing id" } },
-    removeMany: { summary: "Delete variants for every id in result.ids (from media.listFolderItems or media.removeFolder)", reads: ["result.ids"], writes: [] },
+    removeMany: { summary: "Delete variants for every id in result.ids (from media.listFolderItems, media.removeFolder or media.purge)", reads: ["result.ids"], writes: [] },
+    hideMany: { summary: "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged", reads: ["result.ids"], writes: [] },
+    showMany: { summary: "Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged", reads: ["result.ids"], writes: [] },
     attach: {
-      summary: "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed",
+      summary: "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, and a hidden item lists no variants and is not available",
       reads: ["result"],
       writes: ["result.available?", "result.variants?", "result.variantCounts?"],
       extendsItems: { type: "object", properties: { available: { type: "boolean" }, variants: { type: "array", items: ATTACHED_VARIANT_SCHEMA }, variantCounts: VARIANT_COUNTS_SCHEMA }, required: ["available", "variants", "variantCounts"] },
@@ -288,7 +311,7 @@ export default defineModule({
           reads: ["params.id", "params.file"],
           writes: ["result"],
           binary: true,
-          errors: { 400: "missing id or file", 404: "media item not found, not ready, or the file is neither a current nor a retired size" },
+          errors: { 400: "missing id or file", 404: "media item not found, not ready or hidden, or the file is neither a current nor a retired size" },
           anonymous: "required" as const,
         }
       : {
@@ -296,14 +319,14 @@ export default defineModule({
           reads: ["params.id", "params.file"],
           writes: ["result"],
           binary: true,
-          errors: { 400: "missing id or file", 404: "media item not found, not ready, or the file is neither a current nor a retired size" },
+          errors: { 400: "missing id or file", 404: "media item not found, not ready or hidden, or the file is neither a current nor a retired size" },
         },
     syncPublic: {
-      summary: "Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
+      summary: "Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted or hidden items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
       reads: [],
       writes: ["result._publicVariants"],
       extendsOutput: { type: "object", properties: { _publicVariants: PUBLIC_SYNC_SCHEMA }, required: ["_publicVariants"] },
     },
-    export: (dir: string) => ({ summary: `Copy every done variant of a ready media item to ${dir}/<folder>/<filename>.<size>.<ext>`, reads: [], writes: ["result.variants"], extendsOutput: { type: "object", properties: { variants: { type: "object", properties: { written: { type: "number" }, skipped: { type: "number" } }, required: ["written", "skipped"] } }, required: ["variants"] } }),
+    export: (dir: string) => ({ summary: `Copy every done variant of a ready, not hidden media item to ${dir}/<folder>/<filename>.<size>.<ext>`, reads: [], writes: ["result.variants"], extendsOutput: { type: "object", properties: { variants: { type: "object", properties: { written: { type: "number" }, skipped: { type: "number" } }, required: ["written", "skipped"] } }, required: ["variants"] } }),
   }),
 });
