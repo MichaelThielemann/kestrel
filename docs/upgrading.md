@@ -408,8 +408,8 @@ trigger gets a finding naming that instead of "no pipeline runs it".
 
 #### pipelines-media-delete-order
 A pipeline running `images.remove` before `media.remove`, or `images.removeMany` before
-`media.removeFolder`: a render finishing in the gap between the two can leave a public copy or a
-private blob behind. Auto-swaps the two steps' own text in place when the pipeline's file can be
+`media.removeFolder` or `media.purge`: a render finishing in the gap between the two can leave a
+public copy or a private blob behind. Auto-swaps the two steps' own text in place when the pipeline's file can be
 read; manual otherwise. A separate, info-only finding fires when a pipeline runs
 `media.removeFolder` without `events.emit:media.deleted` afterwards, since a subscriber (a
 `delivery.markDependents:media` pipeline, for one) never sees the deleted ids.

@@ -543,6 +543,24 @@ describe("pipelines/media-delete-order", () => {
     expect(text).toContain('"media.removeFolder","images.removeMany"');
   });
 
+  it("auto-fixes images.removeMany/media.purge the same way and accepts the purge in front of it", async () => {
+    const steps = ["media.selectTrash", "references.dropReferenced:media", "images.removeMany", "media.purge", "events.emit:media.deleted"];
+    const pf = await pipelineFile("purgeMedia", steps);
+    const p = { ...(await project([], { pipelines: [{ name: "purgeMedia", steps }] })), pipelineFiles: [pf] };
+    const findings = await mediaDeleteOrderRule.check(contextFor(p));
+    expect(findings.map((f) => f.id)).toEqual(["pipelines/media-delete-order:purgeMedia:images.removeMany"]);
+    const order = findings[0]!;
+    expect(order.message).toContain("runs images.removeMany before media.purge");
+    expect(order.fix.kind).toBe("auto");
+    const edits = order.fix.kind === "auto" ? order.fix.edits : [];
+    const { text } = applyEdits(readFileOrUndefined(pf.file)!, edits);
+    expect(text).toContain('"media.purge","images.removeMany"');
+
+    const fixed = ["media.selectExpiredTrash", "references.dropReferenced:media", "media.purge", "images.removeMany", "events.emit:media.deleted"];
+    const ordered = await project([], { pipelines: [{ name: "purgeExpiredMedia", steps: fixed }] });
+    expect(await mediaDeleteOrderRule.check(contextFor(ordered))).toEqual([]);
+  });
+
   it("falls back to manual when the pipeline's file cannot be read", async () => {
     const p = await project([], { pipelines: [{ name: "deleteMedia", steps: ["images.remove", "media.remove"] }] });
     const findings = await mediaDeleteOrderRule.check(contextFor(p));

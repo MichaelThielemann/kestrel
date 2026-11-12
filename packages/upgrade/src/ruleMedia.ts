@@ -384,6 +384,7 @@ const MEDIA_DELETE_ORDER_RULE_ID = "pipelines/media-delete-order";
 const DELETE_ORDER_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ["media.remove", "images.remove"],
   ["media.removeFolder", "images.removeMany"],
+  ["media.purge", "images.removeMany"],
 ];
 
 /** `pipelines/media-delete-order`: a delete must run before the images cleanup it triggers, or a render finishing in between leaves a public copy or a private blob behind; a folder delete should also raise `media.deleted` for a subscriber to react to. */
