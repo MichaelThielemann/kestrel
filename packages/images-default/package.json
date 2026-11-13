@@ -41,7 +41,7 @@
   },
   "dependencies": {
     "zod": "^3.23.8",
-    "sharp": "^0.35.4"
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@michaelthielemann/kestrel": "workspace:*",

@@ -1495,6 +1495,10 @@ Net changes since 5.8.1.
   private variants and public copies of an item `media@1` no longer reports as ready. When leaving
   that request fails, `images.remove` still deletes everything and answers that error only when a
   delete fails too.
+- `images-default` requires `sharp` ^0.35.5 (was ^0.35.4), which fixes a published advisory.
+- `sanitize-svg` and `validate-jsonschema` require `sanitize-html` ^2.18.1 (was ^2.17.0), which fixes
+  published advisories in its sanitizing. It declares Node.js >=22.12.0 and no longer depends on
+  `deepmerge`.
 
 ### Fixed
 
