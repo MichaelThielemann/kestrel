@@ -846,6 +846,44 @@ describe("images/default re-cropping while a render runs", () => {
     for (const images of [planner, soon, later]) await images.close();
   });
 
+  it("images.resume leaves a pending row that was never rendered to the render queued for it, however long it waits", async () => {
+    const w = await world();
+    const planner = await w.open([SQUARE]);
+    expectOk(await planner.plan(["m1"]));
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "pending", bytes: 0 });
+
+    const later = await w.open([SQUARE], undefined, { now: () => 1001 + 10 * CONFIG.staleAfterMs });
+    expectOk(await later.resume());
+    await whenIdle(later);
+    expect(w.renders).toEqual([]);
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "pending", bytes: 0 });
+    for (const images of [planner, later]) await images.close();
+  });
+
+  it("images.resume reaches a stale re-cropped row past rows of sizes no longer declared and rows it cannot render", async () => {
+    const w = await world();
+    const planner = await w.open([SQUARE]);
+    expectOk(await planner.generate("m1"));
+    expectOk(await planner.setFraming("m1", { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } }));
+    const undeclared = Array.from({ length: 200 }, (_, i) => ({ mediaId: `gone${i}`, size: "old", slot: `gone${i}/old`, spec: "old", width: 10, height: 10, format: "webp", key: `media-variants/gone${i}/old.webp`, bytes: 10, error: null, attempts: 0, updatedAt: 0, crop: "", renderedCrop: "", originalWidth: 0, originalHeight: 0 }));
+    expectOk(await w.db.createMany<Variant>(VARIANTS, [...undeclared.map((row) => ({ ...row, state: "pending" as const })), ...undeclared.map((row) => ({ ...row, slot: `${row.slot}-planned`, state: "planned" as const }))]));
+    const original = expectOk(await w.media.load("m1"))!.data;
+    for (let i = 0; i < 200; i += 1) {
+      w.media.add({ id: `lost${i}`, contentType: "image/jpeg", data: original, filename: "lost.jpg", createdAt: 1000 });
+      expectOk(await planner.generate(`lost${i}`));
+      w.media.loseBytes(`lost${i}`);
+    }
+    expectOk(await w.db.updateMany<Variant>(VARIANTS, { mediaId: { like: "lost%" } }, { state: "pending", updatedAt: 0 }));
+
+    const later = await w.open([SQUARE], undefined, { now: () => 1001 + CONFIG.staleAfterMs });
+    for (let pass = 0; pass < 2; pass += 1) {
+      expectOk(await later.resume());
+      await whenIdle(later);
+    }
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", crop: "400,0,600,600", renderedCrop: "400,0,600,600" });
+    for (const images of [planner, later]) await images.close();
+  });
+
   it("answers NOT_FOUND and stores nothing when the item is hidden while images.setFraming waits for a render of it", async () => {
     const w = await world();
     const g = gate();

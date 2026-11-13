@@ -1549,9 +1549,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
 
     async resume() {
       if (closed) return err(failure("CONFLICT", "images: images are shutting down"));
-      const stalePlanned = await db.findMany<Variant>(VARIANTS, { state: "planned" }, { limit: REPAIR_SAMPLE, sort: { updatedAt: "asc" } });
+      const declared = { in: effective.map((size) => size.name) };
+      const stalePlanned = await db.findMany<Variant>(VARIANTS, { state: "planned", size: declared }, { limit: REPAIR_SAMPLE, sort: { updatedAt: "asc" } });
       if (isErr(stalePlanned)) return stalePlanned;
-      const stalePending = await db.findMany<Variant>(VARIANTS, { state: "pending", updatedAt: { lt: now() - config.staleAfterMs } }, { limit: REPAIR_SAMPLE, sort: { updatedAt: "asc" } });
+      const stalePending = await db.findMany<Variant>(VARIANTS, { state: "pending", size: declared, bytes: { gt: 0 }, updatedAt: { lt: now() - config.staleAfterMs } }, { limit: REPAIR_SAMPLE, sort: { updatedAt: "asc" } });
       if (isErr(stalePending)) return stalePending;
       const ids = new Set([...stalePlanned.value.items, ...stalePending.value.items].map((row) => row.mediaId));
       const recent = await eachMediaFile({ ...ELIGIBLE, createdSince: now() - NEW_ITEM_WINDOW_MS }, async (file) => {
@@ -1578,6 +1579,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       for (const id of placedIds) {
         const generated = await generate(id);
         if (isErr(generated)) logger.error(`images: repair pass could not render media/${id}`, { mediaId: id, error: generated.error.message });
+      }
+      for (const row of stalePending.value.items) {
+        const passed = await db.updateMany<Variant>(VARIANTS, { id: row.id, state: "pending", updatedAt: row.updatedAt }, { updatedAt: now() });
+        if (isErr(passed)) logger.error(`images: repair pass could not move media/${row.mediaId} behind the rows still waiting`, { mediaId: row.mediaId, size: row.size, error: passed.error.message });
       }
 
       const found = await currentJob();
