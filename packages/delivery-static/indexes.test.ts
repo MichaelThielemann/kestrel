@@ -1,3 +1,7 @@
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
@@ -271,6 +275,41 @@ async function seed(h: Harness) {
   return { home, kontakt, intern, entwurf };
 }
 
+const SITEMAP_XSD = `<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" targetNamespace="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" elementFormDefault="qualified">
+  <xsd:import namespace="http://www.w3.org/1999/xhtml" schemaLocation="xhtml-link.xsd"/>
+  <xsd:simpleType name="tLoc"><xsd:restriction base="xsd:anyURI"><xsd:minLength value="12"/><xsd:maxLength value="2048"/></xsd:restriction></xsd:simpleType>
+  <xsd:simpleType name="tLastmod"><xsd:union memberTypes="xsd:date xsd:dateTime"/></xsd:simpleType>
+  <xsd:element name="urlset">
+    <xsd:complexType>
+      <xsd:sequence>
+        <xsd:element name="url" maxOccurs="unbounded">
+          <xsd:complexType>
+            <xsd:sequence>
+              <xsd:element name="loc" type="tLoc"/>
+              <xsd:element name="lastmod" type="tLastmod" minOccurs="0"/>
+              <xsd:any namespace="##other" processContents="strict" minOccurs="0" maxOccurs="unbounded"/>
+            </xsd:sequence>
+          </xsd:complexType>
+        </xsd:element>
+      </xsd:sequence>
+    </xsd:complexType>
+  </xsd:element>
+</xsd:schema>
+`;
+
+const XHTML_LINK_XSD = `<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" targetNamespace="http://www.w3.org/1999/xhtml" elementFormDefault="qualified">
+  <xsd:element name="link">
+    <xsd:complexType>
+      <xsd:attribute name="rel" type="xsd:string" use="required"/>
+      <xsd:attribute name="hreflang" type="xsd:string" use="required"/>
+      <xsd:attribute name="href" type="xsd:anyURI" use="required"/>
+    </xsd:complexType>
+  </xsd:element>
+</xsd:schema>
+`;
+
 function locs(xml: string | undefined): string[] {
   return [...(xml ?? "").matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1] ?? "");
 }
@@ -355,6 +394,21 @@ describe("delivery.exportIndexes", () => {
     expectOk(await h.delivery.exportIndexes());
     expect(h.text("robots.txt")).toBe("User-agent: *\nAllow: /own\n");
     expect(h.text("sitemap.xml")).toContain("<urlset");
+  });
+
+  it.skipIf(spawnSync("xmllint", ["--version"]).error !== undefined)("writes a sitemap.xml that the sitemap 0.9 schema with xhtml:link alternates accepts", async () => {
+    const h = await harness();
+    await seed(h);
+    expectOk(await h.delivery.exportIndexes());
+    const dir = mkdtempSync(join(tmpdir(), "delivery-sitemap-"));
+    try {
+      writeFileSync(join(dir, "sitemap.xml"), h.text("sitemap.xml")!);
+      writeFileSync(join(dir, "xhtml-link.xsd"), XHTML_LINK_XSD);
+      writeFileSync(join(dir, "sitemap.xsd"), SITEMAP_XSD);
+      expect(() => execFileSync("xmllint", ["--noout", "--schema", join(dir, "sitemap.xsd"), join(dir, "sitemap.xml")], { stdio: "pipe" })).not.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("writes an empty urlset and robots.txt for a site whose every page is noindex", async () => {
