@@ -90,8 +90,9 @@ rendering), `images.generate` (id from params/payload/event; `VALIDATION` withou
 for an id `media@1` does not report as ready), `images.sync` (`CONFLICT` while a fresh job runs), `images.resume` (cron: also
 places and renders any item whose lease ran out, with a request left open for longer than
 `staleAfterMs`, with a row that already had a render at its path and was left `pending` for longer
-than `staleAfterMs`, with a row left `planned` or in `error` for longer than `staleAfterMs`, and any
-recent item with no rows at all; `CONFLICT` once `close()` has begun), `images.retryFailed`
+than `staleAfterMs`, with a row left `planned` or in `error` for longer than `staleAfterMs`, with a
+row of a declared size planned with another spec than the size now has and untouched for longer than
+`staleAfterMs` while no sync job runs, and any recent item with no rows at all; `CONFLICT` once `close()` has begun), `images.retryFailed`
 (`NOT_FOUND` for an id `media@1` does not report as ready), `images.prune` (`VALIDATION` for a name that is still declared or
 has no variants; retires rather than deletes the path), `images.readStatus`, `images.remove`
 (`VALIDATION` without an id), `images.removeMany` (after `media.listFolderItems` or
