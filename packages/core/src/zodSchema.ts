@@ -58,6 +58,7 @@ interface Unwrapped {
   nullable: boolean;
   reshapes: boolean;
   defaultValue?: () => unknown;
+  defaultKind?: "default" | "prefault";
   description?: string;
 }
 
@@ -92,7 +93,10 @@ function unwrap(schema: Schema): Unwrapped {
       current = d.innerType;
     } else if (d.type === "default" || d.type === "prefault") {
       out.optional = true;
-      if (out.defaultValue === undefined) out.defaultValue = () => d.defaultValue;
+      if (out.defaultValue === undefined) {
+        out.defaultValue = () => d.defaultValue;
+        out.defaultKind = d.type;
+      }
       current = d.innerType;
     } else if (d.type === "nullable") {
       out.nullable = true;
@@ -466,6 +470,7 @@ interface Ancestors {
   optional: boolean;
   default: unknown;
   redacted: boolean;
+  unparsed: boolean;
 }
 
 function collectVariables(schema: Schema, raw: unknown, parsedInput: unknown, defaults: ConfigDefaults | undefined, path: string[], out: ConfigVariable[], ancestors: Ancestors): void {
@@ -482,7 +487,7 @@ function collectVariables(schema: Schema, raw: unknown, parsedInput: unknown, de
     const set = rawValue !== undefined;
     const hostValue = hostValueAt(defaults, raw, childPath);
     const fromAncestor = valueAt(inherited, [key]);
-    const effective = hostValue !== undefined ? hostValue : fromAncestor === undefined ? unwrapped.defaultValue?.() : fromAncestor;
+    const effective = hostValue !== undefined ? hostValue : fromAncestor === undefined ? (ancestors.unparsed ? undefined : unwrapped.defaultValue?.()) : fromAncestor;
     const optional = ancestors.optional || unwrapped.optional;
     const status: ConfigStatus = set ? "set" : effective === undefined ? "missing" : "default";
     const parsedValue = valueAt(parsed, childPath);
@@ -493,7 +498,8 @@ function collectVariables(schema: Schema, raw: unknown, parsedInput: unknown, de
     if (!set && hostValue !== undefined && defaults !== undefined) variable.source = defaults.from;
     if (effective !== undefined && !redacted) variable.default = redactedSnapshot(child, effective);
     out.push(variable);
-    if (kind(unwrapped.inner) === "object") collectVariables(child, raw, parsed, defaults, childPath, out, { optional, default: effective, redacted });
+    const unparsed = !set && hostValue === undefined && (ancestors.unparsed || (fromAncestor === undefined && unwrapped.defaultKind === "default"));
+    if (kind(unwrapped.inner) === "object") collectVariables(child, raw, parsed, defaults, childPath, out, { optional, default: effective, redacted, unparsed });
   }
 }
 
@@ -509,7 +515,7 @@ function collectVariables(schema: Schema, raw: unknown, parsedInput: unknown, de
 export function describeConfig(schema: Schema, raw: unknown, parsed?: unknown, defaults?: ConfigDefaults): ConfigDescription {
   if (!isZod4Schema(schema)) return { schema: {}, variables: [] };
   const variables: ConfigVariable[] = [];
-  collectVariables(schema, raw, parsed, defaults, [], variables, { optional: false, default: undefined, redacted: false });
+  collectVariables(schema, raw, parsed, defaults, [], variables, { optional: false, default: undefined, redacted: false, unparsed: false });
   const root = toJsonSchema(schema);
   if (root.writeOnly === true && unwrap(schema).description !== SECRET) delete root.writeOnly;
   return { schema: root, variables };

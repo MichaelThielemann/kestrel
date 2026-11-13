@@ -889,7 +889,10 @@ three-state version of it: `set` (same as `set: true`), `default` (the path is a
 comes from the variable's own `.default()` or `.prefault()` or from an ancestor's — `default` then holds the effective
 value, e.g. `archive.folder` → `"old_posts"` when `archive` is left out entirely) or `missing` (no
 value at all). A parent that *is* spelled out in the config hands its children no default: only their
-own `.default()` still applies.
+own `.default()` still applies. A parent left out whose `.default()` applies passes its value on as
+written, so below it only what that value carries is `default` and every other child is `missing`,
+even one with a `.default()` of its own; a `.prefault()` is parsed, so its children's own defaults
+apply too.
 
 When the module entry carries `defaults` (see [configuration](configuration.md#host-supplied-defaults)),
 a path those values carry and `config` does not is `status: "default"` with `source` set to

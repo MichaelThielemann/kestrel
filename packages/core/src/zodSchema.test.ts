@@ -203,6 +203,30 @@ describe("describeConfig", () => {
     expect(byPath["store.archive.folder"]).toEqual({ path: "store.archive.folder", type: "string", required: false, default: "old_posts", secret: false, set: false, status: "default", value: "old_posts", redacted: false });
   });
 
+  it("below an absent object with a plain default, a child the default leaves out is missing, as zod 4 hands the default over unparsed", () => {
+    const retry = z.object({ max: z.number().default(5), base: z.number().default(2), delay: z.object({ ms: z.number().default(100) }).optional() }).strict();
+    const nested = z.object({ retry: retry.default(boundaryCast<z.output<typeof retry>>({ base: 3 }, "host")) }).strict();
+    expect(nested.parse({})).toEqual({ retry: { base: 3 } });
+    const byPath = Object.fromEntries(describeConfig(nested, {}, nested.parse({})).variables.map((v) => [v.path, v]));
+    expect(byPath.retry).toEqual({ path: "retry", type: "object", required: false, default: { base: 3 }, secret: false, set: false, status: "default", value: { base: 3 }, redacted: false });
+    expect(byPath["retry.base"]).toEqual({ path: "retry.base", type: "number", required: false, default: 3, secret: false, set: false, status: "default", value: 3, redacted: false });
+    expect(byPath["retry.max"]).toEqual({ path: "retry.max", type: "number", required: false, secret: false, set: false, status: "missing", value: null, redacted: false });
+    expect(byPath["retry.delay.ms"]).toEqual({ path: "retry.delay.ms", type: "number", required: false, secret: false, set: false, status: "missing", value: null, redacted: false });
+  });
+
+  it("below an absent object with a prefault, a child gets its own default, as zod 4 parses the prefault", () => {
+    const nested = z.object({ retry: z.object({ max: z.number().default(5) }).strict().prefault({}) }).strict();
+    expect(nested.parse({})).toEqual({ retry: { max: 5 } });
+    const byPath = Object.fromEntries(describeConfig(nested, {}, nested.parse({})).variables.map((v) => [v.path, v]));
+    expect(byPath["retry.max"]).toEqual({ path: "retry.max", type: "number", required: false, default: 5, secret: false, set: false, status: "default", value: 5, redacted: false });
+  });
+
+  it("below an object the config sets, a child gets its own default whatever kind of default the object has", () => {
+    const nested = z.object({ retry: z.object({ max: z.number().default(5), base: z.number() }).strict().default({ max: 1, base: 2 }) }).strict();
+    const byPath = Object.fromEntries(describeConfig(nested, { retry: { base: 3 } }).variables.map((v) => [v.path, v]));
+    expect(byPath["retry.max"]).toMatchObject({ status: "default", value: 5 });
+  });
+
   it("reads the effective value from the parsed config, defaults included", () => {
     const parsed = schema.parse({ file: "./x.db", buckets: { a: { limit: 1 } }, passwordHash: "scrypt$abc", kind: "a", up: () => {}, ttl: null });
     const byPath = Object.fromEntries(describeConfig(schema, { file: "./x.db", buckets: { a: { limit: 1 } }, passwordHash: "scrypt$abc", kind: "a", up: () => {}, ttl: null }, parsed).variables.map((v) => [v.path, v]));
