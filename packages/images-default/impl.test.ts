@@ -549,6 +549,16 @@ describe("images/default boot rules", () => {
 });
 
 describe("images/default size set changes", () => {
+  it("refuses an invalid size with a VALIDATION error naming the path and zod's message", async () => {
+    const { images } = await make();
+    const message = async (size: Record<string, unknown>): Promise<string> => expectErr(await images.register([size]), "VALIDATION").message;
+    expect(await message({ name: "hero", width: 10 })).toBe("images: width: Too small: expected number to be >=16");
+    expect(await message({ width: 640 })).toBe("images: name: Invalid input: expected string, received undefined");
+    expect(await message({ name: "Hero", width: 640 })).toBe("images: name: Invalid string: must match pattern /^[a-z][a-z0-9-]*$/");
+    expect(await message({ name: "hero", width: 640, fit: "fill" })).toBe('images: fit: Invalid option: expected one of "inside"|"cover"');
+    expect(await message({ name: "hero", width: 640, fit: "cover" })).toBe('images: height: height is required for fit "cover"');
+  });
+
   it("registering a spec change for a block-registered (non-config) size with existing items starts a background sync that re-plans them", async () => {
     const { images, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
     const id = addMedia(media, "m1", await jpeg(2000, 1000));

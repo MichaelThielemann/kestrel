@@ -31,6 +31,13 @@ Net changes since 5.8.1.
   zod 4's issue code, `invalid_value` where zod 3 said `invalid_enum_value` or `invalid_literal` and
   `invalid_format` where it said `invalid_string`. An enum mismatch still reads
   `Invalid enum value. Expected 'a' | 'b'`.
+- `images-default`: the `VALIDATION` error of `images.register` for an invalid size carries zod 4's
+  message after `images: <path>: `: a width below 16 reads `Too small: expected number to be >=16`
+  (was `Number must be greater than or equal to 16`), a missing name `Invalid input: expected
+  string, received undefined` (was `Required`), a name that is not a slug `Invalid string: must
+  match pattern /^[a-z][a-z0-9-]*$/` (was `Invalid`) and an unknown `fit` or `format` `Invalid
+  option: expected one of "inside"|"cover"` (was `Invalid enum value. Expected 'inside' | 'cover',
+  received 'fill'`).
 - `delivery-static`: **`delivery.exportLlms` is gone.** A pipeline that still names it fails at boot
   as an unknown step. Index files are never written inside a request any more: put
   `delivery.requestIndexes` where `delivery.exportLlms` was, and with `dependencies.render: "events"`
