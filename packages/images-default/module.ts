@@ -30,7 +30,8 @@ export const configSchema = z
     maxAttempts: z.number().int().positive().default(DEFAULT_MAX_ATTEMPTS),
     renderTimeoutMs: z.number().int().positive().default(DEFAULT_RENDER_TIMEOUT_MS),
   })
-  .strict();
+  .strict()
+  .refine((config) => config.renderTimeoutMs < config.staleAfterMs, { message: "renderTimeoutMs must be less than staleAfterMs", path: ["renderTimeoutMs"] });
 
 function mediaId(ctx: Context): string | undefined {
   if (ctx.params.id) return ctx.params.id;

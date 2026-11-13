@@ -122,6 +122,13 @@ describe("images/default configSchema", () => {
     expect(configSchema.safeParse({ publicPath: "/api/media" }).success).toBe(true);
     expect(configSchema.safeParse({ publicCopy: { prefix: "site/" } }).success).toBe(true);
   });
+
+  it("rejects a renderTimeoutMs that is not less than staleAfterMs, so a render ends before its lease on the item runs out", () => {
+    const parsed = configSchema.safeParse({ staleAfterMs: 30000, renderTimeoutMs: 30000 });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]).toMatchObject({ path: ["renderTimeoutMs"], message: "renderTimeoutMs must be less than staleAfterMs" });
+    expect(configSchema.safeParse({ staleAfterMs: 30001, renderTimeoutMs: 30000 }).success).toBe(true);
+  });
 });
 
 describe("images/default at boot", () => {
