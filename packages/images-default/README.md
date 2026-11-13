@@ -287,7 +287,8 @@ which a browser would open as a document that can run script), which has no vari
 always available.
 `variants[]` never lists a `planned` size; `variantCounts` (`{ done, pending, error, failed }`)
 counts a `planned` row as `pending` too, alongside a size with no row yet or a `done` row whose spec
-no longer matches the effective size or whose render was cut with another crop than the row now has; a row for a size nobody declares any more is ignored.
+no longer matches the effective size or whose render was cut with another crop than the row now
+has; a row for a size nobody declares any more is ignored.
 
 Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered HTML.
 
