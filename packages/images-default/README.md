@@ -218,7 +218,11 @@ re-planning of the item run in the item's own section, after a placement or rend
 already under way in this process. Re-planning turns every `cover` size whose crop changes
 `pending` at the same path, with its new width and height, and leaves the old variant there; a
 pipeline renders them by running `images.generate` after it, as `setMediaFraming` in
-`examples/minimal` does. A size added later is placed with the item's framing.
+`examples/minimal` does. A size added later is placed with the item's framing. Re-planning changes
+a row only while it still has the crop, spec and state it was read with, and reads the item again
+otherwise, so two framings saved at once in two processes leave the rows on the framing that is
+stored. When re-planning fails after the framing was stored, `images.setFraming` answers the error
+and plans the item again in the background.
 
 Until the new render is at the path, the origin and the public copy serve the old variant, never the
 original's bytes. Once it is there, `variants[].path` gains `?v=<token>`, a short hash of the crop

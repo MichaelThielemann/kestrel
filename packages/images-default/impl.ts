@@ -715,7 +715,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       touched = true;
     };
     let outcome = await placeItem(item, touch);
-    if (isErr(outcome) && outcome.error.code === "CONFLICT" && !touched) outcome = await placeItem(item, touch);
+    for (let attempt = 1; isErr(outcome) && outcome.error.code === "CONFLICT" && attempt < 3; attempt += 1) outcome = await placeItem(item, touch);
     if (!touched) return outcome;
     return settleWrites(mediaId, outcome, { changed: false });
   }
@@ -792,10 +792,11 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const fresh = newRow(item, size, decodable, ow, oh, framing);
       const dimsPatch = { spec: fresh.spec, width: fresh.width, height: fresh.height, crop: fresh.crop, updatedAt: now() };
       const patch: Partial<Variant> = row.state === "planned" ? dimsPatch : decodable ? { ...dimsPatch, state: "pending", attempts: 0, error: null } : { ...dimsPatch, state: "failed", error: UNDECODABLE };
-      const updated = await db.updateOne<Variant>(VARIANTS, row.id, patch);
+      const updated = await db.updateMany<Variant>(VARIANTS, { id: row.id, key: row.key, spec: row.spec, state: row.state, crop: row.crop }, patch);
       if (isErr(updated)) return updated;
-      if (updated.value.state === "planned") {
-        toPlace.push(updated.value);
+      if (updated.value === 0) return err(failure("CONFLICT", `images: the variant ${size.name} of media/${mediaId} changed while it was planned`));
+      if (row.state === "planned") {
+        toPlace.push({ ...row, ...patch });
         changed = true;
       }
     }
@@ -1882,7 +1883,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         const written = await writeFraming(mediaId, framing, ow, oh);
         if (isErr(written)) return written;
         const planned = await settleWrites(mediaId, await planItem(mediaId), { changed: false });
-        if (isErr(planned)) return planned;
+        if (isErr(planned)) {
+          schedulePlacement(mediaId);
+          return planned;
+        }
         if (planned.value.changed) raiseVariantsChanged([mediaId]);
         return ok({ id: mediaId, framing });
       });

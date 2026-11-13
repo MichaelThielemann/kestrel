@@ -448,6 +448,63 @@ describe("images/default re-cropping while a render runs", () => {
     for (const images of [first, slow, other]) await images.close();
   });
 
+  it("re-planning with a framing another process replaced meanwhile leaves the rows on the stored framing", async () => {
+    const w = await world();
+    const g = gate();
+    let framingReads = 0;
+    let armed = false;
+    const reads: Persistence = {
+      ...w.db,
+      findOne: async (collection, filter) => {
+        const found = await w.db.findOne(collection, filter);
+        if (armed && collection === FRAMING && ++framingReads === 2) {
+          g.arrive();
+          await g.wait;
+        }
+        return found;
+      },
+    };
+    const slow = await w.open([SQUARE], undefined, { db: reads });
+    const other = await w.open([SQUARE]);
+    expectOk(await other.generate("m1"));
+
+    armed = true;
+    const framing = slow.setFraming("m1", { crops: { "1:1": { x: 0, y: 0, w: 0.6, h: 1 } } });
+    await g.reached;
+    expectOk(await other.setFraming("m1", { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } }));
+    g.open();
+    expectOk(await framing);
+
+    expect(expectOk(await other.framingsOf(["m1"])).get("m1")!.ratios[0]!.crop).toEqual({ left: 400, top: 0, width: 600, height: 600 });
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "pending", crop: "400,0,600,600" });
+    expectOk(await other.generate("m1"));
+    expect(copyOf(w, "square.webp")).toContain("400,0,600,600");
+    for (const images of [slow, other]) await images.close();
+  });
+
+  it("re-plans in the background when the re-planning of images.setFraming fails after the framing was stored", async () => {
+    const w = await world();
+    let failing = false;
+    const writes: Persistence = {
+      ...w.db,
+      updateMany: async (collection, filter, patch) => {
+        if (failing && collection === VARIANTS && "crop" in patch) {
+          failing = false;
+          return err(failure("TRANSIENT", "busy"));
+        }
+        return w.db.updateMany(collection, filter, patch);
+      },
+    };
+    const images = await w.open([SQUARE], undefined, { db: writes });
+    expectOk(await images.generate("m1"));
+
+    failing = true;
+    expectErr(await images.setFraming("m1", { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } }), "TRANSIENT");
+    await whenIdle(images);
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "pending", crop: "400,0,600,600" });
+    await images.close();
+  });
+
   it("in one process, images.setFraming waits for a render of the item and re-plans after it", async () => {
     const w = await world();
     const g = gate();
