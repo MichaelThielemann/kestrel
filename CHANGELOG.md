@@ -1307,8 +1307,10 @@ Net changes since 5.8.1.
   `images_hidden`: a hidden item's variants are not served, exported, attached or copied publicly
   until it is shown again, while its rows and stored variants stay. Neither step raises
   `images.variantsChanged`. Both read `result.trashVersions` as well, so when a trash and a restore of the
-  same item overlap, the move that happened last decides whether its variants are hidden. `Images`
-  gains `hide`, `show` and `hidden`.
+  same item overlap, the move that happened last decides whether its variants are hidden. Both leave
+  a request on the item before they set or lift the mark, so a hide or show whose public copies were
+  not all removed or written is finished by `images.resume`. `Images` gains `hide`, `show` and
+  `hidden`.
 - `references/default` gains `references.dropReferenced:<target>`: it keeps the unreferenced ids in
   `result.ids` and adds each referenced one to `result.skipped` as `{ id, reason: "referenced" }`, so a
   purge leaves files a page still uses in the trash and reports them.

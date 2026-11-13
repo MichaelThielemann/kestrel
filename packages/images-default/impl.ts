@@ -455,10 +455,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok(taken.value === 1 ? { mediaId, token, request: row.request, redo: row.redo } : null);
   }
 
-  async function ask(mediaId: string, redo = false): Promise<Result<void, KestrelError>> {
+  async function ask(mediaId: string, redo = false): Promise<Result<string, KestrelError>> {
     const mark = { request: randomUUID(), updatedAt: now() };
     const asked = await db.updateMany<ItemLease>(ITEMS, { mediaId }, redo ? { ...mark, redo: true } : mark);
-    return isErr(asked) ? asked : ok(undefined);
+    return isErr(asked) ? asked : ok(mark.request);
   }
 
   async function renew(lease: Lease): Promise<Result<"held" | "requested" | "lost", KestrelError>> {
@@ -516,7 +516,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok(updated.value === 1 ? { ...row, ...patch } : null);
   }
 
-  function withItem<T>(mediaId: string, work: (lease: Lease) => Promise<Result<T, KestrelError>>, handOver: () => Promise<Result<T, KestrelError>>, options: { serveLater?: boolean } = {}): Promise<Result<T, KestrelError>> {
+  function withItem<T>(mediaId: string, work: (lease: Lease) => Promise<Result<T, KestrelError>>, handOver: () => Promise<Result<T, KestrelError>>, options: { serveLater?: boolean; asked?: string } = {}): Promise<Result<T, KestrelError>> {
     return exclusive(mediaId, async (): Promise<Result<T, KestrelError>> => {
       const lease = await acquire(mediaId);
       if (isErr(lease)) return lease;
@@ -527,7 +527,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         return isErr(asked) ? asked : handed;
       }
       const held = lease.value;
-      return settleLease(held, await work(held), options.serveLater === true);
+      const owed = held.request !== "" && held.request !== options.asked;
+      return settleLease(held, await work(held), options.serveLater === true, owed);
     });
   }
 
@@ -538,7 +539,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return outcome;
   }
 
-  async function settleLease<T>(lease: Lease, done: Result<T, KestrelError>, serveLater: boolean): Promise<Result<T, KestrelError>> {
+  async function settleLease<T>(lease: Lease, done: Result<T, KestrelError>, serveLater: boolean, owedAtStart: boolean): Promise<Result<T, KestrelError>> {
     if (isErr(done)) {
       const found = await db.findOne<ItemLease>(ITEMS, { mediaId: lease.mediaId });
       const asked = !isErr(found) && found.value !== null && found.value.writer === lease.token && found.value.request !== lease.request;
@@ -546,7 +547,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (asked) scheduleConverge(lease.mediaId);
       return left;
     }
-    let owed = lease.request !== "";
+    let owed = owedAtStart;
     for (;;) {
       if (!owed) {
         const released = await db.updateMany<ItemLease>(ITEMS, { mediaId: lease.mediaId, writer: lease.token, request: lease.request }, { writer: "", writerUntil: 0, request: "", redo: false, updatedAt: now() });
@@ -592,8 +593,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(rendered)) return rendered;
     if (config.publicCopy === undefined) return ok(undefined);
     const hidden = await isHidden(mediaId);
-    if (isErr(hidden) || hidden.value) return isErr(hidden) ? hidden : ok(undefined);
-    return writeCopiesOf(mediaId, lease);
+    if (isErr(hidden)) return hidden;
+    if (!hidden.value) return writeCopiesOf(mediaId, lease);
+    const withdrawn = await removeAllCopies(mediaId);
+    return isErr(withdrawn) ? withdrawn : ok(undefined);
   }
 
   async function currentVariants(mediaId: string): Promise<Result<Variant[], KestrelError>> {
@@ -2092,14 +2095,21 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         const media = await readMedia(mediaId);
         if (isErr(media)) return media;
         if (media.value === null) continue;
+        if (config.publicCopy === undefined) {
+          const marked = await markHidden(mediaId, true, versionOf(mediaId));
+          if (isErr(marked)) return marked;
+          continue;
+        }
+        const asked = await ask(mediaId);
+        if (isErr(asked)) return asked;
         const marked = await markHidden(mediaId, true, versionOf(mediaId));
         if (isErr(marked)) return marked;
-        if (!marked.value) continue;
-        const withdrawn = await exclusive(mediaId, async (): Promise<Result<number, KestrelError>> => {
+        const withdraw = async (): Promise<Result<number, KestrelError>> => {
           const still = await isHidden(mediaId);
           if (isErr(still)) return still;
           return still.value ? removeAllCopies(mediaId) : ok(0);
-        });
+        };
+        const withdrawn = await withItem(mediaId, withdraw, withdraw, { asked: asked.value });
         if (isErr(withdrawn)) return withdrawn;
       }
       return ok(undefined);
@@ -2108,9 +2118,15 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     async show(mediaIds, versions) {
       const versionOf = (mediaId: string): number | undefined => trashVersionOf(versions, mediaId);
       for (const mediaId of new Set(mediaIds)) {
+        if (config.publicCopy === undefined) {
+          const unmarked = await markHidden(mediaId, false, versionOf(mediaId));
+          if (isErr(unmarked)) return unmarked;
+          continue;
+        }
+        const asked = await ask(mediaId);
+        if (isErr(asked)) return asked;
         const unmarked = await markHidden(mediaId, false, versionOf(mediaId));
         if (isErr(unmarked)) return unmarked;
-        if (!unmarked.value || config.publicCopy === undefined) continue;
         const rewritten = await withItem(
           mediaId,
           async (lease): Promise<Result<void, KestrelError>> => {
@@ -2119,6 +2135,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
             return hidden.value ? ok(undefined) : writeCopiesOf(mediaId, lease);
           },
           async () => ok(undefined),
+          { asked: asked.value },
         );
         if (isErr(rewritten)) return rewritten;
       }

@@ -1736,6 +1736,10 @@ describe("images/default work a call leaves unfinished", () => {
     return collection === ITEMS && Reflect.has(patch, "request") && !Reflect.has(patch, "writer");
   }
 
+  function isTake(collection: string, patch: object): boolean {
+    return collection === ITEMS && typeof Reflect.get(patch, "writer") === "string" && Reflect.get(patch, "writer") !== "";
+  }
+
   function failingOnce(w: World, matches: (collection: string, patch: object) => boolean): Persistence {
     let failing = true;
     return {
@@ -1889,6 +1893,52 @@ describe("images/default work a call leaves unfinished", () => {
     await whenIdle(later);
     await expectRenderedWith(w, later, "400,0,600,600");
     for (const images of [first, editor, later]) await images.close();
+  });
+
+  it("a restore whose take of the item fails has its public copies written by images.resume", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.generate("m1"));
+    expectOk(await images.hide(["m1"]));
+    expect(copyOf(w, "square.webp")).toBeNull();
+
+    const restoring = await w.open([SQUARE], undefined, { db: failingOnce(w, isTake) });
+    expectErr(await restoring.show(["m1"]), "TRANSIENT");
+    expect(expectOk(await images.hidden(["m1"])).has("m1")).toBe(false);
+    expect(copyOf(w, "square.webp")).toBeNull();
+
+    const later = await w.open([SQUARE], undefined, { now: () => LATER });
+    expectOk(await later.resume());
+    await whenIdle(later);
+    expect(copyOf(w, "square.webp")).toContain("square|");
+    for (const opened of [images, restoring, later]) await opened.close();
+  });
+
+  it("a trashed item whose public copies cannot all be removed has them removed by images.resume", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.generate("m1"));
+    let failing = true;
+    const blobs: Blobstore = {
+      ...w.blobs,
+      remove: async (key) => {
+        if (failing && key.startsWith("site/")) {
+          failing = false;
+          return err(failure("TRANSIENT", "copy store unavailable"));
+        }
+        return w.blobs.remove(key);
+      },
+    };
+    const trashing = await w.open([SQUARE], undefined, { blobs });
+    expectErr(await trashing.hide(["m1"]), "TRANSIENT");
+    expect(copyOf(w, "square.webp")).not.toBeNull();
+
+    const later = await w.open([SQUARE], undefined, { now: () => LATER });
+    expectOk(await later.resume());
+    await whenIdle(later);
+    expect(copyOf(w, "square.webp")).toBeNull();
+    expect(expectOk(await later.hidden(["m1"])).has("m1")).toBe(true);
+    for (const opened of [images, trashing, later]) await opened.close();
   });
 
   it("images.setFraming answers NOT_FOUND and stores nothing when the item is removed after it was read", async () => {

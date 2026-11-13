@@ -152,7 +152,9 @@ under `<id>/variants/` — current sizes and retired paths alike — are removed
 paths, `images.export:<dir>` leaves its variants out, `images.attach` lists no variants for it and
 reports it as not `available`, and nothing writes a public copy for it again: not the placeholder of
 a new size, not the end of a render, not a retired path, not `images.syncPublic`, which also removes
-any copy of it that it finds. Every writer of a public copy checks the mark before and after it
+any copy of it that it finds. Both steps leave a request on the item's lease (see "Focus and crop")
+before they set or lift the mark, so a hide whose copies were not all removed, or a show whose copies
+were not all written, is finished by `images.resume` once `staleAfterMs` has passed. Every writer of a public copy checks the mark before and after it
 writes, so a copy written while a hide in another process lands is withdrawn again, and written once
 more when a show followed before the withdrawal. Its rows, its
 private variants and its renders stay and go on as
@@ -239,15 +241,16 @@ has no query again.
 Placing, rendering and writing the public copies of one item happen under a lease on the item, a row
 per media id in `images_items` that one process holds at a time for `staleAfterMs` and renews before
 each write of a path; `renderTimeoutMs` is below `staleAfterMs`, so a render ends before the lease it
-renews runs out. `images.plan`, `images.generate`, `images.setFraming`, `images.showMany`,
-`images.syncPublic` and `images.resume` take it; a call that finds the item held by another process
-does what needs no lease (`images.setFraming` stores the framing and raises the focus event,
-`images.generate` answers the rows as they are), leaves a request on the lease and returns. The
-holder sees the request before it lets go and places and renders the item again with what is stored
-then, writing its public copies as well; a holder that only places (`images.plan`,
-`images.setFraming`) leaves this to its background loop. A request left after the holder let go
-waits for `images.resume`, which serves it once `staleAfterMs` has passed. An `images.setFraming` that stored
-its framing but could not leave its request places and renders the item in its background loop. A render that sees a request before it
+renews runs out. `images.plan`, `images.generate`, `images.setFraming`, `images.hideMany`,
+`images.showMany`, `images.syncPublic` and `images.resume` take it; a call that finds the item held by
+another process does what needs no lease (`images.setFraming` stores the framing and raises the focus
+event, `images.generate` answers the rows as they are, `images.hideMany` removes the public copies),
+leaves a request on the lease and returns. The holder sees the request before it lets go and places
+and renders the item again with what is stored then, writing its public copies as well (or removing
+them while the item is hidden); a holder that only places (`images.plan`, `images.setFraming`) leaves
+this to its background loop. A request left after the holder let go waits for `images.resume`, which
+serves it once `staleAfterMs` has passed. An `images.setFraming` that stored its framing but could not
+leave its request places and renders the item in its background loop. A render that sees a request before it
 writes drops its bytes and renders again, so two framings saved at once in two processes leave the
 rows on the framing that is stored. A call that stored its framing while another process held the
 item does not store it again when it gets the item, so the framing saved last is the one stored. A
