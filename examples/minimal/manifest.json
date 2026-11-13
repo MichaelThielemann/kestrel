@@ -6854,6 +6854,12 @@
                           "null"
                         ]
                       },
+                      "renders": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
                       "originalWidth": {
                         "type": [
                           "number",
@@ -6968,6 +6974,12 @@
                             "renderedCrop": {
                               "type": [
                                 "string",
+                                "null"
+                              ]
+                            },
+                            "renders": {
+                              "type": [
+                                "number",
                                 "null"
                               ]
                             },
@@ -17433,6 +17445,12 @@
                               "null"
                             ]
                           },
+                          "renders": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
                           "originalWidth": {
                             "type": [
                               "number",
@@ -17547,6 +17565,12 @@
                                 "renderedCrop": {
                                   "type": [
                                     "string",
+                                    "null"
+                                  ]
+                                },
+                                "renders": {
+                                  "type": [
+                                    "number",
                                     "null"
                                   ]
                                 },
@@ -29145,6 +29169,12 @@
                               "null"
                             ]
                           },
+                          "renders": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
                           "originalWidth": {
                             "type": [
                               "number",
@@ -29259,6 +29289,12 @@
                                 "renderedCrop": {
                                   "type": [
                                     "string",
+                                    "null"
+                                  ]
+                                },
+                                "renders": {
+                                  "type": [
+                                    "number",
                                     "null"
                                   ]
                                 },
