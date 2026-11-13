@@ -322,7 +322,9 @@ whenever files changed after the marker the database holds, the two differ. When
 the database holds a marker the blob store lacks (a blob volume that was lost or not mounted, a changed `prefix`),
 every output is marked as for a new build, `restored` is `true`, a warning is logged, and both get a new marker. This
 covers a restore that lost the latest writes, and also a process that stopped without shutting down within a few
-seconds of changing files: that next start renders every output again although the database is current. A graceful
+seconds of changing files: that next start renders every output again although the database is current. During a
+long re-render such a stop always falls within those seconds, so a process that keeps being killed before the
+re-render ends starts it over on every start. A graceful
 stop refuses renders and unpublishes that start after it (they answer `TRANSIENT`, so a queue runs them again after
 the restart), waits up to `renderTimeoutSeconds` per format for the ones in flight, and then stores the marker. A
 check that finds the two equal, and a process that changed no file, write no marker. A process that never ran
