@@ -28,9 +28,8 @@ afterEach(async () => {
 
 const duration = { asymmetricMatch: (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0, toString: () => "a duration in ms" };
 
-async function serve(logger: Logger, run: Runner = echo, options: HttpOptions = {}, checkEveryMs?: number): Promise<string> {
+async function serve(logger: Logger, run: Runner = echo, options: HttpOptions = {}): Promise<string> {
   const server = createHttpServer(routes, run, logger, options);
-  if (checkEveryMs !== undefined) Object.assign(server, { connectionsCheckingInterval: checkEveryMs });
   return start(server);
 }
 
