@@ -1470,4 +1470,33 @@ describe("images/default writes of a holder whose item or row changed meanwhile"
     expect((await rowsBySize(w)).get("square")).toMatchObject({ crop: "0,0,600,600" });
     for (const images of [first, holder, earlier, latest]) await images.close();
   });
+  it("images.resume leaves a placement under way to its queued render, in the same and in another process", async () => {
+    for (const sameProcess of [false, true]) {
+      const w = await world();
+      const placing = holdOnce(w, "site/");
+      const listed = gate();
+      const watching: Persistence = {
+        ...w.db,
+        findMany: async <T extends Document>(collection: string, filter: Filter, options?: FindOptions) => {
+          const found = await w.db.findMany<T>(collection, filter, options);
+          if (collection === VARIANTS && Reflect.get(filter, "state") === "planned") listed.arrive();
+          return found;
+        },
+      };
+      const planner = await w.open([THUMB, SQUARE], undefined, { blobs: placing.blobs, db: watching });
+      const planning = planner.plan(["m1"]);
+      await placing.g.reached;
+      const cron = sameProcess ? planner : await w.open([THUMB, SQUARE], undefined, { db: watching, now: () => 1005 });
+      const resuming = cron.resume();
+      await listed.reached;
+      placing.g.open();
+      expectOk(await planning);
+      expectOk(await resuming);
+      for (const images of [planner, cron]) await whenIdle(images);
+
+      expect(w.renders).toEqual([]);
+      expect([...(await rowsBySize(w)).values()].map((row) => row.state)).toEqual(["pending", "pending"]);
+      for (const images of new Set([planner, cron])) await images.close();
+    }
+  });
 });

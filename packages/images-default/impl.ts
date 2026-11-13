@@ -1649,7 +1649,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(requested)) return requested;
     const stalePending = await db.findMany<Variant>(VARIANTS, { state: "pending", size: declared, bytes: { gt: 0 }, updatedAt: { lt: stale } }, oldestFirst);
     if (isErr(stalePending)) return stalePending;
-    const stalePlanned = await db.findMany<Variant>(VARIANTS, { state: "planned", size: declared }, oldestFirst);
+    const stalePlanned = await db.findMany<Variant>(VARIANTS, { state: "planned", size: declared, updatedAt: { lt: stale } }, oldestFirst);
     if (isErr(stalePlanned)) return stalePlanned;
     const unstarted: string[] = [];
     const recent = await eachMediaFile({ ...ELIGIBLE, createdSince: at - NEW_ITEM_WINDOW_MS }, async (file) => {

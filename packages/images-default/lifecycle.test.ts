@@ -286,7 +286,8 @@ describe("images/default: a format change", () => {
 
 describe("images/default: an image that cannot be decoded", () => {
   it("stays unavailable and lists no path while its placeholder cannot be written, and becomes available once it is", async () => {
-    const w = await world();
+    let clock = 1000;
+    const w = await world({}, fixedRenderer, () => clock);
     await seed(w, "m1", new Uint8Array([1, 2, 3]), { width: 100, height: 50 });
     const put = w.blobs.put.bind(w.blobs);
     w.blobs.put = async (k, d, o) => (k.startsWith("site/") ? err(failure("TRANSIENT", "down")) : put(k, d, o));
@@ -295,6 +296,7 @@ describe("images/default: an image that cannot be decoded", () => {
     expect(rows.map((r) => r.state)).toEqual(["planned"]);
     expect(isAvailable(rows)).toBe(false);
     w.blobs.put = put;
+    clock += baseConfig.staleAfterMs + 1;
     await w.images.resume();
     const repaired = await rowsOf(w, "m1");
     expect(repaired.map((r) => r.state)).toEqual(["failed"]);

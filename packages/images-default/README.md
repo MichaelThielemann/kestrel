@@ -334,30 +334,29 @@ Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered
 with its attempt count unchanged, never at a stale `"done"`, and leaves the lease on the item. The
 next `images.generate` or sync pass picks it up once the lease has run out, and so does
 `images.resume`, which takes over a lease older than `staleAfterMs`. A `pending` row that never had a
-render and whose item no process holds is left to the render queued for it: the `images.planned` subscriber with a queuing event delivery, or with
-inline delivery the render this module's background loop runs after it placed the row. A row whose
-queued render is lost with its process waits for `images.generate` or `images.sync`.
-Meanwhile `images.serve` hands out that earlier render, or the full-size original when the path has
-none yet (header `x-kestrel-variant: original`).
-A job row whose `updatedAt` is older than `staleAfterMs` counts as abandoned, so `images.sync` and
-the `images.resume` cron take it over instead of answering `CONFLICT`. The job's counters are
-written after each image rather than only at the end of a chunk, so a long-running chunk is never
-mistaken for a stalled job by `images.readStatus` or the `staleAfterMs` takeover. `images.resume`
-also places and renders any item whose lease ran out (a holder that stopped, see "Focus and crop"),
-any item with a request left open for longer than `staleAfterMs` (one whose last placement or render
-failed, or whose holder stopped before it served the request), any row that already had a render at
-its path and was left `pending` for longer than `staleAfterMs` (a re-render that never finished), any
-row still stuck at `planned` (a placement that never finished), and any media item created in the
-last 24 hours with no rows at all (a generation that never started). It takes one item from each of
-these in turn, at most 200 items per pass, so no group keeps it from the others. It considers only
-rows of sizes that are still declared, and moves the rows and requests of the items it tried but
-could not advance behind the others, so a few items it cannot place or render never keep it from the
-rest; items left out of a pass keep their place. An
-item it cannot place or render — for instance one its provider reports as ready but whose bytes it
-has lost, which `images.plan` and `images.generate` report as `INTERNAL` (`the stored bytes of
-media/<id> are missing`) — is logged and skipped, and the
-stalled job is resumed regardless. The sync job skips such an item the same way and counts it as
-failed; only a `TRANSIENT` failure stops the job, which `images.resume` then resumes.
+render and whose item no process holds is left to the render queued for it: the `images.planned`
+subscriber with a queuing event delivery, or with inline delivery the render this module's background
+loop runs after it placed the row. A row whose queued render is lost with its process waits for
+`images.generate` or `images.sync`. Meanwhile `images.serve` hands out that earlier render, or the
+full-size original when the path has none yet (header `x-kestrel-variant: original`). A job row whose
+`updatedAt` is older than `staleAfterMs` counts as abandoned, so `images.sync` and the
+`images.resume` cron take it over instead of answering `CONFLICT`. The job's counters are written
+after each image rather than only at the end of a chunk, so a long-running chunk is never mistaken
+for a stalled job by `images.readStatus` or the `staleAfterMs` takeover. `images.resume` also places
+and renders any item whose lease ran out (a holder that stopped, see "Focus and crop"), any item with
+a request left open for longer than `staleAfterMs` (one whose last placement or render failed, or
+whose holder stopped before it served the request), any row that already had a render at its path and
+was left `pending` for longer than `staleAfterMs` (a re-render that never finished), any row left
+`planned` for longer than `staleAfterMs` (a placement that never finished), and any media item
+created in the last 24 hours with no rows at all (a generation that never started). It takes one item
+from each of these in turn, at most 200 items per pass, so no group keeps it from the others. It
+considers only rows of sizes that are still declared, and moves the rows and requests of the items it
+tried but could not advance behind the others, so a few items it cannot place or render never keep it
+from the rest; items left out of a pass keep their place. An item it cannot place or render — for
+instance one its provider reports as ready but whose bytes it has lost, which `images.plan` and
+`images.generate` report as `INTERNAL` (`the stored bytes of media/<id> are missing`) — is logged and
+skipped, and the stalled job is resumed regardless. The sync job skips such an item the same way and
+counts it as failed; only a `TRANSIENT` failure stops the job, which `images.resume` then resumes.
 
 **A render that hangs** (a pathological image that keeps sharp busy, a blocked file descriptor) is
 given up on after `renderTimeoutMs`. sharp gets the same limit, rounded up to whole seconds, and stops

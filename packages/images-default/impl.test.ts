@@ -710,13 +710,17 @@ describe("images/default resume repair pass", () => {
     expect(rowsA.some((r) => r.state === "done")).toBe(true);
   });
 
-  it("places and renders a row a crash left stuck at planned", async () => {
-    const { images, db, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+  it("places and renders a row a crash left stuck at planned once staleAfterMs has passed", async () => {
+    let clock = 1000;
+    const { images, db, media } = await make({ publicCopy: { prefix: "site/" } }, () => clock, fixedRenderer);
     const b = addMedia(media, "b", await jpeg(400, 300), { createdAt: 1 });
     expectOk(await images.plan([b]));
     const rows = expectOk(await images.variantsOf([b])).get(b) ?? [];
     for (const row of rows) expectOk(await db.updateOne(VARIANTS, row.id, { state: "planned" }));
 
+    await images.resume();
+    expect((expectOk(await images.variantsOf([b])).get(b) ?? []).map((r) => r.state)).toEqual(rows.map(() => "planned"));
+    clock += baseConfig.staleAfterMs + 1;
     await images.resume();
     const rowsB = expectOk(await images.variantsOf([b])).get(b) ?? [];
     expect(rowsB.some((r) => r.state === "done")).toBe(true);
