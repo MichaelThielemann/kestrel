@@ -260,6 +260,11 @@ function renderedCropOf(row: Pick<Variant, "renderedCrop">): string {
   return row.renderedCrop ?? "";
 }
 
+function sameRect(a: Rect | null, b: Rect | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+}
+
 function isEmptyFraming(framing: Framing): boolean {
   return framing.focus === null && Object.keys(framing.crops).length === 0;
 }
@@ -1880,14 +1885,18 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (!parsed.ok) return err(failure("VALIDATION", `images: ${parsed.error}`));
       const framing = parsed.value;
       return exclusive(mediaId, async (): Promise<Result<{ id: string; framing: Framing }, KestrelError>> => {
+        const previous = await readFraming(mediaId);
+        if (isErr(previous)) return previous;
+        const focusChanged = !sameRect(previous.value?.focus ?? null, framing.focus);
         const written = await writeFraming(mediaId, framing, ow, oh);
         if (isErr(written)) return written;
         const planned = await settleWrites(mediaId, await planItem(mediaId), { changed: false });
         if (isErr(planned)) {
+          if (focusChanged) raiseVariantsChanged([mediaId]);
           schedulePlacement(mediaId);
           return planned;
         }
-        if (planned.value.changed) raiseVariantsChanged([mediaId]);
+        if (planned.value.changed || focusChanged) raiseVariantsChanged([mediaId]);
         return ok({ id: mediaId, framing });
       });
     },

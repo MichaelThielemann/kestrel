@@ -170,6 +170,26 @@ describe("images/default images.setFraming", () => {
   });
 });
 
+describe("images/default focus changes", () => {
+  it("raises one images.variantsChanged when the focus changes, also with inside sizes only, and none for an unchanged one", async () => {
+    const w = await world();
+    const images = await w.open([THUMB]);
+    expectOk(await images.generate("m1"));
+    w.events.emitted.length = 0;
+
+    expectOk(await images.setFraming("m1", CORNER_FOCUS));
+    expect(w.events.emitted).toEqual([{ name: "images.variantsChanged", ids: ["m1"] }]);
+    expectOk(await images.setFraming("m1", CORNER_FOCUS));
+    expectOk(await images.setFraming("m1", { ...CORNER_FOCUS, crops: { "1:1": { x: 0, y: 0, w: 0.6, h: 1 } } }));
+    expect(w.events.emitted).toHaveLength(1);
+    expectOk(await images.setFraming("m1", { focus: { x: 0.5, y: 0, w: 0.1, h: 0.1 } }));
+    expectOk(await images.setFraming("m1", {}));
+    expect(w.events.emitted).toHaveLength(3);
+    expect(w.renders.map((r) => r.size)).toEqual(["thumb"]);
+    await images.close();
+  });
+});
+
 describe("images/default re-cropping at the same path", () => {
   it("keeps the path and the old variant until the render is done, then switches ?v= and raises one images.variantsChanged", async () => {
     const w = await world();
@@ -191,7 +211,8 @@ describe("images/default re-cropping at the same path", () => {
     expect(copyOf(w, "wide-small.webp")).toBe(oldBytes);
     expect(expectOk(await images.read("m1", "wide-small.webp"))).toMatchObject({ variant: "done", fallback: false });
     expect(text(expectOk(await images.read("m1", "wide-small.webp"))?.data)).toBe(oldBytes);
-    expect(w.events.emitted).toEqual([]);
+    expect(w.events.emitted).toEqual([{ name: "images.variantsChanged", ids: ["m1"] }]);
+    w.events.emitted.length = 0;
     expect(expectOk(await images.variantCounts(["m1"])).get("m1")).toEqual({ done: 1, pending: 3, error: 0, failed: 0 });
 
     expectOk(await images.generate("m1"));
@@ -457,7 +478,7 @@ describe("images/default re-cropping while a render runs", () => {
       ...w.db,
       findOne: async (collection, filter) => {
         const found = await w.db.findOne(collection, filter);
-        if (armed && collection === FRAMING && ++framingReads === 2) {
+        if (armed && collection === FRAMING && ++framingReads === 3) {
           g.arrive();
           await g.wait;
         }

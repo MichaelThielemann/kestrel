@@ -1321,7 +1321,7 @@ Net changes since 5.8.1.
   ratio centred on the focus, else from the centre as without a framing; `inside` sizes never render
   again because of it. A size whose cut changes is planned again at the same path with its new
   dimensions (never enlarged), and the old variant is served until the new render is there; then the
-  item raises `images.variantsChanged`. A render that started before the framing changed never
+  item raises `images.variantsChanged`, as it does at once when the focus changes. A render that started before the framing changed never
   marks its row `done`, and `variantCounts` counts a row rendered with another crop as `pending`.
   `images.attach` adds `focus` and `framing: { focus, crops, ratios: [{ key, sizes, manual, fits,
   crop }] }` to each item. Ratio keys are exact, so sizes with nearly the same ratio get separate

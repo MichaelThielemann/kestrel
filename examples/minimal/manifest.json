@@ -7601,7 +7601,7 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Replace the framing of one media item (params.id): a focus rectangle and manual crops keyed by reduced ratio, normalised to 0..1 on the oriented original; an empty one removes it. Re-plans the item, so each cover size whose crop changes renders again at its path while the old variant keeps being served",
+        "summary": "Replace the framing of one media item (params.id): a focus rectangle and manual crops keyed by reduced ratio, normalised to 0..1 on the oriented original; an empty one removes it. Re-plans the item, so each cover size whose crop changes renders again at its path while the old variant keeps being served; raises images.variantsChanged when the focus changes",
         "reads": [
           "params.id"
         ],
@@ -28744,7 +28744,7 @@
           "name": "images.setFraming",
           "module": "images/default",
           "description": {
-            "summary": "Replace the framing of one media item (params.id): a focus rectangle and manual crops keyed by reduced ratio, normalised to 0..1 on the oriented original; an empty one removes it. Re-plans the item, so each cover size whose crop changes renders again at its path while the old variant keeps being served",
+            "summary": "Replace the framing of one media item (params.id): a focus rectangle and manual crops keyed by reduced ratio, normalised to 0..1 on the oriented original; an empty one removes it. Re-plans the item, so each cover size whose crop changes renders again at its path while the old variant keeps being served; raises images.variantsChanged when the focus changes",
             "reads": [
               "params.id"
             ],

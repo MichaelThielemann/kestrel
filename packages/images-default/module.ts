@@ -341,7 +341,7 @@ export default defineModule({
     hideMany: { summary: "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.trashVersions (from the same steps), an id whose variants a later move already showed is left alone", reads: ["result.ids", "result.trashVersions?"], writes: [] },
     showMany: { summary: "Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged; with result.trashVersions, an id whose variants a later move already hid stays hidden", reads: ["result.ids", "result.trashVersions?"], writes: [] },
     setFraming: {
-      summary: "Replace the framing of one media item (params.id): a focus rectangle and manual crops keyed by reduced ratio, normalised to 0..1 on the oriented original; an empty one removes it. Re-plans the item, so each cover size whose crop changes renders again at its path while the old variant keeps being served",
+      summary: "Replace the framing of one media item (params.id): a focus rectangle and manual crops keyed by reduced ratio, normalised to 0..1 on the oriented original; an empty one removes it. Re-plans the item, so each cover size whose crop changes renders again at its path while the old variant keeps being served; raises images.variantsChanged when the focus changes",
       reads: ["params.id"],
       writes: ["result"],
       input: FRAMING_INPUT_SCHEMA,

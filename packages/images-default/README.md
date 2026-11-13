@@ -215,7 +215,9 @@ than 64 crops, or a crop whose pixel ratio on the oriented original differs from
 than 2%; and `NOT_FOUND` for an id `media@1` does not report as ready, an item that is not an image
 with variants (see `ELIGIBLE`) and a hidden item. It answers `{ id, framing }`. The write and the
 re-planning of the item run in the item's own section, after a placement or render of the item
-already under way in this process. Re-planning turns every `cover` size whose crop changes
+already under way in this process. When the focus differs from the stored one, it raises
+`images.variantsChanged` for the item at once, since pages read `focus` from `images.attach` even
+when no variant renders again (with `inside` sizes only, or when every cut stays the same). Re-planning turns every `cover` size whose crop changes
 `pending` at the same path, with its new width and height, and leaves the old variant there; a
 pipeline renders them by running `images.generate` after it, as `setMediaFraming` in
 `examples/minimal` does. A size added later is placed with the item's framing. Re-planning changes
@@ -268,8 +270,9 @@ nothing, so an editor that runs in the browser can preview exactly what this mod
 `images-default` raises its own event `images.variantsChanged` (`{ id: null, ids, identity: null,
 params: {} }`, at most 200 ids per event) through the optional `events@1` contract — declared in
 `emits`, never required — whenever it changes what a page would need to re-render for: an item it
-placed (made `available`), the items a size-set change or `images.prune` touched, and an item once a
-render with a changed crop is at its path (see "Focus and crop"). It never raises
+placed (made `available`), the items a size-set change or `images.prune` touched, an item whose
+focus `images.setFraming` changed, and an item once a render with a changed crop is at its path (see
+"Focus and crop"). It never raises
 `media.updated`, which belongs to the pipeline that edits a medium; a pipeline that marks the pages
 showing a medium (`delivery.markDependents:media`) subscribes to both. A rejected emit (no
 subscriber, or a subscriber that throws) is logged with the affected ids and does not undo the
@@ -385,7 +388,7 @@ cursor.
 | `images.removeMany` | Delete variants for every id in result.ids (from media.listFolderItems, media.removeFolder or media.purge) | `result.ids` | – | – | – | – | – | no |
 | `images.hideMany` | Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.trashVersions (from the same steps), an id whose variants a later move already showed is left alone | `result.ids`, `result.trashVersions?` | – | – | – | – | – | no |
 | `images.showMany` | Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged; with result.trashVersions, an id whose variants a later move already hid stays hidden | `result.ids`, `result.trashVersions?` | – | – | – | – | – | no |
-| `images.setFraming` | Replace the framing of one media item (params.id): a focus rectangle and manual crops keyed by reduced ratio, normalised to 0..1 on the oriented original; an empty one removes it. Re-plans the item, so each cover size whose crop changes renders again at its path while the old variant keeps being served | `params.id` | `result` | { focus?: object \| null, crops?: object } | { id: string, framing: object, … } | 400 missing id, or an invalid focus or crop; 404 media item not found, not ready, hidden or without variants | – | no |
+| `images.setFraming` | Replace the framing of one media item (params.id): a focus rectangle and manual crops keyed by reduced ratio, normalised to 0..1 on the oriented original; an empty one removes it. Re-plans the item, so each cover size whose crop changes renders again at its path while the old variant keeps being served; raises images.variantsChanged when the focus changes | `params.id` | `result` | { focus?: object \| null, crops?: object } | { id: string, framing: object, … } | 400 missing id, or an invalid focus or crop; 404 media item not found, not ready, hidden or without variants | – | no |
 | `images.attach` | Add available, variants[], variantCounts, focus and framing to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, a hidden item lists no variants and is not available, and framing.ratios has one entry per ratio of the cover sizes | `result` | `result.available?`, `result.variants?`, `result.variantCounts?`, `result.focus?`, `result.framing?` | – | { available: boolean, variants: object[], variantCounts: object, focus: object \| null, framing: object, … } | – | – | no |
 | `images.serve` | The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback | `params.id`, `params.file` | `result` | – | – | 400 missing id or file; 404 media item not found, not ready or hidden, or the file is neither a current nor a retired size | – | no |
 | `images.syncPublic` | Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted or hidden items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result) | – | `result._publicVariants` | – | { _publicVariants: object, … } | – | – | no |
