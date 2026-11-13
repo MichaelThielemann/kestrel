@@ -388,4 +388,18 @@ describe("images/default variants[].crop in images.attach", () => {
     expect(await leftEdgeIsBlue(images, "square.webp")).toBe(false);
     for (const open of [first, images]) await open.close();
   });
+
+  it("changes crop from null to the cut at the first render of a cover size added to the configuration, at the same plain path", async () => {
+    const w = await world();
+    const inside = await w.open([THUMB]);
+    expectOk(await inside.setFraming("m1", RIGHT_CROP));
+    expectOk(await inside.generate("m1"));
+    const added = await w.open([THUMB, SQUARE]);
+    expectOk(await added.plan(["m1"]));
+    expect((await attached(added)).get("square")).toMatchObject({ state: "pending", crop: null, path: SQUARE_PATH });
+    expectOk(await added.generate("m1"));
+    expect((await attached(added)).get("square")).toMatchObject({ state: "done", crop: RIGHT, path: SQUARE_PATH });
+    expect(await leftEdgeIsBlue(added, "square.webp")).toBe(true);
+    for (const open of [inside, added]) await open.close();
+  });
 });
