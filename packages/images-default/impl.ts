@@ -263,6 +263,12 @@ async function pool<T>(tasks: Array<() => Promise<Result<T, KestrelError>>>, lim
   return failureError !== undefined ? err(failureError) : ok(results);
 }
 
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.byteLength !== b.byteLength) return false;
+  for (let i = 0; i < a.byteLength; i += 1) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 function cropOf(row: Pick<Variant, "crop">): string {
   return row.crop ?? "";
 }
@@ -1035,10 +1041,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const current = await db.findOne<Variant>(VARIANTS, { id: row.id });
       if (isErr(current)) return current;
       if (current.value === null || current.value.key !== row.key) break;
-      if (current.value.spec !== row.spec || cropOf(current.value) !== cropOf(row)) {
-        rerun();
-        return recordBytesAtPath(current.value, cropOf(row), recrop);
-      }
+      if (current.value.spec !== row.spec || cropOf(current.value) !== cropOf(row)) return recordBytesAtPath(row, rendered.data, signals);
       if (commit === COMMIT_ATTEMPTS) {
         rerun();
         return ok(current.value);
@@ -1054,15 +1057,46 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok(latest.value);
   }
 
-  async function recordBytesAtPath(current: Variant, written: string, recrop: () => void): Promise<Result<Variant | null, KestrelError>> {
-    const patch: Partial<Variant> | null = current.state === "done" ? { state: "pending", attempts: 0, error: null, updatedAt: now() } : renderedCropOf(current) !== written ? { renderedCrop: written, updatedAt: now() } : null;
-    if (patch !== null) {
-      const recorded = await db.updateMany<Variant>(VARIANTS, { id: current.id, key: current.key, spec: current.spec, crop: current.crop, state: current.state, renderedCrop: current.renderedCrop }, patch);
-      if (isErr(recorded)) return recorded;
-      if (recorded.value === 1 && patch.renderedCrop !== undefined) recrop();
+  async function ownBytesAtPath(row: Variant, data: Uint8Array): Promise<Result<"all" | "some" | "none", KestrelError>> {
+    const keys = config.publicCopy === undefined ? [row.key] : [row.key, copyKey(row.mediaId, fileOf(row))];
+    let present = 0;
+    let own = 0;
+    for (const key of keys) {
+      const found = await blobs.get(key);
+      if (isErr(found)) return found;
+      if (found.value === null) continue;
+      present += 1;
+      if (sameBytes(found.value, data)) own += 1;
     }
-    const latest = await db.findOne<Variant>(VARIANTS, { id: current.id });
-    return isErr(latest) ? latest : ok(latest.value);
+    return ok(own === 0 ? "none" : own === present ? "all" : "some");
+  }
+
+  async function recordBytesAtPath(row: Variant, data: Uint8Array, signals: RenderSignals): Promise<Result<Variant | null, KestrelError>> {
+    const written = cropOf(row);
+    for (let attempt = 1; ; attempt += 1) {
+      const current = await db.findOne<Variant>(VARIANTS, { id: row.id });
+      if (isErr(current)) return current;
+      const seen = current.value;
+      if (seen === null || seen.key !== row.key) return ok(seen);
+      if (seen.state === "planned") {
+        signals.rerun();
+        return ok(seen);
+      }
+      const own = await ownBytesAtPath(row, data);
+      if (isErr(own)) return own;
+      if (seen.state === "done" && own.value === "none") return ok(seen);
+      signals.rerun();
+      const named: Partial<Variant> = own.value === "all" && renderedCropOf(seen) !== written ? { renderedCrop: written } : {};
+      if (seen.state !== "done" && named.renderedCrop === undefined) return ok(seen);
+      const patch: Partial<Variant> = seen.state === "done" ? { ...named, state: "pending", attempts: 0, error: null, updatedAt: now() } : { ...named, updatedAt: now() };
+      const recorded = await db.updateMany<Variant>(VARIANTS, { id: seen.id, key: seen.key, spec: seen.spec, crop: seen.crop, state: seen.state, renderedCrop: seen.renderedCrop }, patch);
+      if (isErr(recorded)) return recorded;
+      if (recorded.value === 1) {
+        if (named.renderedCrop !== undefined) signals.recrop();
+        return ok({ ...seen, ...patch });
+      }
+      if (attempt === COMMIT_ATTEMPTS) return ok(seen);
+    }
   }
 
   async function dropStaleRender(item: MediaFile, row: Variant, original: Original): Promise<Result<void, KestrelError>> {
