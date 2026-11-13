@@ -12,7 +12,7 @@ const ZOD_RANGE = "^4.6.6";
 const FIXED: readonly [number, number, number] = [4, 6, 6];
 const DEPENDENCY_MAPS = ["dependencies", "devDependencies", "peerDependencies"] as const;
 const PARSED_DEFAULT_FACTORIES = new Set(["object", "strictObject", "looseObject", "union", "discriminatedUnion", "intersection"]);
-const OBJECT_COPIES = new Set(["strict", "passthrough", "strip", "catchall", "extend", "merge", "partial", "required", "pick", "omit", "safeExtend"]);
+const DESCRIPTION_DROPPING = new Set(["strict", "passthrough", "strip", "catchall", "extend", "merge", "partial", "required", "pick", "omit", "safeExtend", "or", "and", "extract", "exclude", "rest"]);
 const ZOD_IMPORT = /["']zod["']/;
 
 type Version = readonly [number, number, number];
@@ -187,7 +187,7 @@ function describeOrderEdits(file: string, source: string, root: AstNode): Edit[]
   for (const call of calls) {
     if (call.name !== "describe" || call.args.length !== 1) continue;
     let last = call;
-    for (let next = byReceiver.get(last.call); next !== undefined && OBJECT_COPIES.has(next.name); next = byReceiver.get(last.call)) last = next;
+    for (let next = byReceiver.get(last.call); next !== undefined && DESCRIPTION_DROPPING.has(next.name); next = byReceiver.get(last.call)) last = next;
     if (last === call) continue;
     const describeEnd = span(call.call).end;
     edits.push({ file, start: span(call.object).end, end: describeEnd, text: "" });
@@ -299,7 +299,7 @@ export const zodObjectDefaultRule: SourceRule = {
   },
 };
 
-/** `zod/describe-order`: a `.describe()` followed by an object method such as `.strict()` or `.partial()`, which in zod 4 returns a copy without the description, so a `"secret"` mark is lost; the fix moves the `.describe()` after the last such method. */
+/** `zod/describe-order`: a `.describe()` followed by an object method such as `.strict()` or `.partial()`, or by `.or()`, `.and()`, an enum's `.extract()`/`.exclude()` or a tuple's `.rest()`, each of which in zod 4 returns a schema without the description, so a `"secret"` mark is lost; the fix moves the `.describe()` after the last such method. */
 export const zodDescribeOrderRule: SourceRule = {
   id: "zod/describe-order",
   needs: "source",
@@ -308,8 +308,8 @@ export const zodDescribeOrderRule: SourceRule = {
       finding(
         `zod/describe-order:${file}`,
         "zod/describe-order",
-        `calls .describe() before an object method such as .strict() or .partial() (${edits.length / 2}x); zod 4 returns a copy without the description, so a "secret" mark no longer applies`,
-        "move .describe() after the last object method of the chain",
+        `calls .describe() before a method such as .strict(), .partial() or .or() (${edits.length / 2}x); zod 4 returns a schema without the description, so a "secret" mark no longer applies`,
+        "move .describe() after the last such method of the chain",
         { file },
         edits,
         upgradingDocs("zod-describe-order"),

@@ -248,6 +248,27 @@ describe("zod/describe-order", () => {
     expect(text).toContain('export const b = z\n  .object({ user: z.string() })\n  .extend({ pass: z.string() })\n  .strict().describe("Mail account");');
   });
 
+  it("moves a .describe() past .or(), .and(), an enum's .extract() or .exclude() and a tuple's .rest()", async () => {
+    const source = [
+      'import { z } from "zod";',
+      'export const a = z.string().describe("secret").or(z.literal(false)).optional();',
+      'export const b = z.object({ user: z.string() }).describe("secret").and(z.object({ pass: z.string() }));',
+      'export const c = z.enum(["free", "pro", "internal"]).describe("secret").exclude(["internal"]);',
+      'export const d = z.enum(["free", "pro"]).describe("secret").extract(["pro"]);',
+      'export const e = z.tuple([z.string()]).describe("secret").rest(z.string());',
+      "",
+    ].join("\n");
+    await write("module.ts", source);
+    const findings = await zodDescribeOrderRule.check(context());
+    expect(findings).toHaveLength(1);
+    const text = applied(findings[0], source);
+    expect(text).toContain('export const a = z.string().or(z.literal(false)).describe("secret").optional();');
+    expect(text).toContain('export const b = z.object({ user: z.string() }).and(z.object({ pass: z.string() })).describe("secret");');
+    expect(text).toContain('export const c = z.enum(["free", "pro", "internal"]).exclude(["internal"]).describe("secret");');
+    expect(text).toContain('export const d = z.enum(["free", "pro"]).extract(["pro"]).describe("secret");');
+    expect(text).toContain('export const e = z.tuple([z.string()]).rest(z.string()).describe("secret");');
+  });
+
   it("leaves a .describe() that is last or followed only by a wrapper, and a file without a zod import", async () => {
     await write("a.ts", 'import { z } from "zod";\nexport const a = z.object({ pass: z.string() }).strict().describe("secret").optional().default({ pass: "" });\n');
     await write("b.ts", 'const doc = { describe: (x: string) => ({ strict: () => x }) };\nexport const b = doc.describe("x").strict();\n');

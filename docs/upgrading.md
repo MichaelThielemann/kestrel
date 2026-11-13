@@ -42,7 +42,7 @@ scripts that call the removed `kestrel-openapi` and `kestrel-upgrade` binaries
 built with zod 4, and rewrites three zod 3 forms in the project's own schemas: `z.record` with only
 a value schema ([`zod/record-key`](#zod-record-key)), an object default that relies on being
 parsed ([`zod/object-default`](#zod-object-default)) and a `.describe()` that an object method such
-as `.strict()` follows ([`zod/describe-order`](#zod-describe-order)). [zod 4 schemas](#zod-4-schemas)
+as `.strict()`, or `.or()`, follows ([`zod/describe-order`](#zod-describe-order)). [zod 4 schemas](#zod-4-schemas)
 lists what else to check by hand.
 
 `fix` without `--write` only previews: it shows a unified diff of every file it would change and
@@ -243,7 +243,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`deps/zod-range`](#deps-zod-range) | source | auto | a `zod` dependency range that admits a release below 4.6.6 or another major |
 | [`zod/record-key`](#zod-record-key) | source | auto | a `z.record` call with only a value schema |
 | [`zod/object-default`](#zod-object-default) | source | auto / manual (warning) | an object or union schema's object-literal `.default({…})` |
-| [`zod/describe-order`](#zod-describe-order) | source | auto | a `.describe()` followed by `.strict()`, `.partial()` or another object method |
+| [`zod/describe-order`](#zod-describe-order) | source | auto | a `.describe()` followed by `.strict()`, `.partial()`, `.or()` or another method that drops it |
 | [`scripts/kestrel-binaries`](#scripts-kestrel-binaries) | source | auto / manual (warning) | a `kestrel-openapi` or `kestrel-upgrade` command, or an unscoped `npx kestrel`, in `package.json` scripts or another project file |
 | [`deps/host-outdated`](#deps-host-outdated), `deps/host-refused` | source | manual | a direct dependency whose plugin is not built for this version, or whose `kestrel` field is refused |
 | [`offer/event-queue`](#offer-event-queue) | source | none / ask / auto | the switch from `events-direct` to `events-queue` |
@@ -842,10 +842,13 @@ it by hand when that schema is an object or a union of objects.
 #### zod-describe-order
 zod 4's object methods `.strict()`, `.passthrough()`, `.strip()`, `.catchall()`, `.extend()`,
 `.safeExtend()`, `.merge()`, `.partial()`, `.required()`, `.pick()` and `.omit()` return a copy of
-the schema without its description. In `z.object({ user: z.string(), pass: z.string()
+the schema without its description, and so do `.or()`, `.and()`, an enum's `.extract()` and
+`.exclude()` and a tuple's `.rest()`. In `z.object({ user: z.string(), pass: z.string()
 }).describe("secret").strict()` the `"secret"` mark is lost, and `kestrel describe`, the manifest
-and the admin show `pass` in plain text. The rule moves the `.describe()` after the last object
-method that follows it: `z.object({ … }).strict().describe("secret")`. A wrapper after those methods
+and the admin show `pass` in plain text; in `z.string().describe("secret").or(z.literal(false))`
+the value shows the same way. The rule moves the `.describe()` after the last of these methods
+that follows it: `z.object({ … }).strict().describe("secret")`,
+`z.string().or(z.literal(false)).describe("secret")`. A wrapper after those methods
 (`.optional()`, `.default()`, `.nullable()`) keeps the description and stays where it is. A schema
 held in a variable and given an object method elsewhere, `const smtp = base.describe("secret")` and
 later `smtp.strict()`, is not rewritten; keep `.describe()` the last call there by hand.
@@ -882,9 +885,9 @@ zod's [migration guide](https://zod.dev/v4/changelog) lists every change between
   from the value, is ignored by zod 4, and the issue reads `Invalid input`.
 - `.strict()` and `.passthrough()` still work and are read as `additionalProperties: false` and
   `true`; `z.strictObject()` and `z.looseObject()` are the zod 4 spellings and are read the same
-  way. `.describe("secret")` still marks a value secret, as long as it is the last call on an
-  object schema: an object method after it returns a copy without the mark (see
-  [`zod/describe-order`](#zod-describe-order)).
+  way. `.describe("secret")` still marks a value secret, as long as no object method,
+  `.or()`, `.and()`, `.extract()`, `.exclude()` or `.rest()` follows it: each returns a schema
+  without the mark (see [`zod/describe-order`](#zod-describe-order)).
 - `.default()` on a schema with a `transform` takes the transformed output type; `.prefault()`
   takes the input, as zod 3's `.default()` did.
 

@@ -15,17 +15,18 @@ Net changes since 5.8.1.
   first (`z.record(z.string(), value)`); an object schema's `.default({})` no longer fills the nested
   defaults inside it, `.prefault({})` does, as zod 3's `.default()` did; a function as the second
   argument of `.refine()` is ignored, pass `{ error: … }`. `.strict()`, `.passthrough()` and
-  `.describe("secret")` keep working, but `.describe()` must be the last call on an object schema:
+  `.describe("secret")` keep working, but `.describe()` must come after the methods that drop it:
   zod 4's `.strict()`, `.passthrough()`, `.extend()`, `.partial()`, `.pick()` and the other object
-  methods return a copy without the description, so a `"secret"` mark set before them is lost and
+  methods return a copy without the description, as do `.or()`, `.and()`, an enum's `.extract()`
+  and `.exclude()` and a tuple's `.rest()`, so a `"secret"` mark set before them is lost and
   the value shows in plain text in `describe()`. The JSON Schema, variables and defaults of every
   bundled module's config are unchanged, but the integer settings of `kestrel.config` and of every
   bundled module refuse a value above `Number.MAX_SAFE_INTEGER` (`http: { maxBodyBytes:
   Number.MAX_VALUE }` now fails boot with `Too big: expected int to be <=9007199254740991`), and every
   number setting refuses `Infinity`. `kestrel upgrade`'s new `deps/zod-range` raises the
   project's `zod` range, `zod/record-key` inserts the key schema, `zod/object-default` renames such
-  a `.default` to `.prefault` and `zod/describe-order` moves a `.describe()` after the object methods
-  that follow it; `types/breaking-signatures` names the schema type. A module whose `configSchema`
+  a `.default` to `.prefault` and `zod/describe-order` moves a `.describe()` after the methods that
+  follow it and drop it; `types/breaking-signatures` names the schema type. A module whose `configSchema`
   was not built with zod 4.6.6 or a later 4.x, such as one from a package that still depends on zod 3
   or imports zod 3.25's `zod/v4`, fails boot with the new problem code `invalid-config-schema`, naming
   that module and the zod version its schema reports, before its config is parsed.
