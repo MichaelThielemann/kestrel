@@ -1548,6 +1548,9 @@ Net changes since 5.8.1.
 
 ### Fixed
 
+- `insights`: a pipeline's `lastAt` and a recent failure's `at` are the whole-millisecond wall clock
+  reading at the end of the run. They were the start time plus the measured duration, a fraction of a
+  millisecond that could lie ahead of `Date.now()` and of the `generatedAt` of the same answer.
 - `openapi`: a request body leaves out every property that a step with a closed `input`
   (`additionalProperties: false`) does not list, and every `required` entry among them, since that
   step answers `400` for it. `PUT /media/:id/framing` in `examples/minimal` documents only `focus`

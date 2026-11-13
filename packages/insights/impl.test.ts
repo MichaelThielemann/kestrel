@@ -88,9 +88,11 @@ describe("insights aggregation", () => {
   });
 
   it("counts active runs while a pipeline is in flight", async () => {
-    const insights = createInsights({ now: () => 1000, processStartedAt: 0 });
+    let clock = 1000;
+    const insights = createInsights({ now: () => clock, processStartedAt: 0 });
     insights.observer.runStart!({ runId: "r", pipeline: "p", trigger: http, at: 1000 });
     expect(insights.stats().runs.active).toBe(1);
+    clock = 1005;
     insights.observer.runEnd!({ runId: "r", pipeline: "p", trigger: http, at: 1000, ms: 5, status: 200, outcome: "ok" });
     expect(insights.stats().runs).toEqual({ active: 0, total: 1, failed: 0, errors: 0 });
     expect(insights.stats().pipelines[0]).toEqual({ name: "p", count: 1, failed: 0, errors: 0, p50Ms: 5, p95Ms: 5, lastAt: 1005 });
@@ -106,6 +108,14 @@ describe("insights aggregation", () => {
     expect(events).toMatchObject([{ name: "thing.done", count: 2 }]);
     expect(typeof events[0]?.lastAt).toBe("number");
     await kestrel.stop();
+  });
+
+  it("stamps a run's end with its clock, never later than the clock, when a whole-millisecond start and a fractional duration add up past it", () => {
+    const insights = createInsights({ now: () => 1000, processStartedAt: 0 });
+    insights.observer.runEnd!({ runId: "r", pipeline: "p", trigger: http, at: 999, ms: 1.19, status: 500, outcome: "error", code: "INTERNAL" });
+    expect(insights.stats().pipelines[0]?.lastAt).toBe(1000);
+    expect(insights.stats().recentFailures[0]?.at).toBe(1000);
+    expect(insights.stats().recentFailures[0]?.ms).toBe(1.19);
   });
 
   it("keeps only the last sampleSize durations for the percentiles but every count", () => {
