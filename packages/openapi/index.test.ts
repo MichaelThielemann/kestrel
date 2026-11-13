@@ -45,6 +45,8 @@ const demo = defineModule({
     list: pass,
     attachToItems: pass,
     redirectish: pass,
+    frame: pass,
+    render: pass,
   }),
   describe: () => ({
     requireUser: { summary: "Require a valid session", reads: [], writes: [], security: "required", errors: { 401: "not authenticated" } },
@@ -61,6 +63,8 @@ const demo = defineModule({
     list: { summary: "List", reads: [], writes: ["result"], output: { type: "object", properties: { items: { type: "array", items: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } }, total: { type: "integer" } }, required: ["items", "total"] } },
     attachToItems: { summary: "Attach to items", reads: ["result"], writes: ["result.variants"], extendsItems: { type: "object", properties: { variants: { type: "array", items: { type: "string" } } }, required: ["variants"] } },
     redirectish: { summary: "End with a redirect on a hit, pass through otherwise", reads: [], writes: ["result?"], terminalOutput: { type: "object", properties: { redirect: { type: "object", properties: { to: { type: "string" } }, required: ["to"] } }, required: ["redirect"] } },
+    frame: { summary: "Frame", reads: ["params.id"], writes: [], input: { type: "object", properties: { focus: { type: "string" } }, additionalProperties: false } },
+    render: { summary: "Render", reads: [], writes: [], input: { type: "object", properties: { id: { type: "string" }, ids: { type: "array", items: { type: "string" } } }, required: ["id"], additionalProperties: true } },
   }),
 });
 const config = {
@@ -78,6 +82,7 @@ const config = {
     { http: "GET /listed", pipeline: "listed" },
     { http: "GET /single", pipeline: "single" },
     { http: "GET /redirectish/:id", pipeline: "redirectish" },
+    { http: "PUT /pictures/:id", pipeline: "frame" },
   ],
   http: null,
 };
@@ -93,6 +98,7 @@ const pipelines = [
   definePipeline({ name: "listed", steps: ["demo.list", "demo.attachToItems"] }),
   definePipeline({ name: "single", steps: ["demo.replaceAfterExtend", "demo.attachToItems"] }),
   definePipeline({ name: "redirectish", steps: ["demo.redirectish", "demo.get:pages"] }),
+  definePipeline({ name: "frame", steps: ["demo.frame", "demo.render"] }),
 ];
 
 async function generate(mountPath?: string) {
@@ -104,7 +110,7 @@ describe("kestrel-openapi", () => {
   it("emits one operation per trigger with params, body, responses and security", async () => {
     const doc = await generate();
     expect(doc.openapi).toBe("3.1.0");
-    expect(Object.keys(doc.paths).sort()).toEqual(["/listed", "/lonely-extend", "/media", "/media/{id}/file", "/pages", "/pages/{id}", "/plain", "/publish-all", "/redirectish/{id}", "/replace-after-extend", "/single", "/site/{path}"]);
+    expect(Object.keys(doc.paths).sort()).toEqual(["/listed", "/lonely-extend", "/media", "/media/{id}/file", "/pages", "/pages/{id}", "/pictures/{id}", "/plain", "/publish-all", "/redirectish/{id}", "/replace-after-extend", "/single", "/site/{path}"]);
     const create = doc.paths["/pages"]?.post;
     expect(create?.operationId).toBe("createPage");
     expect(create?.security).toEqual([{ bearerAuth: [] }]);
@@ -114,6 +120,11 @@ describe("kestrel-openapi", () => {
     expect(read?.security).toEqual([{ bearerAuth: [] }, {}]);
     expect(read?.parameters).toEqual([{ name: "id", in: "path", required: true, schema: { type: "string" } }, { name: "locale", in: "query", required: false, schema: { type: "string" } }]);
     expect(doc.paths["/site/{path}"]?.get?.parameters?.[0]?.name).toBe("path");
+  });
+
+  it("leaves out of the body every property a step with a closed input does not allow, since that step rejects it", async () => {
+    const doc = await generate();
+    expect(doc.paths["/pictures/{id}"]?.put?.requestBody).toEqual({ required: true, content: { "application/json": { schema: { type: "object", properties: { focus: { type: "string" } }, additionalProperties: false } } } });
   });
 
   it("describes the error body with code, retryable and the optional step and details fields", async () => {

@@ -1465,6 +1465,10 @@ Net changes since 5.8.1.
 
 ### Fixed
 
+- `openapi`: a request body leaves out every property that a step with a closed `input`
+  (`additionalProperties: false`) does not list, and every `required` entry among them, since that
+  step answers `400` for it. `PUT /media/:id/framing` in `examples/minimal` documents only `focus`
+  and `crops`.
 - `media-default`: `media.list` with a `q` containing `_` found no item, because the wildcard was
   dropped from the store's prefilter (`my_file` searched for `myfile`); a `q` with `_` or `%` now
   finds exactly the names that contain it. `q` also ignores case now (`Photo` finds `photo.jpg`); it

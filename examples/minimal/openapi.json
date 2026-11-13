@@ -10136,15 +10136,6 @@
                       "additionalProperties": false
                     },
                     "description": "manual crops keyed by reduced ratio, e.g. \"16:9\""
-                  },
-                  "id": {
-                    "type": "string"
-                  },
-                  "ids": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
                   }
                 },
                 "additionalProperties": false
@@ -14089,13 +14080,6 @@
                       {
                         "type": "null"
                       }
-                    ]
-                  },
-                  "locale": {
-                    "type": "string",
-                    "enum": [
-                      "de",
-                      "en"
                     ]
                   }
                 },

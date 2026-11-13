@@ -46,15 +46,18 @@ function pathOf(route: Route, mountPath: string): { path: string; params: string
 function mergeObjects(schemas: JsonSchema[]): JsonSchema | undefined {
   if (schemas.length === 0) return undefined;
   if (schemas.length === 1) return schemas[0];
+  const propertiesOf = (s: JsonSchema): Record<string, unknown> => boundaryCast<Record<string, unknown>>(s.properties ?? {}, "json");
+  const closed = schemas.filter((s) => s.additionalProperties === false).map((s) => new Set(Object.keys(propertiesOf(s))));
+  const allowed = (name: string): boolean => closed.every((names) => names.has(name));
   const properties: Record<string, unknown> = {};
   const required = new Set<string>();
   for (const s of schemas) {
-    Object.assign(properties, boundaryCast<Record<string, unknown>>(s.properties ?? {}, "json"));
-    for (const r of boundaryCast<string[]>(s.required ?? [], "json")) required.add(r);
+    for (const [name, property] of Object.entries(propertiesOf(s))) if (allowed(name)) properties[name] = property;
+    for (const r of boundaryCast<string[]>(s.required ?? [], "json")) if (allowed(r)) required.add(r);
   }
   const merged: JsonSchema = { type: "object", properties };
   if (required.size > 0) merged.required = [...required].sort();
-  if (schemas.some((s) => s.additionalProperties === false)) merged.additionalProperties = false;
+  if (closed.length > 0) merged.additionalProperties = false;
   return merged;
 }
 
