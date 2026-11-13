@@ -77,25 +77,32 @@ unknown `generation`, is `Err(NOT_FOUND)`; an unparsable `at` in the payload is 
 `backup/blobstore` follows the same pattern with its own file names (`<file>.restore-pending` plus
 `<file>.restore-marker`), so both modules can point at the same database without clashing. When
 either module restores the file, it writes `<file>.restored-at` next to it:
-`{ "restoredAtBootStartedAt": <epoch ms this boot started> }`, plus `"prepared": true` when the file
-is a prepared restore applied at setup rather than a rebuild of a missing file. The other module, if
+`{ "restoredAtBootStartedAt": <epoch ms this boot started> }`, plus `"reported": true` when the
+restored file can be older than what was derived from the database before it. The sidecar is written
+atomically, before the restored file is moved into place, so a boot that stops in between applies the
+restore again on the next start. The other module, if
 configured on the same file, recognizes a matching boot as "this boot already restored the file" and
 skips its own check — neither module has to know the other exists. The next restore overwrites the
 sidecar.
 
-`replication.checkRestored` tells the rest of a pipeline about the latest prepared restore of the
-database file: it adds `_databaseRestoredAt` to the result, the start of the boot that applied it
-(whichever of the two modules prepared it, with `replication.prepareRestore` or `backup.restore`), or
-`null` when the sidecar records none. The value stays the same in every later boot until the next
-restore, so a step that keeps output derived from the database stores the last value it acted on and
-treats any other one as a restore; a boot that stops before acting on it leaves it to the next one.
-The member is a shared convention: `backup.checkRestored` writes the same one, and `delivery.checkBuild`
-of delivery-static reads it to render every page again after a restore. Put the step first in the
-pipeline that runs that check at boot, for example
-`["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`. A rebuild of a
-missing file under `restoreOnStart` is not reported: it brings back the latest state of the replica,
-and on an ephemeral disk it happens at every start. A database file copied into place by hand is not
-reported either; restore through `replication.prepareRestore` instead.
+`replication.checkRestored` tells the rest of a pipeline about the latest reported restore of the
+database file: it adds `_databaseRestoredAt` to the result, the start of the boot that restored it, or
+`null` when the sidecar records none. A prepared restore is reported (`replication.prepareRestore`, or
+`backup.restore`), and so is backup-blobstore's restore of a missing file. The value stays the same in
+every later boot until the next restore, so a step that keeps output derived from the database stores
+the last value it acted on and treats any other one as a restore; a boot that stops before acting on it
+leaves it to the next one. The member is a shared convention: `backup.checkRestored` writes the same
+one, and `delivery.checkBuild` of delivery-static reads it to render every page again after a restore.
+Put the step first in the pipeline that runs that check at boot, for example
+`["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`.
+
+This module's rebuild of a missing file under `restoreOnStart` is not reported: it brings back the
+replica as of the last shipped WAL frames, which a stop through teardown ships, and on an ephemeral disk
+it happens at every start. A process that stopped without teardown loses the frames written since the
+last `replication.sync`, and output derived from them (for delivery-static, the files of pages saved in
+that window) is not rendered again. A database file copied into place by hand is not reported either.
+After either one, restore through `replication.prepareRestore` instead, or render everything again
+yourself (for delivery-static, `delivery.markAll` for every delivered type).
 Not included: multi-process setups, encryption, restore without restart.
 
 <!-- kestrel-docs:start -->
@@ -114,7 +121,7 @@ Not included: multi-process setups, encryption, restore without restart.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `replication.checkRestored` | When the latest prepared restore of the database file was applied, by this module or another one (adds `_databaseRestoredAt`, the start of that boot or null, to the result) | – | `result._databaseRestoredAt` | – | { _databaseRestoredAt: number \| null, … } | – | – | no |
+| `replication.checkRestored` | When the latest restore of the file was a prepared restore or a restore of a missing file from a periodic backup, by this module or another one (adds `_databaseRestoredAt`, the start of the boot that wrote it or null, to the result) | – | `result._databaseRestoredAt` | – | { _databaseRestoredAt: number \| null, … } | – | – | no |
 | `replication.sync` | Ship new WAL frames, checkpoint, snapshot and prune when due | – | `result` | – | { generation: string, shippedBytes: number, frames: number, checkpointed: boolean, pruned: number, … } | – | – | no |
 | `replication.snapshot` | Start a new generation with a full snapshot | – | `result` | – | { generation: string, bytes: number, … } | – | – | no |
 | `replication.listPoints` | Restore points (snapshots and WAL segments) | – | `result` | – | object[] | – | – | no |

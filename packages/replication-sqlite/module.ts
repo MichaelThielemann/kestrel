@@ -7,7 +7,7 @@ import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { applyPendingRestore, createReplicationSqlite, restoreFromBlobs, type Replication } from "./impl.ts";
-import { checkSkippedRestore, markRestoredThisBoot, preparedRestoreAt } from "./restoreFreshness.ts";
+import { checkSkippedRestore, markRestoredThisBoot, reportedRestoreAt } from "./restoreFreshness.ts";
 
 export const configSchema = z
   .object({
@@ -23,7 +23,7 @@ export const configSchema = z
 
 const POINT = { type: "object", properties: { generation: { type: "string" }, at: { type: "number" }, kind: { type: "string", enum: ["snapshot", "wal"] }, key: { type: "string" } }, required: ["generation", "at", "kind", "key"] };
 
-type ReplicationInstance = Replication & { logger: Logger; preparedRestoreAt: () => number | null };
+type ReplicationInstance = Replication & { logger: Logger; reportedRestoreAt: () => number | null };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -39,8 +39,7 @@ export default defineModule({
   async setup(config, deps): Promise<ReplicationInstance> {
     const blobs = deps.get(BLOBSTORE);
     const bootStartedAt = deps.bootStartedAt ?? Date.now();
-    const restoredFromMarker = applyPendingRestore(config.file);
-    if (restoredFromMarker) markRestoredThisBoot(config.file, bootStartedAt, true);
+    const restoredFromMarker = applyPendingRestore(config.file, () => markRestoredThisBoot(config.file, bootStartedAt, true));
     if (config.restoreOnStart) {
       if (!existsSync(config.file)) {
         const restored = await restoreFromBlobs(blobs, config.prefix, {}, config.file);
@@ -50,7 +49,7 @@ export default defineModule({
         await checkSkippedRestore(config, blobs, deps.logger, bootStartedAt);
       }
     }
-    return { ...createReplicationSqlite(config, blobs), logger: deps.logger, preparedRestoreAt: () => preparedRestoreAt(config.file) };
+    return { ...createReplicationSqlite(config, blobs), logger: deps.logger, reportedRestoreAt: () => reportedRestoreAt(config.file) };
   },
 
   health: (r) => r.health(),
@@ -68,7 +67,7 @@ export default defineModule({
   steps: (replication) => ({
     checkRestored: async (ctx: Context) => {
       const previous = isRecord(ctx.result) ? ctx.result : {};
-      return ok({ ...ctx, result: { ...previous, _databaseRestoredAt: replication.preparedRestoreAt() } });
+      return ok({ ...ctx, result: { ...previous, _databaseRestoredAt: replication.reportedRestoreAt() } });
     },
     sync: async (ctx: Context) => {
       const result = await replication.sync();
@@ -107,7 +106,7 @@ export default defineModule({
 
   describe: () => ({
     checkRestored: {
-      summary: "When the latest prepared restore of the database file was applied, by this module or another one (adds `_databaseRestoredAt`, the start of that boot or null, to the result)",
+      summary: "When the latest restore of the file was a prepared restore or a restore of a missing file from a periodic backup, by this module or another one (adds `_databaseRestoredAt`, the start of the boot that wrote it or null, to the result)",
       reads: [],
       writes: ["result._databaseRestoredAt"],
       extendsOutput: { type: "object", properties: { _databaseRestoredAt: { type: ["number", "null"] } }, required: ["_databaseRestoredAt"] },

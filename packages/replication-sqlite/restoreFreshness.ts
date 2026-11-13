@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, statSync, writeSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -18,7 +18,7 @@ function readFileTimes(file: string): FileTimes {
 
 interface RestoreSidecarContent {
   restoredAtBootStartedAt: number;
-  prepared?: true;
+  reported?: true;
 }
 
 /**
@@ -59,19 +59,28 @@ async function hasSnapshot(blobs: Blobstore, prefix: string): Promise<boolean> {
 
 /**
  * The sidecar a restoring module leaves next to the database file, naming the boot that restored it:
- * `{ "restoredAtBootStartedAt": <epoch ms>, "prepared"?: true }`, with `prepared` for a prepared
- * restore applied at setup. Read by any module configured on the same file (`replication-sqlite`, `backup-blobstore`) to
- * recognize a file the other one already restored in this boot, and by `preparedRestoreAt`, without
+ * `{ "restoredAtBootStartedAt": <epoch ms>, "reported"?: true }`, with `reported` for a restore
+ * whose file can be older than what was delivered from the database before it. Read by any module configured on the same file (`replication-sqlite`, `backup-blobstore`) to
+ * recognize a file the other one already restored in this boot, and by `reportedRestoreAt`, without
  * either module naming the other. One fixed name, overwritten by every restore.
  */
 export function restoreSidecar(file: string): string {
   return `${file}.restored-at`;
 }
 
-/** Writes the `restoreSidecar`; `prepared` when the file is a prepared restore applied at setup rather than a rebuild of a missing file. */
-export function markRestoredThisBoot(file: string, bootStartedAt: number, prepared = false): void {
-  const content: RestoreSidecarContent = prepared ? { restoredAtBootStartedAt: bootStartedAt, prepared } : { restoredAtBootStartedAt: bootStartedAt };
-  writeFileSync(restoreSidecar(file), JSON.stringify(content));
+/** Writes the `restoreSidecar` atomically and durably (temporary file, fsync, rename); `reported` when `reportedRestoreAt` should answer this restore. */
+export function markRestoredThisBoot(file: string, bootStartedAt: number, reported = false): void {
+  const content: RestoreSidecarContent = reported ? { restoredAtBootStartedAt: bootStartedAt, reported } : { restoredAtBootStartedAt: bootStartedAt };
+  const sidecar = restoreSidecar(file);
+  const temporary = `${sidecar}.tmp`;
+  const fd = openSync(temporary, "w");
+  try {
+    writeSync(fd, JSON.stringify(content));
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(temporary, sidecar);
 }
 
 function readSidecar(file: string): Partial<RestoreSidecarContent> {
@@ -89,10 +98,10 @@ function restoredThisBoot(file: string, bootStartedAt: number): boolean {
   return readSidecar(file).restoredAtBootStartedAt === bootStartedAt;
 }
 
-/** The start (epoch ms) of the boot that applied the latest prepared restore of `file`, as its `restoreSidecar` records it; `null` when the sidecar records none. */
-export function preparedRestoreAt(file: string): number | null {
+/** The start (epoch ms) of the boot that wrote the latest reported restore of `file`, as its `restoreSidecar` records it; `null` when the sidecar records none. */
+export function reportedRestoreAt(file: string): number | null {
   const record = readSidecar(file);
-  return record.prepared === true && typeof record.restoredAtBootStartedAt === "number" ? record.restoredAtBootStartedAt : null;
+  return record.reported === true && typeof record.restoredAtBootStartedAt === "number" ? record.restoredAtBootStartedAt : null;
 }
 
 function freshRestoreError(file: string, note?: string): string {

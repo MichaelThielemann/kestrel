@@ -315,23 +315,32 @@ code. It answers `{ changed, restored, marked }`.
 **A restored database.** A database restored from a backup holds older status rows than the files under `prefix`.
 `delivery.checkBuild` learns of a restore from `result._databaseRestoredAt`, the member that
 `replication.checkRestored` (replication-sqlite) and `backup.checkRestored` (backup-blobstore) set to the start of
-the boot that applied the latest prepared restore of the database file (`replication.prepareRestore`,
-`backup.restore`), or to `null`; a missing member means no restore. Put one of them before `delivery.checkBuild` in
-the pipeline that runs it at boot:
+the boot that wrote the latest reported restore of the database file, or to `null`; a missing member means no
+restore. A prepared restore (`replication.prepareRestore`, `backup.restore`) is reported, and so is backup-blobstore's
+restore of a missing file under `restoreOnStart`, which brings back a periodic backup: on an ephemeral disk with that
+module, every start renders every output again. Put one of the two steps before `delivery.checkBuild` in the
+pipeline that runs it at boot:
 
 ```ts
 definePipeline({ name: "deliveryBuildCheck", steps: ["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"] });
 ```
+
+Without one of the two steps before it, no step after `delivery.checkBuild` in that pipeline may write `result`: the
+boot rejects it with `optional-read-order`, because `delivery.checkBuild` optionally reads
+`result._databaseRestoredAt`. Run steps such as `delivery.resumeStale`, `delivery.markAll:<type>` or
+`delivery.readStaleStatus` in a pipeline of their own there.
 
 The check stores the last value it handled in `delivery_state`, which the restored database cannot hold for its own
 restore. A value that differs from it is a restore: `delivery.checkBuild` records the one-time removal of orphaned
 page outputs (see below) as done, marks every output as for a new build, stores the build, then stores the value,
 logs a warning and answers `restored: true`. When one of these steps fails, or the boot stops before the check runs,
 the next check told the same value handles the restore again. Nothing else counts as a restore: an unclean stop, a
-crash during a re-render backlog, a restart, a second process on the same database and a rebuild of a missing
-database file under `restoreOnStart` (on an ephemeral disk, every start) leave the stored build as it is. A database
-file copied into place by hand is not detected; restore through one of the two modules, or run `delivery.markAll`
-for every delivered type after such a copy. After a restore every output the restored rows know is
+crash during a re-render backlog, a restart, a second process on the same database and replication-sqlite's
+rebuild of a missing database file under `restoreOnStart` (on an ephemeral disk, every start) leave the stored build
+as it is. That rebuild brings back the replica as of its last shipped WAL frames; after a stop without teardown, the
+pages saved since the last `replication.sync` keep files the rebuilt rows do not know. A database file copied into
+place by hand is not detected either. After such a copy or rebuild, run `delivery.markAll` for every delivered type,
+or restore through one of the two modules. After a restore every output the restored rows know is
 rendered again, but the files of pages created or moved after the backup stay under `prefix`, no status row owns
 them, and they are absent from `sitemap.xml` and `llms.txt`. Remove them by hand: they are the `index.<ext>` keys
 under `prefix` at paths that no `delivery.readStatus` row reports. Every export rebuilds the index files from the

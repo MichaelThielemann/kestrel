@@ -15,7 +15,8 @@ export interface Config {
 export interface Backup {
   backup(): Promise<Result<{ key: string; size: number; versions: string[] }, BlobstoreError>>;
   prepareRestore(key?: string): Promise<Result<{ prepared: true; key: string; size: number; file: string }, KestrelError<"NOT_FOUND" | "TRANSIENT">>>;
-  restoreWhenMissing(): Promise<{ restored: boolean; key: string; size: number }>;
+  /** Downloads the latest backup when the file is missing; `beforeCommit` runs after the download, before the download takes the place of the file. */
+  restoreWhenMissing(beforeCommit?: () => void): Promise<{ restored: boolean; key: string; size: number }>;
   versions(): Promise<Result<string[], BlobstoreError>>;
   key: string;
 }
@@ -32,7 +33,8 @@ export function restoreMarker(file: string): string {
   return `${file}.restore-marker`;
 }
 
-export async function applyPendingRestore(file: string): Promise<{ key: string; size: number } | null> {
+/** Moves a restore staged by `prepareRestore` into place; `beforeSwap` runs before the old file is removed, while the restore can still be applied again. */
+export async function applyPendingRestore(file: string, beforeSwap: () => void = () => {}): Promise<{ key: string; size: number } | null> {
   const marker = restoreMarker(file);
   if (!(await exists(marker))) return null;
   const pending = pendingRestoreFile(file);
@@ -42,6 +44,7 @@ export async function applyPendingRestore(file: string): Promise<{ key: string; 
   }
   const key = (await readFile(marker, "utf8")).trim();
   const size = (await stat(pending)).size;
+  beforeSwap();
   for (const suffix of ["", "-wal", "-shm"]) await rm(file + suffix, { force: true });
   await rename(pending, file);
   await rm(marker, { force: true });
@@ -59,13 +62,14 @@ export function createBackupBlobstore(config: Config, blobs: Blobstore, now: () 
     if (key !== config.key && !key.startsWith(`${config.key}.`)) throw new Error(`backup/blobstore: key ${JSON.stringify(key)} is not a backup of ${config.key}`);
   };
 
-  const download = async (key: string, destination: string): Promise<Result<number | null, BlobstoreError>> => {
+  const download = async (key: string, destination: string, beforeCommit: () => void = () => {}): Promise<Result<number | null, BlobstoreError>> => {
     const blob = await blobs.get(key);
     if (isErr(blob)) return blob;
     if (blob.value === null) return ok(null);
     await mkdir(dirname(destination), { recursive: true });
     const part = `${destination}.part`;
     await writeFile(part, blob.value);
+    beforeCommit();
     await rename(part, destination);
     return ok(blob.value.byteLength);
   };
@@ -99,9 +103,9 @@ export function createBackupBlobstore(config: Config, blobs: Blobstore, now: () 
       await writeFile(restoreMarker(config.file), key);
       return ok({ prepared: true as const, key, size: size.value, file: pending });
     },
-    async restoreWhenMissing() {
+    async restoreWhenMissing(beforeCommit) {
       if (await exists(config.file)) return { restored: false, key: config.key, size: 0 };
-      const size = await download(config.key, config.file);
+      const size = await download(config.key, config.file, beforeCommit);
       if (isErr(size)) throw new Error(size.error.message, { cause: size.error });
       if (size.value === null) return { restored: false, key: config.key, size: 0 };
       return { restored: true, key: config.key, size: size.value };

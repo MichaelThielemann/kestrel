@@ -5,7 +5,7 @@ import { first, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { applyPendingRestore, createBackupBlobstore, exists, type Backup } from "./impl.ts";
-import { checkSkippedRestore, markRestoredThisBoot, preparedRestoreAt } from "./restoreFreshness.ts";
+import { checkSkippedRestore, markRestoredThisBoot, reportedRestoreAt } from "./restoreFreshness.ts";
 
 export const configSchema = z
   .object({
@@ -17,7 +17,7 @@ export const configSchema = z
   })
   .strict();
 
-type BackupInstance = Backup & { preparedRestoreAt: () => number | null };
+type BackupInstance = Backup & { reportedRestoreAt: () => number | null };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -33,26 +33,21 @@ export default defineModule({
   async setup(cfg, deps): Promise<BackupInstance> {
     const blobs = deps.get(BLOBSTORE);
     const bootStartedAt = deps.bootStartedAt ?? Date.now();
-    const applied = await applyPendingRestore(cfg.file);
-    if (applied) {
-      deps.logger.info("backup/blobstore: applied pending restore", { file: cfg.file, key: applied.key, size: applied.size });
-      markRestoredThisBoot(cfg.file, bootStartedAt, true);
-    }
+    const record = (): void => markRestoredThisBoot(cfg.file, bootStartedAt, true);
+    const applied = await applyPendingRestore(cfg.file, record);
+    if (applied) deps.logger.info("backup/blobstore: applied pending restore", { file: cfg.file, key: applied.key, size: applied.size });
     const backup = createBackupBlobstore(cfg, blobs);
     if (cfg.restoreOnStart && !applied) {
       if (await exists(cfg.file)) await checkSkippedRestore(cfg, blobs, deps.logger, bootStartedAt);
-      else {
-        const result = await backup.restoreWhenMissing();
-        if (result.restored) markRestoredThisBoot(cfg.file, bootStartedAt);
-      }
+      else await backup.restoreWhenMissing(record);
     }
-    return { ...backup, preparedRestoreAt: () => preparedRestoreAt(cfg.file) };
+    return { ...backup, reportedRestoreAt: () => reportedRestoreAt(cfg.file) };
   },
 
   steps: (backup) => ({
     checkRestored: async (ctx: Context) => {
       const previous = isRecord(ctx.result) ? ctx.result : {};
-      return ok({ ...ctx, result: { ...previous, _databaseRestoredAt: backup.preparedRestoreAt() } });
+      return ok({ ...ctx, result: { ...previous, _databaseRestoredAt: backup.reportedRestoreAt() } });
     },
     run: async (ctx: Context) => {
       const result = await backup.backup();
@@ -79,7 +74,7 @@ export default defineModule({
 
   describe: () => ({
     checkRestored: {
-      summary: "When the latest prepared restore of the file was applied, by this module or another one (adds `_databaseRestoredAt`, the start of that boot or null, to the result)",
+      summary: "When the latest restore of the file was a prepared restore or a restore of a missing file from a periodic backup, by this module or another one (adds `_databaseRestoredAt`, the start of the boot that wrote it or null, to the result)",
       reads: [],
       writes: ["result._databaseRestoredAt"],
       extendsOutput: { type: "object", properties: { _databaseRestoredAt: { type: ["number", "null"] } }, required: ["_databaseRestoredAt"] },

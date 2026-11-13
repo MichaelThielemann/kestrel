@@ -63,9 +63,11 @@ export function restoreMarker(file: string): string {
   return `${file}.restore`;
 }
 
-export function applyPendingRestore(file: string): boolean {
+/** Moves a database rebuilt by `prepareRestore` into place; `beforeSwap` runs before the old file is removed, while the restore can still be applied again. */
+export function applyPendingRestore(file: string, beforeSwap: () => void = () => {}): boolean {
   const restored = restoreMarker(file);
   if (!existsSync(restored)) return false;
+  beforeSwap();
   for (const suffix of ["", "-wal", "-shm"]) rmSync(file + suffix, { force: true });
   renameSync(restored, file);
   return true;

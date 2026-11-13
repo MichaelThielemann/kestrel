@@ -1,4 +1,5 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -128,7 +129,7 @@ describe("backup/blobstore checkRestored", () => {
     return boundaryCast<Record<string, unknown>>(run.result, "host")._databaseRestoredAt;
   }
 
-  it("answers the start of the boot that applied a prepared restore, in that boot and every later one, and null for a restore of a missing file", async () => {
+  it("answers the start of the boot that restored the file, from a prepared restore or a missing file, in that boot and every later one", async () => {
     const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "kestrel-backup-restored-"));
     dirs.push(dir);
     const file = join(dir, "kestrel.db");
@@ -141,11 +142,49 @@ describe("backup/blobstore checkRestored", () => {
       return { instance: boundaryCast<Backup>(await module.setup(config, moduleDeps(blobs, dir, bootStartedAt)), "host"), bootStartedAt };
     };
     const missing = await start();
-    expect(await restoredAt(missing.instance)).toBeNull();
-    expect((await missing.instance.prepareRestore()).ok).toBe(true);
+    expect(await restoredAt(missing.instance)).toBe(missing.bootStartedAt);
+    const kept = await start();
+    expect(await restoredAt(kept.instance)).toBe(missing.bootStartedAt);
+    expect((await kept.instance.prepareRestore()).ok).toBe(true);
     const restoring = await start();
     expect(await restoredAt(restoring.instance)).toBe(restoring.bootStartedAt);
     expect(await restoredAt((await start()).instance)).toBe(restoring.bootStartedAt);
+  });
+
+  it("answers null for a file no restore wrote", async () => {
+    expect(await restoredAt(await boot())).toBeNull();
+  });
+
+  it("leaves a restore whose record could not be written to the next start", async () => {
+    const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "kestrel-backup-unrecorded-"));
+    dirs.push(dir);
+    const file = join(dir, "kestrel.db");
+    const blobs = fakeBlobstore();
+    blobs.blobs.set("backups/db", { data: new TextEncoder().encode("hello"), contentType: "application/octet-stream" });
+    const config = configSchema.parse({ file, key: "backups/db" });
+    const unblockRecord = async (): Promise<void> => {
+      await rm(`${file}.restored-at`, { recursive: true, force: true });
+    };
+    const blockRecord = async (): Promise<void> => {
+      await unblockRecord();
+      await mkdir(join(`${file}.restored-at`, "blocked"), { recursive: true });
+    };
+
+    await blockRecord();
+    await expect(module.setup(config, moduleDeps(blobs, dir, Date.now()))).rejects.toThrow();
+    expect(existsSync(file)).toBe(false);
+    await unblockRecord();
+    const rebuilt = Date.now() + 1;
+    const afterRebuild = boundaryCast<Backup>(await module.setup(config, moduleDeps(blobs, dir, rebuilt)), "host");
+    expect(await restoredAt(afterRebuild)).toBe(rebuilt);
+
+    expect((await afterRebuild.prepareRestore()).ok).toBe(true);
+    await blockRecord();
+    await expect(module.setup(config, moduleDeps(blobs, dir, rebuilt + 1))).rejects.toThrow();
+    expect(existsSync(`${file}.restore-marker`)).toBe(true);
+    await unblockRecord();
+    const applied = rebuilt + 2;
+    expect(await restoredAt(boundaryCast<Backup>(await module.setup(config, moduleDeps(blobs, dir, applied)), "host"))).toBe(applied);
   });
 
   it("keeps the other members of the result", async () => {

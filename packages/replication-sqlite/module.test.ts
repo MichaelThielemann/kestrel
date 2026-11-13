@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -185,6 +185,28 @@ describe("replication/sqlite checkRestored", () => {
     const rebuilt = await start(file, dir, blobs);
     expect(await restoredAt(rebuilt.instance)).toBeNull();
     rebuilt.instance.close();
+  });
+
+  it("leaves a prepared restore whose record could not be written to the next start", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-unrecorded-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    const app = new DatabaseSync(file);
+    app.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+    app.close();
+    const blobs = fakeBlobs();
+    const first = await start(file, dir, blobs);
+    expect((await first.instance.snapshot()).ok).toBe(true);
+    expect((await first.instance.prepareRestore({})).ok).toBe(true);
+    first.instance.close();
+
+    mkdirSync(join(`${file}.restored-at`, "blocked"), { recursive: true });
+    await expect(start(file, dir, blobs)).rejects.toThrow();
+    expect(existsSync(`${file}.restore`)).toBe(true);
+    rmSync(`${file}.restored-at`, { recursive: true, force: true });
+    const applied = await start(file, dir, blobs);
+    expect(await restoredAt(applied.instance)).toBe(applied.bootStartedAt);
+    applied.instance.close();
   });
 
   it("keeps the other members of the result", async () => {

@@ -3698,7 +3698,7 @@
       "module": "replication/sqlite",
       "factory": false,
       "description": {
-        "summary": "When the latest prepared restore of the database file was applied, by this module or another one (adds `_databaseRestoredAt`, the start of that boot or null, to the result)",
+        "summary": "When the latest restore of the file was a prepared restore or a restore of a missing file from a periodic backup, by this module or another one (adds `_databaseRestoredAt`, the start of the boot that wrote it or null, to the result)",
         "reads": [],
         "writes": [
           "result._databaseRestoredAt"
