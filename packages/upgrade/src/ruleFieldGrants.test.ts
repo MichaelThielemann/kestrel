@@ -86,7 +86,7 @@ describe("pipelines/field-step", () => {
     expect(finding?.suggestion).toContain('getMedia → "authz.fields:media?shape=item"');
     expect(finding?.suggestion).toContain('resolvePage → "authz.fields:pages?shape=item"');
     expect(finding?.suggestion).toContain('serveMediaFile → "authz.fields:mediaFile?shape=file"');
-    expect(finding?.suggestion).toContain("media: id, path, filename, contentType, size, width, height, alt, title, description, provenance, variants[].size, variants[].width, variants[].height, variants[].format, variants[].path");
+    expect(finding?.suggestion).toContain("media: id, path, filename, contentType, size, width, height, alt, title, description, provenance, focus, variants[].size, variants[].width, variants[].height, variants[].format, variants[].path");
     expect(finding?.suggestion).toContain("pages: id, slug, title, _locales, _translations, _locale, _links, redirect");
     expect(finding?.suggestion).toContain("mediaFile: headers.cache-control, headers.x-content-provenance, headers.x-kestrel-variant");
   });
@@ -172,7 +172,7 @@ describe("responses/anonymous-fields", () => {
     const findings = await anonymousFieldsRule.check(contextFor(await project({ triggers })));
     expect(findings.map((f) => f.where.pipeline)).toEqual(["getMedia", "resolvePage", "serveMediaFile"]);
     expect(findings.every((f) => f.severity === "info")).toBe(true);
-    expect(findings[0]?.message).toContain("folder, createdAt, updatedAt, available, variantCounts, variants[].bytes, variants[].state");
+    expect(findings[0]?.message).toContain("folder, createdAt, updatedAt, available, variantCounts, framing, variants[].bytes, variants[].state");
     expect(findings[1]?.message).toContain("createdAt, updatedAt");
     expect(findings[2]?.message).toContain("every response header the grant does not name");
   });

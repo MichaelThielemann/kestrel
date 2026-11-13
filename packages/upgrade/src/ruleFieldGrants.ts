@@ -23,7 +23,7 @@ const OTHER_FIELD_PROBLEMS = [
 ];
 
 const MEDIA_FIELDS = ["id", "path", "filename", "contentType", "size", "width", "height", "alt", "title", "description", "provenance"];
-const VARIANT_FIELDS = ["variants[].size", "variants[].width", "variants[].height", "variants[].format", "variants[].path"];
+const VARIANT_FIELDS = ["focus", "variants[].size", "variants[].width", "variants[].height", "variants[].format", "variants[].path"];
 
 function authzLines(ctx: RuleContext): string[] {
   return ctx.bootCheck.errors
@@ -193,7 +193,7 @@ function granted(grants: readonly string[], permission: string): boolean {
 }
 
 function droppedMembers(resource: string | undefined, steps: readonly string[]): string {
-  if (resource === "media") return `folder, createdAt, updatedAt${runs(steps, "images.attach") ? ", available, variantCounts, variants[].bytes, variants[].state" : ""}`;
+  if (resource === "media") return `folder, createdAt, updatedAt${runs(steps, "images.attach") ? ", available, variantCounts, framing, variants[].bytes, variants[].state" : ""}`;
   if (resource === "mediaFile") return "every response header the grant does not name";
   if (resource === undefined) return "every member the grant does not name";
   return "createdAt, updatedAt";

@@ -441,7 +441,7 @@ the pipelines and shapes from boot's own message and the resource from the step 
 file step → `mediaFile`, `redirects.render` → `redirectRules`). It proposes the grants from the loaded
 project: `id` and every model field of a content type, `_locales` and `_translations` with locales,
 `_locale` and `_links` behind `site.resolve`, `redirect` behind `redirects.lookup`; the public media
-fields, and the variant fields behind `images.attach`; the file headers `cache-control`,
+fields, and `focus` and the variant fields behind `images.attach`; the file headers `cache-control`,
 `x-content-provenance` and, with `images-default`, `x-kestrel-variant`; the redirect rules' `pattern`,
 `target` and `status`. It asks once, with no default, since every granted field is served to callers
 without a session: "yes" appends the step to each pipeline file and sets `anonymousFields` (existing
@@ -459,9 +459,9 @@ Manual; the suggestion is the hint boot gives, for example `"variants" is a list
 An HTTP pipeline that anonymous callers reach answers them only the fields `anonymousFields` grants once
 it ends with `authz.fields`. The finding names the members they stop receiving with the example's
 grants: `createdAt` and `updatedAt` of a document; `folder`, `createdAt`, `updatedAt`, and behind
-`images.attach` `available`, `variantCounts` and each variant's `bytes` and `state` of a media item;
-any header of a file the grant does not name. Signed-in callers whose roles have no field grant keep
-the whole answer.
+`images.attach` `available`, `variantCounts`, `framing` and each variant's `bytes` and `state` of a
+media item; any header of a file the grant does not name. Signed-in callers whose roles have no
+field grant keep the whole answer.
 
 #### responses-thrown-error-text
 A file next to a local module compares the `error` text of an answer (`res.error` with `toContain`,
