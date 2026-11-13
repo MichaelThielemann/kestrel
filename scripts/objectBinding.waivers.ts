@@ -31,6 +31,7 @@ export const OBJECT_BINDING_REGISTRY: Record<string, ObjectBindingDisposition> =
   [key("delivery/static", "unpublish")]: { kind: "waiver", reason: "payload.id is only a fallback used when params.id is absent, in an event-triggered run with no HTTP caller; params.id remains the resource itself, not a second object to bind to." },
 
   [key("images/default", "serve")]: { kind: "test", file: "images-default/module.test.ts", title: "serve: does not return another media item's variant for the same size name" },
+  [key("images/default", "setFraming")]: { kind: "waiver", reason: "the input schema is the framing of the item params.id names: rectangles and ratio keys, no id of another object." },
   [key("media/default", "serve")]: { kind: "test", file: "media-default/module.test.ts", title: "serve: does not return another media item's file for a different name" },
 
   [key("media/default", "update")]: { kind: "waiver", reason: "the only request-controlled value beside params.id is the query locale, not an object id." },
