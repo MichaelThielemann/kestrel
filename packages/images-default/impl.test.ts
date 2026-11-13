@@ -298,7 +298,7 @@ describe("images/default rendering", () => {
     expect(blobs.blobs.has(`site/media/${id}/variants/thumb.webp`)).toBe(true);
   });
 
-  it("direct mode: a failed render writes no placeholder and leaves the row planned, then the background loop places it", async () => {
+  it("direct mode: a failed render writes no placeholder and leaves the row planned, then the background loop places and renders it", async () => {
     let fail = true;
     const flaky: Renderer = async (data, size, planned) => {
       if (fail) throw new Error("render failed");
@@ -316,8 +316,8 @@ describe("images/default rendering", () => {
     fail = false;
     await whenIdle(images);
     const after = expectOk(await images.variantsOf([id])).get(id) ?? [];
-    expect(after[0]?.state).toBe("pending");
-    expect(blobs.blobs.has(`site/media/${id}/variants/thumb.webp`)).toBe(true);
+    expect(after[0]?.state).toBe("done");
+    expect(blobs.blobs.get(`site/media/${id}/variants/thumb.webp`)?.data).toEqual(new Uint8Array([1]));
   });
 
   it("a render failure on an already-placed row counts an attempt and keeps the path's existing content", async () => {

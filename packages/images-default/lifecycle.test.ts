@@ -403,7 +403,7 @@ describe("images/default: a variant write that fails", () => {
     expect(w.blobs.blobs.get("site/media/m1/variants/thumb.webp")?.contentType).toBe("image/jpeg");
   });
 
-  it("an inline render whose copy cannot be written leaves the size to the background loop, which places it", async () => {
+  it("an inline render whose copy cannot be written leaves the size to the background loop, which places and renders it", async () => {
     const w = await world();
     await seed(w, "m1", await jpeg(1000, 600));
     const put = w.blobs.put.bind(w.blobs);
@@ -413,8 +413,8 @@ describe("images/default: a variant write that fails", () => {
     expect((await rowsOf(w, "m1")).map((r) => r.state)).toEqual(["planned"]);
     failing = false;
     await whenIdle(w.images);
-    expect((await rowsOf(w, "m1")).map((r) => r.state)).toEqual(["pending"]);
-    expect(w.blobs.blobs.has("site/media/m1/variants/thumb.webp")).toBe(true);
+    expect((await rowsOf(w, "m1")).map((r) => r.state)).toEqual(["done"]);
+    expect(w.blobs.blobs.get("site/media/m1/variants/thumb.webp")?.contentType).toBe("image/webp");
   });
 });
 
