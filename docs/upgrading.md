@@ -848,7 +848,19 @@ held in a variable and given an object method elsewhere, `const smtp = base.desc
 later `smtp.strict()`, is not rewritten; keep `.describe()` the last call there by hand.
 
 #### zod-4-schemas
-What a module's own config schema may need beyond the rules above:
+What a module's own config schema may need beyond the rules above. The list is not complete:
+zod's [migration guide](https://zod.dev/v4/changelog) lists every change between zod 3 and zod 4.
+
+- Some schemas parse differently without a type error:
+  - `z.string().default("x").optional()` and `.partial()` over a key with a `.default()` fill that
+    default for an absent key, where zod 3 returned `undefined`.
+  - `z.record(z.enum(["a", "b"]), value)` requires every key of the enum, so a config that sets
+    only some of them fails boot; `z.partialRecord(z.enum(["a", "b"]), value)` accepts a subset as
+    zod 3's record did.
+  - `z.string().uuid()` accepts only RFC 9562 UUIDs and refuses an id such as
+    `12345678-1234-1234-1234-123456789012`; `z.guid()` accepts any id of that shape as zod 3's
+    `.uuid()` did.
+  - `.int()` refuses a number above `Number.MAX_SAFE_INTEGER`.
 
 - Error messages are zod 4's. A missing key reads `Invalid input: expected string, received
   undefined` instead of `Required`, an unknown key `Unrecognized key: "name"` instead of
