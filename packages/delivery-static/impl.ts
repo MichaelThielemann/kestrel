@@ -249,6 +249,7 @@ const INDEXES_COALESCE_KEY = "indexes";
 const BUILD = "build";
 const MARKER = "marker";
 const ORPHANS = "orphans";
+const SITEMAP_WRITTEN = "sitemap";
 const INDEXES_OUTCOME = "export:indexes";
 const LLMS_FULL_OUTCOME = "export:llmsFull";
 const INDEX_FILE = /^index\.([A-Za-z0-9]+)$/;
@@ -384,6 +385,12 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   for (const p of prepared) if (isErr(p)) throw new Error(`delivery/static: cannot prepare its collections: ${p.error.message}`);
   const versioned = await db.updateMany<StatusRow>(STATUS, { version: null }, { version: 0 });
   if (isErr(versioned)) throw new Error(`delivery/static: cannot give older status rows a version: ${versioned.error.message}`);
+  const heldOutputs = await db.count(STATUS, {});
+  if (isErr(heldOutputs)) throw new Error(`delivery/static: cannot count its status rows: ${heldOutputs.error.message}`);
+  if (heldOutputs.value === 0) {
+    const fresh = await db.createOne<StateRow>(STATE, { id: ORPHANS, value: JSON.stringify({ at: now(), removed: 0 }), seq: null, updatedAt: now() });
+    if (isErr(fresh) && fresh.error.code !== "CONFLICT") throw new Error(`delivery/static: cannot record that a new database has no orphaned output files: ${fresh.error.message}`);
+  }
 
   const uploadedAssets = new Set<string>();
   const warnedUnread = new Set<string>();
@@ -399,7 +406,9 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   let renderStarts = 0;
   let rendersInFlight = 0;
   let markerArmed = false;
-  let outputsChanged = false;
+  let aheadToken: string | null = null;
+  let aheadWritten: Promise<boolean> = Promise.resolve(false);
+  let unpublishesInFlight = 0;
   let orphansDone = false;
   let orphansSkipLogged = false;
   let loop: BackgroundLoop | undefined;
@@ -454,6 +463,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   };
 
   const removeKeys = async (keys: readonly string[]): Promise<Result<void, DeliveryError>> => {
+    if (keys.length > 0) await advanceMarker();
     for (const key of keys) {
       const removed = await blobs.remove(key);
       if (isErr(removed)) return err(transientOnly(removed.error, "blobstore@1"));
@@ -772,7 +782,6 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     }
 
     if (won) {
-      outputsChanged = true;
       const ownId = before?.id ?? statusIdOf(output.type, output.docId, output.locale);
       const oldPath = before === null ? null : before.path;
       if (before !== null && oldPath !== null && oldPath !== target.path) {
@@ -944,6 +953,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     if ("failure" in rendered) return failed(rendered.failure, { renderPath: null, written: {} }, reads);
 
     const written: Record<string, string> = {};
+    await advanceMarker();
     try {
       for (const { format, output: out } of rendered.outputs) {
         const key = keyFor(config.prefix, path, out.extension);
@@ -1028,6 +1038,13 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
           return ok();
         }),
       publishedExists,
+      sitemapWritten: {
+        read: async () => {
+          const row = await db.findOne<StateRow>(STATE, { id: SITEMAP_WRITTEN });
+          return isErr(row) ? err(dbFailure(row.error)) : ok(row.value?.value === "yes");
+        },
+        write: (written) => writeState(SITEMAP_WRITTEN, written ? "yes" : "no"),
+      },
       stopping: () => stopping,
       interleave: () => runDueIndexes(),
     },
@@ -1413,30 +1430,55 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return ok({ marked: dispatched.value });
   };
 
-  const detectRestore = async (): Promise<boolean | null> => {
-    if (markerKey === null) return false;
+  const readMarker = async (): Promise<"missing" | "same" | "differs" | null> => {
+    if (markerKey === null) return "same";
     const stored = await db.findOne<StateRow>(STATE, { id: MARKER });
     const blob = await blobs.get(markerKey);
     if (isErr(stored) || isErr(blob)) {
       logger.error("delivery/static: could not read the restore marker, this build check cannot tell whether the database was restored", { error: isErr(stored) ? stored.error.message : isErr(blob) ? blob.error.message : "" });
       return null;
     }
-    if (blob.value === null) return false;
-    return new TextDecoder().decode(blob.value) !== stored.value?.value;
+    if (blob.value === null) return "missing";
+    return new TextDecoder().decode(blob.value) === stored.value?.value ? "same" : "differs";
   };
 
-  const rotateMarker = async (): Promise<void> => {
-    if (markerKey === null) return;
-    markerArmed = true;
-    outputsChanged = false;
+  const putMarker = async (token: string): Promise<boolean> => {
+    if (markerKey === null) return false;
+    const written = await blobs.put(markerKey, new TextEncoder().encode(token), { contentType: "text/plain; charset=utf-8" });
+    if (!isErr(written)) return true;
+    logger.error("delivery/static: could not write the restore marker, a restore that loses the files written next may go unnoticed", { error: written.error.message });
+    return false;
+  };
+
+  const resetMarker = async (): Promise<boolean> => {
     const token = randomUUID();
     const stored = await writeState(MARKER, token);
     if (isErr(stored)) {
-      logger.error("delivery/static: could not store the restore marker, a later restore may go unnoticed", { error: stored.error.message });
-      return;
+      logger.error("delivery/static: could not store the restore marker, the next build check renders every output again", { error: stored.error.message });
+      return false;
     }
-    const written = await blobs.put(markerKey, new TextEncoder().encode(token), { contentType: "text/plain; charset=utf-8" });
-    if (isErr(written)) logger.error("delivery/static: could not write the restore marker, the next build check renders every output again", { error: written.error.message });
+    if (await putMarker(token)) return true;
+    logger.error("delivery/static: the restore marker is stored but not written next to the prefix, the next build check renders every output again");
+    return false;
+  };
+
+  const advanceMarker = (): Promise<boolean> => {
+    if (!markerArmed) return Promise.resolve(false);
+    if (aheadToken === null) {
+      const token = randomUUID();
+      aheadToken = token;
+      aheadWritten = putMarker(token);
+    }
+    return aheadWritten;
+  };
+
+  const sealMarker = async (): Promise<void> => {
+    if (aheadToken === null || rendersInFlight > 0 || unpublishesInFlight > 0) return;
+    const token = aheadToken;
+    aheadToken = null;
+    if (!(await aheadWritten)) return;
+    const stored = await writeState(MARKER, token);
+    if (isErr(stored)) logger.error("delivery/static: could not store the restore marker, the next build check renders every output again", { error: stored.error.message });
   };
 
   const publishedWithoutLiveRow = async (): Promise<Result<boolean, DeliveryError>> => {
@@ -1492,6 +1534,9 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       if (busy.value > 0) return skip("outputs wait for a re-render");
     }
     if (rendersInFlight > 0) return skip("outputs wait for a re-render");
+    const live = await db.count(STATUS, { state: "live" });
+    if (isErr(live)) return err(dbFailure(live.error));
+    if (live.value === 0) return skip("no output is live");
     const missing = await publishedWithoutLiveRow();
     if (isErr(missing)) return missing;
     if (missing.value) return skip("a published document has no live output");
@@ -1521,11 +1566,21 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       orphans.set(file.path, [...(orphans.get(file.path) ?? []), key]);
     }
     if (renderStarts !== startedBefore || rendersInFlight > 0) return skip("a page was published while the files were compared");
+    if (orphans.size > ownedPaths.size) {
+      logWarn(logger, `delivery/static: the one-time removal of orphaned output files found ${orphans.size} paths no status row has, more than the ${ownedPaths.size} paths status rows own, so it removes nothing; remove files that no page serves by hand`);
+      const gaveUp = await writeState(ORPHANS, JSON.stringify({ at: now(), removed: 0, unowned: orphans.size }));
+      if (isErr(gaveUp)) return gaveUp;
+      orphansDone = true;
+      return ok(0);
+    }
     let removed = 0;
     for (const [path, keys] of orphans) {
       if (stopping) return ok(removed);
       const gone = await removeFiles(path, keys);
-      if (isErr(gone)) return gone;
+      if (isErr(gone)) {
+        logger.error("delivery/static: could not remove an orphaned output file", { path, keys, error: gone.error.message });
+        return gone;
+      }
       for (const key of keys) logger.info("delivery/static: removed an orphaned output file no status row owns", { path, key });
       removed += keys.length;
     }
@@ -1536,6 +1591,15 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   };
 
   const rearmOrphans = async (): Promise<void> => {
+    const live = await db.count(STATUS, { state: "live" });
+    if (isErr(live)) {
+      logger.error("delivery/static: could not arm the removal of orphaned output files after a restore, files of outputs the restored database lacks stay online", { error: live.error.message });
+      return;
+    }
+    if (live.value === 0) {
+      logger.info("delivery/static: the restored database has no live output, so the removal of orphaned output files is not armed again");
+      return;
+    }
     const cleared = await db.deleteMany(STATE, { id: ORPHANS });
     if (isErr(cleared)) {
       logger.error("delivery/static: could not arm the removal of orphaned output files after a restore, files of outputs the restored database lacks stay online", { error: cleared.error.message });
@@ -1545,53 +1609,61 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     orphansSkipLogged = false;
   };
 
+  const unpublishOutputs = async (type: string, id: string): Promise<Result<number, DeliveryError>> => {
+    const rows = await db.findMany<StatusRow>(STATUS, { type, docId: id }, { sort: { locale: "asc" } });
+    if (isErr(rows)) return err(dbFailure(rows.error));
+    const pending = [...rows.value.items];
+    const present = new Set(pending.map((r) => r.locale));
+    for (const locale of locales.length > 0 ? locales : [""]) {
+      if (present.has(locale)) continue;
+      const blocked = await db.createOne<StatusRow>(STATUS, { id: statusIdOf(type, id, locale), type, docId: id, locale, state: "deleted", path: null, writtenKeys: {}, error: null, publishedAt: null, updatedAt: now(), version: 1, depSet: null, depCount: null, staleAt: null, staleToken: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null });
+      if (!isErr(blocked)) continue;
+      if (blocked.error.code !== "CONFLICT") return err(dbFailure(blocked.error));
+      const raced = await readRow(type, id, locale);
+      if (isErr(raced)) return raced;
+      if (raced.value) pending.push(raced.value);
+    }
+    let count = 0;
+    for (const row of pending) {
+      const output: OutputRef = { type: row.type, docId: row.docId, locale: row.locale };
+      let current: StatusRow | null = row;
+      let tombstoned = false;
+      for (let tries = 0; current !== null && current.state !== "deleted"; tries++) {
+        if (tries >= UNPUBLISH_TRIES) return err(transient(`delivery/static: ${type}/${id}/${row.locale} kept changing while it was being unpublished – try again`));
+        const swapped: Result<number, KestrelError> = await db.updateMany<StatusRow>(STATUS, { id: current.id, version: current.version }, { state: "deleted", version: (current.version ?? 0) + 1, updatedAt: now(), depSet: null, depCount: null, staleToken: null, staleAt: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null });
+        if (isErr(swapped)) return err(dbFailure(swapped.error));
+        if (swapped.value === 1) {
+          tombstoned = true;
+          break;
+        }
+        const reread: Result<StatusRow | null, KestrelError> = await db.findOne<StatusRow>(STATUS, { id: current.id });
+        if (isErr(reread)) return err(dbFailure(reread.error));
+        current = reread.value;
+      }
+      if (current === null) continue;
+      if (tombstoned) count += 1;
+      if (current.path !== null) {
+        const keys = Object.values(await ownedKeys(current));
+        const removed = await removeStaleKeys(current.path, keys);
+        if (isErr(removed)) return removed;
+        const cleared = await db.updateMany<StatusRow>(STATUS, { id: current.id, state: "deleted" }, { path: null, writtenKeys: {} });
+        if (isErr(cleared)) return err(dbFailure(cleared.error));
+      }
+      if (tombstoned && current.depSet !== null) logged("could not remove the dependency set of an unpublished output, the sweep removes it", output)(await retireSet(current.depSet, false));
+    }
+    return ok(count);
+  };
+
   return {
     publish,
     async unpublish(type, id) {
       typeConfig(type);
-      outputsChanged = true;
-      const rows = await db.findMany<StatusRow>(STATUS, { type, docId: id }, { sort: { locale: "asc" } });
-      if (isErr(rows)) return err(dbFailure(rows.error));
-      const pending = [...rows.value.items];
-      const present = new Set(pending.map((r) => r.locale));
-      for (const locale of locales.length > 0 ? locales : [""]) {
-        if (present.has(locale)) continue;
-        const blocked = await db.createOne<StatusRow>(STATUS, { id: statusIdOf(type, id, locale), type, docId: id, locale, state: "deleted", path: null, writtenKeys: {}, error: null, publishedAt: null, updatedAt: now(), version: 1, depSet: null, depCount: null, staleAt: null, staleToken: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null });
-        if (!isErr(blocked)) continue;
-        if (blocked.error.code !== "CONFLICT") return err(dbFailure(blocked.error));
-        const raced = await readRow(type, id, locale);
-        if (isErr(raced)) return raced;
-        if (raced.value) pending.push(raced.value);
+      unpublishesInFlight += 1;
+      try {
+        return await unpublishOutputs(type, id);
+      } finally {
+        unpublishesInFlight -= 1;
       }
-      let count = 0;
-      for (const row of pending) {
-        const output: OutputRef = { type: row.type, docId: row.docId, locale: row.locale };
-        let current: StatusRow | null = row;
-        let tombstoned = false;
-        for (let tries = 0; current !== null && current.state !== "deleted"; tries++) {
-          if (tries >= UNPUBLISH_TRIES) return err(transient(`delivery/static: ${type}/${id}/${row.locale} kept changing while it was being unpublished – try again`));
-          const swapped: Result<number, KestrelError> = await db.updateMany<StatusRow>(STATUS, { id: current.id, version: current.version }, { state: "deleted", version: (current.version ?? 0) + 1, updatedAt: now(), depSet: null, depCount: null, staleToken: null, staleAt: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null });
-          if (isErr(swapped)) return err(dbFailure(swapped.error));
-          if (swapped.value === 1) {
-            tombstoned = true;
-            break;
-          }
-          const reread: Result<StatusRow | null, KestrelError> = await db.findOne<StatusRow>(STATUS, { id: current.id });
-          if (isErr(reread)) return err(dbFailure(reread.error));
-          current = reread.value;
-        }
-        if (current === null) continue;
-        if (tombstoned) count += 1;
-        if (current.path !== null) {
-          const keys = Object.values(await ownedKeys(current));
-          const removed = await removeStaleKeys(current.path, keys);
-          if (isErr(removed)) return removed;
-          const cleared = await db.updateMany<StatusRow>(STATUS, { id: current.id, state: "deleted" }, { path: null, writtenKeys: {} });
-          if (isErr(cleared)) return err(dbFailure(cleared.error));
-        }
-        if (tombstoned && current.depSet !== null) logged("could not remove the dependency set of an unpublished output, the sweep removes it", output)(await retireSet(current.depSet, false));
-      }
-      return ok(count);
     },
     async status(type, id) {
       typeConfig(type);
@@ -1629,28 +1701,27 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     async checkBuild(build) {
       const stored = await db.findOne<StateRow>(STATE, { id: BUILD });
       if (isErr(stored)) return err(dbFailure(stored.error));
-      const restored = await detectRestore();
+      const marker = markerArmed ? "same" : await readMarker();
+      const restored = marker === "differs";
       const changed = stored.value?.value !== build;
-      if (!changed && restored !== true) {
-        if (restored === false) await rotateMarker();
-        return ok({ changed: false, restored: false, marked: 0 });
-      }
-      if (restored === true) {
+      if (restored) {
         logWarn(logger, "delivery/static: the database is older than the delivered files (restored from a backup), so every output is rendered again");
         await rearmOrphans();
       }
       let marked = 0;
-      for (const type of Object.keys(config.types)) {
-        const all = await markAll(type);
-        if (isErr(all)) return all;
-        marked += all.value.marked;
+      if (changed || restored) {
+        for (const type of Object.keys(config.types)) {
+          const all = await markAll(type);
+          if (isErr(all)) return all;
+          marked += all.value.marked;
+        }
       }
       if (changed) {
         const written = stored.value === null ? await db.createOne<StateRow>(STATE, { id: BUILD, value: build, seq: null, updatedAt: now() }) : await db.updateOne<StateRow>(STATE, BUILD, { value: build, updatedAt: now() });
         if (isErr(written) && written.error.code !== "CONFLICT") return err(dbFailure(written.error));
       }
-      if (restored !== null) await rotateMarker();
-      return ok({ changed, restored: restored === true, marked });
+      if (markerKey !== null && !markerArmed && marker !== null) markerArmed = marker === "same" || (await resetMarker());
+      return ok({ changed, restored, marked });
     },
     async republishOutput(target) {
       typeConfig(target.type);
@@ -1726,10 +1797,10 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       const llmsFull = config.llms.full ? await readOutcome(LLMS_FULL_OUTCOME) : ok(null);
       if (isErr(llmsFull)) logger.error("delivery/static: could not read the outcome of the last llms-full.txt export", { error: llmsFull.error.message });
       else if (llmsFull.value?.error !== null && llmsFull.value?.error !== undefined) logged("could not request an llms-full.txt export from the recovery pass", {})(await requestLlmsFull());
-      if (markerArmed && outputsChanged) await rotateMarker();
+      await sealMarker();
       const orphans = await removeOrphans();
-      if (isErr(orphans)) return orphans;
-      return ok({ released: released.value, swept, dispatched, aged, orphans: orphans.value });
+      if (isErr(orphans)) logger.error("delivery/static: the one-time removal of orphaned output files failed, the next recovery pass tries again", { error: orphans.error.message });
+      return ok({ released: released.value, swept, dispatched, aged, orphans: isErr(orphans) ? 0 : orphans.value });
     },
     async retryStale() {
       const failed: string[] = [];
@@ -1766,7 +1837,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     async close() {
       stopping = true;
       await loop?.stop();
-      if (markerArmed) await rotateMarker();
+      await sealMarker();
     },
   };
 }

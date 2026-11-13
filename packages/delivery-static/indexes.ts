@@ -127,6 +127,11 @@ export interface IndexFilesDeps {
   candidates(type: string, visit: (page: IndexCandidate[]) => Promise<Result<void, KestrelError>>): Promise<Result<void, KestrelError>>;
   /** Whether any document of a delivered type is published in any delivered locale. */
   publishedExists(): Promise<Result<boolean, KestrelError>>;
+  /** Whether the `sitemap.xml` under the prefix is one an export wrote, kept across restarts. */
+  sitemapWritten: {
+    read(): Promise<Result<boolean, KestrelError>>;
+    write(written: boolean): Promise<Result<void, KestrelError>>;
+  };
   stopping(): boolean;
   /** Runs work that came due meanwhile; called before each page an llms-full.txt export reads. */
   interleave(): Promise<void>;
@@ -243,10 +248,42 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
     return ok(listed.value.some((entry) => entry.key === key));
   };
 
-  const removeTurnedOff = async (sitemapOn: boolean): Promise<Result<void, KestrelError>> => {
-    if (!sitemapOn) {
-      const sitemap = await removeIfPresent(SITEMAP_KEY);
-      if (isErr(sitemap)) return sitemap;
+  let sitemapOwned: boolean | undefined;
+  const ownSitemap = async (owned: boolean): Promise<Result<void, KestrelError>> => {
+    if (sitemapOwned === owned) return ok();
+    sitemapOwned = undefined;
+    const recorded = await deps.sitemapWritten.write(owned);
+    if (isErr(recorded)) return recorded;
+    sitemapOwned = owned;
+    return ok();
+  };
+
+  const writeSitemap = async (entries: readonly IndexEntry[]): Promise<Result<boolean, KestrelError>> => {
+    if (entries.length === 0) {
+      const removed = await removeIfPresent(SITEMAP_KEY);
+      if (isErr(removed)) return removed;
+      const recorded = await ownSitemap(false);
+      return isErr(recorded) ? recorded : ok(false);
+    }
+    const put = await putIfChanged(SITEMAP_KEY, buildSitemapXml(sitemapUrls(entries, deps.defaultLocale)), SITEMAP_CONTENT_TYPE);
+    if (isErr(put)) return put;
+    const recorded = await ownSitemap(true);
+    return isErr(recorded) ? recorded : ok(true);
+  };
+
+  const removeTurnedOff = async (): Promise<Result<void, KestrelError>> => {
+    if (config.sitemap && config.siteUrl === undefined) {
+      if (sitemapOwned === undefined) {
+        const read = await deps.sitemapWritten.read();
+        if (isErr(read)) return read;
+        sitemapOwned = read.value;
+      }
+      if (sitemapOwned) {
+        const sitemap = await removeIfPresent(SITEMAP_KEY);
+        if (isErr(sitemap)) return sitemap;
+        const recorded = await ownSitemap(false);
+        if (isErr(recorded)) return recorded;
+      }
     }
     if (!config.llms.full) {
       const full = await removeIfPresent(LLMS_FULL_KEY);
@@ -266,7 +303,7 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
       if (isErr(published)) return published;
       if (published.value) {
         logWarn(logger, "delivery/static: published documents exist but none has a rendered output yet; sitemap.xml and llms.txt are left as they are");
-        const removed = await removeTurnedOff(sitemapOn);
+        const removed = await removeTurnedOff();
         if (isErr(removed)) return removed;
         const present = sitemapOn ? await sitemapPresent() : ok(false);
         if (isErr(present)) return present;
@@ -280,13 +317,11 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
     const sections: LlmsSection[] = sectionsOf(entries, (e) => ({ title: e.title, url: e.url, ...(e.description === undefined ? {} : { description: e.description }) })).map((s) => ({ heading: s.heading, entries: s.items }));
     const llms = await putIfChanged(LLMS_KEY, buildLlmsTxt({ ...head.value, sections }), LLMS_CONTENT_TYPE);
     if (isErr(llms)) return llms;
-    if (sitemapOn) {
-      const sitemap = await putIfChanged(SITEMAP_KEY, buildSitemapXml(sitemapUrls(entries, deps.defaultLocale)), SITEMAP_CONTENT_TYPE);
-      if (isErr(sitemap)) return sitemap;
-    }
-    const removed = await removeTurnedOff(sitemapOn);
+    const sitemap = sitemapOn ? await writeSitemap(entries) : ok(false);
+    if (isErr(sitemap)) return sitemap;
+    const removed = await removeTurnedOff();
     if (isErr(removed)) return removed;
-    const robots = await writeRobots(sitemapOn);
+    const robots = await writeRobots(sitemap.value);
     if (isErr(robots)) return robots;
     return ok({ entries: entries.length });
   };

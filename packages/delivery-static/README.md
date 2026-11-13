@@ -78,21 +78,25 @@ same URL give one entry, the `live` one first, then the lower row id. Entries ar
 **Guard.** When published documents exist but no row serves a file yet (before the first render, or after
 every first render failed), sitemap.xml and llms.txt are left as they are and a warning is logged; robots.txt
 is still written, with a `Sitemap:` line only when a sitemap.xml from an earlier export is there, and the
-outcome is recorded with `skipped: true`. A site whose every page is `noindex` gets an empty `<urlset>` and an llms.txt without
-sections.
+outcome is recorded with `skipped: true`. A site whose every page is `noindex`, or that has nothing published, gets
+no sitemap.xml (one found there is removed, since the sitemaps.org schema needs at least one `<url>`), a robots.txt
+without a `Sitemap:` line, and an llms.txt without sections.
 
 **sitemap.xml** (`application/xml; charset=utf-8`) lists one `<url>` per entry: `<loc>`, `<lastmod>` from the
 document's own `updatedAt` for `live` entries only, and, for a document with more than one listed locale, an
 `<xhtml:link rel="alternate" hreflang="…">` for each of them plus `hreflang="x-default"` for the default
-locale. Values are XML-escaped. Without `siteUrl`, or with `sitemap: false`, no sitemap is written and a
-stale one is removed; a missing `siteUrl` with the sitemap on logs one warning at setup. One file holds up to
+locale. Values are XML-escaped. With `sitemap: false` no sitemap is written and a `<prefix>sitemap.xml` is left alone,
+like robots.txt with `robots: false`. Without `siteUrl` no sitemap is written either, and one is removed only when an
+export of this module wrote it (recorded in `delivery_state`, so this holds across restarts); a missing `siteUrl` with
+the sitemap on logs one warning at setup. One file holds up to
 50 000 URLs per the sitemaps.org limit; this module writes no sitemap index.
 
 **robots.txt** (`text/plain; charset=utf-8`) is `User-agent: *` and `Allow: /` or `Disallow: /` from
 `robots.policy`, then the lines of `robots.extra`, then `Sitemap: <siteUrl>/sitemap.xml` when a sitemap is
 written. Without `robots.policy` the policy is `allow` when `NODE_ENV` is `production` and `disallow`
 otherwise, and setup logs a warning that names the choice. The module owns `<prefix>robots.txt` and
-`<prefix>sitemap.xml` and overwrites a file of that name it finds there; `robots: false` leaves robots.txt to
+`<prefix>sitemap.xml` and overwrites a file of that name it finds there, or removes a sitemap.xml while no page is
+listed; `robots: false` leaves robots.txt to
 the site, neither writing nor removing it. Crawlers read robots.txt only at the root of a host, so with a base
 path in `siteUrl` (`https://example.org/de`) the file this module writes is not read, and setup warns: serve a
 robots.txt at the host's root instead.
@@ -304,28 +308,39 @@ the next start. Run it after every deploy: every output is then re-rendered, and
 code. It answers `{ changed, restored, marked }`.
 
 **A restored database.** A database restored from a backup holds older status rows than the files in the blob
-store. `delivery.checkBuild` keeps a random marker both in `delivery_state` and in a blob next to `prefix`, outside
-the files it serves (`site/` keeps `site.delivery-marker`, `markerKeyFor` from `./impl` names it), and replaces it in
-both after every check, on every `delivery.resumeStale` run after an output changed, and when the process stops.
-When the two differ at the next check, the database is older than the files: every output is marked as for a new
-build, `restored` is `true`, and a warning is logged. A process that never ran `delivery.checkBuild` writes no
-marker. A `prefix` that does not end in `/`, the default empty one included, keeps no marker, because every key
-there could be served; a restore then goes undetected and needs a "Publish all". Sites that share a blob store under
-different prefixes keep apart markers. When the marker cannot be read, the check logs an error, still compares and
-stores the build (marking everything when it changed), and leaves the marker for the next check.
+store. After its first `delivery.checkBuild`, a process keeps a random marker both in `delivery_state` and in a blob
+next to `prefix`, outside the files it serves (`site/` keeps `site.delivery-marker`, `markerKeyFor` from `./impl`
+names it). Before the first file it writes or removes after the two last agreed, it writes a new marker to the blob
+only; the database takes that marker once no render or unpublish is in flight, on the next `delivery.resumeStale` run
+or when the process stops. So whenever files changed after the marker the database holds, the two differ. When they
+differ at the next check, every output is marked as for a new build, `restored` is `true`, a warning is logged, and both
+get a new marker. This covers a restore that lost the latest writes, and also a process that stopped without shutting
+down after it changed files and before the next recovery pass: that next start renders every output again although the
+database is current. A check that finds the two equal, and a process that changed no file, write no marker. A process
+that never ran `delivery.checkBuild` writes no marker, and the first check writes one. A `prefix` that does not end
+in `/`, the default empty one included, keeps no marker, because every key there could be served; a restore then
+goes undetected and needs a "Publish all". Sites that share a blob store under different prefixes keep apart markers.
+When the marker cannot be read, the check logs an error, still compares and stores the build (marking everything
+when it changed), and leaves the marker for the next check. When the blob cannot be written, an error is logged, and a
+restore that loses the files written next goes unnoticed. With several processes on one database, a process that
+stores its marker after another one wrote a newer one to the blob makes the next check render everything again.
 
 `delivery.resumeStale` (a recovery net, not the render path) releases expired claims, removes tombstones and
 orphaned sets, re-raises marks that are older than a minute, due and unclaimed, for example after a process
-stopped, and asks for the index exports (see above). Once per database it also removes page outputs under
-`prefix` at paths no status row has, which older versions could leave behind after a failed render followed by a
-slug change. A page output is an `index.<ext>` file whose extension is one of `formats` or one a status row recorded;
-files under `reservedPaths`, renderer assets this process wrote, and every other file (a media copy such as
-`media/<id>/index.png` among them) are left alone. With an empty `prefix` it never runs, because the listing would
-cover the whole blob store. It waits while an output is marked or rendering, or while a published document has no
-`live` output, and gives up a run during which a page started to render; each removed file is logged, and the
-completed run is recorded in `delivery_state`, so it runs once. A restore that `delivery.checkBuild` detects (see
-above) arms it again, so the files of pages the restored database no longer has are removed once the re-renders
-settle. It answers `{ released, swept, dispatched, aged, orphans }`. `delivery.retryStale` gives outputs that failed
+stopped, and asks for the index exports (see above). Once per database that held status rows when the process set up
+(one from an older version), it also removes page outputs under `prefix` at paths no status row has, which older
+versions could leave behind after a failed render followed by a slug change. A new or empty database records the
+removal as done at setup, so it never runs there, whatever files the prefix holds. A page output is an `index.<ext>`
+file whose extension is one of `formats` or one a status row recorded; files under `reservedPaths`, renderer assets
+this process wrote, and every other file (a media copy such as `media/<id>/index.png` among them) are left alone. With
+an empty `prefix` it never runs, because the listing would cover the whole blob store. It waits while an output is
+marked or rendering, while no output is `live`, or while a published document has no `live` output, and gives up a
+run during which a page started to render. When more paths look orphaned than status rows own, it removes nothing,
+logs a warning and records the run. Each removed file is logged, and the completed run is recorded in
+`delivery_state`, so it runs once. A restore that `delivery.checkBuild` detects (see above) arms it again when the
+restored database has a `live` output, so the files of pages the restored database no longer has are removed once the
+re-renders settle. A failure of this removal (a file that cannot be deleted, a listing that fails) is logged and
+retried on the next run; the recovery pass still succeeds and answers `orphans: 0`. It answers `{ released, swept, dispatched, aged, orphans }`. `delivery.retryStale` gives outputs that failed
 `maxAttempts` times new attempts. `delivery.readStaleStatus` answers
 `{ stale, failed, rendering, unknown, oldestStaleAt, abandoned, exports }`.
 

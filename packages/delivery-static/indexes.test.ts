@@ -360,7 +360,7 @@ describe("delivery.exportIndexes", () => {
     expect(expectOk(await h.delivery.readStaleStatus()).exports.indexes).toMatchObject({ entries: 0, error: null, skipped: true });
   });
 
-  it("keeps the Sitemap line while published documents have no rendered output when an earlier sitemap.xml is still there, and removes files that are turned off", async () => {
+  it("keeps the Sitemap line while published documents have no rendered output when an earlier sitemap.xml is still there, removes a turned-off llms-full.txt, and with sitemap: false leaves sitemap.xml alone", async () => {
     const blobs = memoryBlobs();
     for (const name of ["sitemap.xml", "llms-full.txt"]) blobs.files.set(`site/${name}`, { text: "old", contentType: "text/plain" });
     const h = await harness({ blobs });
@@ -374,8 +374,12 @@ describe("delivery.exportIndexes", () => {
     off.state.down = true;
     await seed(off);
     expectOk(await off.delivery.exportIndexes());
-    expect(off.text("sitemap.xml")).toBeUndefined();
+    expect(off.text("sitemap.xml")).toBe("old");
     expect(off.text("robots.txt")).toBe("User-agent: *\nAllow: /\n");
+    off.state.down = false;
+    expectOk(await off.delivery.publishAll("pages"));
+    expectOk(await off.delivery.exportIndexes());
+    expect(off.text("sitemap.xml")).toBe("old");
   });
 
   it("records a regular export as not skipped", async () => {
@@ -396,47 +400,78 @@ describe("delivery.exportIndexes", () => {
     expect(h.text("sitemap.xml")).toContain("<urlset");
   });
 
-  it.skipIf(spawnSync("xmllint", ["--version"]).error !== undefined)("writes a sitemap.xml that the sitemap 0.9 schema with xhtml:link alternates accepts", async () => {
-    const h = await harness();
-    await seed(h);
-    expectOk(await h.delivery.exportIndexes());
+  it.skipIf(spawnSync("xmllint", ["--version"]).error !== undefined)("writes only sitemap.xml files that the sitemap 0.9 schema with xhtml:link alternates accepts, and none for a site with no listed page", async () => {
+    const seeded = await harness();
+    await seed(seeded);
+    expectOk(await seeded.delivery.exportIndexes());
+    const noindex = await harness();
+    await noindex.page({ slug: "home", title: "Start", status: "published", seo: { noindex: true } });
+    expectOk(await noindex.delivery.exportIndexes());
+    const nothing = await harness();
+    expectOk(await nothing.delivery.exportIndexes());
     const dir = mkdtempSync(join(tmpdir(), "delivery-sitemap-"));
     try {
-      writeFileSync(join(dir, "sitemap.xml"), h.text("sitemap.xml")!);
       writeFileSync(join(dir, "xhtml-link.xsd"), XHTML_LINK_XSD);
       writeFileSync(join(dir, "sitemap.xsd"), SITEMAP_XSD);
-      expect(() => execFileSync("xmllint", ["--noout", "--schema", join(dir, "sitemap.xsd"), join(dir, "sitemap.xml")], { stdio: "pipe" })).not.toThrow();
+      for (const h of [seeded, noindex, nothing]) {
+        const xml = h.text("sitemap.xml");
+        if (xml === undefined) continue;
+        writeFileSync(join(dir, "sitemap.xml"), xml);
+        expect(() => execFileSync("xmllint", ["--noout", "--schema", join(dir, "sitemap.xsd"), join(dir, "sitemap.xml")], { stdio: "pipe" })).not.toThrow();
+      }
+      expect(seeded.text("sitemap.xml")).toBeDefined();
+      expect(noindex.text("sitemap.xml")).toBeUndefined();
+      expect(nothing.text("sitemap.xml")).toBeUndefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("writes an empty urlset and robots.txt for a site whose every page is noindex", async () => {
-    const h = await harness();
+  it("removes sitemap.xml and leaves the Sitemap line out for a site whose every page is noindex, and still writes robots.txt", async () => {
+    const blobs = memoryBlobs();
+    blobs.files.set("site/sitemap.xml", { text: "old", contentType: "application/xml" });
+    const h = await harness({ blobs });
     await h.page({ slug: "home", title: "Start", status: "published", seo: { noindex: true } });
     expect(expectOk(await h.delivery.exportIndexes())).toEqual({ entries: 0 });
-    expect(locs(h.text("sitemap.xml"))).toEqual([]);
-    expect(h.text("sitemap.xml")).toContain("<urlset");
-    expect(h.text("robots.txt")).toBe("User-agent: *\nAllow: /\n\nSitemap: https://example.org/sitemap.xml\n");
+    expect(h.text("sitemap.xml")).toBeUndefined();
+    expect(h.text("robots.txt")).toBe("User-agent: *\nAllow: /\n");
   });
 
-  it("writes an empty sitemap for a site with nothing published yet", async () => {
+  it("writes no sitemap.xml for a site with nothing published yet", async () => {
     const h = await harness();
     expect(expectOk(await h.delivery.exportIndexes())).toEqual({ entries: 0 });
-    expect(locs(h.text("sitemap.xml"))).toEqual([]);
+    expect(h.text("sitemap.xml")).toBeUndefined();
+    expect(h.text("robots.txt")).toBe("User-agent: *\nAllow: /\n");
   });
 
-  it("without siteUrl writes no sitemap, removes a stale one, leaves the Sitemap line out and warns once at setup", async () => {
+  it("without siteUrl writes no sitemap, leaves one it did not write, leaves the Sitemap line out and warns once at setup", async () => {
     const blobs = memoryBlobs();
     blobs.files.set("site/sitemap.xml", { text: "old", contentType: "application/xml" });
     const h = await harness({ blobs, config: { siteUrl: undefined } });
     expect(h.logger.warnings).toEqual(["delivery/static: no siteUrl is set, so no sitemap.xml is written and llms.txt lists paths instead of URLs"]);
     await seed(h);
     expectOk(await h.delivery.exportIndexes());
-    expect(h.text("sitemap.xml")).toBeUndefined();
+    expect(h.text("sitemap.xml")).toBe("old");
     expect(h.text("robots.txt")).toBe("User-agent: *\nAllow: /\n");
     expect(h.text("llms.txt")).toContain("- [Kontakt](/kontakt)");
     expect((await harness({ config: { siteUrl: undefined, sitemap: false } })).logger.warnings).toEqual([]);
+  });
+
+  it("without siteUrl removes a sitemap.xml an earlier export with siteUrl wrote, also after a restart", async () => {
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    const before = await harness({ db, blobs });
+    await seed(before);
+    expectOk(await before.delivery.exportIndexes());
+    expect(before.text("sitemap.xml")).toContain("<urlset");
+    await before.delivery.close();
+    const after = await harness({ db, blobs, content: before.content, config: { siteUrl: undefined } });
+    expectOk(await after.delivery.exportIndexes());
+    expect(after.text("sitemap.xml")).toBeUndefined();
+    blobs.files.set("site/sitemap.xml", { text: "own", contentType: "application/xml" });
+    const later = await harness({ db, blobs, content: before.content, config: { siteUrl: undefined } });
+    expectOk(await later.delivery.exportIndexes());
+    expect(later.text("sitemap.xml")).toBe("own");
   });
 
   it("warns at setup that a robots.txt under a base path of siteUrl is not read by crawlers", async () => {
@@ -851,6 +886,7 @@ describe("a database restored from a backup", () => {
     await seed(first);
     expect(expectOk(await first.delivery.checkBuild("b1"))).toMatchObject({ changed: true, restored: false });
     const backup = expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "marker" }))!.value;
+    await first.page({ slug: "neu", title: "Neu", status: "published" });
     await first.delivery.close();
     expect(blobs.files.has(MARKER_KEY)).toBe(true);
     expect(expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "marker" }))!.value).toBe(blobs.files.get(MARKER_KEY)!.text);
@@ -868,6 +904,41 @@ describe("a database restored from a backup", () => {
     expect(expectOk(await restored.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
   });
 
+  it("detects a restore that lost a page written after the last recovery pass, when the process stopped without shutting down", async () => {
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    const first = await harness({ db, blobs });
+    await seed(first);
+    expectOk(await first.delivery.checkBuild("b1"));
+    expectOk(await first.delivery.resumeStale());
+    const replicated = expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "marker" }))!.value;
+    const neu = await first.page({ slug: "neu", title: "Neu", status: "published" });
+    expect(blobs.files.has("site/neu/index.html")).toBe(true);
+
+    expectOk(await db.deleteMany(STATUS, { docId: neu }));
+    expectOk(await db.updateMany(STATE, { id: "marker" }, { value: replicated }));
+    const restarted = await harness({ db, blobs, content: first.content });
+    expect(expectOk(await restarted.delivery.checkBuild("b1"))).toMatchObject({ changed: false, restored: true });
+  });
+
+  it("a restart with no output changed writes no marker, neither at the build check nor at shutdown", async () => {
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    const first = await harness({ db, blobs });
+    await seed(first);
+    expectOk(await first.delivery.checkBuild("b1"));
+    await first.delivery.close();
+    const marker = blobs.files.get(MARKER_KEY)!.text;
+    blobs.puts.length = 0;
+    const next = await harness({ db, blobs, content: first.content });
+    expect(expectOk(await next.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
+    expectOk(await next.delivery.resumeStale());
+    await next.delivery.close();
+    expect(blobs.puts.filter((key) => key === MARKER_KEY)).toEqual([]);
+    expect(blobs.files.get(MARKER_KEY)!.text).toBe(marker);
+    expect(expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "marker" }))!.value).toBe(marker);
+  });
+
   it("a process that never checked a build writes no marker", async () => {
     const h = await harness();
     await seed(h);
@@ -877,9 +948,16 @@ describe("a database restored from a backup", () => {
 });
 
 describe("the one-time removal of orphaned output files", () => {
+  async function upgraded(options: Options = {}): Promise<Harness> {
+    const first = await harness(options);
+    await seed(first);
+    await first.delivery.close();
+    expectOk(await first.db.deleteMany(STATE, { id: "orphans" }));
+    return harness({ ...options, db: first.db, content: first.content, blobs: first.blobs });
+  }
+
   async function withOrphans() {
-    const h = await harness({ config: { reservedPaths: ["/media"] } });
-    await seed(h);
+    const h = await upgraded({ config: { reservedPaths: ["/media"] } });
     for (const key of ["site/alt/index.html", "site/en/old/index.html", "site/media/index.html", "site/alt/photo.jpg", "site/index.pdf"]) h.blobs.files.set(key, { text: "x", contentType: "text/html" });
     return h;
   }
@@ -913,8 +991,7 @@ describe("the one-time removal of orphaned output files", () => {
   });
 
   it("removes only page outputs of the configured formats, never media copies or renderer assets named index.<ext>", async () => {
-    const h = await harness();
-    await seed(h);
+    const h = await upgraded();
     for (const key of ["site/alt/index.html", "site/assets/index.css", "site/media/abc123/index.png", "site/downloads/index.pdf"]) h.blobs.files.set(key, { text: "x", contentType: "application/octet-stream" });
     expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(1);
     expect(h.blobs.files.has("site/alt/index.html")).toBe(false);
@@ -922,8 +999,7 @@ describe("the one-time removal of orphaned output files", () => {
   });
 
   it("never runs with an empty prefix, where the whole blob store would be compared", async () => {
-    const h = await harness({ config: { prefix: "" } });
-    await seed(h);
+    const h = await upgraded({ config: { prefix: "" } });
     for (const key of ["alt/index.html", "media/abc123/index.png"]) h.blobs.files.set(key, { text: "x", contentType: "application/octet-stream" });
     expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
     expect(h.blobs.files.has("alt/index.html")).toBe(true);
@@ -931,17 +1007,16 @@ describe("the one-time removal of orphaned output files", () => {
   });
 
   it("gives up a run during which a page started to render, even one that finished before the files were listed", async () => {
-    const db = createFakePersistence();
-    const content = await createContentDefault(model, db);
-    const h = await harness({ db, content, config: { reservedPaths: ["/media"] } });
-    const ids = await seed(h);
+    const h = await upgraded({ config: { reservedPaths: ["/media"] } });
+    const content = h.content;
+    const kontakt = expectOk(await h.db.findOne<StatusRow>(STATUS, { path: "/kontakt" }))!.docId;
     h.blobs.files.set("site/alt/index.html", { text: "x", contentType: "text/html" });
     const list = content.list.bind(content);
     let armed = true;
     content.list = async (type, filter, options) => {
       if (armed) {
         armed = false;
-        expectOk(await h.delivery.publish("pages", ids.kontakt));
+        expectOk(await h.delivery.publish("pages", kontakt));
       }
       return list(type, filter, options);
     };
@@ -972,6 +1047,68 @@ describe("the one-time removal of orphaned output files", () => {
     expectOk(await restored.delivery.publishAll("pages"));
     expect(expectOk(await restored.delivery.resumeStale()).orphans).toBe(1);
     expect(blobs.files.has("site/spaeter/index.html")).toBe(false);
+  });
+
+  it("never runs on a database that held no status row when the process started, whatever files the prefix holds", async () => {
+    const blobs = memoryBlobs();
+    for (const key of ["site/alt/index.html", "site/en/old/index.html"]) blobs.files.set(key, { text: "x", contentType: "text/html" });
+    const h = await harness({ blobs });
+    await seed(h);
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(blobs.files.has("site/alt/index.html")).toBe(true);
+    expect(blobs.files.has("site/en/old/index.html")).toBe(true);
+  });
+
+  it("removes nothing when the process starts on an empty database against a published site", async () => {
+    const blobs = memoryBlobs();
+    const first = await harness({ blobs });
+    await seed(first);
+    expectOk(await first.delivery.checkBuild("b1"));
+    expectOk(await first.delivery.resumeStale());
+    await first.delivery.close();
+    const pages = [...blobs.files.keys()].filter((k) => k.endsWith("index.html")).sort();
+    expect(pages.length).toBeGreaterThan(0);
+
+    const empty = await harness({ blobs });
+    expect(expectOk(await empty.delivery.checkBuild("b1"))).toMatchObject({ changed: true, restored: true, marked: 0 });
+    expect(expectOk(await empty.delivery.resumeStale()).orphans).toBe(0);
+    await empty.page({ slug: "neu", title: "Neu", status: "published" });
+    expect(expectOk(await empty.delivery.resumeStale()).orphans).toBe(0);
+    for (const key of pages) expect(blobs.files.has(key), key).toBe(true);
+  });
+
+  it("waits while no output is live", async () => {
+    const h = await withOrphans();
+    for (const row of expectOk(await h.db.findMany<StatusRow>(STATUS, { state: "live" })).items) expectOk(await h.content.update("pages", row.docId, { status: "draft" }, { locale: row.locale }));
+    expectOk(await h.db.updateMany(STATUS, { state: "live" }, { state: "error" }));
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(h.blobs.files.has("site/alt/index.html")).toBe(true);
+    expect(expectOk(await h.db.findOne(STATE, { id: "orphans" }))).toBeNull();
+  });
+
+  it("gives up for good, removing nothing, when more paths look orphaned than status rows own", async () => {
+    const h = await upgraded();
+    for (const name of ["a", "b", "c", "d", "e", "f"]) h.blobs.files.set(`site/${name}/index.html`, { text: "x", contentType: "text/html" });
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    for (const name of ["a", "b", "c", "d", "e", "f"]) expect(h.blobs.files.has(`site/${name}/index.html`)).toBe(true);
+    expect(h.logger.warnings.some((w) => w.includes("6 paths") && w.includes("removes nothing"))).toBe(true);
+    expect(expectOk(await h.db.findOne(STATE, { id: "orphans" }))).not.toBeNull();
+  });
+
+  it("a failing removal leaves the recovery pass's own result, logs the error and is tried again on the next run", async () => {
+    const h = await withOrphans();
+    const list = h.blobs.list.bind(h.blobs);
+    h.blobs.list = async (prefix) => (prefix === "site/" ? err(failure("TRANSIENT", "listing denied")) : list(prefix));
+    const failed = expectOk(await h.delivery.resumeStale());
+    expect(failed.orphans).toBe(0);
+    expect(h.logger.errors).toContain("delivery/static: the one-time removal of orphaned output files failed, the next recovery pass tries again");
+    h.blobs.list = list;
+    const remove = h.blobs.remove.bind(h.blobs);
+    h.blobs.remove = async (key) => (key === "site/alt/index.html" ? err(failure("TRANSIENT", "object is locked")) : remove(key));
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(h.logger.errors.filter((e) => e === "delivery/static: could not remove an orphaned output file")).toHaveLength(1);
+    h.blobs.remove = remove;
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(2);
   });
 
   it("waits while outputs are marked for a re-render", async () => {
