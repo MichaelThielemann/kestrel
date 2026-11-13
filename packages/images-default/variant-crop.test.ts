@@ -210,6 +210,31 @@ describe("images/default variants[].crop in images.attach", () => {
     await images.close();
   });
 
+  it("keeps the old crop and path while the re-render after a framing change fails, until it gives up", async () => {
+    const w = await world();
+    let failing = false;
+    const renderer: Renderer = async (data, size, planned, options) => {
+      if (failing) throw new Error("render failed");
+      return render(data, size, planned, options);
+    };
+    const images = await w.open([SQUARE], renderer);
+    expectOk(await images.setFraming("m1", RIGHT_CROP));
+    expectOk(await images.generate("m1"));
+    const before = (await attached(images)).get("square")!;
+    expect(before).toMatchObject({ state: "done", crop: RIGHT });
+
+    expectOk(await images.setFraming("m1", LEFT_CROP));
+    failing = true;
+    expectOk(await images.generate("m1"));
+    expect((await attached(images)).get("square")).toMatchObject({ state: "error", crop: RIGHT, path: before.path });
+    expect(await leftEdgeIsBlue(images, "square.webp")).toBe(true);
+
+    for (let attempt = 1; attempt < CONFIG.maxAttempts; attempt += 1) expectOk(await images.generate("m1"));
+    expect((await attached(images)).get("square")).toMatchObject({ state: "failed", crop: RIGHT, path: before.path });
+    expect(await leftEdgeIsBlue(images, "square.webp")).toBe(true);
+    await images.close();
+  });
+
   it("reports null after a reset to automatic once its render is done, and the manual crop until then", async () => {
     const w = await world();
     const images = await w.open([SQUARE]);
