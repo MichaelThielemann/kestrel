@@ -209,8 +209,9 @@ The crop a ratio renders with is, in this order:
   shifted back inside the image, so a focus at an edge or in a corner moves the cut, not out of it;
 - otherwise the centre, exactly as without a framing.
 
-A crop that comes out equal to the centred one counts as the centre: nothing renders again and the
-variant's path gets no version. A focus larger than the ratio allows cannot fit: the cut is still
+A crop that comes out equal to the centred one counts as the centre: a variant already cut from
+the centre does not render again and its path stays as it is, while one cut elsewhere renders again
+from the centre and gets a new `?v=` like any other change of its cut. A focus larger than the ratio allows cannot fit: the cut is still
 centred on it, and `fits` (below) is `false`. A crop is never enlarged: a size larger than its crop
 renders at the size's ratio and no larger than the crop, so its `width`/`height` in `variants[]`
 shrink and several sizes of one ratio can end up with the same dimensions.
@@ -241,8 +242,11 @@ query changes only once new bytes are at the path, and it never comes back for t
 set back to an earlier one, or a framing reset to the centre, gets a URL of its own, and a URL
 that a cache filled stays bound to the bytes it got then. The same holds for any later render at
 the path, after a changed size or format, a repair by `images.resume`, or a size registered again
-after a prune, whose path held bytes before. Only a variant whose first render is the only one at
-its path keeps the plain path. The path itself, the public copy's file name, `images.serve` (whose
+after a prune, whose path held bytes before. The query appears from a row's second finished render
+on, and a row placed at a path that held bytes before starts its count at one. A format change
+moves the row to another path and keeps its count, so the first render at the new path of a
+variant that rendered before already has a query. Only a row's first render, at a path that never
+held other bytes, keeps the plain path. The path itself, the public copy's file name, `images.serve` (whose
 `:file` carries no query) and `images.export:<dir>` stay as they are; a check that compares
 exported URLs with files ignores the query.
 

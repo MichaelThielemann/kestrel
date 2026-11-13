@@ -517,6 +517,20 @@ describe("images/default ?v= of a re-rendered variant", () => {
     for (const open of [images, narrowed, grown]) await open.close();
   });
 
+  it("gives the first render after a format change of a variant that rendered before a query at its new path", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.generate("m1"));
+    expect(await squarePath(w, images)).toBe(SQUARE_PATH);
+    const changed = await w.open([{ ...SQUARE, format: "original" }]);
+    expectOk(await changed.plan(["m1"]));
+    expectOk(await changed.generate("m1"));
+    const row = (await rowsBySize(w)).get("square")!;
+    expect(row).toMatchObject({ state: "done", renders: 2 });
+    expect(changed.publicPath("m1", row)).toMatch(/^\/media\/m1\/variants\/square\.jpg\?v=[0-9a-z]+$/);
+    for (const open of [images, changed]) await open.close();
+  });
+
   it("gives a format change back to a path a pruned size rendered before a query on its first render there", async () => {
     const w = await world();
     const images = await w.open([THUMB, SQUARE]);

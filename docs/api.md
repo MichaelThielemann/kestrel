@@ -642,7 +642,7 @@ error, failed } }], job, orphaned: { sizes: [name], variants: n }, registrySeen,
 `GET /media/:id` and `GET /media` additionally return `available` and
 `variants: [{ size, width, height, format, bytes, state, path }]`; `path` is the public path
 `/media/<id>/variants/<size>.<ext>`, followed by `?v=<token>` once a later render replaced bytes the
-path already had, with a token that path is never given again (the file name never carries the
+path already had, or after a format change of a variant that rendered before, with a token that path is never given again (the file name never carries the
 query), and `width`/`height` are the planned dimensions, present in
 every state, not only once the render is `done`. `variants[]` never lists a size whose path has no
 object at all yet (still `planned`, internal to `images-default`) — every listed path always answers.
@@ -695,7 +695,7 @@ around the focus, else from the centre; the example's default sizes are all `ins
 framing changes no variant. A size whose cut changes renders again at the same path: until then its
 path keeps answering with the old variant, afterwards `variants[].path` ends in `?v=<token>` and the
 pages showing the item are marked for a re-render. A changed focus marks them at once, also when no
-variant renders again. The token counts the renders at the path, so a crop set back, or a framing
+variant renders again. The token counts the variant's renders, so a crop set back, or a framing
 reset to the centre, gets a new URL, not an earlier one. Ratio keys are exact, so a size of `1000x562`
 gets a crop of its own, not the one of `"16:9"`. The `images-default` README, "Focus and crop", has
 the rules, and `@michaelthielemann/kestrel-images-default/framing` computes the same cuts in the

@@ -1464,8 +1464,10 @@ Net changes since 5.8.1.
   a size registered again after a prune) ends in `?v=<token>`. The token is a short hash of the row
   and the number of its finished renders, raised when a render is marked `done` after its bytes are
   at the path, so it changes only then and never comes back for that path, also when a crop is set
-  back to an earlier one or the framing is reset. A variant whose first render is the only one at
-  its path keeps the plain path. Such a render raises `images.variantsChanged` for the item, so
+  back to an earlier one or the framing is reset. The query appears from a row's second finished
+  render on; a row placed at a path that held bytes before starts its count at one, and a format
+  change keeps the count, so only a row's first render, at a path that never held other bytes, keeps
+  the plain path. Such a render raises `images.variantsChanged` for the item, so
   the pages that show it are published again with the new URL. The path, its public copy,
   `images.serve` and `images.export:<dir>` are unchanged, so a check that matches exported URLs to
   files strips the query.

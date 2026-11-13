@@ -189,7 +189,7 @@ export interface Images {
   variantCounts(mediaIds: string[]): Promise<Result<Map<string, VariantCounts>, KestrelError>>;
   read(mediaId: string, file: string): Promise<Result<VariantBlob | null, KestrelError>>;
   exportTo(dir: string): Promise<Result<{ written: number; skipped: number }, KestrelError>>;
-  /** The variant's public URL, `<publicPath>/<id>/variants/<file>`; once a further render is at a path that held bytes before (`renders` from `2` on), followed by `?v=<token>`, which no other render of that path is given. */
+  /** The variant's public URL, `<publicPath>/<id>/variants/<file>`; from the row's second finished render on (`renders` from `2` on, a count a format change keeps), followed by `?v=<token>`, which no other render of that path is given. */
   publicPath(mediaId: string, variant: Variant): string;
   publicCopyEnabled(): boolean;
   syncPublic(): Promise<Result<PublicSync, KestrelError>>;
