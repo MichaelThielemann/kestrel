@@ -408,8 +408,8 @@ Net changes since 5.8.1.
   with the original's bytes and type until the rendered variant replaces them at the same path. With
   a queue-style delivery module, placing and rendering are separate jobs connected by the new event
   `images.planned`, so an item never waits for a render to become usable; with inline event delivery,
-  `images.generate` renders straight into the paths and a size it could not render is placed by
-  `images-default`'s background loop right after the request. `images.attach` adds `available` per
+  `images.generate` renders straight into the paths and a size it could not render is placed and
+  rendered by `images-default`'s background loop right after the request. `images.attach` adds `available` per
   item: `false` while an image still lacks a variant path, and such an item lists no variant; an
   output never names a path without a file. Variant rows gain the state `planned` (never in an
   output); an attached variant carries its final `width`/`height` and `path` in every state. A variant
@@ -507,7 +507,8 @@ Net changes since 5.8.1.
   (`media.collection`) is removed, so a config that still sets it fails boot; `createImages` takes
   `deps.media`. The module's setup hands `createImages` only a persistence handle limited by
   `ownedPersistence` to the collections it stores, exported as `COLLECTIONS` (`images_sizes`,
-  `images_variants`, `images_jobs`, `images_retired`, `images_hidden` and `images_framing`), which throws a wiring error for any other collection; `createImages` uses the
+  `images_variants`, `images_jobs`, `images_retired`, `images_hidden`, `images_framing` and
+  `images_items`), which throws a wiring error for any other collection; `createImages` uses the
   handle it is given as it is.
   - `images.generate` and `images.retryFailed` answer 404 for an item that is not ready (an upload in
     flight, a failed upload, an item being deleted); they answered 200 with no variants.
@@ -696,6 +697,8 @@ Net changes since 5.8.1.
   to `createImages` as `deps.render` must cut `planned.crop` from the original after its EXIF
   orientation before it resizes, or a framed size records a crop its bytes do not have. `kestrel
   upgrade`'s `types/breaking-signatures` names them.
+- `images-default`'s config must set `renderTimeoutMs` below `staleAfterMs` (the defaults are 30000
+  and 60000); a config that does not fails boot, since a render could outlast the lease on its item.
 
 ### Added
 
@@ -1324,20 +1327,20 @@ Net changes since 5.8.1.
   ratio centred on the focus, else from the centre as without a framing; `inside` sizes never render
   again because of it. A size whose cut changes is planned again at the same path with its new
   dimensions (never enlarged), and the old variant is served until the new render is there; then the
-  item raises `images.variantsChanged`, as it does at once when the focus changes. A render that started before the framing changed never
-  marks its row `done` and renders the item again, in the background, until its rows have the stored
-  crop. Every write of a variant's path claims the variant's row first, so a render of an older crop
-  never writes over a newer one and `?v=` names only bytes rendered with its crop; `images.resume`
-  takes over a claim left by a stopped process once it is older than `staleAfterMs`. A failed
-  `images.setFraming` plans and renders the item in the background, and `images.resume` applies a
-  stored framing whose re-planning never ran. `variantCounts` counts a row rendered with another crop
-  as `pending`.
+  item raises `images.variantsChanged`, as it does at once when the focus changes. Placing,
+  rendering and writing the public copies of one item run under a lease on the item in the new
+  collection `images_items`, held by one process at a time: a call that finds the item held by
+  another process stores what it was asked to (a framing, for instance), leaves a request and
+  returns, and the holder places and renders the item again before it lets go, so the rows end on
+  the stored framing and `?v=` names the bytes at the path. A failed `images.setFraming` plans and
+  renders the item in the background; `images.resume` takes over a lease whose holder stopped once it
+  has run out and serves a request left open. `variantCounts` counts a row rendered with another
+  crop as `pending`.
   `images.attach` adds `focus` and `framing: { focus, crops, width, height, ratios: [{ key, sizes,
   manual, fits, crop }] }` to each item, `width` and `height` being the original's oriented
   dimensions. Ratio keys are exact, so sizes with nearly the same ratio get separate
   keys. A framing survives trash and restore and is deleted with the item's variants;
-  `images_variants` gains `crop`, `renderedCrop`, `originalWidth`, `originalHeight`, `writer` and
-  `writerUntil`. The new subpath
+  `images_variants` gains `crop`, `renderedCrop`, `originalWidth` and `originalHeight`. The new subpath
   `@michaelthielemann/kestrel-images-default/framing` imports nothing and exports the crop rules this
   module renders with (`ratioKey`, `centredCrop`, `cropForRatio`, `effectiveCrop`, `focusFits`,
   `parseFraming`, `formatCrop`, `parseCrop`, `cropToken`), so an editor in the browser previews
@@ -1457,13 +1460,15 @@ Net changes since 5.8.1.
   query.
 - `images-default`: a request to generate an item while a render of it runs waits for that render and
   renders once more, instead of sharing the running render, which may have read the rows before the
-  request. `images.resume` also renders items with a row of a declared size whose write was cut off, or
-  that already had a render at its path and was left `pending` for longer than `staleAfterMs`, ahead of
-  rows still `planned`, and moves behind only the items it tried. A row that never had a render is
-  left to the render queued for it; with inline event delivery, a size the request could not render is
-  now placed and then rendered by the background loop, where it was only placed. `close()` waits for an
-  `images.resume` or a sync start under way, and neither starts the sync job again once it has begun;
-  `images.resume` then answers `CONFLICT`.
+  request. `images.resume` also places and renders items whose lease ran out, items with a request
+  left open, items with a row of a declared size that already had a render at its path and was left
+  `pending` for longer than `staleAfterMs`, items with a row still `planned`, and items created in the
+  last 24 hours without rows, taking one item from each of these in turn up to 200 per pass, and moves
+  the rows it tried behind the others. A row that never had a render is left to the render queued for
+  it. A render whose public copy cannot be written puts the earlier render back at the private path,
+  so both paths keep the bytes `?v=` names. `close()` waits for an `images.resume` or a sync start
+  under way, and neither starts the sync job again once it has begun; `images.resume` then answers
+  `CONFLICT`.
 
 ### Fixed
 

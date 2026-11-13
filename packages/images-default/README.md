@@ -14,7 +14,7 @@ through it: whether an item exists and is ready, its type, the type the provider
 its size, stored dimensions, folder and display name, and its bytes. It never reads another module's
 collection or a storage key of the original. The module's setup wraps the `persistence@1` handle
 with `ownedPersistence` before `createImages` ever sees it, so the only handle the implementation
-holds reaches `images_sizes`, `images_variants`, `images_jobs`, `images_retired`, `images_hidden` and `images_framing` (`COLLECTIONS`),
+holds reaches `images_sizes`, `images_variants`, `images_jobs`, `images_retired`, `images_hidden`, `images_framing` and `images_items` (`COLLECTIONS`),
 and any other collection is a wiring error that names this module. Boot fails when no active module provides `media@1`
 (`missing-provider`), and a config that still sets the removed `media` option fails its schema.
 
@@ -82,15 +82,15 @@ below).
 
 Config: `sizes` (defaults `thumb 320, small 640, medium 1024, large 1600, xl 2400`, all
 `inside`/`webp`/82), `prefix`, `publicPath` (default `/media`), `publicCopy` (optional `{ prefix }`),
-`chunk`, `staleAfterMs`, `maxAttempts` (default 5), `renderTimeoutMs` (default 30000).
+`chunk`, `staleAfterMs`, `maxAttempts` (default 5), `renderTimeoutMs` (default 30000, and below
+`staleAfterMs`, or the config fails its schema).
 Steps: `images.register` (`VALIDATION` on an empty or malformed list, `CONFLICT` on a config
 collision), `images.listSizes`, `images.plan` (id from params/payload/event; places without
 rendering), `images.generate` (id from params/payload/event; `VALIDATION` without an id, `NOT_FOUND`
 for an id `media@1` does not report as ready), `images.sync` (`CONFLICT` while a fresh job runs), `images.resume` (cron: also
-places and renders any item still `planned`, any item with a row whose write was cut off, with a row
-that already had a render at its path and was left `pending` for longer than `staleAfterMs`, or with a
-framing that was never applied, and any recent item with no rows at all; `CONFLICT` once `close()` has
-begun), `images.retryFailed`
+places and renders any item whose lease ran out or that has a request left open, with a row that
+already had a render at its path and was left `pending` for longer than `staleAfterMs`, with a row
+still `planned`, and any recent item with no rows at all; `CONFLICT` once `close()` has begun), `images.retryFailed`
 (`NOT_FOUND` for an id `media@1` does not report as ready), `images.prune` (`VALIDATION` for a name that is still declared or
 has no variants; retires rather than deletes the path), `images.readStatus`, `images.remove`
 (`VALIDATION` without an id), `images.removeMany` (after `media.listFolderItems` or
@@ -220,17 +220,12 @@ with variants (see `ELIGIBLE`) and a hidden item. It answers `{ id, framing }`. 
 re-planning of the item run in the item's own section, after a placement or render of the item
 already under way in this process. When the focus differs from the stored one, it raises
 `images.variantsChanged` for the item at once, since pages read `focus` from `images.attach` even
-when no variant renders again (with `inside` sizes only, or when every cut stays the same). Re-planning turns every `cover` size whose crop changes
-`pending` at the same path, with its new width and height, and leaves the old variant there; a
-pipeline renders them by running `images.generate` after it, as `setMediaFraming` in
-`examples/minimal` does. A size added later is placed with the item's framing. Re-planning changes
-a row only while it still has the crop, spec and state it was read with, and reads the item again
-otherwise, so two framings saved at once in two processes leave the rows on the framing that is
-stored. When re-planning fails after the framing was stored, `images.setFraming` answers the error
-and plans and renders the item again in the background. A stored framing counts as not applied until
-a placement of the item has planned its rows with it, so `images.resume` applies one whose
-re-planning never ran, because the process closed or stopped, once it has waited longer than
-`staleAfterMs`.
+when no variant renders again (with `inside` sizes only, or when every cut stays the same).
+Re-planning turns every `cover` size whose crop changes `pending` at the same path, with its new
+width and height, and leaves the old variant there; a pipeline renders them by running
+`images.generate` after it, as `setMediaFraming` in `examples/minimal` does. A size added later is
+placed with the item's framing. When re-planning fails after the framing was stored,
+`images.setFraming` answers the error and plans and renders the item again in the background.
 
 Until the new render is at the path, the origin and the public copy serve the old variant, never the
 original's bytes. Once it is there, `variants[].path` gains `?v=<token>`, a short hash of the crop
@@ -240,26 +235,28 @@ file name, `images.serve` (whose `:file` carries no query) and `images.export:<d
 are; a check that compares exported URLs with files ignores the query. Back at the centre, the path
 has no query again.
 
-Every write of a variant's path, the private variant and its public copy alike, happens under a
-claim on the variant's row in `images_variants`: one conditional update records the writer and a
-time `staleAfterMs` ahead, and a second writer that finds the row claimed writes nothing. Renders,
-placements and the writers of public copies (`images.showMany`, `images.syncPublic`) all claim. A
-render claims only while the row still has the crop, spec, state and rendered crop it rendered with,
-so a render whose crop changed meanwhile writes nothing and renders the item again in the
-background. A render that finds the row claimed by another render or placement leaves the row to it;
-a writer of public copies that held the row renders the item once it leaves it `pending`. A render
-marks its row `done` in the same update that releases its claim, so `?v=` names only bytes rendered
-with that crop. When the crop changes while a render holds the row, the render records the crop of
-the bytes it wrote, so `?v=` names them and `images.variantsChanged` is raised, turns the row
-`pending` and renders the item again; that render switches `?v=` back and raises the event once more.
+Placing, rendering and writing the public copies of one item happen under a lease on the item, a row
+per media id in `images_items` that one process holds at a time for `staleAfterMs` and renews
+before each write of a path; `renderTimeoutMs` is below `staleAfterMs`, so a render ends before the
+lease it renews runs out. `images.plan`, `images.generate`, `images.setFraming`, `images.showMany`,
+`images.syncPublic` and `images.resume` take it; a call that finds the item held by another process
+does what needs no lease (`images.setFraming` stores the framing and raises the focus event,
+`images.generate` answers the rows as they are), leaves a request on the lease and returns. The
+holder sees the request before it lets go and places and renders the item again with what is stored
+then, writing its public copies as well; a holder that only places (`images.plan`,
+`images.setFraming`) leaves this to its background loop. A render that sees a request before it
+writes drops its bytes and renders again, so two framings saved at once in two processes leave the
+rows on the framing that is stored. A render marks its row `done` with the crop it rendered after its
+bytes are at the path, so `?v=` names only bytes rendered with that crop.
 
-A write that fails releases the claim and counts a failed attempt, as any failed render does. A
-writer that stops before it releases its claim (the process ends, or the store fails right after the
-write) leaves the claim behind until `staleAfterMs` has passed; `images.resume` then releases it and
-renders the row again, and until that render is done the URL under the row's current `?v=` may
-answer the bytes the stopped writer left. A writer that stalls longer than `staleAfterMs` between its
-claim and its write can lose the row to another writer; it notices when it finishes and turns a `done`
-row `pending` again.
+A holder that stops (the process ends) leaves its lease until `staleAfterMs` has passed;
+`images.resume` then takes it over and places and renders the item, and until that render is done the
+URL under the row's current `?v=` may answer the bytes the stopped holder left. A holder that stalls
+longer than `staleAfterMs` stops before its next write once another process has taken the item over.
+A single write that stalls that long can still land after the new holder's; the stalled holder
+notices when it finishes, marks the item, and every rendered size of the item renders again. Until
+then that path answers the stalled bytes, and a cache that fetched it meanwhile keeps them under the
+same `?v=`.
 
 `images.attach` adds `focus` (the rectangle or `null`), meant for anonymous readers, and
 `framing: { focus, crops, width, height, ratios }`, meant for an editor. `width` and `height` are the
@@ -311,11 +308,11 @@ job in the same instant share the same start, so only one job row is ever create
 Within one process, placing, rendering, `images.remove` and the public-copy sync's writes of one item
 run one at a time, so `images.remove` waits for a plan or a render of that item already in progress;
 a render stops after the size it is rendering once a remove of its item is waiting. Across processes the
-store decides: a plan or a render reads the media item through `media@1` again after its last write
-and, when the item stopped being ready meanwhile, removes everything it wrote; a render marks its row `done` only if the row
-still has the path and spec it rendered for, and otherwise drops what it wrote at a path the row no
-longer has; a placement that finds its row already rendered puts the render back at the path. Two
-planners of one item at once end with one row per size.
+lease on the item (see "Focus and crop") lets one process place, render and write its public copies
+at a time. `images.remove` and `images.prune` take no lease: a plan or a render reads the media item
+through `media@1` again after its last write and, when the item stopped being ready meanwhile,
+removes everything it wrote, and a public copy written at a path a prune retired meanwhile gets the
+original's bytes again. Two planners of one item at once end with one row per size.
 
 `available` (on `images.attach`'s output) is `false` for an eligible image that has at least one size
 still `planned` (no object at its path yet), `true` once every size has one — including for a
@@ -331,11 +328,11 @@ Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered
 
 ## What happens when generation fails or hangs
 
-**A crash mid-render** leaves the variant row at `state: "pending"` with the attempt already
-counted, never at a stale `"done"`. The next `images.generate` or sync pass picks it up, and so does
-`images.resume` once the row has waited longer than `staleAfterMs` if its path already held a render
-or the render had claimed the row for its write. A `pending` row that never had a render is left to
-the render queued for it: the `images.planned` subscriber with a queuing event delivery, or with
+**A crash mid-render** leaves the variant row in the state it had (`planned`, `pending` or `error`)
+with its attempt count unchanged, never at a stale `"done"`, and leaves the lease on the item. The
+next `images.generate` or sync pass picks it up once the lease has run out, and so does
+`images.resume`, which takes over a lease older than `staleAfterMs`. A `pending` row that never had a
+render and whose item no process holds is left to the render queued for it: the `images.planned` subscriber with a queuing event delivery, or with
 inline delivery the render this module's background loop runs after it placed the row. A row whose
 queued render is lost with its process waits for `images.generate` or `images.sync`.
 Meanwhile `images.serve` hands out that earlier render, or the full-size original when the path has
@@ -344,15 +341,16 @@ A job row whose `updatedAt` is older than `staleAfterMs` counts as abandoned, so
 the `images.resume` cron take it over instead of answering `CONFLICT`. The job's counters are
 written after each image rather than only at the end of a chunk, so a long-running chunk is never
 mistaken for a stalled job by `images.readStatus` or the `staleAfterMs` takeover. `images.resume`
-also places and renders any row whose write was cut off (a claim older than `staleAfterMs`, see
-"Focus and crop"), any row that already had a render at its path and was left `pending` for longer
-than `staleAfterMs` (a re-render that never finished), any item whose framing was stored but never
-applied for longer than `staleAfterMs`, any row still stuck at `planned` (a placement that never
-finished), and any media item created in the last 24 hours with no rows at all (a generation that
-never started), at most 200 items per pass in that order. It considers only rows of sizes that are
-still declared, and moves the rows and framings of the items it tried but could not advance behind
-the others, so a few items it cannot place or render never keep it from the rest; items left out of a
-pass keep their place. An
+also places and renders any item whose lease ran out (a holder that stopped, see "Focus and crop"),
+any item with a request left open for longer than `staleAfterMs` (one whose last placement or render
+failed, or whose holder stopped before it served the request), any row that already had a render at
+its path and was left `pending` for longer than `staleAfterMs` (a re-render that never finished), any
+row still stuck at `planned` (a placement that never finished), and any media item created in the
+last 24 hours with no rows at all (a generation that never started). It takes one item from each of
+these in turn, at most 200 items per pass, so no group keeps it from the others. It considers only
+rows of sizes that are still declared, and moves the rows and requests of the items it tried but
+could not advance behind the others, so a few items it cannot place or render never keep it from the
+rest; items left out of a pass keep their place. An
 item it cannot place or render — for instance one its provider reports as ready but whose bytes it
 has lost, which `images.plan` and `images.generate` report as `INTERNAL` (`the stored bytes of
 media/<id> are missing`) — is logged and skipped, and the
@@ -371,8 +369,12 @@ whose render fails this way is left `planned`, not counted as an attempt, and ha
 background loop to place and render right after the request.
 
 **Repeated failure** is bounded by `maxAttempts`, and a rendered variant whose private blob or
-public copy cannot be written counts as a failed attempt too: the last failure sets `state:
-"failed"` instead of `"error"`, and generate/sync/resume skip the variant from then on, so one broken
+public copy cannot be written counts as a failed attempt too (a placement or a public-copy writer
+whose write fails answers the error and counts nothing). A render whose public copy cannot be
+written puts the earlier render back at the private path, or removes its bytes there when the path
+had none, so the origin and the public copy answer the same bytes under the row's `?v=`; the item
+keeps a request that `images.resume` serves. The last failure sets `state: "failed"` instead of
+`"error"`, and generate/sync/resume skip the variant from then on, so one broken
 original cannot burn the whole budget of the job forever. `images.serve` does not hide such a variant behind the
 original: for a size that has never rendered at its path it keeps answering with the original's bytes
 and type, marked `x-kestrel-variant: original`, exactly like a `pending` one; a size with an earlier
