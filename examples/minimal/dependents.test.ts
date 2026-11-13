@@ -239,8 +239,23 @@ async function call(example: Example, pipeline: string, input: { token?: string;
   return boundaryCast<Record<string, unknown>>(result.result, "json");
 }
 
-async function stale(example: Example): Promise<{ stale: number; failed: number; rendering: number; unknown: number }> {
-  return boundaryCast<{ stale: number; failed: number; rendering: number; unknown: number }>(await call(example, "staleStatus"), "json");
+interface StaleStatus {
+  stale: number;
+  failed: number;
+  rendering: number;
+  unknown: number;
+  exports: { indexes: { at: number; entries: number; error: string | null } | null };
+}
+
+async function stale(example: Example): Promise<StaleStatus> {
+  return boundaryCast<StaleStatus>(await call(example, "staleStatus"), "json");
+}
+
+async function indexesExported(example: Example, entries: number, timeoutMs?: number, intervalMs?: number): Promise<void> {
+  await pollUntil(async () => {
+    const indexes = (await stale(example)).exports.indexes;
+    return indexes !== null && indexes.error === null && indexes.entries === entries;
+  }, timeoutMs, intervalMs);
 }
 
 interface Seeded {
@@ -386,7 +401,8 @@ for (const mode of ["queue", "direct"] as const) {
         for (let i = 0; i < 30; i++) await call(example, "createPage", { token, body: { slug: `seite-${i}`, title: `Seite ${i}`, status: "published" } });
         await settled(example);
         const sitemap = (): string => (existsSync(join(example.site, "sitemap.xml")) ? readFileSync(join(example.site, "sitemap.xml"), "utf8") : "");
-        await pollUntil(() => sitemap().includes("<loc>http://127.0.0.1:4000/seite-29</loc>"));
+        await indexesExported(example, 30);
+        expect(sitemap()).toContain("<loc>http://127.0.0.1:4000/seite-29</loc>");
         expect(readFileSync(join(example.site, "robots.txt"), "utf8")).toBe("User-agent: *\nDisallow: /\n\nSitemap: http://127.0.0.1:4000/sitemap.xml\n");
 
         example.reading.delayMs = 200;
@@ -394,8 +410,9 @@ for (const mode of ["queue", "direct"] as const) {
         await pollUntil(async () => (await stale(example)).stale >= 25);
         const savedAt = Date.now();
         await call(example, "createPage", { token, body: { slug: "neu", title: "Neu", status: "published" } });
-        await pollUntil(() => sitemap().includes("<loc>http://127.0.0.1:4000/neu</loc>"), 10_000, 10);
+        await indexesExported(example, 31, 10_000, 10);
         const elapsed = Date.now() - savedAt;
+        expect(sitemap()).toContain("<loc>http://127.0.0.1:4000/neu</loc>");
         expect((await stale(example)).stale).toBeGreaterThan(0);
         expect(elapsed).toBeLessThanOrEqual(10_000);
         expect(readFileSync(join(example.site, "llms.txt"), "utf8")).toContain("[Neu](http://127.0.0.1:4000/neu)");
