@@ -1309,6 +1309,24 @@ describe("the one-time removal of orphaned output files", () => {
     expect(blobs.files.has("site/spaeter/index.html")).toBe(true);
   });
 
+  it("keeps the file of a page published at an orphaned path while the removal checks that path for an owner", async () => {
+    const h = await upgraded();
+    placed(h, "site/neu/index.html");
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    h.advance(CLAIM_TTL_MS + 1);
+    const count = h.db.count.bind(h.db);
+    let neu: string | undefined;
+    h.db.count = async (collection, filter) => {
+      const answer = await count(collection, filter);
+      if (neu === undefined && collection === STATUS && filter.path === "/neu") neu = await h.page({ slug: "neu", title: "Neu", status: "published" });
+      return answer;
+    };
+    expectOk(await h.delivery.resumeStale());
+    expect(neu).toBeDefined();
+    expect(h.blobs.files.get("site/neu/index.html")?.text).toContain("Neu");
+    expect(expectOk(await h.db.findOne<StatusRow>(STATUS, { docId: neu!, locale: "de" }))).toMatchObject({ state: "live", path: "/neu", staleToken: null });
+  });
+
   it("does not run after an unclean stop of a process that started on an empty database against a published site", async () => {
     const blobs = memoryBlobs();
     const old = await harness({ blobs });

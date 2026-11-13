@@ -491,6 +491,12 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     }
     return ok();
   };
+  const afterRemoval = async (path: string): Promise<Result<void, DeliveryError>> => {
+    const recorded = await recordChange(PATH_CHANGE, [path]);
+    const marked = await markOwners(path);
+    if (isErr(recorded)) return recorded;
+    return marked;
+  };
   const legacyKeysFor = (path: string): Record<string, string> => Object.fromEntries(config.formats.map((format) => [format, keyFor(config.prefix, path, format)]));
   const underPath = (key: string, path: string): boolean => key.startsWith(keyFor(config.prefix, path, ""));
 
@@ -532,10 +538,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   const removeFiles = async (path: string, keys: readonly string[]): Promise<Result<void, DeliveryError>> => {
     const removed = await removeKeys(keys);
     if (isErr(removed)) return removed;
-    const recorded = await recordChange(PATH_CHANGE, [path]);
-    const marked = await markOwners(path);
-    if (isErr(recorded)) return recorded;
-    return marked;
+    return afterRemoval(path);
   };
 
   const deleteDependencyRows = async (ids: readonly string[]): Promise<Result<void, DeliveryError>> => {
@@ -1763,16 +1766,33 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     for (const [path, keys] of orphans) {
       if (!candidates.value.paths.has(path)) continue;
       if (stopping || interrupted()) return ok(removed);
+      const advanced = await advanceMarker();
+      if (isErr(advanced)) return advanced;
       const owned = await pathOwned(path);
       if (isErr(owned)) return owned;
       if (owned.value) continue;
-      const gone = await removeFiles(path, keys);
-      if (isErr(gone)) {
-        logger.error("delivery/static: could not remove an orphaned output file", { path, keys, error: gone.error.message });
-        return gone;
+      let gone = 0;
+      let failed: DeliveryError | null = null;
+      for (const key of keys) {
+        if (stopping || interrupted()) break;
+        const out = await blobs.remove(key);
+        if (isErr(out)) {
+          failed = transientOnly(out.error, "blobstore@1");
+          break;
+        }
+        logger.info("delivery/static: removed an orphaned output file no status row owns", { path, key });
+        gone += 1;
       }
-      for (const key of keys) logger.info("delivery/static: removed an orphaned output file no status row owns", { path, key });
-      removed += keys.length;
+      removed += gone;
+      if (gone > 0) {
+        const settledOwners = await afterRemoval(path);
+        if (isErr(settledOwners)) return settledOwners;
+      }
+      if (failed !== null) {
+        logger.error("delivery/static: could not remove an orphaned output file", { path, keys, error: failed.message });
+        return err(failed);
+      }
+      if (gone < keys.length) return ok(removed);
     }
     if (interrupted()) return ok(removed);
     const recordedDone = await recordOrphansDone({ removed });
