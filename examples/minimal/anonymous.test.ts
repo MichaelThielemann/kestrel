@@ -126,6 +126,13 @@ function anyJson(g: Generator, depth: number): unknown {
   return { [`k${Math.floor(g.next() * 10)}`]: anyJson(g, depth + 1) };
 }
 
+function numberOf(schema: JsonSchema, g: Generator): number {
+  if (typeof schema.minimum !== "number" && typeof schema.maximum !== "number") return Math.floor(g.next() * 1000);
+  const low = typeof schema.minimum === "number" ? schema.minimum : 0;
+  const high = typeof schema.maximum === "number" ? schema.maximum : low + 999;
+  return Math.min(high, low + Math.floor(g.next() * (high - low + 1)));
+}
+
 function valueOf(schema: JsonSchema, g: Generator, depth = 0): unknown {
   const union = Array.isArray(schema.anyOf) ? schema.anyOf : Array.isArray(schema.oneOf) ? schema.oneOf : undefined;
   if (union !== undefined) return valueOf(boundaryCast<JsonSchema>(pick(g, union), "json"), g, depth);
@@ -136,7 +143,7 @@ function valueOf(schema: JsonSchema, g: Generator, depth = 0): unknown {
   if (type === "any") return anyJson(g, depth);
   if (type === "null") return null;
   if (type === "string") return typeof schema.pattern === "string" ? "a1" : `s${Math.floor(g.next() * 1000)}`;
-  if (type === "number" || type === "integer") return Math.floor(g.next() * 1000);
+  if (type === "number" || type === "integer") return numberOf(schema, g);
   if (type === "boolean") return g.next() < 0.5;
   if (type === "array") return depth > 5 || !isRecord(schema.items) ? [] : Array.from({ length: Math.floor(g.next() * 3) + 1 }, () => valueOf(boundaryCast<JsonSchema>(schema.items, "json"), g, depth + 1));
   const value: Record<string, unknown> = {};
@@ -146,7 +153,7 @@ function valueOf(schema: JsonSchema, g: Generator, depth = 0): unknown {
       if (!required.includes(key) && g.next() < 0.3) continue;
       value[key] = valueOf(boundaryCast<JsonSchema>(member, "json"), g, depth + 1);
     }
-    value[`x_extra_${g.extras++}`] = depth > 4 ? "x" : anyJson(g, depth + 1);
+    if (schema.additionalProperties !== false) value[`x_extra_${g.extras++}`] = depth > 4 ? "x" : anyJson(g, depth + 1);
   } else if (isRecord(schema.additionalProperties)) {
     for (let i = 0; i < 2; i++) value[`m${i}`] = valueOf(schema.additionalProperties, g, depth + 1);
   }
