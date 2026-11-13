@@ -204,10 +204,11 @@ A module is a `module.ts` with a default export from `defineModule()`. It does n
 a contract — `provides: []` and a step map is enough. Put it anywhere in the project and point
 `use` at the file with a relative path.
 
-Modules declare their config with a Zod schema, so the project needs `zod` as its own dependency:
+Modules declare their config with a zod 4 schema, so the project needs `zod` 4.6.6 or later as its
+own dependency, the same range kestrel uses:
 
 ```
-pnpm add zod
+pnpm add zod@^4.6.6
 ```
 
 ```ts
