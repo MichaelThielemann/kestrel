@@ -842,11 +842,18 @@ nested defaults in the same file, as in `z.object({ perMinute: z.number().defaul
 z.number().default(5) }).default(DEFAULT_LIMITS)` with `DEFAULT_LIMITS = { perMinute: 10 }`, where
 zod 4 leaves `burst` undefined; and likewise when an array or record default holds object literals
 for objects that declare nested defaults, as in `z.array(z.object({ host: z.string(), port:
-z.number().default(25) })).default([{ host: "localhost" }])`. Rename those to `.prefault()` where
-the value can leave out a key that has its own default. An object-literal `.default({…})` on a
-schema the rule cannot trace, one imported from another file or returned by a function, is
-reported as a manual warning with its line; rename it by hand when that schema is an object or a
-union of objects.
+z.number().default(25) })).default([{ host: "localhost" }])`, when a function returns such a
+literal (`.default(() => [{ host: "localhost" }])`) and when the value is not a literal
+(`.default([DEFAULT_SERVER])`). The rule finds nested defaults through the local variables the
+schema refers to, at any depth: `z.array(server)` with `const server = z.object({ …, port:
+z.number().default(25) })` counts, and so does `http.default(HTTP_DEFAULTS)` where `http` holds a
+`retry` object that declares its own defaults. Rename those to `.prefault()` where the value can
+leave out a key that has its own default. An object-literal `.default({…})` on a schema the rule
+cannot trace, one imported from another file or returned by a function, or one built with
+`z.preprocess`, `z.lazy`, `z.pipe`, `z.custom` or through `.pipe()` or `.transform()`, is reported
+as a manual warning with its line; rename it by hand when that schema is an object or a union of
+objects. An array or record whose element schema the rule cannot trace gets the same warning when
+its default holds objects or is not a literal.
 
 #### zod-describe-order
 zod 4's object methods `.strict()`, `.passthrough()`, `.strip()`, `.catchall()`, `.extend()`,

@@ -223,6 +223,58 @@ describe("zod/object-default", () => {
     expect(new Set(findings.map((f) => f.id)).size).toBe(4);
   });
 
+  const manualLines = async (lines: string[]): Promise<Array<[string, number | undefined]>> => {
+    await write("module.ts", ['import { z } from "zod";', ...lines, ""].join("\n"));
+    const findings = await zodObjectDefaultRule.check(context());
+    return findings.map((f) => [f.fix.kind, f.where.line]);
+  };
+
+  it("warns about an array default holding objects whose schema sits in a local variable with nested defaults", async () => {
+    expect(await manualLines(["const server = z.object({ host: z.string(), port: z.number().default(25) });", 'export const configSchema = z.object({ servers: z.array(server).default([{ host: "localhost" }]) });'])).toEqual([["manual", 3]]);
+  });
+
+  it("warns about a record default holding objects whose schema sits in a local variable with nested defaults", async () => {
+    expect(await manualLines(["const server = z.object({ host: z.string(), port: z.number().default(25) });", 'export const configSchema = z.object({ servers: z.record(z.string(), server).default({ main: { host: "x" } }) });'])).toEqual([["manual", 3]]);
+  });
+
+  it("warns about a variable default on an object whose nested defaults sit in another local variable", async () => {
+    const lines = ["const retry = z.object({ max: z.number().default(5) });", "const http = z.object({ retry, timeoutMs: z.number() });", "const HTTP_DEFAULTS = { retry: {}, timeoutMs: 1000 };", "export const configSchema = z.object({ http: http.default(HTTP_DEFAULTS) });"];
+    expect(await manualLines(lines)).toEqual([["manual", 5]]);
+  });
+
+  it("warns about a function default on an array that returns objects whose schema has nested defaults", async () => {
+    expect(await manualLines(['export const configSchema = z.object({ servers: z.array(z.object({ host: z.string(), port: z.number().default(25) })).default(() => [{ host: "localhost" }]) });'])).toEqual([["manual", 2]]);
+    expect(await manualLines(['export const configSchema = z.object({ servers: z.array(z.object({ host: z.string(), port: z.number().default(25) })).default(function () { return [{ host: "localhost" }]; }) });'])).toEqual([["manual", 2]]);
+  });
+
+  it("warns about an array default holding a variable when the element schema has nested defaults", async () => {
+    const lines = ['const DEFAULT_SERVER = { host: "localhost" };', "export const configSchema = z.object({ servers: z.array(z.object({ host: z.string(), port: z.number().default(25) })).default([DEFAULT_SERVER]) });"];
+    expect(await manualLines(lines)).toEqual([["manual", 3]]);
+  });
+
+  it("warns about a variable default on a collection whose element schema it cannot trace", async () => {
+    const lines = ['import { server } from "./shared.ts";', "const SERVERS = [];", "export const configSchema = z.object({ servers: z.array(server).default(SERVERS), empty: z.array(server).default([]), names: z.array(server).default([\"a\"]) });"];
+    expect(await manualLines(lines)).toEqual([["manual", 4]]);
+  });
+
+  it("warns about an object-literal default on a preprocess, lazy, pipe or custom schema as one it cannot trace", async () => {
+    const lines = [
+      "export const configSchema = z.object({",
+      "  a: z.preprocess((v) => v, z.object({ n: z.number().default(1) })).default({}),",
+      "  b: z.lazy(() => z.object({ n: z.number().default(1) })).default({}),",
+      "  c: z.pipe(z.object({}), z.object({ n: z.number().default(1) })).default({}),",
+      "  d: z.custom<{ n: number }>().default({ n: 1 }),",
+      "  e: z.object({ n: z.number().default(1) }).pipe(z.object({ n: z.number() })).default({}),",
+      "});",
+    ];
+    expect(await manualLines(lines)).toEqual([2, 3, 4, 5, 6].map((line) => ["manual", line + 1]));
+  });
+
+  it("leaves a variable default on a collection of scalars and callbacks inside a traced element schema", async () => {
+    const lines = ['const TAGS = ["a"];', "const host = z.object({ name: z.string() }).refine((value) => value.name.length > 0);", "export const configSchema = z.object({ tags: z.array(z.string()).default(TAGS), hosts: z.array(host).default(HOSTS) });", "const HOSTS = [{ name: \"a\" }];"];
+    expect(await manualLines(lines)).toEqual([]);
+  });
+
   it("leaves scalar defaults, array and record defaults without objects with nested defaults, and a non-literal default on an object without nested defaults", async () => {
     const source = [
       'import { z } from "zod";',
