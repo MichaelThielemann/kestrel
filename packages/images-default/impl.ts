@@ -59,6 +59,7 @@ export interface Variant extends Document {
   height: number;
   format: string;
   key: string;
+  /** The byte size of the render at `key`; `0` while the row has none, and its path then answers the original's bytes even if `key` holds a render. */
   bytes: number;
   state: VariantState;
   error: string | null;
@@ -876,7 +877,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   }
 
   async function contentFor(item: MediaFile, row: Variant | null): Promise<Result<Content | null, KestrelError>> {
-    if (row !== null && row.state !== "planned") {
+    if (row !== null && row.state !== "planned" && row.bytes > 0) {
       const rendered = await blobs.get(row.key);
       if (isErr(rendered)) return rendered;
       if (rendered.value !== null) return ok({ data: rendered.value, contentType: publicTypeOf(contentTypeOf(row.format)), rendered: true });
@@ -2150,7 +2151,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const copiedRows = await eachRow<Variant>(VARIANTS, {}, async (row) => {
         const media = ready.get(row.mediaId);
         if (media === undefined || row.state === "planned" || hidden.has(row.mediaId)) return ok(undefined);
-        return ensureCopy(media, fileOf(row), privateSizes.get(row.key) ?? media.size);
+        return ensureCopy(media, fileOf(row), row.bytes > 0 ? (privateSizes.get(row.key) ?? media.size) : media.size);
       });
       if (isErr(copiedRows)) return copiedRows;
       const copiedRetired = await eachRow<Retired>(RETIRED, {}, async (row) => {

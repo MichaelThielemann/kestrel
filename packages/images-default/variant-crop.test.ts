@@ -404,6 +404,47 @@ describe("images/default variants[].crop in images.attach", () => {
     for (const open of [first, images]) await open.close();
   });
 
+  it("answers the original at a size added to the configuration whose first render stayed at its key after its copy and removal failed, while the entry lists crop null", async () => {
+    const w = await world();
+    const inside = await w.open([THUMB]);
+    expectOk(await inside.setFraming("m1", RIGHT_CROP));
+    expectOk(await inside.generate("m1"));
+
+    let down = true;
+    let renderFails = false;
+    const broken: Blobstore = {
+      ...w.blobs,
+      put: async (key, data, options) => (down && key.startsWith("site/") ? err(failure("TRANSIENT", "copy store unavailable")) : w.blobs.put(key, data, options)),
+      remove: async (key) => (down && key.startsWith("media-variants/") ? err(failure("TRANSIENT", "variant store unavailable")) : w.blobs.remove(key)),
+    };
+    const renderer: Renderer = async (data, size, planned, options) => {
+      if (renderFails) throw new Error("render failed");
+      return render(data, size, planned, options);
+    };
+    const added = await w.open([THUMB, SQUARE], renderer, { blobs: broken });
+    await added.generate("m1");
+    await whenIdle(added);
+    expect(w.blobs.blobs.has("media-variants/m1/square.webp")).toBe(true);
+
+    down = false;
+    renderFails = true;
+    expectOk(await added.plan(["m1"]));
+    for (let attempt = 0; attempt < CONFIG.maxAttempts; attempt += 1) await added.generate("m1");
+    await whenIdle(added);
+    expectOk(await added.syncPublic());
+    expect((await attached(added)).get("square")).toMatchObject({ state: "failed", crop: null, bytes: 0, path: SQUARE_PATH });
+    const served = expectOk(await added.read("m1", "square.webp"))!;
+    expect(served.fallback).toBe(true);
+    expect(await leftEdgeIsBlue(added, "square.webp")).toBe(false);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(served.data);
+
+    renderFails = false;
+    expectOk(await added.setFraming("m1", LEFT_CROP));
+    expectOk(await added.generate("m1"));
+    expect((await attached(added)).get("square")).toMatchObject({ state: "done", crop: LEFT, path: SQUARE_PATH });
+    for (const open of [inside, added]) await open.close();
+  });
+
   it("leaves the sizes of an image that cannot be decoded failed with cannot decode when a write of the item landed late", async () => {
     const w = await world();
     w.media.add({ id: "m2", contentType: "image/jpeg", data: new Uint8Array([1, 2, 3]), filename: "broken.jpg", createdAt: 1000, width: 100, height: 50 });
