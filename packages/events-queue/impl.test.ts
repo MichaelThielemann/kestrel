@@ -1591,14 +1591,26 @@ describe("events/queue retry: repeated requests during an outage", () => {
 
   it("a request every five minutes to a delayed lane job that always fails leaves no dead letters and at most one retrying row", async () => {
     const { queue, clock, rows } = await make({ maxAttempts: 5, backoffSeconds: [5, 30, 120, 600], lanes: { indexes: ["refresh"] }, delayMs: { refresh: 1000 } });
-    queue.setDelivery([{ event: "stale", pipeline: "refresh" }], async () => FAIL);
+    let deliveries = 0;
+    queue.setDelivery([{ event: "stale", pipeline: "refresh" }], async () => {
+      deliveries++;
+      return FAIL;
+    });
     const start = clock.t;
-    for (let elapsed = 0; elapsed <= 4 * 3600_000; elapsed += 1000) {
-      clock.t = start + elapsed;
-      if (elapsed % 300_000 === 0) await queue.enqueue("stale", { coalesceKey: "indexes" });
+    const end = start + 4 * 3600_000;
+    const nextSecond = (t: number) => start + Math.ceil((t - start) / 1000) * 1000;
+    let nextRequest = start;
+    while (clock.t <= end) {
+      if (clock.t === nextRequest) {
+        await queue.enqueue("stale", { coalesceKey: "indexes" });
+        nextRequest += 300_000;
+      }
       while ((await queue.tickLane("indexes")) > 0);
+      const due = Math.min(nextRequest, ...(await rows()).filter((r) => r.state === "pending").map((r) => r.availableAt));
+      clock.t = Math.max(clock.t + 1000, nextSecond(due));
     }
     const stored = await rows();
+    expect(deliveries).toBeGreaterThan(stored.length);
     expect(stored.filter((r) => r.state === "dead")).toEqual([]);
     expect(stored.filter((r) => r.state === "pending" && r.attempts > 0).length).toBeLessThanOrEqual(1);
     expect(expectOk(await queue.deliveryStatus()).dead).toBe(0);
