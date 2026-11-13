@@ -10,3 +10,5 @@ minimumReleaseAgeExclude:
 trustPolicy: no-downgrade
 trustPolicyIgnoreAfter: 129600
 blockExoticSubdeps: true
+overrides:
+  'minimatch@10': ^11.0.1
