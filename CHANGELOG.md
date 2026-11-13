@@ -19,7 +19,10 @@ Net changes since 5.8.1.
   zod 4's `.strict()`, `.passthrough()`, `.extend()`, `.partial()`, `.pick()` and the other object
   methods return a copy without the description, so a `"secret"` mark set before them is lost and
   the value shows in plain text in `describe()`. The JSON Schema, variables and defaults of every
-  bundled module's config are unchanged. `kestrel upgrade`'s new `deps/zod-range` raises the
+  bundled module's config are unchanged, but the integer settings of `kestrel.config` and of every
+  bundled module refuse a value above `Number.MAX_SAFE_INTEGER` (`http: { maxBodyBytes:
+  Number.MAX_VALUE }` now fails boot with `Too big: expected int to be <=9007199254740991`), and every
+  number setting refuses `Infinity`. `kestrel upgrade`'s new `deps/zod-range` raises the
   project's `zod` range, `zod/record-key` inserts the key schema, `zod/object-default` renames such
   a `.default` to `.prefault` and `zod/describe-order` moves a `.describe()` after the object methods
   that follow it; `types/breaking-signatures` names the schema type. A module whose `configSchema`

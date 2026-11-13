@@ -864,6 +864,10 @@ zod's [migration guide](https://zod.dev/v4/changelog) lists every change between
     `12345678-1234-1234-1234-123456789012`; `z.guid()` accepts any id of that shape as zod 3's
     `.uuid()` did.
   - `.int()` refuses a number above `Number.MAX_SAFE_INTEGER`.
+  - `z.number()` refuses `Infinity` and `-Infinity`, which zod 3 accepted, so a config such as
+    `cacheTtlMs: Infinity` for "never expire" fails boot with `Invalid input: expected number,
+    received Infinity`. Use a large finite number, or accept `null` for that case through
+    `.nullable()`.
 
 - Error messages are zod 4's. A missing key reads `Invalid input: expected string, received
   undefined` instead of `Required`, an unknown key `Unrecognized key: "name"` instead of
