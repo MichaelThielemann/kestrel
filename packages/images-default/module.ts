@@ -10,6 +10,7 @@ import { binaryResult, first, stepFactory, type Context } from "@michaelthielema
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import type { FramingView } from "./framed.ts";
+import { parseCrop, type PixelCrop } from "./framing.ts";
 import { eligible } from "./generate.ts";
 import { COLLECTIONS, DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, createImages, type Images, type Variant, type VariantCounts } from "./impl.ts";
 import { sizeSchema } from "./sizes.ts";
@@ -61,8 +62,9 @@ function resultVersions(ctx: Context): Record<string, number> | undefined {
   return out;
 }
 
-function attachedVariant(images: Images, variant: Variant): { size: string; width: number; height: number; format: string; bytes: number; state: "pending" | "done" | "error" | "failed"; path: string } {
-  return { size: variant.size, width: variant.width, height: variant.height, format: variant.format, bytes: variant.bytes, state: variant.state === "planned" ? "pending" : variant.state, path: images.publicPath(variant.mediaId, variant) };
+function attachedVariant(images: Images, variant: Variant): { size: string; width: number; height: number; format: string; bytes: number; state: "pending" | "done" | "error" | "failed"; path: string; crop: PixelCrop | null } {
+  const rendered = typeof variant.renderedCrop === "string" ? parseCrop(variant.renderedCrop) : null;
+  return { size: variant.size, width: variant.width, height: variant.height, format: variant.format, bytes: variant.bytes, state: variant.state === "planned" ? "pending" : variant.state, path: images.publicPath(variant.mediaId, variant), crop: rendered };
 }
 
 const ZERO_VARIANT_COUNTS: VariantCounts = { done: 0, pending: 0, error: 0, failed: 0 };
@@ -86,10 +88,10 @@ const GENERATE_INPUT_SCHEMA = { type: "object", properties: { id: { type: "strin
 const VARIANT_SCHEMA = { type: "object", properties: { id: { type: "string" }, mediaId: { type: "string" }, size: { type: "string" }, slot: { type: "string" }, spec: { type: "string" }, width: { type: "number" }, height: { type: "number" }, format: { type: "string" }, key: { type: "string" }, bytes: { type: "number" }, state: { type: "string", enum: ["planned", "pending", "done", "error", "failed"] }, error: { type: ["string", "null"] }, attempts: { type: "number" }, updatedAt: { type: "number" }, crop: { type: ["string", "null"] }, renderedCrop: { type: ["string", "null"] }, renders: { type: ["number", "null"] }, originalWidth: { type: ["number", "null"] }, originalHeight: { type: ["number", "null"] } }, required: ["id", "mediaId", "size", "slot", "spec", "width", "height", "format", "key", "bytes", "state", "error", "attempts", "updatedAt"] };
 const JOB_SCHEMA = { type: "object", properties: { id: { type: "string" }, state: { type: "string", enum: ["running", "paused", "done", "error"] }, total: { type: "number" }, done: { type: "number" }, failed: { type: "number" }, cursor: { type: "string" }, startedAt: { type: "number" }, updatedAt: { type: "number" }, finishedAt: { type: ["number", "null"] }, error: { type: ["string", "null"] } }, required: ["id", "state", "total", "done", "failed", "cursor", "startedAt", "updatedAt", "finishedAt", "error"] };
 const FAILED_VARIANT_SCHEMA = { type: "object", properties: { mediaId: { type: "string" }, size: { type: "string" }, attempts: { type: "number" }, error: { type: ["string", "null"] }, updatedAt: { type: "number" } }, required: ["mediaId", "size", "attempts", "error", "updatedAt"] };
-const ATTACHED_VARIANT_SCHEMA = { type: "object", properties: { size: { type: "string" }, width: { type: "number" }, height: { type: "number" }, format: { type: "string" }, bytes: { type: "number" }, state: { type: "string", enum: ["pending", "done", "error", "failed"] }, path: { type: "string" } }, required: ["size", "width", "height", "format", "bytes", "state", "path"] };
+const PIXEL_CROP_SCHEMA = { type: "object", properties: { left: { type: "number" }, top: { type: "number" }, width: { type: "number" }, height: { type: "number" } }, required: ["left", "top", "width", "height"] };
+const ATTACHED_VARIANT_SCHEMA = { type: "object", properties: { size: { type: "string" }, width: { type: "number" }, height: { type: "number" }, format: { type: "string" }, bytes: { type: "number" }, state: { type: "string", enum: ["pending", "done", "error", "failed"] }, path: { type: "string" }, crop: { oneOf: [PIXEL_CROP_SCHEMA, { type: "null" }], description: "the crop of the oriented original that the bytes at path show; null for the whole image or the centred cut of the size's ratio" } }, required: ["size", "width", "height", "format", "bytes", "state", "path", "crop"] };
 const VARIANT_COUNTS_SCHEMA = { type: "object", properties: { done: { type: "number" }, pending: { type: "number" }, error: { type: "number" }, failed: { type: "number" } }, required: ["done", "pending", "error", "failed"] };
 const RECT_SCHEMA = { type: "object", properties: { x: { type: "number", minimum: 0, maximum: 1 }, y: { type: "number", minimum: 0, maximum: 1 }, w: { type: "number", minimum: 0, maximum: 1 }, h: { type: "number", minimum: 0, maximum: 1 } }, required: ["x", "y", "w", "h"], additionalProperties: false };
-const PIXEL_CROP_SCHEMA = { type: "object", properties: { left: { type: "number" }, top: { type: "number" }, width: { type: "number" }, height: { type: "number" } }, required: ["left", "top", "width", "height"] };
 const FRAMING_PROPERTIES = { focus: { oneOf: [RECT_SCHEMA, { type: "null" }] }, crops: { type: "object", additionalProperties: RECT_SCHEMA, description: "manual crops keyed by reduced ratio, e.g. \"16:9\"" } };
 const FRAMING_SCHEMA = { type: "object", properties: FRAMING_PROPERTIES, required: ["focus", "crops"] };
 const FRAMING_INPUT_SCHEMA = { type: "object", properties: FRAMING_PROPERTIES, additionalProperties: false };

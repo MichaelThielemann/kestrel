@@ -16294,6 +16294,37 @@
                       },
                       "path": {
                         "type": "string"
+                      },
+                      "crop": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "left": {
+                                "type": "number"
+                              },
+                              "top": {
+                                "type": "number"
+                              },
+                              "width": {
+                                "type": "number"
+                              },
+                              "height": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "left",
+                              "top",
+                              "width",
+                              "height"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "the crop of the oriented original that the bytes at path show; null for the whole image or the centred cut of the size's ratio"
                       }
                     },
                     "required": [
@@ -16303,7 +16334,8 @@
                       "format",
                       "bytes",
                       "state",
-                      "path"
+                      "path",
+                      "crop"
                     ]
                   }
                 },
@@ -16865,6 +16897,37 @@
                 },
                 "path": {
                   "type": "string"
+                },
+                "crop": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "left": {
+                          "type": "number"
+                        },
+                        "top": {
+                          "type": "number"
+                        },
+                        "width": {
+                          "type": "number"
+                        },
+                        "height": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "left",
+                        "top",
+                        "width",
+                        "height"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "the crop of the oriented original that the bytes at path show; null for the whole image or the centred cut of the size's ratio"
                 }
               },
               "required": [
@@ -16874,7 +16937,8 @@
                 "format",
                 "bytes",
                 "state",
-                "path"
+                "path",
+                "crop"
               ]
             }
           },
@@ -17410,6 +17474,37 @@
                 },
                 "path": {
                   "type": "string"
+                },
+                "crop": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "left": {
+                          "type": "number"
+                        },
+                        "top": {
+                          "type": "number"
+                        },
+                        "width": {
+                          "type": "number"
+                        },
+                        "height": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "left",
+                        "top",
+                        "width",
+                        "height"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "the crop of the oriented original that the bytes at path show; null for the whole image or the centred cut of the size's ratio"
                 }
               },
               "required": [
@@ -17419,7 +17514,8 @@
                 "format",
                 "bytes",
                 "state",
-                "path"
+                "path",
+                "crop"
               ]
             }
           },

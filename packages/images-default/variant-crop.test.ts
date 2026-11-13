@@ -1,0 +1,289 @@
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import sharp from "sharp";
+import { describe, expect, it } from "vitest";
+import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { createFakeMedia } from "@michaelthielemann/kestrel-contracts/testing/fakeMedia";
+import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
+import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { createContext, type Context, type Step } from "@michaelthielemann/kestrel/context";
+import { failure } from "@michaelthielemann/kestrel/errors";
+import type { Logger } from "@michaelthielemann/kestrel/logger";
+import { err, ok } from "@michaelthielemann/kestrel/result";
+import { validateSchema } from "@michaelthielemann/kestrel/schema";
+import module from "./module.ts";
+import { DEFAULT_RENDER_TIMEOUT_MS, VARIANTS, createImages, type Config, type Images, type Variant } from "./impl.ts";
+import type { PixelCrop } from "./framing.ts";
+import { render, type Renderer } from "./generate.ts";
+import type { Size } from "./sizes.ts";
+
+type MemoryBlobs = Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> };
+
+function memoryBlobs(): MemoryBlobs {
+  const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
+  return {
+    blobs,
+    async put(key, data, options) { blobs.set(key, { data, contentType: options?.contentType ?? "application/octet-stream" }); return ok(); },
+    async get(key) { return ok(blobs.get(key)?.data ?? null); },
+    async remove(key) { blobs.delete(key); return ok(); },
+    async move(from, to) { const b = blobs.get(from); if (!b) return err(failure("NOT_FOUND", `${from} not found`)); blobs.set(to, b); blobs.delete(from); return ok(); },
+    async list(prefix) { return ok([...blobs].filter(([k]) => k.startsWith(prefix)).map(([key, b]) => ({ key, size: b.data.byteLength }))); },
+  };
+}
+
+const quiet: Logger = { step() {}, info() {}, error() {} };
+const THUMB: Size = { name: "thumb", width: 64, fit: "inside", format: "webp", quality: 82 };
+const BANNER: Size = { name: "banner", width: 250, height: 150, fit: "cover", format: "webp", quality: 82 };
+const WIDE: Size = { name: "wide", width: 160, height: 90, fit: "cover", format: "webp", quality: 82 };
+const WIDE_LARGE: Size = { name: "wide-large", width: 320, height: 180, fit: "cover", format: "webp", quality: 82 };
+const SQUARE: Size = { name: "square", width: 100, height: 100, fit: "cover", format: "webp", quality: 82 };
+const SIZES = [THUMB, BANNER, WIDE, WIDE_LARGE, SQUARE];
+const CONFIG: Config = { prefix: "media-variants/", publicPath: "/media", publicCopy: { prefix: "site/" }, chunk: 5, staleAfterMs: 60000, maxAttempts: 2, renderTimeoutMs: DEFAULT_RENDER_TIMEOUT_MS, sizes: SIZES };
+
+const CORNER_FOCUS = { focus: { x: 0, y: 0, w: 0.1, h: 0.1 } };
+const RIGHT_CROP = { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } };
+const LEFT_CROP = { crops: { "1:1": { x: 0, y: 0, w: 0.6, h: 1 } } };
+const RIGHT: PixelCrop = { left: 400, top: 0, width: 600, height: 600 };
+const LEFT: PixelCrop = { left: 0, top: 0, width: 600, height: 600 };
+const SQUARE_PATH = "/media/m1/variants/square.webp";
+const VERSIONED_SQUARE = /^\/media\/m1\/variants\/square\.webp\?v=[0-9a-z]+$/;
+
+interface AttachedVariant {
+  size: string;
+  width: number;
+  height: number;
+  format: string;
+  bytes: number;
+  state: string;
+  path: string;
+  crop: PixelCrop | null;
+}
+
+interface World {
+  blobs: MemoryBlobs;
+  db: FakePersistence;
+  open(sizes?: Size[], renderer?: Renderer): Promise<Images>;
+}
+
+async function world(): Promise<World> {
+  const blobs = memoryBlobs();
+  const db = createFakePersistence();
+  const media = createFakeMedia();
+  const red = await sharp({ create: { width: 400, height: 600, channels: 3, background: "#ff0000" } }).png().toBuffer();
+  const original = new Uint8Array(await sharp({ create: { width: 1000, height: 600, channels: 3, background: "#0000ff" } }).composite([{ input: red, left: 0, top: 0 }]).jpeg().toBuffer());
+  media.add({ id: "m1", contentType: "image/jpeg", data: original, filename: "photo.jpg", createdAt: 1000 });
+  return {
+    blobs,
+    db,
+    open: (sizes = SIZES, renderer = render) => createImages({ ...CONFIG, sizes }, { blobs, db, media, logger: quiet, render: renderer }, () => 1000),
+  };
+}
+
+function ctx(patch: Partial<Context>): Context {
+  return { ...createContext({ trigger: { kind: "http", name: "t" } }), ...patch };
+}
+
+async function attached(images: Images): Promise<Map<string, AttachedVariant>> {
+  const steps = boundaryCast<{ attach: Step }>(module.steps!(images), "host");
+  const description = boundaryCast<{ extendsItems: Record<string, unknown> }>(module.describe!(images).attach, "host");
+  const single = expectOk(await steps.attach(ctx({ result: { id: "m1", contentType: "image/jpeg" } })));
+  expect(validateSchema(description.extendsItems, single.result)).toEqual([]);
+  const list = expectOk(await steps.attach(ctx({ result: { items: [{ id: "m1", contentType: "image/jpeg" }] } })));
+  const fromList = boundaryCast<{ items: Array<{ variants: AttachedVariant[] }> }>(list.result, "host").items[0]!.variants;
+  const variants = boundaryCast<{ variants: AttachedVariant[] }>(single.result, "host").variants;
+  expect(fromList).toEqual(variants);
+  return new Map(variants.map((variant) => [variant.size, variant]));
+}
+
+async function thumbnail(images: Images, file: string): Promise<number[]> {
+  const found = expectOk(await images.read("m1", file));
+  const { data } = await sharp(found!.data).resize(16, 9, { fit: "fill" }).raw().toBuffer({ resolveWithObject: true });
+  return [...data].map((value) => Math.round(value / 64));
+}
+
+async function leftEdgeIsBlue(images: Images, file: string): Promise<boolean> {
+  const found = expectOk(await images.read("m1", file));
+  const { data } = await sharp(found!.data).raw().toBuffer({ resolveWithObject: true });
+  return data[2]! > 200 && data[0]! < 60;
+}
+
+function gate(): { wait: Promise<void>; open(): void; reached: Promise<void>; arrive(): void } {
+  let open: () => void = () => {};
+  let arrive: () => void = () => {};
+  const wait = new Promise<void>((resolve) => { open = resolve; });
+  const reached = new Promise<void>((resolve) => { arrive = resolve; });
+  return { wait, open, reached, arrive };
+}
+
+function heldNext(): { renderer: Renderer; held: ReturnType<typeof gate>; arm(): void } {
+  const held = gate();
+  let armed = false;
+  return {
+    held,
+    arm() { armed = true; },
+    async renderer(data, size, planned, options) {
+      if (armed) {
+        armed = false;
+        held.arrive();
+        await held.wait;
+      }
+      return render(data, size, planned, options);
+    },
+  };
+}
+
+describe("images/default variants[].crop in images.attach", () => {
+  it("is null for an inside size, for a cover size of the original's ratio without a framing or with a focus only, and the focus cut for another ratio", async () => {
+    const w = await world();
+    const images = await w.open();
+    expectOk(await images.generate("m1"));
+    const unframed = await attached(images);
+    expect([...unframed.values()].map((variant) => [variant.size, variant.state, variant.crop]).sort()).toEqual([
+      ["banner", "done", null],
+      ["square", "done", null],
+      ["thumb", "done", null],
+      ["wide", "done", null],
+      ["wide-large", "done", null],
+    ]);
+
+    expectOk(await images.setFraming("m1", CORNER_FOCUS));
+    expectOk(await images.generate("m1"));
+    const focused = await attached(images);
+    expect(focused.get("thumb")).toMatchObject({ state: "done", crop: null });
+    expect(focused.get("banner")).toMatchObject({ state: "done", crop: null, path: "/media/m1/variants/banner.webp" });
+    expect(focused.get("wide")).toMatchObject({ state: "done", crop: { left: 0, top: 0, width: 1000, height: 563 } });
+    expect(focused.get("wide-large")).toMatchObject({ state: "done", crop: focused.get("wide")!.crop });
+    expect(await thumbnail(images, "wide-large.webp")).toEqual(await thumbnail(images, "wide.webp"));
+    expect(focused.get("square")).toMatchObject({ state: "done", crop: LEFT });
+    expect(expectOk(await images.framingsOf(["m1"])).get("m1")!.ratios.map((ratio) => [ratio.key, ratio.crop])).toEqual([
+      ["5:3", null],
+      ["16:9", focused.get("wide")!.crop],
+      ["1:1", focused.get("square")!.crop],
+    ]);
+    await images.close();
+  });
+
+  it("reports a manual crop once its render is done, and the bytes at the path show it", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.generate("m1"));
+    expect(await leftEdgeIsBlue(images, "square.webp")).toBe(false);
+
+    expectOk(await images.setFraming("m1", RIGHT_CROP));
+    expect((await attached(images)).get("square")).toMatchObject({ state: "pending", crop: null, path: SQUARE_PATH });
+    expectOk(await images.generate("m1"));
+    const square = (await attached(images)).get("square")!;
+    expect(square).toMatchObject({ state: "done", crop: RIGHT });
+    expect(square.path).toMatch(VERSIONED_SQUARE);
+    expect(await leftEdgeIsBlue(images, "square.webp")).toBe(true);
+    await images.close();
+  });
+
+  it("keeps the old crop and path while a re-render after a framing change runs, then switches crop and ?v= together", async () => {
+    const w = await world();
+    const holder = heldNext();
+    const images = await w.open([SQUARE], holder.renderer);
+    expectOk(await images.setFraming("m1", RIGHT_CROP));
+    expectOk(await images.generate("m1"));
+    const before = (await attached(images)).get("square")!;
+    expect(before).toMatchObject({ state: "done", crop: RIGHT, path: SQUARE_PATH });
+
+    expectOk(await images.setFraming("m1", LEFT_CROP));
+    expect((await attached(images)).get("square")).toEqual({ ...before, state: "pending" });
+
+    holder.arm();
+    const generating = images.generate("m1");
+    await holder.held.reached;
+    const during = (await attached(images)).get("square")!;
+    expect(during).toMatchObject({ crop: RIGHT, path: SQUARE_PATH });
+    expect(await leftEdgeIsBlue(images, "square.webp")).toBe(true);
+    holder.held.open();
+    expectOk(await generating);
+
+    const after = (await attached(images)).get("square")!;
+    expect(after).toMatchObject({ state: "done", crop: LEFT });
+    expect(after.path).toMatch(VERSIONED_SQUARE);
+    expect(after.path).not.toBe(before.path);
+    expect(await leftEdgeIsBlue(images, "square.webp")).toBe(false);
+    await images.close();
+  });
+
+  it("reports null after a reset to automatic once its render is done, and the manual crop until then", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.setFraming("m1", RIGHT_CROP));
+    expectOk(await images.generate("m1"));
+    const manual = (await attached(images)).get("square")!;
+
+    expectOk(await images.setFraming("m1", {}));
+    expect((await attached(images)).get("square")).toMatchObject({ state: "pending", crop: RIGHT, path: manual.path });
+    expectOk(await images.generate("m1"));
+    const reset = (await attached(images)).get("square")!;
+    expect(reset).toMatchObject({ state: "done", crop: null });
+    expect(reset.path).toMatch(VERSIONED_SQUARE);
+    expect(reset.path).not.toBe(manual.path);
+    await images.close();
+  });
+
+  it("reports null at the new path of a format change until its render is done, then the crop", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.setFraming("m1", RIGHT_CROP));
+    expectOk(await images.generate("m1"));
+    const changed = await w.open([{ ...SQUARE, format: "original" }]);
+    expectOk(await changed.plan(["m1"]));
+    const replanned = (await attached(changed)).get("square");
+    expect(replanned).toMatchObject({ state: "pending", crop: null, path: "/media/m1/variants/square.jpg" });
+    expectOk(await changed.generate("m1"));
+    const square = (await attached(changed)).get("square")!;
+    expect(square).toMatchObject({ state: "done", format: "jpeg", crop: RIGHT });
+    expect(square.path).toMatch(/^\/media\/m1\/variants\/square\.jpg\?v=[0-9a-z]+$/);
+    expect(await leftEdgeIsBlue(changed, "square.jpg")).toBe(true);
+    for (const open of [images, changed]) await open.close();
+  });
+
+  it("reports null for a row without a rendered crop and for one whose rendered crop does not parse", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.setFraming("m1", RIGHT_CROP));
+    expectOk(await images.generate("m1"));
+    for (const renderedCrop of [null, "", "400,0,x,600", "400,0,0,600", "-1,0,600,600", "400;0;600;600"]) {
+      expectOk(await w.db.updateMany<Variant>(VARIANTS, { mediaId: "m1" }, { renderedCrop }));
+      expect((await attached(images)).get("square"), String(renderedCrop)).toMatchObject({ size: "square", crop: null });
+    }
+    await images.close();
+  });
+
+  it("lists no variants for a hidden item", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.setFraming("m1", RIGHT_CROP));
+    expectOk(await images.generate("m1"));
+    expectOk(await images.hide(["m1"]));
+    expect((await attached(images)).size).toBe(0);
+    expectOk(await images.show(["m1"]));
+    expect((await attached(images)).get("square")).toMatchObject({ crop: RIGHT });
+    await images.close();
+  });
+
+  it("leaves the export and the public copy at the plain path with the bytes of the crop's render", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.setFraming("m1", RIGHT_CROP));
+    expectOk(await images.generate("m1"));
+    expect((await attached(images)).get("square")).toMatchObject({ crop: RIGHT });
+    const rendered = expectOk(await images.read("m1", "square.webp"))!.data;
+    expect([...w.blobs.blobs.keys()].filter((key) => key.startsWith("site/"))).toEqual(["site/media/m1/variants/square.webp"]);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(rendered);
+    const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "images-crop-export-"));
+    try {
+      expect(expectOk(await images.exportTo(dir)).written).toBe(1);
+      expect(await readdir(dir, { recursive: true })).toEqual(["photo.jpg.square.webp"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+    await images.close();
+  });
+});
