@@ -2037,6 +2037,53 @@ describe("images/default work a call leaves unfinished", () => {
 });
 
 describe("images/default writes racing a lease-free prune or a request left on a free lease", () => {
+  function pauseFirstPut(w: World, key: string): { blobs: Blobstore; g: ReturnType<typeof gate>; arm(): void } {
+    const g = gate();
+    let armed = false;
+    return {
+      g,
+      arm: () => {
+        armed = true;
+      },
+      blobs: {
+        ...w.blobs,
+        put: async (k, data, options) => {
+          if (armed && k === key) {
+            armed = false;
+            g.arrive();
+            await g.wait;
+          }
+          return w.blobs.put(k, data, options);
+        },
+      },
+    };
+  }
+
+  it("a public copy of a row that another process prunes while the copy is written ends with the original's bytes at the retired path", async () => {
+    for (const writer of ["images.showMany", "images.syncPublic"] as const) {
+      const w = await world();
+      const paused = pauseFirstPut(w, "site/media/m1/variants/square.webp");
+      const declaring = await w.open([SQUARE, THUMB], undefined, { blobs: paused.blobs });
+      const narrowed = await w.open([THUMB]);
+      expectOk(await declaring.generate("m1"));
+      if (writer === "images.showMany") expectOk(await declaring.hide(["m1"]));
+      else w.blobs.blobs.delete("site/media/m1/variants/square.webp");
+
+      paused.arm();
+      const writing = writer === "images.showMany" ? declaring.show(["m1"]) : declaring.syncPublic();
+      await paused.g.reached;
+      expectOk(await narrowed.prune(["square"]));
+      paused.g.open();
+      expectOk(await writing);
+      await whenIdle(declaring);
+
+      const original = expectOk(await w.media.load("m1"))!.data;
+      expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")?.data).toEqual(original);
+      expect(expectOk(await narrowed.read("m1", "square.webp"))).toMatchObject({ variant: "original" });
+      for (const images of [declaring, narrowed]) await images.close();
+    }
+  });
+
   it("images.generate renders the item after one failed read of its lease, and a sync job finishes past it", async () => {
     const w = await world();
     let failing = false;

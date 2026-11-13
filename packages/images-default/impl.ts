@@ -838,12 +838,20 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok({ data: original.value.data, contentType: original.value.publishedType, rendered: false });
   }
 
-  async function keepCopyOwned(mediaId: string, file: string): Promise<Result<boolean, KestrelError>> {
+  async function keepCopyOwned(lease: Lease, file: string, wroteRow: boolean): Promise<Result<boolean, KestrelError>> {
+    const mediaId = lease.mediaId;
     const media = await readMedia(mediaId);
     if (isErr(media)) return media;
     const owner = await ownerOf(mediaId, file);
     if (isErr(owner)) return owner;
-    if (media.value !== null && (owner.value.row !== null || owner.value.retired !== null)) return ok(true);
+    if (media.value !== null && owner.value.row !== null) return ok(true);
+    if (media.value !== null && owner.value.retired !== null) {
+      if (!wroteRow) return ok(true);
+      const original = await contentFor(media.value, null);
+      if (isErr(original) || original.value === null) return isErr(original) ? original : ok(true);
+      const put = await putCopyHeld(lease, file, original.value.data, original.value.contentType);
+      return isErr(put) ? put : ok(put.value === true);
+    }
     const undone = await blobs.remove(copyKey(mediaId, file));
     return isErr(undone) ? undone : ok(false);
   }
@@ -853,7 +861,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(content) || content.value === null) return isErr(content) ? content : ok("missing");
     const put = await putCopyHeld(lease, fileOf(row), content.value.data, content.value.contentType);
     if (isErr(put) || put.value !== true) return isErr(put) ? put : ok("skipped");
-    const kept = await keepCopyOwned(lease.mediaId, fileOf(row));
+    const kept = await keepCopyOwned(lease, fileOf(row), true);
     return isErr(kept) ? kept : ok(kept.value ? "written" : "skipped");
   }
 
@@ -866,7 +874,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(original) || original.value === null) return isErr(original) ? original : ok("missing");
     const put = await putCopyHeld(lease, file, original.value.data, original.value.contentType);
     if (isErr(put) || put.value !== true) return isErr(put) ? put : ok("skipped");
-    const kept = await keepCopyOwned(lease.mediaId, file);
+    const kept = await keepCopyOwned(lease, file, false);
     return isErr(kept) ? kept : ok(kept.value ? "written" : "skipped");
   }
 
