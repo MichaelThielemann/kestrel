@@ -312,33 +312,44 @@ the next start. Run it after every deploy: every output is then re-rendered, and
 code. It answers `{ changed, restored, marked }`.
 
 **A restored database.** A database restored from a backup holds older status rows than the files in the blob
-store. After its first `delivery.checkBuild`, a process keeps a random marker both in `delivery_state` and in a blob
-next to `prefix`, outside the files it serves (`site/` keeps `site.delivery-marker`, `markerKeyFor` from `./impl`
-names it). Before it writes or removes a file, it puts a new marker into the blob only, unless the one it put last is
-still ahead of the database's; when the database took another process's marker meanwhile, it puts a new one. A
+store. A process keeps a random marker both in `delivery_state` and in a blob next to `prefix`, outside the files it
+serves (`site/` keeps `site.delivery-marker`, `markerKeyFor` from `./impl` names it). Before it writes or removes a
+page output, it puts a new marker into the blob only, unless the one it put last is still ahead of the database's;
+when the database took another process's marker meanwhile, it puts a new one. This starts with the process's first
+write, whether or not `delivery.checkBuild` ran before it, and the puts of one process run one after another. A
 marker is retired five seconds after it was put, on every `delivery.resumeStale` run and when the process stops, and
-the database takes it once every render and unpublish of this process that was in flight at that moment finished. So
-whenever files changed after the marker the database holds, the two differ. When they differ at the next check, or
-the database holds a marker the blob store lacks (a blob volume that was lost or not mounted, a changed `prefix`),
-every output is marked as for a new build, `restored` is `true`, a warning is logged, and both get a new marker. This
-covers a restore that lost the latest writes, and also a process that stopped without shutting down within a few
-seconds of changing files: that next start renders every output again although the database is current. During a
-long re-render such a stop always falls within those seconds, so a process that keeps being killed before the
-re-render ends starts it over on every start. A graceful
-stop refuses renders and unpublishes that start after it (they answer `TRANSIENT`, so a queue runs them again after
-the restart), waits up to `renderTimeoutSeconds` per format for the ones in flight, and then stores the marker. A
-check that finds the two equal, and a process that changed no file, write no marker. A process that never ran
-`delivery.checkBuild` writes no marker, and the first check writes one. A `prefix` that does not end in `/`, the
-default empty one included, keeps no marker, because every key there could be served; a restore then goes undetected
-and needs a "Publish all". Sites that share a blob store under different prefixes keep apart markers. When the marker
-cannot be read, the check logs an error, still compares and stores the build (marking everything when it changed),
-and the marker is read again before the process's first write and on each `delivery.resumeStale` run. While the
-marker cannot be read or written, no file is written or removed: the render fails as it does when its own file cannot
-be written, and is retried. With several processes on one database, each one waits only for its own renders before
-the database takes its marker, and stores none while the blob holds another process's. A backup taken in the moment
-between one process storing its marker and another process recording a render whose file it already wrote can miss
-that render without the next check noticing; processes that write at the same time can also make the next check
-render everything again.
+the database takes it once every render, re-render job and unpublish of this process that was in flight at that
+moment finished. So whenever page outputs changed after the marker the database holds, the two differ.
+
+`delivery.checkBuild` compares them as they were before this process put its first marker. When they differ and the
+blob holds a marker, it reads them again for up to five seconds plus `renderTimeoutSeconds` per format; when the
+database takes a marker another process put meanwhile, that process is still running and it is no restore. When
+they still differ then, or the database holds a marker the blob store lacks (a blob volume that was lost or not
+mounted, a changed `prefix`), every output is marked as for a new build, the one-time removal of orphaned page
+outputs (see below) is recorded as done, `restored` is `true` and a warning is logged. A process that has written
+nothing yet then puts a new marker and stores it, in that order; when one of the two fails, only that marker is
+tried again before the next write, and the outputs are not marked again. After a detected restore, every output
+the restored rows know is rendered again, but the files of pages that were created or moved after the backup stay
+under `prefix`, no status row owns them, and they are absent from `sitemap.xml` and `llms.txt`. Remove them by
+hand: they are the `index.<ext>` keys under `prefix` at paths that no `delivery.readStatus` row reports. A process
+that stopped without shutting down within a few seconds of changing files is detected the same way: that next
+start renders every output again although the database is current. During a long re-render such a stop always
+falls within those seconds, so a process that keeps being killed before the re-render ends starts it over on every
+start. A graceful stop refuses renders, re-render jobs and unpublishes that start after it (they answer
+`TRANSIENT`, so a queue runs them again after the restart), waits up to `renderTimeoutSeconds` per format for the
+ones in flight, and then stores the marker. A check that finds the two equal, and a process that changed no file,
+write no marker. A `prefix` that does not end in `/`, the default empty one included, keeps no marker, because
+every key there could be served; a restore then goes undetected and needs a "Publish all". Sites that share a blob
+store under different prefixes keep apart markers. When the marker cannot be read, the check logs an error, still
+compares and stores the build (marking everything when it changed), and the comparison runs again before the
+process's next write and on each `delivery.resumeStale` run; a build check that fails before it reads the marker
+does the same. While the marker cannot be read or written, no page output is written or removed: the render fails
+as it does when its own file cannot be written, and is retried. The index files (`sitemap.xml`, `robots.txt`,
+`llms.txt`, `llms-full.txt`) are outside the marker: every export rebuilds them from the database. With several
+processes on one database, each one waits only for its own renders before the database takes its marker, and
+stores none while the blob holds another process's. A backup taken in the moment between one process storing its
+marker and another process recording a render whose file it already wrote can miss that render without the next
+check noticing; processes that write at the same time can also make the next check render everything again.
 
 `delivery.resumeStale` (a recovery net, not the render path) releases expired claims, removes tombstones and
 orphaned sets, re-raises marks that are older than a minute, due and unclaimed, for example after a process
@@ -348,19 +359,24 @@ versions could leave behind after a failed render followed by a slug change. A n
 removal as done at setup, so it never runs there, whatever files the prefix holds. A page output is an `index.<ext>`
 file whose extension is one of `formats` or one a status row recorded. The root page `<prefix>index.<ext>`, files under
 `reservedPaths`, files below the prefix of another deployment nested in this one (recognized by its
-`<dir>.delivery-marker`, which that deployment writes at its first `delivery.checkBuild`; list its path in
-`reservedPaths` when it runs none), renderer assets this process wrote, and every other file (a media copy such as
+`<dir>.delivery-marker`, which that deployment writes with its first page output; list its path in
+`reservedPaths` while it has written none), renderer assets this process wrote, and every other file (a media copy such as
 `media/<id>/index.png` among them) are left alone. With a `prefix` that does not end in `/`, the empty one included,
 it never runs, because the listing would reach keys of other deployments or the whole blob store. It waits while an
 output is marked or rendering, while no output is `live`, or while a published document has no `live` output, and
-gives up a run during which a page started to render. The first run that finds such paths removes nothing and
-records them; a run at least `claimTtlSeconds` later removes those it still finds unowned, checks each path for an
-owner again right before removing it, and stops when a page starts to render meanwhile, so a page another process is
-writing keeps its file. When more paths look orphaned than status rows own, it removes nothing, logs a warning and
-records the run. Each removed file is logged, and the completed run is recorded in `delivery_state`, so it runs once.
-A restore that `delivery.checkBuild` detects does not run it again; only a database restored from a backup taken
-before this version first started, which has no such record, runs it. So a hand-placed `index.<ext>` under `prefix`
-that no page owns needs its path in `reservedPaths` for as long as such a backup may be restored. A failure of this
+gives up a run during which a page started to render. It also waits until `delivery.checkBuild` has checked the
+restore marker in this process. The first run that finds such paths removes nothing and records them; a run at least
+`claimTtlSeconds` later removes those it still finds unowned. It checks each path for an owner again right before
+removing it and stops when a page of this process starts to render meanwhile, so that page keeps its file; a page
+another process writes at that path meanwhile is marked and rendered again. When more paths look orphaned than
+status rows own, it removes nothing, logs a warning and records the run. Each removed file is logged, and the
+completed run is recorded in `delivery_state`, so it runs once. A restore that `delivery.checkBuild` detects
+records it as done as well. A database restored from a backup taken before the removal completed (it waits for the
+re-render after the upgrade and for a second pass at least `claimTtlSeconds` later), whose restore the check does
+not detect because no page output changed since the backup, runs it again; when that backup holds recorded
+candidates, its first pass removes those it still finds unowned without recording them again. So a hand-placed
+`index.<ext>` under `prefix` that no page owns needs its path in `reservedPaths` for as long as such a backup may be
+restored. A failure of this
 removal (a file that cannot be deleted, a listing that fails) is logged and retried on the next run; the recovery pass
 still succeeds and answers `orphans: 0`. It answers `{ released, swept, dispatched, aged, orphans }`. `delivery.retryStale` gives outputs that failed
 `maxAttempts` times new attempts. `delivery.readStaleStatus` answers

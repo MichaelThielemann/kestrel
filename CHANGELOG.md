@@ -36,9 +36,12 @@ Net changes since 5.8.1.
   removes every `index.<ext>` file under `prefix`, with the extension of a configured format, at a
   path no status row has and outside `reservedPaths`, logging each key (see upgrading.md,
   "delivery-orphan-removal"). The root page and the files of a nested deployment that keeps its
-  marker under `prefix` stay. It runs once per database, and again only on a database restored from
-  a backup taken before the upgrade; never on a new or empty database or with a `prefix` that does
-  not end in `/`. Hand-placed index files that no page owns need their path in `reservedPaths`.
+  marker under `prefix` stay. It runs once per database and waits for the build check of the process;
+  a restore that `delivery.checkBuild` detects records it as done, and only a database restored from
+  a backup taken before it completed, whose restore goes undetected because no page file changed
+  since the backup, runs it again (deleting recorded paths on its first run). It never runs on a new
+  or empty database or with a `prefix` that does not end in `/`. Hand-placed index files that no
+  page owns need their path in `reservedPaths`.
 - **A slug belongs to its locale; a translation without a slug of its own is never served.** `site@1`
   finds a locale only by its own slug there: `site.resolve`, `pathOf`, `resolveLinks`, `_paths`,
   `site.attachPaths`, the moves `site.pathsMoved` reports (and so the automatic redirects built from
@@ -1109,25 +1112,31 @@ Net changes since 5.8.1.
   its last export failed.
 - `delivery.checkBuild` also renders everything again after a database restore with an unchanged
   build: a marker kept in `delivery_state` and in a blob next to `prefix` (`site/` keeps
-  `site.delivery-marker`, see `markerKeyFor`) moves ahead in the blob before a file is written or
-  removed, also after another process's marker reached the database, and the database takes it once
-  the renders this process had in flight when it was retired finished: five seconds after it was
-  put, on every recovery pass and at shutdown. When the two differ, or the database holds a marker
-  the blob store lacks, every output is marked; this also follows a process that stopped without
-  shutting down within seconds of changing files. A check that finds them equal writes nothing. A
-  `prefix` not ending in `/`, the default empty one included, keeps no marker and detects no
-  restore. A marker that cannot be read is logged, the build is still checked, and the marker is read
-  again before the first write; no file is written or removed while the marker cannot be read or
-  written. The result gains `restored`.
+  `site.delivery-marker`, see `markerKeyFor`) moves ahead in the blob before a page file is written
+  or removed, from the process's first write on, also after another process's marker reached the
+  database, and the database takes it once the renders and re-render jobs this process had in flight
+  when it was retired finished: five seconds after it was put, on every recovery pass and at
+  shutdown. When the two differ, the check waits up to five seconds plus `renderTimeoutSeconds` per
+  format for another running process to store its marker; when none does, or the database holds a
+  marker the blob store lacks, every output is marked once, also when the new marker cannot be
+  written yet; this also follows a process that stopped without shutting down within seconds of
+  changing files. Pages created or moved after the backup keep their files, which no status row owns
+  and which have to be removed by hand (see the `delivery-static` README). A check that finds them
+  equal writes nothing. A `prefix` not ending in `/`, the default empty one included, keeps no marker
+  and detects no restore. A marker that cannot be read, or a build check that fails before it, is
+  logged, and the comparison runs again before the next write and on every recovery pass; no page
+  file is written or removed while the marker cannot be read or written. The index files are outside
+  the marker; every export rebuilds them from the database. The result gains `restored`.
 - `delivery-static`: once the module is stopping, `delivery.publish`, `delivery.unpublish`,
   `delivery.republishOutput` and `delivery.resumeStale` answer `TRANSIENT`, and shutdown waits up to
-  `renderTimeoutSeconds` per format for the renders in flight.
+  `renderTimeoutSeconds` per format for the renders and re-render jobs in flight.
 - `delivery.resumeStale` removes, once per database that held status rows at setup, page files under
   `prefix` at paths no status row has (left behind by older versions after a failed render and a slug
   change; listed under Breaking), logging each; it waits while outputs are marked or rendering, while
-  no output is `live` or a published document has no `live` output, gives up a run during which a
-  page started to render, removes only paths a run at least `claimTtlSeconds` after the first still
-  finds unowned, checking each one again before its removal, removes nothing when more paths look
+  no output is `live` or a published document has no `live` output, and until `delivery.checkBuild`
+  checked the restore marker, gives up a run during which a page started to render, removes only
+  paths a run at least `claimTtlSeconds` after the first still finds unowned, checking each one again
+  right before its removal, removes nothing when more paths look
   orphaned than status rows own, and leaves the root page, renderer assets, media copies, a nested
   deployment's files and `reservedPaths` alone. A failure of this removal is logged
   and retried on the next run without failing the recovery pass. The result gains `orphans`.
