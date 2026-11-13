@@ -2,7 +2,7 @@ import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
-import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Document, Filter, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakeMedia, type FakeMedia } from "@michaelthielemann/kestrel-contracts/testing/fakeMedia";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
@@ -476,8 +476,8 @@ describe("images/default re-cropping while a render runs", () => {
     let armed = false;
     const reads: Persistence = {
       ...w.db,
-      findOne: async (collection, filter) => {
-        const found = await w.db.findOne(collection, filter);
+      findOne: async <T extends Document>(collection: string, filter: Filter) => {
+        const found = await w.db.findOne<T>(collection, filter);
         if (armed && collection === FRAMING && ++framingReads === 3) {
           g.arrive();
           await g.wait;
