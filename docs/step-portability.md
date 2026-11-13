@@ -68,6 +68,7 @@ prefix).
 | `images.removeMany` | none |
 | `images.hideMany` | none |
 | `images.showMany` | none |
+| `images.setFraming` | none |
 | `images.attach` | none |
 | `images.serve` | none |
 | `images.syncPublic` | none |

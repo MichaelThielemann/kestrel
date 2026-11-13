@@ -9,6 +9,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { binaryResult, first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
+import type { FramingView } from "./framed.ts";
 import { eligible } from "./generate.ts";
 import { COLLECTIONS, DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, createImages, type Images, type Variant, type VariantCounts } from "./impl.ts";
 import { sizeSchema } from "./sizes.ts";
@@ -64,15 +65,35 @@ function attachedVariant(images: Images, variant: Variant): { size: string; widt
 }
 
 const ZERO_VARIANT_COUNTS: VariantCounts = { done: 0, pending: 0, error: 0, failed: 0 };
+const UNFRAMED: FramingView = { focus: null, crops: {}, ratios: [] };
+
+function framingFields(views: Map<string, FramingView>, id: unknown, isEligible: boolean): { focus: FramingView["focus"]; framing: FramingView } {
+  const view = isEligible && typeof id === "string" ? (views.get(id) ?? UNFRAMED) : UNFRAMED;
+  return { focus: view.focus, framing: view };
+}
+
+function framingInput(ctx: Context): Record<string, unknown> {
+  const input: Record<string, unknown> = {};
+  if (ctx.payload.focus !== undefined) input.focus = ctx.payload.focus;
+  if (ctx.payload.crops !== undefined) input.crops = ctx.payload.crops;
+  return input;
+}
 
 const SIZE_SCHEMA = { type: "object", properties: { name: { type: "string" }, width: { type: "number" }, height: { type: ["number", "null"] }, fit: { type: "string", enum: ["inside", "cover"] }, format: { type: "string", enum: ["webp", "original"] }, quality: { type: "number" }, source: { type: "string", enum: ["default", "config", "registered"] }, updatedAt: { type: "number" } }, required: ["name", "width", "fit", "format", "quality", "source", "updatedAt"] };
 const SIZE_INPUT_SCHEMA = { type: "object", properties: { name: { type: "string" }, width: { type: "integer", minimum: 16, maximum: 8192 }, height: { type: "integer", minimum: 16, maximum: 8192 }, fit: { type: "string", enum: ["inside", "cover"] }, format: { type: "string", enum: ["webp", "original"] }, quality: { type: "integer", minimum: 1, maximum: 100 } }, required: ["name", "width"], additionalProperties: false };
 const GENERATE_INPUT_SCHEMA = { type: "object", properties: { id: { type: "string" }, ids: { type: "array", items: { type: "string" } } }, additionalProperties: true, description: "reached either directly (id/ids) or as the media.uploaded / images.planned event envelope, which carries further fields this step ignores" };
-const VARIANT_SCHEMA = { type: "object", properties: { id: { type: "string" }, mediaId: { type: "string" }, size: { type: "string" }, slot: { type: "string" }, spec: { type: "string" }, width: { type: "number" }, height: { type: "number" }, format: { type: "string" }, key: { type: "string" }, bytes: { type: "number" }, state: { type: "string", enum: ["planned", "pending", "done", "error", "failed"] }, error: { type: ["string", "null"] }, attempts: { type: "number" }, updatedAt: { type: "number" } }, required: ["id", "mediaId", "size", "slot", "spec", "width", "height", "format", "key", "bytes", "state", "error", "attempts", "updatedAt"] };
+const VARIANT_SCHEMA = { type: "object", properties: { id: { type: "string" }, mediaId: { type: "string" }, size: { type: "string" }, slot: { type: "string" }, spec: { type: "string" }, width: { type: "number" }, height: { type: "number" }, format: { type: "string" }, key: { type: "string" }, bytes: { type: "number" }, state: { type: "string", enum: ["planned", "pending", "done", "error", "failed"] }, error: { type: ["string", "null"] }, attempts: { type: "number" }, updatedAt: { type: "number" }, crop: { type: ["string", "null"] }, renderedCrop: { type: ["string", "null"] } }, required: ["id", "mediaId", "size", "slot", "spec", "width", "height", "format", "key", "bytes", "state", "error", "attempts", "updatedAt"] };
 const JOB_SCHEMA = { type: "object", properties: { id: { type: "string" }, state: { type: "string", enum: ["running", "paused", "done", "error"] }, total: { type: "number" }, done: { type: "number" }, failed: { type: "number" }, cursor: { type: "string" }, startedAt: { type: "number" }, updatedAt: { type: "number" }, finishedAt: { type: ["number", "null"] }, error: { type: ["string", "null"] } }, required: ["id", "state", "total", "done", "failed", "cursor", "startedAt", "updatedAt", "finishedAt", "error"] };
 const FAILED_VARIANT_SCHEMA = { type: "object", properties: { mediaId: { type: "string" }, size: { type: "string" }, attempts: { type: "number" }, error: { type: ["string", "null"] }, updatedAt: { type: "number" } }, required: ["mediaId", "size", "attempts", "error", "updatedAt"] };
 const ATTACHED_VARIANT_SCHEMA = { type: "object", properties: { size: { type: "string" }, width: { type: "number" }, height: { type: "number" }, format: { type: "string" }, bytes: { type: "number" }, state: { type: "string", enum: ["pending", "done", "error", "failed"] }, path: { type: "string" } }, required: ["size", "width", "height", "format", "bytes", "state", "path"] };
 const VARIANT_COUNTS_SCHEMA = { type: "object", properties: { done: { type: "number" }, pending: { type: "number" }, error: { type: "number" }, failed: { type: "number" } }, required: ["done", "pending", "error", "failed"] };
+const RECT_SCHEMA = { type: "object", properties: { x: { type: "number", minimum: 0, maximum: 1 }, y: { type: "number", minimum: 0, maximum: 1 }, w: { type: "number", minimum: 0, maximum: 1 }, h: { type: "number", minimum: 0, maximum: 1 } }, required: ["x", "y", "w", "h"], additionalProperties: false };
+const PIXEL_CROP_SCHEMA = { type: "object", properties: { left: { type: "number" }, top: { type: "number" }, width: { type: "number" }, height: { type: "number" } }, required: ["left", "top", "width", "height"] };
+const FRAMING_PROPERTIES = { focus: { oneOf: [RECT_SCHEMA, { type: "null" }] }, crops: { type: "object", additionalProperties: RECT_SCHEMA, description: "manual crops keyed by reduced ratio, e.g. \"16:9\"" } };
+const FRAMING_SCHEMA = { type: "object", properties: FRAMING_PROPERTIES, required: ["focus", "crops"] };
+const FRAMING_INPUT_SCHEMA = { type: "object", properties: FRAMING_PROPERTIES, additionalProperties: false };
+const FRAMING_RATIO_SCHEMA = { type: "object", properties: { key: { type: "string" }, sizes: { type: "array", items: { type: "string" } }, manual: { type: "boolean" }, fits: { type: "boolean" }, crop: { oneOf: [PIXEL_CROP_SCHEMA, { type: "null" }] } }, required: ["key", "sizes", "manual", "fits", "crop"] };
+const FRAMING_VIEW_SCHEMA = { type: "object", properties: { ...FRAMING_PROPERTIES, ratios: { type: "array", items: FRAMING_RATIO_SCHEMA } }, required: ["focus", "crops", "ratios"] };
 const PUBLIC_SYNC_SCHEMA = { type: "object", properties: { written: { type: "number" }, removed: { type: "number" }, planned: { type: "number" }, missing: { type: "number" } }, required: ["written", "removed", "planned", "missing"] };
 
 export default defineModule({
@@ -203,11 +224,21 @@ export default defineModule({
       return ok(ctx);
     },
 
+    setFraming: async (ctx: Context) => {
+      const id = ctx.params.id;
+      if (!id) return ctx.fail("VALIDATION", "images: missing id");
+      const framed = await images.setFraming(id, framingInput(ctx));
+      if (isErr(framed)) return ctx.fail(framed.error);
+      return ok({ ...ctx, result: framed.value });
+    },
+
     attach: async (ctx: Context) => {
       const result = boundaryCast<{ id?: unknown; items?: unknown } | undefined>(ctx.result, "host");
       if (typeof result?.id === "string") {
         const byMedia = await images.variantsOf([result.id]);
         if (isErr(byMedia)) return ctx.fail(byMedia.error);
+        const views = await images.framingsOf([result.id]);
+        if (isErr(views)) return ctx.fail(views.error);
         const counts = await images.variantCounts([result.id]);
         if (isErr(counts)) return ctx.fail(counts.error);
         const hidden = await images.hidden([result.id]);
@@ -217,13 +248,15 @@ export default defineModule({
         const isEligible = typeof contentType !== "string" || eligible(contentType);
         const available = !hidden.value.has(result.id) && (!isEligible || (rows.length > 0 && rows.every((v) => v.state !== "planned")));
         const variants = rows.filter((v) => v.state !== "planned").map((v) => attachedVariant(images, v));
-        return ok({ ...ctx, result: { ...result, available, variants, variantCounts: counts.value.get(result.id) ?? ZERO_VARIANT_COUNTS } });
+        return ok({ ...ctx, result: { ...result, available, variants, variantCounts: counts.value.get(result.id) ?? ZERO_VARIANT_COUNTS, ...framingFields(views.value, result.id, isEligible) } });
       }
       if (Array.isArray(result?.items)) {
         const items = boundaryCast<Array<Record<string, unknown>>>(result.items, "host");
         const ids = items.map((item) => item.id).filter((id): id is string => typeof id === "string");
         const byMedia = await images.variantsOf(ids);
         if (isErr(byMedia)) return ctx.fail(byMedia.error);
+        const views = await images.framingsOf(ids);
+        if (isErr(views)) return ctx.fail(views.error);
         const counts = await images.variantCounts(ids);
         if (isErr(counts)) return ctx.fail(counts.error);
         const hidden = await images.hidden(ids);
@@ -235,7 +268,7 @@ export default defineModule({
           const isEligible = typeof item.contentType !== "string" || eligible(item.contentType);
           const available = !isHidden && (!isEligible || (rows.length > 0 && rows.every((v) => v.state !== "planned")));
           const variants = rows.filter((v) => v.state !== "planned").map((v) => attachedVariant(images, v));
-          return { ...item, available, variants, variantCounts: itemCounts };
+          return { ...item, available, variants, variantCounts: itemCounts, ...framingFields(views.value, item.id, isEligible) };
         });
         return ok({ ...ctx, result: { ...result, items: withVariants } });
       }
@@ -307,11 +340,19 @@ export default defineModule({
     removeMany: { summary: "Delete variants for every id in result.ids (from media.listFolderItems, media.removeFolder or media.purge)", reads: ["result.ids"], writes: [] },
     hideMany: { summary: "Hide the variants of every id in result.ids (from media.trash or media.trashFolder): their public copies are removed and their paths are neither served, exported nor copied again until images.showMany, while rows and stored variants stay; raises no images.variantsChanged; with result.trashVersions (from the same steps), an id whose variants a later move already showed is left alone", reads: ["result.ids", "result.trashVersions?"], writes: [] },
     showMany: { summary: "Show the variants of every id in result.ids again (from media.restore) and write their public copies; raises no images.variantsChanged; with result.trashVersions, an id whose variants a later move already hid stays hidden", reads: ["result.ids", "result.trashVersions?"], writes: [] },
+    setFraming: {
+      summary: "Replace the framing of one media item (params.id): a focus rectangle and manual crops keyed by reduced ratio, normalised to 0..1 on the oriented original; an empty one removes it. Re-plans the item, so each cover size whose crop changes renders again at its path while the old variant keeps being served",
+      reads: ["params.id"],
+      writes: ["result"],
+      input: FRAMING_INPUT_SCHEMA,
+      output: { type: "object", properties: { id: { type: "string" }, framing: FRAMING_SCHEMA }, required: ["id", "framing"] },
+      errors: { 400: "missing id, or an invalid focus or crop", 404: "media item not found, not ready, hidden or without variants" },
+    },
     attach: {
-      summary: "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, and a hidden item lists no variants and is not available",
+      summary: "Add available, variants[], variantCounts, focus and framing to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, a hidden item lists no variants and is not available, and framing.ratios has one entry per ratio of the cover sizes",
       reads: ["result"],
-      writes: ["result.available?", "result.variants?", "result.variantCounts?"],
-      extendsItems: { type: "object", properties: { available: { type: "boolean" }, variants: { type: "array", items: ATTACHED_VARIANT_SCHEMA }, variantCounts: VARIANT_COUNTS_SCHEMA }, required: ["available", "variants", "variantCounts"] },
+      writes: ["result.available?", "result.variants?", "result.variantCounts?", "result.focus?", "result.framing?"],
+      extendsItems: { type: "object", properties: { available: { type: "boolean" }, variants: { type: "array", items: ATTACHED_VARIANT_SCHEMA }, variantCounts: VARIANT_COUNTS_SCHEMA, focus: { oneOf: [RECT_SCHEMA, { type: "null" }] }, framing: FRAMING_VIEW_SCHEMA }, required: ["available", "variants", "variantCounts", "focus", "framing"] },
     },
     serve: images.publicCopyEnabled()
       ? {

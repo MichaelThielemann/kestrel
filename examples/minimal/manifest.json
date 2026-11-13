@@ -892,6 +892,7 @@
         "images.removeMany",
         "images.hideMany",
         "images.showMany",
+        "images.setFraming",
         "images.attach",
         "images.serve",
         "images.syncPublic",
@@ -6839,6 +6840,18 @@
                       },
                       "updatedAt": {
                         "type": "number"
+                      },
+                      "crop": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "renderedCrop": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       }
                     },
                     "required": [
@@ -6932,6 +6945,18 @@
                             },
                             "updatedAt": {
                               "type": "number"
+                            },
+                            "crop": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "renderedCrop": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
                             }
                           },
                           "required": [
@@ -7571,18 +7596,215 @@
       }
     },
     {
+      "name": "images.setFraming",
+      "module": "images/default",
+      "factory": false,
+      "description": {
+        "summary": "Replace the framing of one media item (params.id): a focus rectangle and manual crops keyed by reduced ratio, normalised to 0..1 on the oriented original; an empty one removes it. Re-plans the item, so each cover size whose crop changes renders again at its path while the old variant keeps being served",
+        "reads": [
+          "params.id"
+        ],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "focus": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "w": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "h": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "w",
+                    "h"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "crops": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "w": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "h": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
+                "additionalProperties": false
+              },
+              "description": "manual crops keyed by reduced ratio, e.g. \"16:9\""
+            }
+          },
+          "additionalProperties": false
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "framing": {
+              "type": "object",
+              "properties": {
+                "focus": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "y": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "w": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "h": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y",
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "crops": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "y": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "w": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "h": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y",
+                      "w",
+                      "h"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "manual crops keyed by reduced ratio, e.g. \"16:9\""
+                }
+              },
+              "required": [
+                "focus",
+                "crops"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "framing"
+          ]
+        },
+        "errors": {
+          "400": "missing id, or an invalid focus or crop",
+          "404": "media item not found, not ready, hidden or without variants"
+        }
+      }
+    },
+    {
       "name": "images.attach",
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, and a hidden item lists no variants and is not available",
+        "summary": "Add available, variants[], variantCounts, focus and framing to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, a hidden item lists no variants and is not available, and framing.ratios has one entry per ratio of the cover sizes",
         "reads": [
           "result"
         ],
         "writes": [
           "result.available?",
           "result.variants?",
-          "result.variantCounts?"
+          "result.variantCounts?",
+          "result.focus?",
+          "result.framing?"
         ],
         "extendsItems": {
           "type": "object",
@@ -7656,12 +7878,198 @@
                 "error",
                 "failed"
               ]
+            },
+            "focus": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "w": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "h": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "w",
+                    "h"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "framing": {
+              "type": "object",
+              "properties": {
+                "focus": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "y": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "w": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "h": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y",
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "crops": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "y": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "w": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "h": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y",
+                      "w",
+                      "h"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "manual crops keyed by reduced ratio, e.g. \"16:9\""
+                },
+                "ratios": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "sizes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "manual": {
+                        "type": "boolean"
+                      },
+                      "fits": {
+                        "type": "boolean"
+                      },
+                      "crop": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "left": {
+                                "type": "number"
+                              },
+                              "top": {
+                                "type": "number"
+                              },
+                              "width": {
+                                "type": "number"
+                              },
+                              "height": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "left",
+                              "top",
+                              "width",
+                              "height"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "sizes",
+                      "manual",
+                      "fits",
+                      "crop"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "focus",
+                "crops",
+                "ratios"
+              ]
             }
           },
           "required": [
             "available",
             "variants",
-            "variantCounts"
+            "variantCounts",
+            "focus",
+            "framing"
           ]
         }
       }
@@ -16966,6 +17374,18 @@
                           },
                           "updatedAt": {
                             "type": "number"
+                          },
+                          "crop": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "renderedCrop": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
@@ -17059,6 +17479,18 @@
                                 },
                                 "updatedAt": {
                                   "type": "number"
+                                },
+                                "crop": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "renderedCrop": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
                                 }
                               },
                               "required": [
@@ -17268,14 +17700,16 @@
           "name": "images.attach",
           "module": "images/default",
           "description": {
-            "summary": "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, and a hidden item lists no variants and is not available",
+            "summary": "Add available, variants[], variantCounts, focus and framing to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, a hidden item lists no variants and is not available, and framing.ratios has one entry per ratio of the cover sizes",
             "reads": [
               "result"
             ],
             "writes": [
               "result.available?",
               "result.variants?",
-              "result.variantCounts?"
+              "result.variantCounts?",
+              "result.focus?",
+              "result.framing?"
             ],
             "extendsItems": {
               "type": "object",
@@ -17349,12 +17783,198 @@
                     "error",
                     "failed"
                   ]
+                },
+                "focus": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "y": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "w": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "h": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y",
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "framing": {
+                  "type": "object",
+                  "properties": {
+                    "focus": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "y": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "w": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "h": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y",
+                            "w",
+                            "h"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "crops": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "y": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "w": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "h": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "w",
+                          "h"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "manual crops keyed by reduced ratio, e.g. \"16:9\""
+                    },
+                    "ratios": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "sizes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "manual": {
+                            "type": "boolean"
+                          },
+                          "fits": {
+                            "type": "boolean"
+                          },
+                          "crop": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "left": {
+                                    "type": "number"
+                                  },
+                                  "top": {
+                                    "type": "number"
+                                  },
+                                  "width": {
+                                    "type": "number"
+                                  },
+                                  "height": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "left",
+                                  "top",
+                                  "width",
+                                  "height"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "sizes",
+                          "manual",
+                          "fits",
+                          "crop"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "focus",
+                    "crops",
+                    "ratios"
+                  ]
                 }
               },
               "required": [
                 "available",
                 "variants",
-                "variantCounts"
+                "variantCounts",
+                "focus",
+                "framing"
               ]
             }
           }
@@ -19832,14 +20452,16 @@
           "name": "images.attach",
           "module": "images/default",
           "description": {
-            "summary": "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, and a hidden item lists no variants and is not available",
+            "summary": "Add available, variants[], variantCounts, focus and framing to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, a hidden item lists no variants and is not available, and framing.ratios has one entry per ratio of the cover sizes",
             "reads": [
               "result"
             ],
             "writes": [
               "result.available?",
               "result.variants?",
-              "result.variantCounts?"
+              "result.variantCounts?",
+              "result.focus?",
+              "result.framing?"
             ],
             "extendsItems": {
               "type": "object",
@@ -19913,12 +20535,198 @@
                     "error",
                     "failed"
                   ]
+                },
+                "focus": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "y": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "w": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "h": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y",
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "framing": {
+                  "type": "object",
+                  "properties": {
+                    "focus": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "y": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "w": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "h": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y",
+                            "w",
+                            "h"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "crops": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "y": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "w": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "h": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "w",
+                          "h"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "manual crops keyed by reduced ratio, e.g. \"16:9\""
+                    },
+                    "ratios": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "sizes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "manual": {
+                            "type": "boolean"
+                          },
+                          "fits": {
+                            "type": "boolean"
+                          },
+                          "crop": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "left": {
+                                    "type": "number"
+                                  },
+                                  "top": {
+                                    "type": "number"
+                                  },
+                                  "width": {
+                                    "type": "number"
+                                  },
+                                  "height": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "left",
+                                  "top",
+                                  "width",
+                                  "height"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "sizes",
+                          "manual",
+                          "fits",
+                          "crop"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "focus",
+                    "crops",
+                    "ratios"
+                  ]
                 }
               },
               "required": [
                 "available",
                 "variants",
-                "variantCounts"
+                "variantCounts",
+                "focus",
+                "framing"
               ]
             }
           }
