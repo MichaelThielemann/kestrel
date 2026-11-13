@@ -18,7 +18,9 @@ Net changes since 5.8.1.
   `.describe("secret")` keep working. The JSON Schema, variables and defaults of every bundled module's
   config are unchanged. `kestrel upgrade`'s new `deps/zod-range` raises the project's `zod` range,
   `zod/record-key` inserts the key schema and `zod/object-default` renames such a `.default` to
-  `.prefault`; `types/breaking-signatures` names the schema type.
+  `.prefault`; `types/breaking-signatures` names the schema type. A module whose `configSchema` is
+  not a zod 4 schema, such as one from a package that still depends on zod 3, fails boot with the new
+  problem code `invalid-config-schema`, naming that module, before its config is parsed.
 - An `invalid config: …` or `invalid kestrel.config: …` boot error carries zod 4's messages: a missing
   key reads `Invalid input: expected string, received undefined` (was `Required`), an unknown key
   `Unrecognized key: "name"` (was `Unrecognized key(s) in object: 'name'`). A secret path reports

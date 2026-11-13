@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { boot, checkBoot, type BootInput } from "./boot.ts";
+import { boundaryCast } from "./cast.ts";
 import { stepFactory, type Context } from "./context.ts";
 import { defineContract } from "./defineContract.ts";
 import { defineModule, type ModuleDefinition } from "./defineModule.ts";
@@ -184,6 +185,17 @@ describe("checkBoot: collecting every problem", () => {
       { kind: "module", name: "good/broken", because: "invalid config" },
       { kind: "module", name: "dependent/one", because: 'depends on "good@1" whose provider was not set up' },
     ]);
+  });
+
+  it("reports a config schema built with zod 3 before parsing it, and still returns a manifest", async () => {
+    const legacySchema = boundaryCast<ModuleDefinition["configSchema"]>({ _def: { typeName: "ZodObject", shape: () => ({}) }, safeParse: () => ({ success: false, error: { issues: [{ code: "invalid_type", path: ["file"], message: "Required" }] } }) }, "host");
+    const legacy = defineModule({ name: "legacy/store", provides: [], requires: [], configSchema: legacySchema, setup: async () => ({}) });
+    const input: BootInput = { config: { modules: [{ use: "./legacy-store", config: {} }], triggers: [], http: null }, modules: [legacy], pipelines: [], logger: silentLogger };
+    const check = await checkBoot(input, { setup: "all" });
+    expect(check.errors).toEqual([{ code: "invalid-config-schema", owner: "legacy/store", module: "legacy/store", reason: "configSchema is not a zod 4 schema; the module must depend on zod ^4.6.6" }]);
+    expect(check.notChecked).toContainEqual({ kind: "module", name: "legacy/store", because: "configSchema is not a zod 4 schema" });
+    expect(check.manifest?.modules[0]?.config).toEqual({ schema: {}, variables: [] });
+    await expect(boot(input)).rejects.toMatchObject({ code: "invalid-config-schema", module: "legacy/store" });
   });
 
   it("setup: none runs no module code and reports every module as not checked", async () => {

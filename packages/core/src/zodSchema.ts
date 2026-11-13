@@ -61,6 +61,11 @@ interface Unwrapped {
   description?: string;
 }
 
+/** True when `value` is a schema built with zod 4, the only kind whose definitions kestrel reads. */
+export function isZod4Schema(value: unknown): boolean {
+  return typeof value === "object" && value !== null && "_zod" in value;
+}
+
 const def = (schema: Schema): Def => boundaryCast<core.$ZodTypes>(schema, "host")._zod.def;
 const kind = (schema: Schema): string => schema._zod.def.type;
 const descriptionOf = (schema: Schema): string | undefined => globalRegistry.get(schema)?.description;
@@ -495,6 +500,7 @@ function collectVariables(schema: Schema, raw: unknown, parsedInput: unknown, de
  * `"default"` with `source` set to `defaults.from`, ahead of any default the schema declares.
  */
 export function describeConfig(schema: Schema, raw: unknown, parsed?: unknown, defaults?: ConfigDefaults): ConfigDescription {
+  if (!isZod4Schema(schema)) return { schema: {}, variables: [] };
   const variables: ConfigVariable[] = [];
   collectVariables(schema, raw, parsed, defaults, [], variables, { optional: false, default: undefined, redacted: false });
   const root = toJsonSchema(schema);

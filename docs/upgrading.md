@@ -801,7 +801,9 @@ the same edit.
 kestrel 6.0.0 depends on `zod` `^4.6.6` and reads a module's `configSchema` through zod 4's own
 definitions: its JSON Schema, its variables, its defaults and its secrets. A schema built with zod 3
 cannot be read that way, so a project that declares its own modules needs zod 4.6.6 or later; with
-`^4.6.6` the install resolves one copy for the project and kestrel. The rule reads `zod` in `dependencies`, `devDependencies` and
+`^4.6.6` the install resolves one copy for the project and kestrel. A module whose `configSchema`
+is still a zod 3 schema, for example from a package that depends on zod 3 itself, fails boot with
+`invalid-config-schema`, naming that module. The rule reads `zod` in `dependencies`, `devDependencies` and
 `peerDependencies` of `package.json` and sets every range whose lowest release is below 4.6.6, or
 on another major, to `^4.6.6`. A range it cannot read as a version (`latest`, `catalog:`,
 `workspace:*`, an `npm:` alias) is left alone. Like `deps/kestrel-range`, it reads `package.json`

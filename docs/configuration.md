@@ -278,7 +278,7 @@ code it does not recognize rather than assume this list is complete.
 |---|---|
 | Config | `invalid-config`, `module-count`, `module-listed-twice`, `module-entry-mismatch` |
 | Module order | `contract-provided-twice`, `before-and-requires`, `missing-provider`, `provides-itself`, `dependency-cycle`, `module-name-contract` |
-| Module setup | `invalid-module-config`, `setup-failed`, `missing-methods` |
+| Module setup | `invalid-config-schema`, `invalid-module-config`, `setup-failed`, `missing-methods` |
 | Step registration | `steps-threw`, `invalid-read-path`, `invalid-write-path`, `step-not-function`, `step-registered-twice`, `step-undescribed`, `describe-shape`, `describe-threw`, `describe-unknown-step` |
 | Pipeline resolution | `pipeline-defined-twice`, `pipeline-empty`, `unknown-step`, `step-argument`, `describe-threw`, `atomic-unsafe-step` |
 | Triggers | `svg-without-sanitizer`, `invalid-allowlist`, `unknown-trigger-pipeline`, `invalid-trigger`, `duplicate-route` |

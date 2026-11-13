@@ -25,6 +25,10 @@ function simpleModule(name: string, overrides: Partial<ModuleDefinition> = {}): 
   };
 }
 
+function zod3ShapedSchema(): ModuleDefinition["configSchema"] {
+  return boundaryCast<ModuleDefinition["configSchema"]>({ _def: { typeName: "ZodObject", shape: () => ({}) }, safeParse: (data: unknown) => ({ success: true, data }) }, "host");
+}
+
 const A = defineContract<{ a(): void }>()("a@1", ["a"]);
 const B = defineContract<{ b(): void }>()("b@1", ["b"]);
 
@@ -107,6 +111,13 @@ const cases: BootCase[] = [
     build: () => {
       const mod = simpleModule("strict/one", { configSchema: z.object({ file: z.string() }).strict() });
       return { config: { modules: [{ use: "./strict-one", config: { file: 42 } }], triggers: [] }, modules: [mod], pipelines: [], logger: silentLogger };
+    },
+  },
+  {
+    code: "invalid-config-schema",
+    build: () => {
+      const mod = simpleModule("legacy/one", { configSchema: zod3ShapedSchema() });
+      return { config: { modules: [{ use: "./legacy-one", config: {} }], triggers: [] }, modules: [mod], pipelines: [], logger: silentLogger };
     },
   },
   {
@@ -440,10 +451,10 @@ const cases: BootCase[] = [
 ];
 
 describe("bootCases: every sink-reachable BootErrorCode, pinned and checked for parity", () => {
-  it("covers exactly the 43 codes the sink can report", () => {
+  it("covers exactly the 44 codes the sink can report", () => {
     const seen = new Set(cases.map((c) => c.code));
     expect(seen.size).toBe(cases.length);
-    expect(cases.length).toBe(43);
+    expect(cases.length).toBe(44);
   });
 
   for (const { code, build } of cases) {

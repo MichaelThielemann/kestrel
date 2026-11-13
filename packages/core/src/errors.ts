@@ -16,6 +16,7 @@ export type BootErrorCode =
   | "dependency-cycle"
   | "module-name-contract"
   | "invalid-module-config"
+  | "invalid-config-schema"
   | "setup-failed"
   | "missing-methods"
   | "steps-threw"
