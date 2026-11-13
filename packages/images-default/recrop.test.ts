@@ -1732,6 +1732,45 @@ describe("images/default work a call leaves unfinished", () => {
     };
   }
 
+  function isRequest(collection: string, patch: object): boolean {
+    return collection === ITEMS && Reflect.has(patch, "request") && !Reflect.has(patch, "writer");
+  }
+
+  function failingOnce(w: World, matches: (collection: string, patch: object) => boolean): Persistence {
+    let failing = true;
+    return {
+      ...w.db,
+      updateMany: async (collection, filter, patch) => {
+        if (failing && matches(collection, patch)) {
+          failing = false;
+          return err(failure("TRANSIENT", "database busy"));
+        }
+        return w.db.updateMany(collection, filter, patch);
+      },
+    };
+  }
+
+  it("a framing stored while another process renders the item is placed and rendered when the request to the holder cannot be written", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.generate("m1"));
+    expectOk(await first.setFraming("m1", LEFT));
+    const held = heldRender();
+    const holder = await w.open([SQUARE], held.render);
+    const saver = await w.open([SQUARE], undefined, { db: failingOnce(w, isRequest) });
+
+    const rendering = holder.generate("m1");
+    await held.g.reached;
+    expectErr(await saver.setFraming("m1", RIGHT), "TRANSIENT");
+    held.g.open();
+    expectOk(await rendering);
+    for (const images of [saver, holder, saver]) await whenIdle(images);
+
+    expect(expectOk(await w.db.findOne<FramingRow>(FRAMING, { mediaId: "m1" }))?.crops).toEqual(RIGHT.crops);
+    await expectRenderedWith(w, holder, "400,0,600,600");
+    for (const images of [first, holder, saver]) await images.close();
+  });
+
   it("a framing stored after the holder let go is left as a request, which images.resume serves once staleAfterMs has passed", async () => {
     const w = await world();
     const first = await w.open([SQUARE]);
@@ -1778,5 +1817,36 @@ describe("images/default work a call leaves unfinished", () => {
     await whenIdle(later);
     await expectRenderedWith(w, later, "400,0,600,600");
     for (const images of [first, holder, saver, later]) await images.close();
+  });
+
+  it("images.setFraming answers NOT_FOUND and stores nothing when the item is removed after it was read", async () => {
+    const w = await world();
+    const loaded = gate();
+    let pausing = false;
+    const slowMedia: MediaFiles = {
+      ...w.media,
+      load: async (id) => {
+        const found = await w.media.load(id);
+        if (pausing) {
+          pausing = false;
+          loaded.arrive();
+          await loaded.wait;
+        }
+        return found;
+      },
+    };
+    const images = await w.open([SQUARE], undefined, { media: slowMedia });
+    expectOk(await images.generate("m1"));
+    pausing = true;
+    const framing = images.setFraming("m1", RIGHT);
+    await loaded.reached;
+    w.media.remove("m1");
+    expectOk(await images.remove("m1"));
+    loaded.open();
+
+    expectErr(await framing, "NOT_FOUND");
+    expect(expectOk(await w.db.count(FRAMING, {}))).toBe(0);
+    expect(expectOk(await w.db.count(VARIANTS, {}))).toBe(0);
+    await images.close();
   });
 });

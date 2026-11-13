@@ -2146,6 +2146,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       let stored = false;
       const store = async (): Promise<Result<boolean, KestrelError>> => {
         if (stored) return ok(false);
+        const still = await readMedia(mediaId);
+        if (isErr(still)) return still;
+        if (still.value === null) return notFound();
         const hiddenMeanwhile = await isHidden(mediaId);
         if (isErr(hiddenMeanwhile)) return hiddenMeanwhile;
         if (hiddenMeanwhile.value) return notFound();
@@ -2157,19 +2160,15 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         return ok(!sameRect(previous.value?.focus ?? null, framing.focus));
       };
       const answer = { id: mediaId, framing };
-      return withItem(
+      const saved = await withItem(
         mediaId,
         async (lease): Promise<Result<{ id: string; framing: Framing }, KestrelError>> => {
           const focusChanged = await store();
           if (isErr(focusChanged)) return focusChanged;
           const planned = await planItem(mediaId, lease);
-          if (isErr(planned)) {
-            if (focusChanged.value) raiseVariantsChanged([mediaId]);
-            scheduleConverge(mediaId);
-            return planned;
-          }
-          if (planned.value.changed || focusChanged.value) raiseVariantsChanged([mediaId]);
-          return ok(answer);
+          if (planned.ok && planned.value.changed) raiseVariantsChanged([mediaId]);
+          else if (focusChanged.value) raiseVariantsChanged([mediaId]);
+          return isErr(planned) ? planned : ok(answer);
         },
         async () => {
           const focusChanged = await store();
@@ -2179,6 +2178,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         },
         { serveLater: true },
       );
+      if (isErr(saved) && stored) schedulePlacement(mediaId);
+      return saved;
     },
 
     framingsOf,
