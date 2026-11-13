@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { boot, checkBoot, silentLogger, type BootInput } from "@michaelthielemann/kestrel";
+import { boot, checkBoot, definePipeline, silentLogger, type BootInput } from "@michaelthielemann/kestrel";
 import { loadConfig, loadModules, loadPipelines } from "@michaelthielemann/kestrel/load";
 import type { KestrelConfigInput } from "@michaelthielemann/kestrel/defineConfig";
 
@@ -39,5 +39,34 @@ describe("examples/minimal boot check manifest", { timeout: 30_000 }, () => {
     } finally {
       rmSync(dataDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("examples/minimal boot check of the restore wiring", { timeout: 30_000 }, () => {
+  async function errorsWith(steps: string[]): Promise<Array<{ code: string; reason: string }>> {
+    const dataDir = mkdtempSync(join(tmpdir(), "kestrel-minimal-restore-"));
+    try {
+      const input = await isolatedInput(dataDir);
+      const check = await checkBoot({ ...input, pipelines: [...input.pipelines, definePipeline({ name: "deliveryBuildCheck", steps })] }, { setup: "all" });
+      return check.errors.map((e) => ({ code: e.code, reason: e.reason }));
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  }
+
+  it("accepts checkRestored before checkBuild, with any step after it", async () => {
+    expect(await errorsWith(["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"])).toEqual([]);
+    expect(await errorsWith(["replication.checkRestored", "delivery.checkBuild", "delivery.resumeStale"])).toEqual([]);
+  });
+
+  it("accepts checkBuild without checkRestored when no later step writes the result", async () => {
+    expect(await errorsWith(["delivery.checkBuild", "delivery.requestIndexes"])).toEqual([]);
+  });
+
+  it("rejects checkBuild without checkRestored before it when a later step writes the result", async () => {
+    const errors = await errorsWith(["delivery.checkBuild", "delivery.resumeStale"]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.code).toBe("optional-read-order");
+    expect(errors[0]?.reason).toContain("result._databaseRestoredAt");
   });
 });
