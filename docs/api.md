@@ -656,8 +656,8 @@ paused/failed/stuck sync job and finishes any item a crash left mid-way, even wi
 
 They also return `variantCounts: { done, pending, error, failed }`, the effective sizes tallied by
 state: a size with no row yet, a row not yet placed, or a `done` row whose spec is outdated or
-whose render was cut with another crop than the one the size now has (a re-crop under way), counts
-as `pending`; a row for a size nobody declares any more is ignored. `variantCounts` is all zero for
+whose render was cut with another crop than the item's stored framing gives the size (a re-crop
+under way, also one another process has not placed yet), counts as `pending`; a row for a size nobody declares any more is ignored. `variantCounts` is all zero for
 an item with no eligible variants (not an image, SVG, GIF), the same as an empty `variants[]`. It
 lets a client tell "no variants apply" apart from "still generating" without polling `variants[]`
 itself.

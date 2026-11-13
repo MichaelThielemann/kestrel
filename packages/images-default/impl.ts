@@ -757,7 +757,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return err(failure("TRANSIENT", `images: the framing of media/${mediaId} was written by another process at the same time – set it again`));
   }
 
-  async function framingsOf(mediaIds: string[]): Promise<Result<Map<string, FramingView>, KestrelError>> {
+  async function framingRowsOf(mediaIds: string[]): Promise<Result<Map<string, FramingRow>, KestrelError>> {
     const stored = new Map<string, FramingRow>();
     for (let i = 0; i < mediaIds.length; i += EVENT_CHUNK) {
       const chunk = mediaIds.slice(i, i + EVENT_CHUNK);
@@ -765,6 +765,13 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (isErr(page)) return page;
       for (const row of page.value.items) stored.set(row.mediaId, row);
     }
+    return ok(stored);
+  }
+
+  async function framingsOf(mediaIds: string[]): Promise<Result<Map<string, FramingView>, KestrelError>> {
+    const read = await framingRowsOf(mediaIds);
+    if (isErr(read)) return read;
+    const stored = read.value;
     const planned = await variantsOf(mediaIds.filter((id) => !stored.has(id)));
     if (isErr(planned)) return planned;
     const views = new Map<string, FramingView>();
@@ -1523,13 +1530,19 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
 
     const byMedia = await variantsOf(eligibleIds);
     if (isErr(byMedia)) return byMedia;
+    const framings = await framingRowsOf(eligibleIds);
+    if (isErr(framings)) return framings;
 
     for (const id of eligibleIds) {
       const byName = new Map((byMedia.value.get(id) ?? []).map((row) => [row.size, row]));
+      const stored = framings.value.get(id);
+      const framing = stored === undefined ? null : storedFraming(stored);
+      const sized = stored !== undefined && stored.width > 0 && stored.height > 0;
       const tally: VariantCounts = { done: 0, pending: 0, error: 0, failed: 0 };
       for (const size of effective) {
         const row = byName.get(size.name);
-        if (row !== undefined && row.state === "done" && row.spec === spec(size) && cropOf(row) === renderedCropOf(row)) tally.done += 1;
+        const cut = formatCrop(plannedCrop(size, sized, stored?.width ?? 0, stored?.height ?? 0, framing));
+        if (row !== undefined && row.state === "done" && row.spec === spec(size) && cropOf(row) === renderedCropOf(row) && renderedCropOf(row) === cut) tally.done += 1;
         else if (row !== undefined && row.state === "error") tally.error += 1;
         else if (row !== undefined && row.state === "failed") tally.failed += 1;
         else tally.pending += 1;

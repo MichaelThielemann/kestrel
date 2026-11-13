@@ -2578,3 +2578,25 @@ describe("images/default rows a sync job left on an earlier spec", () => {
     for (const opened of [images, later]) await opened.close();
   });
 });
+
+describe("images/default variantCounts and a stored framing", () => {
+  it("counts a done row as pending while the stored framing cuts its size differently, until it renders again", async () => {
+    const w = await world();
+    const images = await w.open([THUMB, SQUARE]);
+    expectOk(await images.generate("m1"));
+    expect(expectOk(await images.variantCounts(["m1"])).get("m1")).toEqual({ done: 2, pending: 0, error: 0, failed: 0 });
+
+    expectOk(await w.db.createOne<FramingRow>(FRAMING, { mediaId: "m1", focus: null, crops: { "1:1": { x: 0, y: 0, w: 0.6, h: 1 } }, width: 1000, height: 600, updatedAt: 1000 }));
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", crop: "", renderedCrop: "" });
+    expect(expectOk(await images.variantCounts(["m1"])).get("m1")).toEqual({ done: 1, pending: 1, error: 0, failed: 0 });
+
+    expectOk(await images.plan(["m1"]));
+    expectOk(await images.generate("m1"));
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", renderedCrop: "0,0,600,600" });
+    expect(expectOk(await images.variantCounts(["m1"])).get("m1")).toEqual({ done: 2, pending: 0, error: 0, failed: 0 });
+
+    expectOk(await w.db.deleteMany(FRAMING, { mediaId: "m1" }));
+    expect(expectOk(await images.variantCounts(["m1"])).get("m1")).toEqual({ done: 1, pending: 1, error: 0, failed: 0 });
+    await images.close();
+  });
+});

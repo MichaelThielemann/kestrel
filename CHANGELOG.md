@@ -1341,7 +1341,7 @@ Net changes since 5.8.1.
   stored the framing, also because it could not leave its request, places and renders the item in
   the background; `images.resume` takes over a lease whose holder stopped once it
   has run out and serves a request left open. `variantCounts` counts a row rendered with another
-  crop as `pending`.
+  crop than the stored framing gives its size as `pending`.
   `images.attach` adds `focus` and `framing: { focus, crops, width, height, ratios: [{ key, sizes,
   manual, fits, crop }] }` to each item, `width` and `height` being the original's oriented
   dimensions. Ratio keys are exact, so sizes with nearly the same ratio get separate
