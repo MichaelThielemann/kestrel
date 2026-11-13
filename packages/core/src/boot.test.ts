@@ -419,7 +419,7 @@ describe("boot", () => {
       await kestrel?.stop();
       kestrel = await boot({ config: config(http), modules: [spy], pipelines: [ipPipeline], logger: silentLogger });
       const base = `http://127.0.0.1:${(await kestrel.start()).http?.port ?? 0}`;
-      return (await fetch(`${base}/ip`, { headers })).json();
+      return boundaryCast<unknown>(await (await fetch(`${base}/ip`, { headers })).json(), "json");
     };
     expect(await ipVia({ trustProxy: false }, { "x-forwarded-for": "203.0.113.9" })).toBe("127.0.0.1");
     expect(await ipVia({ trustProxy: true }, { "x-forwarded-for": "203.0.113.9, 10.0.0.1" })).toBe("10.0.0.1");

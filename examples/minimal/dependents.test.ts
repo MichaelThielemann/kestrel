@@ -432,7 +432,7 @@ describe("examples/minimal dependent pages: reads the instance cannot see", () =
       expect(example.port).toBeGreaterThan(0);
       example.reading.via = async (path) => {
         const response = await fetch(`http://127.0.0.1:${example.port}/site${path}`);
-        return response.ok ? await response.json() : null;
+        return response.ok ? boundaryCast<unknown>(await response.json(), "json") : null;
       };
       const token = boundaryCast<{ token: string }>(await call(example, "login", { body: { username: "admin", password: "kestrel-demo" } }), "json").token;
       await call(example, "setSettings", { token, body: { title: "Festival", locale: "de" } });
