@@ -228,8 +228,11 @@ restart. It runs nothing itself:
   window, so one export follows a burst of saves; a delayed pipeline is never relayed into the request.
 - With `"background"` the loop exports the index files once `dependencies.indexesDelayMs` (default 1000) passed
   after the first request, before its next batch of at most five renders, so the files never wait for a re-render
-  backlog. A failed index export is logged and retried after `dependencies.backoffSeconds`, and the renders go on.
-  llms-full.txt is exported once no render is due, with the same retry.
+  backlog. A later request inside that window joins it without moving it. A failed index export is logged and
+  retried after `dependencies.backoffSeconds`, and the renders go on; a new request still exports once its own window
+  passed, so the first save after an outage is not held back by the backoff. llms-full.txt is exported once no render
+  is due and no index window is open, with the same retry, and while it reads the stored pages it lets an index
+  export that came due run between two of them.
 
 After each re-render, llms-full.txt is asked for again (it reads the HTML), and the index files only when the
 output's path changed or the output started or stopped serving a file; a `live` output that fails and keeps its path

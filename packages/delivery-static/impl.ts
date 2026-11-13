@@ -377,7 +377,8 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   const claimTtlMs = dependencies.claimTtlSeconds * 1000;
   let abandoned = 0;
   let stopping = false;
-  let indexesDueAt: number | null = null;
+  let indexesWindowAt: number | null = null;
+  let indexesRetryAt: number | null = null;
   let indexesFailures = 0;
   let llmsFullRequested = false;
   let llmsFullRetryAt: number | null = null;
@@ -1015,6 +1016,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         }),
       publishedExists,
       stopping: () => stopping,
+      interleave: () => runDueIndexes(),
     },
   );
 
@@ -1103,7 +1105,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
 
   const requestIndexFiles = async (): Promise<Result<void, DeliveryError>> => {
     if (dependencies.render === "background") {
-      indexesDueAt ??= now() + dependencies.indexesDelayMs;
+      indexesWindowAt ??= now() + dependencies.indexesDelayMs;
       loop?.wake();
       return ok();
     }
@@ -1157,8 +1159,15 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     }
   };
 
+  const indexesDueAt = (): number | null => (indexesWindowAt === null ? indexesRetryAt : indexesRetryAt === null ? indexesWindowAt : Math.min(indexesWindowAt, indexesRetryAt));
+  const indexesDue = (): boolean => {
+    const due = indexesDueAt();
+    return !stopping && due !== null && now() >= due;
+  };
+
   const runIndexesWindow = async (): Promise<void> => {
-    indexesDueAt = null;
+    indexesWindowAt = null;
+    indexesRetryAt = null;
     const failed = await attempt(exportIndexesNow);
     if (failed === null) {
       indexesFailures = 0;
@@ -1166,8 +1175,12 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     }
     if (stopping) return;
     indexesFailures += 1;
-    indexesDueAt = now() + exportBackoffMs(indexesFailures);
-    logger.error("delivery/static: the index export failed, the re-renders go on and the export is retried", { error: failed, attempts: indexesFailures, retryAt: indexesDueAt });
+    indexesRetryAt = now() + exportBackoffMs(indexesFailures);
+    logger.error("delivery/static: the index export failed, the re-renders go on and the export is retried", { error: failed, attempts: indexesFailures, retryAt: indexesRetryAt });
+  };
+
+  const runDueIndexes = async (): Promise<void> => {
+    if (dependencies.render === "background" && indexesDue()) await runIndexesWindow();
   };
 
   const runLlmsFull = async (): Promise<void> => {
@@ -1187,7 +1200,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
 
   const pass = async (): Promise<PassOutcome> => {
     unwrap(await releaseExpiredClaims());
-    if (!stopping && indexesDueAt !== null && now() >= indexesDueAt) await runIndexesWindow();
+    if (indexesDue()) await runIndexesWindow();
     const at = now();
     const due = await db.findMany<StatusRow>(STATUS, { staleRetryAt: { lte: at }, claimedBy: null, staleAttempts: { lt: dependencies.maxAttempts }, type: { in: deliveredTypes } }, { sort: { staleRetryAt: "asc" }, limit: LOOP_BATCH });
     if (isErr(due)) throw new Error(due.error.message);
@@ -1211,13 +1224,13 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       }
       return { busy: true, sleepMs: null };
     }
-    if (!stopping && llmsFullRequested && (llmsFullRetryAt === null || now() >= llmsFullRetryAt)) {
+    if (!stopping && llmsFullRequested && indexesWindowAt === null && (llmsFullRetryAt === null || now() >= llmsFullRetryAt)) {
       await runLlmsFull();
       return { busy: true, sleepMs: null };
     }
     const next = await db.findMany<StatusRow>(STATUS, { staleRetryAt: { gt: at }, staleAttempts: { lt: dependencies.maxAttempts } }, { sort: { staleRetryAt: "asc" }, limit: 1 });
     if (isErr(next)) throw new Error(next.error.message);
-    const wakeAts = [next.value.items[0]?.staleRetryAt ?? null, indexesDueAt, llmsFullRequested ? llmsFullRetryAt : null].filter((v): v is number => v !== null);
+    const wakeAts = [next.value.items[0]?.staleRetryAt ?? null, indexesDueAt(), llmsFullRequested ? llmsFullRetryAt : null].filter((v): v is number => v !== null);
     if (wakeAts.length === 0) return { busy: false, sleepMs: null };
     return { busy: false, sleepMs: Math.max(0, Math.min(...wakeAts) - now()) };
   };

@@ -148,6 +148,8 @@ export interface IndexFilesDeps {
   /** Whether any document of a delivered type is published in any delivered locale. */
   publishedExists(): Promise<Result<boolean, KestrelError>>;
   stopping(): boolean;
+  /** Runs work that came due meanwhile; called before each page an llms-full.txt export reads. */
+  interleave(): Promise<void>;
 }
 
 export interface IndexFiles {
@@ -293,6 +295,7 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
     let missingMain = false;
     const pages = new Map<IndexEntry, LlmsFullPage>();
     for (const entry of entries) {
+      await deps.interleave();
       if (deps.stopping()) return err(stopped());
       let body = "";
       const stored = await entry.html();

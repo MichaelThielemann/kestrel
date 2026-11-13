@@ -199,6 +199,7 @@ interface Options {
   content?: Content;
   blobs?: Files;
   render?: "events" | "background";
+  clock?: { t: number };
 }
 
 const instances: Delivery[] = [];
@@ -232,7 +233,8 @@ async function harness(options: Options = {}) {
   const logger = recordingLogger();
   let offset = 0;
   const config = configSchema.parse({ types: { pages: { home: "home" } }, prefix: "site/", siteUrl: "https://example.org", robots: { policy: "allow" }, dependencies: { render: options.render ?? "events" }, ...options.config });
-  const delivery = await createDeliveryStatic(config, { content, site, renderer, blobs, db, logger, events, ...(options.nodeEnv === undefined ? {} : { nodeEnv: options.nodeEnv }) }, () => Date.now() + offset);
+  const clock = options.clock;
+  const delivery = await createDeliveryStatic(config, { content, site, renderer, blobs, db, logger, events, ...(options.nodeEnv === undefined ? {} : { nodeEnv: options.nodeEnv }) }, clock === undefined ? () => Date.now() + offset : () => clock.t);
   instances.push(delivery);
   const page = async (de: Record<string, unknown>, en?: Record<string, unknown>): Promise<string> => {
     const id = expectOk(await content.create("pages", de, { locale: "de" })).id;
@@ -549,6 +551,149 @@ describe("index exports in the background loop", () => {
     expectOk(await h.delivery.markAll("pages"));
     await until(() => (h.text("llms-full.txt") ?? "").startsWith("# Neuer Titel"));
     expect(expectOk(await h.delivery.readStaleStatus()).stale).toBe(0);
+  });
+});
+
+interface LoopProbe {
+  settle(wake: () => Promise<unknown>): Promise<void>;
+}
+
+function probeLoop(db: Persistence): LoopProbe {
+  let started = 0;
+  let endedStart = 0;
+  let current = 0;
+  const updateMany = db.updateMany.bind(db);
+  const findMany = db.findMany.bind(db);
+  db.updateMany = async (collection, filter, patch) => {
+    if (collection === STATUS && Object.keys(filter).join() === "claimedAt") current = ++started;
+    return updateMany(collection, filter, patch);
+  };
+  db.findMany = async (collection, filter, options) => {
+    const found = await findMany(collection, filter, options);
+    if (collection === STATUS && options?.limit === 1 && isRecord(filter.staleRetryAt) && "gt" in filter.staleRetryAt) endedStart = current;
+    return found;
+  };
+  return {
+    async settle(wake) {
+      const before = started;
+      await wake();
+      await until(() => endedStart > before);
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+describe("index exports in the background loop, on a manual clock", () => {
+  async function background(config: Record<string, unknown> = {}) {
+    const clock = { t: Date.UTC(2026, 10, 2, 9) };
+    const db = createFakePersistence();
+    const probe = probeLoop(db);
+    const h = await harness({ db, clock, render: "background", config: { ...config, dependencies: { render: "background", ...(isRecord(config.dependencies) ? config.dependencies : {}) } } });
+    await seed(h);
+    const sitemapPuts = (): number => h.blobs.puts.filter((k) => k === "site/sitemap.xml").length;
+    const failures = (): number => h.logger.errors.filter((e) => e === "delivery/static: the index export failed, the re-renders go on and the export is retried").length;
+    const rendered = async (): Promise<void> => {
+      await probe.settle(async () => expectOk(await h.delivery.markAll("pages")));
+      await until(async () => expectOk(await h.delivery.readStaleStatus()).stale === 0);
+    };
+    return { ...h, clock, probe, sitemapPuts, failures, rendered };
+  }
+
+  it("exports the index files indexesDelayMs after the first request, and a second request inside the window does not move it", async () => {
+    const h = await background();
+    h.blobs.puts.length = 0;
+    await h.probe.settle(() => h.delivery.requestIndexes());
+    expect(h.sitemapPuts()).toBe(0);
+    h.clock.t += 999;
+    await h.probe.settle(() => h.delivery.requestIndexes());
+    expect(h.sitemapPuts()).toBe(0);
+    h.clock.t += 1;
+    await h.probe.settle(() => h.delivery.requestIndexes());
+    expect(h.sitemapPuts()).toBe(1);
+  });
+
+  it("does not try a failed index export again before its backoff ended", async () => {
+    const h = await background({ dependencies: { backoffSeconds: [60] } });
+    h.blobs.failPut.add("site/llms.txt");
+    await h.probe.settle(() => h.delivery.requestIndexes());
+    h.clock.t += 1000;
+    await h.probe.settle(() => h.delivery.requestIndexes());
+    expect(h.failures()).toBe(1);
+    h.clock.t += 59_999;
+    await h.rendered();
+    expect(h.failures()).toBe(1);
+    h.blobs.failPut.clear();
+    h.clock.t += 1;
+    await h.rendered();
+    await until(async () => expectOk(await h.delivery.readStaleStatus()).exports.indexes?.error === null);
+    expect(h.failures()).toBe(1);
+  });
+
+  it("a request after a failed export runs it once the window passed, without waiting for the backoff", async () => {
+    const h = await background({ dependencies: { backoffSeconds: [60] } });
+    h.blobs.failPut.add("site/llms.txt");
+    await h.probe.settle(() => h.delivery.requestIndexes());
+    h.clock.t += 1000;
+    await h.probe.settle(() => h.delivery.requestIndexes());
+    expect(h.failures()).toBe(1);
+    h.blobs.failPut.clear();
+    h.clock.t += 5000;
+    await h.page({ slug: "neu", title: "Neu", status: "published" });
+    await h.probe.settle(() => h.delivery.requestIndexes());
+    expect(h.text("sitemap.xml") ?? "").not.toContain("https://example.org/neu");
+    h.clock.t += 1000;
+    await h.probe.settle(() => h.delivery.requestIndexes());
+    expect(h.text("sitemap.xml")).toContain("https://example.org/neu");
+  });
+
+  function slowHtml(h: Harness) {
+    const waiting: Array<() => void> = [];
+    let open = false;
+    const get = h.blobs.get.bind(h.blobs);
+    h.blobs.get = async (key) => {
+      if (!open && key.endsWith("index.html")) await new Promise<void>((resolve) => waiting.push(resolve));
+      return get(key);
+    };
+    return {
+      waiting: () => waiting.length,
+      releaseOne: () => waiting.shift()?.(),
+      releaseAll: () => {
+        open = true;
+        for (const resolve of waiting.splice(0)) resolve();
+      },
+    };
+  }
+
+  it("a save exports sitemap.xml, robots.txt and llms.txt once the window passed, before a slow llms-full.txt export", async () => {
+    const h = await background({ llms: { full: true } });
+    const html = slowHtml(h);
+    await h.page({ slug: "neu", title: "Neu", status: "published" });
+    await h.probe.settle(() => h.delivery.requestIndexes());
+    h.clock.t += 1000;
+    await h.delivery.requestIndexes();
+    await until(() => (h.text("sitemap.xml") ?? "").includes("https://example.org/neu"));
+    expect(h.text("llms.txt")).toContain("https://example.org/neu");
+    expect(h.text("llms-full.txt")).toBeUndefined();
+    html.releaseAll();
+    await until(() => h.text("llms-full.txt") !== undefined);
+  });
+
+  it("an llms-full.txt export that is already reading pages lets a due index export run between two pages", async () => {
+    const h = await background({ llms: { full: true } });
+    const html = slowHtml(h);
+    expectOk(await h.delivery.markAll("pages"));
+    await until(() => html.waiting() === 1);
+    await h.page({ slug: "neu", title: "Neu", status: "published" });
+    expectOk(await h.delivery.requestIndexes());
+    h.clock.t += 1000;
+    html.releaseOne();
+    await until(() => (h.text("sitemap.xml") ?? "").includes("https://example.org/neu"));
+    expect(h.text("llms-full.txt")).toBeUndefined();
+    html.releaseAll();
+    await until(() => h.text("llms-full.txt") !== undefined);
   });
 });
 

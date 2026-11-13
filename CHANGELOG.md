@@ -1075,7 +1075,9 @@ Net changes since 5.8.1.
   events with `"events"`; with `"background"`, the loop exports the index files
   `dependencies.indexesDelayMs` (default 1000) after the first request, before its next batch of
   re-renders, retries a failed export with `dependencies.backoffSeconds` without holding up the
-  renders, and exports llms-full.txt once no render is due. A re-render asks for llms-full.txt every
+  renders (a new request still exports after its own window), and exports llms-full.txt once no
+  render is due and no index window is open, letting a due index export run between the pages it
+  reads. A re-render asks for llms-full.txt every
   time and for the index files only when the output's path changed or it started or stopped serving
   a file. `delivery.resumeStale` asks for the index files on every run and for llms-full.txt while
   its last export failed.
