@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
 import type { Document, Filter, FindOptions, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { MediaFiles } from "@michaelthielemann/kestrel-contracts/media";
 import { createFakeMedia, type FakeMedia } from "@michaelthielemann/kestrel-contracts/testing/fakeMedia";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
@@ -68,7 +69,7 @@ interface World {
   media: FakeMedia;
   events: Events & { emitted: Array<{ name: string; ids: unknown }> };
   renders: Render[];
-  open(sizes?: Size[], render?: Renderer, deps?: { db?: Persistence; blobs?: Blobstore; now?: () => number }): Promise<Images>;
+  open(sizes?: Size[], render?: Renderer, deps?: { db?: Persistence; blobs?: Blobstore; media?: MediaFiles; now?: () => number }): Promise<Images>;
 }
 
 function bytesFor(size: string, crop: PixelCrop | null, round: number): Uint8Array {
@@ -94,7 +95,7 @@ async function world(): Promise<World> {
     media,
     events,
     renders,
-    open: (sizes = SIZES, render = recording, deps = {}) => createImages({ ...CONFIG, sizes }, { blobs: deps.blobs ?? blobs, db: deps.db ?? db, media, logger: quiet, render, events }, deps.now ?? (() => 1000)),
+    open: (sizes = SIZES, render = recording, deps = {}) => createImages({ ...CONFIG, sizes }, { blobs: deps.blobs ?? blobs, db: deps.db ?? db, media: deps.media ?? media, logger: quiet, render, events }, deps.now ?? (() => 1000)),
   };
 }
 
@@ -676,12 +677,12 @@ describe("images/default re-cropping while a render runs", () => {
     let failing = false;
     const writes: Persistence = {
       ...w.db,
-      updateOne: async <T extends Document>(collection: string, id: string, patch: Partial<Omit<T, "id">>) => {
+      updateMany: async (collection, filter, patch) => {
         if (failing && collection === VARIANTS && "crop" in patch) {
           failing = false;
           return err(failure("TRANSIENT", "busy"));
         }
-        return w.db.updateOne<T>(collection, id, patch);
+        return w.db.updateMany(collection, filter, patch);
       },
     };
     const images = await w.open([SQUARE], undefined, { db: writes });
@@ -1421,6 +1422,130 @@ describe("images/default one writer per item across processes", () => {
 });
 
 describe("images/default writes of a holder whose item or row changed meanwhile", () => {
+  function failingCopyAfterStall(w: World): { blobs: Blobstore; g: ReturnType<typeof gate> } {
+    const g = gate();
+    let holdPrivate = true;
+    let failCopy = false;
+    return {
+      g,
+      blobs: {
+        ...w.blobs,
+        put: async (key, data, options) => {
+          if (holdPrivate && key.startsWith("media-variants/")) {
+            holdPrivate = false;
+            g.arrive();
+            await g.wait;
+            failCopy = true;
+          } else if (failCopy && key.startsWith("site/")) {
+            failCopy = false;
+            return err(failure("TRANSIENT", "copy store unavailable"));
+          }
+          return w.blobs.put(key, data, options);
+        },
+      },
+    };
+  }
+
+  it("a holder whose lease ran out while its variant write stalled and whose public copy then fails leaves the newer render at both paths under its ?v=", async () => {
+    for (const before of ["never rendered", "rendered"] as const) {
+      const w = await world();
+      const first = await w.open([SQUARE]);
+      if (before === "rendered") expectOk(await first.generate("m1"));
+      expectOk(await first.setFraming("m1", LEFT));
+      const stalled = failingCopyAfterStall(w);
+      const slow = await w.open([SQUARE], undefined, { blobs: stalled.blobs });
+      const generating = slow.generate("m1");
+      await stalled.g.reached;
+
+      const later = await w.open([SQUARE], undefined, { now: () => LATER });
+      expectOk(await later.setFraming("m1", RIGHT));
+      expectOk(await later.generate("m1"));
+      await expectRenderedWith(w, later, "400,0,600,600");
+      stalled.g.open();
+      expectOk(await generating);
+      await whenIdle(slow);
+      await whenIdle(later);
+
+      await expectRenderedWith(w, later, "400,0,600,600");
+      for (const images of [first, slow, later]) await images.close();
+    }
+  });
+
+  it("a render whose public copy lands but whose hidden check after it fails puts the earlier bytes back at both paths", async () => {
+    for (const before of ["never rendered", "rendered"] as const) {
+      const w = await world();
+      const first = await w.open([SQUARE]);
+      expectOk(await first.setFraming("m1", LEFT));
+      if (before === "rendered") expectOk(await first.generate("m1"));
+      let failNextHiddenCheck = false;
+      const blobs: Blobstore = {
+        ...w.blobs,
+        put: async (key, data, options) => {
+          const put = await w.blobs.put(key, data, options);
+          if (key.startsWith("site/") && text(data).startsWith("square|")) failNextHiddenCheck = true;
+          return put;
+        },
+      };
+      const db: Persistence = {
+        ...w.db,
+        count: async (collection, filter) => {
+          if (failNextHiddenCheck && collection === HIDDEN) {
+            failNextHiddenCheck = false;
+            return err(failure("TRANSIENT", "database busy"));
+          }
+          return w.db.count(collection, filter);
+        },
+      };
+      const other = await w.open([SQUARE], undefined, { blobs, db });
+      if (before === "rendered") expectOk(await other.setFraming("m1", RIGHT));
+      expectErr(await other.generate("m1"), "TRANSIENT");
+
+      const square = (await rowsBySize(w)).get("square")!;
+      expect(square.state).toBe("error");
+      if (before === "rendered") {
+        expect(square.renderedCrop).toBe("0,0,600,600");
+        expect(other.publicPath("m1", square)).toBe(`/media/m1/variants/square.webp?v=${cropToken({ left: 0, top: 0, width: 600, height: 600 })}`);
+        expect(text(w.blobs.blobs.get(square.key)?.data)).toContain("|0,0,600,600|");
+        expect(copyOf(w, "square.webp")).toContain("|0,0,600,600|");
+      } else {
+        const original = expectOk(await w.media.load("m1"))!.data;
+        expect(w.blobs.blobs.has(square.key)).toBe(false);
+        expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")?.data).toEqual(original);
+        expect(expectOk(await other.read("m1", "square.webp"))).toMatchObject({ fallback: true, variant: "original" });
+      }
+      for (const images of [first, other]) await images.close();
+    }
+  });
+
+  it("a render that fails after another process took the item over and rendered it leaves that render done", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.setFraming("m1", LEFT));
+    const g = gate();
+    let holding = true;
+    const failing: Renderer = async () => {
+      if (holding) {
+        holding = false;
+        g.arrive();
+        await g.wait;
+      }
+      throw new Error("premature end of input");
+    };
+    const slow = await w.open([SQUARE], failing);
+    const generating = slow.generate("m1");
+    await g.reached;
+
+    const later = await w.open([SQUARE], undefined, { now: () => LATER });
+    expectOk(await later.setFraming("m1", RIGHT));
+    expectOk(await later.generate("m1"));
+    g.open();
+    expectOk(await generating);
+    await whenIdle(slow);
+
+    await expectRenderedWith(w, later, "400,0,600,600");
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ attempts: 1, error: null });
+    for (const images of [first, slow, later]) await images.close();
+  });
 
   it("a framing saved while another save waits for the item is the one stored, also after the waiting save takes the item", async () => {
     const w = await world();
@@ -1470,6 +1595,7 @@ describe("images/default writes of a holder whose item or row changed meanwhile"
     expect((await rowsBySize(w)).get("square")).toMatchObject({ crop: "0,0,600,600" });
     for (const images of [first, holder, earlier, latest]) await images.close();
   });
+
   it("images.resume leaves a placement under way to its queued render, in the same and in another process", async () => {
     for (const sameProcess of [false, true]) {
       const w = await world();
@@ -1498,5 +1624,93 @@ describe("images/default writes of a holder whose item or row changed meanwhile"
       expect([...(await rowsBySize(w)).values()].map((row) => row.state)).toEqual(["pending", "pending"]);
       for (const images of new Set([planner, cron])) await images.close();
     }
+  });
+
+  it("a render that finishes after another process pruned its size leaves the original's bytes at the retired path and answers the item", async () => {
+    const w = await world();
+    const g = gate();
+    let holding = true;
+    const render: Renderer = async (_d, s, p) => {
+      if (holding && s.name === "square") {
+        holding = false;
+        g.arrive();
+        await g.wait;
+      }
+      return { data: bytesFor(s.name, p.crop ?? null, 0), width: p.width, height: p.height, format: p.format, ext: p.format, contentType: `image/${p.format}` };
+    };
+    const declaring = await w.open([THUMB, SQUARE], render);
+    const narrowed = await w.open([THUMB]);
+    expectOk(await declaring.plan(["m1"]));
+    const generating = declaring.generate("m1");
+    await g.reached;
+    expectOk(await narrowed.prune(["square"]));
+    g.open();
+    expectOk(await generating);
+    await whenIdle(declaring);
+
+    const original = expectOk(await w.media.load("m1"))!.data;
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")?.data).toEqual(original);
+    expect([...w.blobs.blobs.keys()].filter((key) => key.startsWith("media-variants/m1/square"))).toEqual([]);
+    expect(expectOk(await narrowed.read("m1", "square.webp"))).toMatchObject({ variant: "original" });
+    expect([...(await rowsBySize(w)).keys()]).toEqual(["thumb"]);
+    for (const images of [declaring, narrowed]) await images.close();
+  });
+
+  it("a holder whose lease ran out while it loaded the original re-plans nothing over the framing another process stored meanwhile", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.generate("m1"));
+    const g = gate();
+    let loads = 0;
+    const slowMedia: MediaFiles = {
+      ...w.media,
+      load: async (id) => {
+        if (++loads === 2) {
+          g.arrive();
+          await g.wait;
+        }
+        return w.media.load(id);
+      },
+    };
+    const slow = await w.open([SQUARE], undefined, { media: slowMedia });
+    const framing = slow.setFraming("m1", { focus: { x: 0, y: 0, w: 0.1, h: 0.1 } });
+    await g.reached;
+
+    const later = await w.open([SQUARE], undefined, { now: () => LATER });
+    expectOk(await later.setFraming("m1", { focus: { x: 0.9, y: 0, w: 0.1, h: 0.1 } }));
+    g.open();
+    expectOk(await framing);
+    expectOk(await later.generate("m1"));
+    await whenIdle(slow);
+    await whenIdle(later);
+
+    expect(expectOk(await w.db.findOne<FramingRow>(FRAMING, { mediaId: "m1" }))?.focus).toMatchObject({ x: 0.9 });
+    await expectRenderedWith(w, later, "400,0,600,600");
+    for (const images of [first, slow, later]) await images.close();
+  });
+
+  it("a format change that stalls past staleAfterMs while it overwrites the old path leaves the row another process placed and rendered", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.generate("m1"));
+    const asOriginal: Size = { ...SQUARE, format: "original" };
+    const stalled = holdOnce(w, "site/");
+    const slow = await w.open([asOriginal], undefined, { blobs: stalled.blobs });
+    const planning = slow.plan(["m1"]);
+    await stalled.g.reached;
+
+    const later = await w.open([asOriginal], undefined, { now: () => LATER });
+    expectOk(await later.plan(["m1"]));
+    expectOk(await later.generate("m1"));
+    const rendered = (await rowsBySize(w)).get("square")!;
+    expect(rendered).toMatchObject({ state: "done", format: "jpeg" });
+    stalled.g.open();
+    expectOk(await planning);
+
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ id: rendered.id, state: "done", bytes: rendered.bytes });
+    await whenIdle(slow);
+    await whenIdle(later);
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", format: "jpeg" });
+    for (const images of [first, slow, later]) await images.close();
   });
 });

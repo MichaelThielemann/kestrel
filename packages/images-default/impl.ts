@@ -471,14 +471,20 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok(extended.value === 1 ? "requested" : "lost");
   }
 
+  async function handBack(mediaId: string, redo: boolean): Promise<Result<void, KestrelError>> {
+    const asked = await ask(mediaId, redo);
+    if (isErr(asked)) return asked;
+    scheduleConverge(mediaId);
+    return ok(undefined);
+  }
+
   async function mayWrite(lease: Lease, yieldToRequest: boolean): Promise<Result<boolean, KestrelError>> {
     const hold = await renew(lease);
     if (isErr(hold)) return hold;
     if (hold.value === "held" || (hold.value === "requested" && !yieldToRequest)) return ok(true);
     if (hold.value === "lost") {
-      const asked = await ask(lease.mediaId);
-      if (isErr(asked)) return asked;
-      scheduleConverge(lease.mediaId);
+      const handed = await handBack(lease.mediaId, false);
+      if (isErr(handed)) return handed;
     }
     return ok(false);
   }
@@ -487,10 +493,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const hold = await renew(lease);
     if (isErr(hold)) return hold;
     if (hold.value !== "lost") return ok(true);
-    const asked = await ask(lease.mediaId, true);
-    if (isErr(asked)) return asked;
-    scheduleConverge(lease.mediaId);
-    return ok(false);
+    const handed = await handBack(lease.mediaId, true);
+    return isErr(handed) ? handed : ok(false);
   }
 
   async function putCopyHeld(lease: Lease, file: string, data: Uint8Array, contentType: string): Promise<Result<boolean | "lost", KestrelError>> {
@@ -500,6 +504,16 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(put)) return put;
     const kept = await wroteHeld(lease);
     return isErr(kept) ? kept : put;
+  }
+
+  function asRead(row: Variant): Filter {
+    return { id: row.id, key: row.key, spec: row.spec, state: row.state, crop: row.crop ?? null, attempts: row.attempts };
+  }
+
+  async function updateAsRead(row: Variant, patch: Partial<Variant>): Promise<Result<Variant | null, KestrelError>> {
+    const updated = await db.updateMany<Variant>(VARIANTS, asRead(row), patch);
+    if (isErr(updated)) return updated;
+    return ok(updated.value === 1 ? { ...row, ...patch } : null);
   }
 
   function withItem<T>(mediaId: string, work: (lease: Lease) => Promise<Result<T, KestrelError>>, handOver: () => Promise<Result<T, KestrelError>>, serveLater = false): Promise<Result<T, KestrelError>> {
@@ -1044,11 +1058,17 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         if (isErr(overwritten)) return overwritten;
         if (overwritten.value === "lost") return ok({ changed });
       }
-      const dropped = await blobs.remove(row.key);
-      if (isErr(dropped)) return dropped;
       const fresh = newRow(item, size, decodable, ow, oh, framing);
-      const replanned = await db.updateOne<Variant>(VARIANTS, row.id, { key: fresh.key, format: fresh.format, spec: fresh.spec, width: fresh.width, height: fresh.height, bytes: 0, state: "planned", error: fresh.error, attempts: 0, updatedAt: now(), crop: fresh.crop, renderedCrop: "", originalWidth: fresh.originalWidth, originalHeight: fresh.originalHeight });
+      const replanned = await updateAsRead(row, { key: fresh.key, format: fresh.format, spec: fresh.spec, width: fresh.width, height: fresh.height, bytes: 0, state: "planned", error: fresh.error, attempts: 0, updatedAt: now(), crop: fresh.crop, renderedCrop: "", originalWidth: fresh.originalWidth, originalHeight: fresh.originalHeight });
       if (isErr(replanned)) return replanned;
+      if (replanned.value === null) {
+        const handed = await handBack(mediaId, false);
+        return isErr(handed) ? handed : ok({ changed });
+      }
+      if (row.key !== fresh.key) {
+        const dropped = await blobs.remove(row.key);
+        if (isErr(dropped)) return dropped;
+      }
       const current = await db.deleteMany(RETIRED, { slot: slotOf(mediaId, fileOf(replanned.value)) });
       if (isErr(current)) return current;
       toPlace.push(replanned.value);
@@ -1059,8 +1079,12 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const fresh = newRow(item, size, decodable, ow, oh, framing);
       const dimsPatch = { spec: fresh.spec, width: fresh.width, height: fresh.height, crop: fresh.crop, originalWidth: fresh.originalWidth, originalHeight: fresh.originalHeight, updatedAt: now() };
       const patch: Partial<Variant> = row.state === "planned" ? dimsPatch : decodable ? { ...dimsPatch, state: "pending", attempts: 0, error: null } : { ...dimsPatch, state: "failed", error: UNDECODABLE };
-      const updated = await db.updateOne<Variant>(VARIANTS, row.id, patch);
+      const updated = await updateAsRead(row, patch);
       if (isErr(updated)) return updated;
+      if (updated.value === null) {
+        const handed = await handBack(mediaId, false);
+        return isErr(handed) ? handed : ok({ changed });
+      }
       if (row.state === "planned") {
         toPlace.push(updated.value);
         changed = true;
@@ -1210,24 +1234,49 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (row.state === "failed") logger.error(`images: variant ${size.name} for media/${row.mediaId} gave up after ${row.attempts} attempts`, { mediaId: row.mediaId, size: size.name, error: row.error });
   }
 
-  async function recordFailure(row: Variant, size: Size, attempts: number, message: string): Promise<Result<Variant, KestrelError>> {
-    const recorded = await db.updateOne<Variant>(VARIANTS, row.id, failurePatch(row, attempts, message));
-    if (isErr(recorded)) return recorded;
+  async function recordFailure(row: Variant, size: Size, attempts: number, message: string): Promise<Result<Variant | null, KestrelError>> {
+    const recorded = await updateAsRead(row, failurePatch(row, attempts, message));
+    if (isErr(recorded) || recorded.value === null) return recorded;
     logFailure(recorded.value, size);
     return recorded;
   }
 
-  async function writeRender(lease: Lease, row: Variant, rendered: Rendered): Promise<Result<void, KestrelError>> {
+  async function writeRender(lease: Lease, row: Variant, rendered: Rendered, original: Original): Promise<Result<"written" | "lost", KestrelError>> {
     const previous = config.publicCopy !== undefined && row.bytes > 0 ? await blobs.get(row.key) : ok(null);
     if (isErr(previous)) return previous;
     const stored = await blobs.put(row.key, rendered.data, { contentType: rendered.contentType });
     if (isErr(stored)) return stored;
-    if (config.publicCopy === undefined) return ok(undefined);
+    if (config.publicCopy === undefined) return ok("written");
     const copied = await putCopy(lease.mediaId, fileOf(row), rendered.data, publicTypeOf(rendered.contentType));
-    if (!isErr(copied)) return ok(undefined);
+    if (!isErr(copied)) return ok("written");
+    const held = await wroteHeld(lease);
+    if (!isErr(held) && !held.value) return ok("lost");
     const restored = previous.value === null ? await blobs.remove(row.key) : await blobs.put(row.key, previous.value, { contentType: contentTypeOf(row.format) });
-    if (isErr(restored)) logger.error(`images: the earlier render of ${row.key} could not be put back after its public copy failed`, { mediaId: row.mediaId, error: restored.error.message });
+    const recopied = previous.value === null ? await putCopy(lease.mediaId, fileOf(row), original.data, original.publishedType) : await putCopy(lease.mediaId, fileOf(row), previous.value, publicTypeOf(contentTypeOf(row.format)));
+    const unrestored = isErr(restored) ? restored : isErr(recopied) ? recopied : null;
+    if (unrestored !== null) logger.error(`images: the earlier bytes of ${fileOf(row)} could not be put back after its public copy failed`, { mediaId: row.mediaId, error: unrestored.error.message });
+    const kept = await wroteHeld(lease);
+    if (!isErr(kept) && !kept.value) return ok("lost");
     return copied;
+  }
+
+  async function dropStaleRender(item: MediaFile, row: Variant, original: Original): Promise<Result<null, KestrelError>> {
+    const file = fileOf(row);
+    const owner = await ownerOf(item.id, file);
+    if (isErr(owner)) return owner;
+    if (owner.value.row !== null) {
+      const handed = await handBack(item.id, true);
+      return isErr(handed) ? handed : ok(null);
+    }
+    const droppedBlob = await blobs.remove(row.key);
+    if (isErr(droppedBlob)) return droppedBlob;
+    if (config.publicCopy === undefined) return ok(null);
+    if (owner.value.retired !== null) {
+      const put = await putCopy(item.id, file, original.data, original.publishedType);
+      return isErr(put) ? put : ok(null);
+    }
+    const droppedCopy = await blobs.remove(copyKey(item.id, file));
+    return isErr(droppedCopy) ? droppedCopy : ok(null);
   }
 
   async function renderVariant(lease: Lease, item: MediaFile, size: Size, row: Variant, original: Original, signals: RenderSignals): Promise<Result<Variant | null, KestrelError>> {
@@ -1239,16 +1288,20 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(may) || !may.value) return isErr(may) ? may : ok(null);
     signals.touch();
     const rendered = attempt.value;
-    const written = await writeRender(lease, row, rendered);
+    const written = await writeRender(lease, row, rendered, original);
+    if (!isErr(written) && written.value === "lost") return ok(null);
     if (isErr(written)) {
       const recorded = await recordFailure(row, size, attempts, written.error.message);
-      return isErr(recorded) ? recorded : err(written.error);
+      if (isErr(recorded)) return recorded;
+      if (recorded.value !== null) return err(written.error);
+      return dropStaleRender(item, row, original);
     }
     const kept = await wroteHeld(lease);
     if (isErr(kept) || !kept.value) return isErr(kept) ? kept : ok(null);
 
-    const committed = await db.updateOne<Variant>(VARIANTS, row.id, { state: "done", bytes: rendered.data.byteLength, attempts, error: null, updatedAt: now(), renderedCrop: cropOf(row) });
+    const committed = await updateAsRead(row, { state: "done", bytes: rendered.data.byteLength, attempts, error: null, updatedAt: now(), renderedCrop: cropOf(row) });
     if (isErr(committed)) return committed;
+    if (committed.value === null) return dropStaleRender(item, row, original);
     if (cropOf(row) !== renderedCropOf(row)) signals.recrop();
     return committed;
   }

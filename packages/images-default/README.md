@@ -255,10 +255,12 @@ A holder that stops (the process ends) leaves its lease until `staleAfterMs` has
 `images.resume` then takes it over and places and renders the item, and until that render is done the
 URL under the row's current `?v=` may answer the bytes the stopped holder left. A holder that stalls
 longer than `staleAfterMs` stops before its next write once another process has taken the item over.
-A single write that stalls that long can still land after the new holder's; the stalled holder
-notices when it finishes, marks the item, and every rendered size of the item renders again. Until
-then that path answers the stalled bytes, and a cache that fetched it meanwhile keeps them under the
-same `?v=`.
+It changes a variant row only while the row is still as it read it, so it never re-plans a row,
+records a failed attempt or marks a row `done` over what the new holder wrote. A single write of a
+path that stalls that long can still land after the new holder's; the stalled holder notices when
+it finishes, whether the write succeeded or failed, puts nothing back, marks the item, and every
+rendered size of the item renders again. Until then that path answers the stalled bytes, and a
+cache that fetched it meanwhile keeps them under the same `?v=`.
 
 `images.attach` adds `focus` (the rectangle or `null`), meant for anonymous readers, and
 `framing: { focus, crops, width, height, ratios }`, meant for an editor. `width` and `height` are the
@@ -309,12 +311,13 @@ job in the same instant share the same start, so only one job row is ever create
 
 Within one process, placing, rendering, `images.remove` and the public-copy sync's writes of one item
 run one at a time, so `images.remove` waits for a plan or a render of that item already in progress;
-a render stops after the size it is rendering once a remove of its item is waiting. Across processes the
-lease on the item (see "Focus and crop") lets one process place, render and write its public copies
-at a time. `images.remove` and `images.prune` take no lease: a plan or a render reads the media item
-through `media@1` again after its last write and, when the item stopped being ready meanwhile,
-removes everything it wrote, and a public copy written at a path a prune retired meanwhile gets the
-original's bytes again. Two planners of one item at once end with one row per size.
+a render stops after the size it is rendering once a remove of its item is waiting. Across processes
+the lease on the item (see "Focus and crop") lets one process place, render and write its public
+copies at a time. `images.remove` and `images.prune` take no lease: a plan or a render reads the
+media item through `media@1` again after its last write and, when the item stopped being ready
+meanwhile, removes everything it wrote, and a render or public copy written at a path a prune retired
+meanwhile leaves no bytes at the private path and the original's bytes in the public copy. Two
+planners of one item at once end with one row per size.
 
 `available` (on `images.attach`'s output) is `false` for an eligible image that has at least one size
 still `planned` (no object at its path yet), `true` once every size has one — including for a
@@ -369,22 +372,22 @@ would hold its slot for good and the sync job would never reach the next image. 
 whose render fails this way is left `planned`, not counted as an attempt, and handed to the
 background loop to place and render right after the request.
 
-**Repeated failure** is bounded by `maxAttempts`, and a rendered variant whose private blob or
-public copy cannot be written counts as a failed attempt too (a placement or a public-copy writer
-whose write fails answers the error and counts nothing). A render whose public copy cannot be
-written puts the earlier render back at the private path, or removes its bytes there when the path
-had none, so the origin and the public copy answer the same bytes under the row's `?v=`; the item
-keeps a request that `images.resume` serves. The last failure sets `state: "failed"` instead of
-`"error"`, and generate/sync/resume skip the variant from then on, so one broken
-original cannot burn the whole budget of the job forever. `images.serve` does not hide such a variant behind the
-original: for a size that has never rendered at its path it keeps answering with the original's bytes
-and type, marked `x-kestrel-variant: original`, exactly like a `pending` one; a size with an earlier
-render at the same path (a re-crop or a redefined size) keeps serving that render. A variant never
-404s once it has been placed.
-`images.readStatus` counts `failed` per size next to `done`/`pending`/`error`
-and adds `failed: { variants, recent }` — the totals over all sizes plus the twenty most recently
-failed variants with `mediaId`, `size`, `attempts`, `error` and `updatedAt`, which is what an admin
-UI shows.
+**Repeated failure** is bounded by `maxAttempts`, and a rendered variant whose private blob or public
+copy cannot be written counts as a failed attempt too (a placement or a public-copy writer whose
+write fails answers the error and counts nothing). A render whose public copy cannot be written, or
+whose check after writing it fails, puts the earlier render back at the private path and the public
+copy; when the path had none, it removes its bytes from the private path and writes the original's
+bytes to the public copy. The origin and the public copy then answer the same bytes under the row's
+`?v=`; the item keeps a request that `images.resume` serves. The last failure sets `state: "failed"`
+instead of `"error"`, and generate/sync/resume skip the variant from then on, so one broken original
+cannot burn the whole budget of the job forever. `images.serve` does not hide such a variant behind
+the original: for a size that has never rendered at its path it keeps answering with the original's
+bytes and type, marked `x-kestrel-variant: original`, exactly like a `pending` one; a size with an
+earlier render at the same path (a re-crop or a redefined size) keeps serving that render. A variant
+never 404s once it has been placed. `images.readStatus` counts `failed` per size next to
+`done`/`pending`/`error` and adds `failed: { variants, recent }` — the totals over all sizes plus the
+twenty most recently failed variants with `mediaId`, `size`, `attempts`, `error` and `updatedAt`,
+which is what an admin UI shows.
 
 **Getting out of it** is `images.retryFailed`: it sets every `failed` variant back to `pending` with
 `attempts: 0` — all of them, or one media item's with `params.id`/`payload.id` — and then does the
