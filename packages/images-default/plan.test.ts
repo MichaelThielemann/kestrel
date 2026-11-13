@@ -69,6 +69,18 @@ describe("plannedDimensions", () => {
   it("every value is at least 1", () => {
     expect(plannedDimensions({ name: "s", width: 2000, fit: "inside", format: "webp", quality: 82 }, 1, 1000)).toEqual({ width: 1, height: 1000 });
   });
+
+  it("cover with a crop: plans from the crop, so a crop smaller than the size gives a smaller variant of the same ratio", () => {
+    const cover: Size = { name: "s", width: 1600, height: 900, fit: "cover", format: "webp", quality: 82 };
+    expect(plannedDimensions(cover, 4000, 3000, { left: 0, top: 0, width: 3200, height: 1800 })).toEqual({ width: 1600, height: 900 });
+    expect(plannedDimensions(cover, 4000, 3000, { left: 100, top: 100, width: 800, height: 450 })).toEqual({ width: 800, height: 450 });
+    expect(plannedDimensions(cover, 4000, 3000, null)).toEqual(plannedDimensions(cover, 4000, 3000));
+  });
+
+  it("inside ignores a crop", () => {
+    const inside: Size = { name: "s", width: 1024, fit: "inside", format: "webp", quality: 82 };
+    expect(plannedDimensions(inside, 2000, 1000, { left: 0, top: 0, width: 500, height: 500 })).toEqual({ width: 1024, height: 512 });
+  });
 });
 
 describe("orientedOriginalDimensions", () => {

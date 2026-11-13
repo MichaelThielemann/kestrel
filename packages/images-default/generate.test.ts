@@ -158,6 +158,35 @@ describe("sharp cuts after rotate() in the coordinates of the oriented image", (
   });
 });
 
+describe("render with a crop", () => {
+  const cover: Size = { name: "tall", width: 50, height: 100, fit: "cover", format: "webp", quality: 90 };
+
+  it("cuts the crop from the oriented image of an orientation 6 jpeg, then resizes it to the planned dimensions", async () => {
+    const data = await storedQuadrantJpeg(6);
+    const red = await render(data, cover, { width: 50, height: 100, format: "webp", crop: orientedCells.topRight });
+    expect([red.width, red.height]).toEqual([50, 100]);
+    expect(isRed(await meanColour(red.data))).toBe(true);
+    const blue = await render(data, cover, { width: 50, height: 100, format: "webp", crop: orientedCells.topLeft });
+    expect(isBlue(await meanColour(blue.data))).toBe(true);
+  });
+
+  it("cuts the crop from the oriented image of an orientation 8 jpeg", async () => {
+    const data = await storedQuadrantJpeg(8);
+    const red = await render(data, cover, { width: 50, height: 100, format: "webp", crop: orientedCells.bottomLeft });
+    expect(isRed(await meanColour(red.data))).toBe(true);
+    const blue = await render(data, cover, { width: 50, height: 100, format: "webp", crop: orientedCells.bottomRight });
+    expect(isBlue(await meanColour(blue.data))).toBe(true);
+  });
+
+  it("without a crop, a cover size stays cut from the centre", async () => {
+    const data = await storedQuadrantJpeg(6);
+    const wide: Size = { name: "wide", width: 200, height: 100, fit: "cover", format: "webp", quality: 90 };
+    const centred = await render(data, wide, { width: 200, height: 100, format: "webp", crop: null });
+    expect(isBlue(await meanColour(centred.data))).toBe(false);
+    expect(isRed(await meanColour(centred.data))).toBe(false);
+  });
+});
+
 describe("render time limit", () => {
   it("stops a render that runs past the limit inside the image library", async () => {
     const side = 5000;

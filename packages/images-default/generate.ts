@@ -2,6 +2,7 @@ import sharp, { type FormatEnum } from "sharp";
 import type { MediaFilter } from "@michaelthielemann/kestrel-contracts/media";
 import { mediaTypeAllowed } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import type { PixelCrop } from "./framing.ts";
 import { extOf } from "./sizes.ts";
 import type { Size } from "./sizes.ts";
 
@@ -32,6 +33,8 @@ export interface Planned {
   width: number;
   height: number;
   format: string;
+  /** The region of the oriented original to cut before resizing; `null` or missing cuts a `cover` size from the centre. */
+  crop?: PixelCrop | null;
 }
 
 export interface RenderOptions {
@@ -41,13 +44,16 @@ export interface RenderOptions {
 
 export type Renderer = (data: Uint8Array, size: Size, planned: Planned, options?: RenderOptions) => Promise<Rendered>;
 
-/** Renders to exactly `planned.width`x`planned.height` in `planned.format`: the plan, not the decoder, decides the output shape. */
+/** Renders to exactly `planned.width`x`planned.height` in `planned.format`: the plan, not the decoder, decides the output shape. A `planned.crop` is cut from the oriented original first, then stretched to the planned dimensions. */
 export async function render(data: Uint8Array, size: Size, planned: Planned, options: RenderOptions = {}): Promise<Rendered> {
   const decoder = sharp(data, { failOn: "error" });
   const limited = options.timeoutSeconds === undefined ? decoder : decoder.timeout({ seconds: options.timeoutSeconds });
-  const pipeline = limited
-    .rotate()
-    .resize({ width: planned.width, height: planned.height, fit: size.fit === "cover" ? "cover" : "fill" });
+  const oriented = limited.rotate();
+  const crop = planned.crop ?? null;
+  const pipeline =
+    crop === null
+      ? oriented.resize({ width: planned.width, height: planned.height, fit: size.fit === "cover" ? "cover" : "fill" })
+      : oriented.extract(crop).resize({ width: planned.width, height: planned.height, fit: "fill" });
   const output = size.format === "webp" ? pipeline.webp({ quality: size.quality }) : pipeline.toFormat(boundaryCast<keyof FormatEnum>(planned.format, "host"));
   const { data: buffer, info } = await output.toBuffer({ resolveWithObject: true });
   const format = info.format;

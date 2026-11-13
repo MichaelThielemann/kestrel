@@ -1,5 +1,6 @@
 import sharp from "sharp";
 import { mediaTypeEssence } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
+import type { PixelCrop } from "./framing.ts";
 import { extOf } from "./sizes.ts";
 import type { Size } from "./sizes.ts";
 
@@ -20,8 +21,8 @@ export function plannedExt(size: Size, contentType: string): string {
   return extOf(size, plannedFormat(size, contentType));
 }
 
-/** Width and height a size renders to, from the oriented original's dimensions; never enlarges, always at least 1px. */
-export function plannedDimensions(size: Size, ow: number, oh: number): { width: number; height: number } {
+/** Width and height a size renders to, from the oriented original's dimensions, or for a `cover` size from its crop; never enlarges, always at least 1px. */
+export function plannedDimensions(size: Size, ow: number, oh: number, crop?: PixelCrop | null): { width: number; height: number } {
   if (size.fit === "inside") {
     if (size.height === undefined) {
       const w = Math.min(size.width, ow);
@@ -32,7 +33,9 @@ export function plannedDimensions(size: Size, ow: number, oh: number): { width: 
     return { width: Math.max(1, Math.round(ow * s)), height: Math.max(1, Math.round(oh * s)) };
   }
   const targetHeight = size.height ?? size.width;
-  const k = Math.min(1, ow / size.width, oh / targetHeight);
+  const sw = crop?.width ?? ow;
+  const sh = crop?.height ?? oh;
+  const k = Math.min(1, sw / size.width, sh / targetHeight);
   return { width: Math.max(1, Math.round(size.width * k)), height: Math.max(1, Math.round(targetHeight * k)) };
 }
 
