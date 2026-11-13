@@ -258,6 +258,16 @@ describe("generate step", () => {
     expect(result.variants).toHaveLength(5);
   });
 
+  it("answers variant rows with exactly the fields its output declares", async () => {
+    const { images, media, steps } = await make();
+    addImage(media, "a", await jpeg(400, 300));
+    const ctx = expectOk(await steps.generate(fakeCtx({ params: { id: "a" } })));
+    const variants = boundaryCast<{ variants: Array<Record<string, unknown>> }>(ctx.result, "host").variants;
+    const output = boundaryCast<{ oneOf: Array<{ properties: { variants?: { items: { properties: Record<string, unknown> } } } }> }>(module.describe!(images).generate.output, "host");
+    const declared = Object.keys(output.oneOf[0]!.properties.variants!.items.properties).sort();
+    for (const variant of variants) expect(Object.keys(variant).sort()).toEqual(declared);
+  });
+
   it("answers VALIDATION without a media id", async () => {
     const { steps } = await make();
     expectErr(await steps.generate(fakeCtx()), "VALIDATION");
