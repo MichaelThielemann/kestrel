@@ -18,6 +18,17 @@ way. When either this module or `replication-sqlite` restores the file, it write
 on the same file, recognizes a matching value as "this boot already restored the file" and skips
 its own check — neither module has to know the other exists. A sidecar from an earlier boot is
 ignored and simply overwritten on the next restore.
+
+`backup.checkRestored` tells the rest of a pipeline whether the file was restored in this boot: it adds
+`_databaseRestored` to the result, `true` when the sidecar names this boot (whichever of the two modules
+restored the file) and `false` otherwise. The member is a shared
+convention: `replication.checkRestored` writes the same one, and a step that keeps output derived from the
+database reads it, as `delivery.checkBuild` of delivery-static does to render every page again after a
+restore. Put the step first in the pipeline that runs that check at boot, for example
+`["backup.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`, and only when `file` is the
+database. Only a restore one of the two modules performs is signalled; a file copied into place by hand is
+not.
+
 `versions` (default 24) keeps timestamped copies `<key>.<iso-time>` next to the latest one and
 prunes older ones; `backup.restore` takes an optional `key` from the payload to restore a specific
 version, `backup.listVersions` lists them.
@@ -38,6 +49,7 @@ filesystem failure – a boot error, not a request.
 
 | Step | reads | writes | errors |
 |---|---|---|---|
+| `backup.checkRestored` | – | `result._databaseRestored` | – |
 | `backup.run` | – | `result` | `TRANSIENT` |
 | `backup.restore` | – | `result` | `VALIDATION`, `NOT_FOUND`, `TRANSIENT` |
 | `backup.listVersions` | – | `result` | `TRANSIENT` |
@@ -60,6 +72,7 @@ Not included: continuous replication (see `replication-sqlite`), restore without
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
+| `backup.checkRestored` | Whether this module or another one restored the file in this boot (adds `_databaseRestored` to the result) | – | `result._databaseRestored` | – | { _databaseRestored: boolean, … } | – | – | no |
 | `backup.run` | Back up the file | – | `result` | – | { key: string, size: number, versions: string[], … } | – | – | no |
 | `backup.restore` | Stage the latest or a chosen version next to the file; applied on the next start | – | `result` | { key?: string } | { key: string, size: number, file: string, pending: true, appliedOnRestart: true, … } | 400 unknown version; 404 no backup | – | no |
 | `backup.listVersions` | List backup versions | – | `result` | – | { versions: string[], … } | – | – | no |

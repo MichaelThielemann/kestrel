@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import type { Step } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
@@ -41,8 +42,9 @@ function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; c
   };
 }
 
-function moduleDeps(blobs: Blobstore, root: string): Deps {
+function moduleDeps(blobs: Blobstore, root: string, bootStartedAt?: number): Deps {
   return {
+    ...(bootStartedAt === undefined ? {} : { bootStartedAt }),
     get<T>(contract: Contract<T>): T {
       if (contract.name !== BLOBSTORE.name) throw new Error(`no provider for "${contract.name}"`);
       return boundaryCast<T>(blobs, "host");
@@ -112,5 +114,41 @@ describe("backup/blobstore module via runPipeline", () => {
     const result = await runPipeline(pipeline, { body: { key: "backups/db", nope: true } }, { modules: [{ module, instance }] });
     expect(result.status).toBe(400);
     expect(result.code).toBe("VALIDATION");
+  });
+});
+
+function writeResult(result: unknown): Step {
+  return async (ctx) => ok({ ...ctx, result });
+}
+
+describe("backup/blobstore checkRestored", () => {
+  async function restored(instance: Backup): Promise<unknown> {
+    const run = await runPipeline(definePipeline({ name: "checkRestored", steps: ["backup.checkRestored"] }), {}, { modules: [{ module, instance }] });
+    expect(run.status).toBe(200);
+    return boundaryCast<Record<string, unknown>>(run.result, "host")._databaseRestored;
+  }
+
+  it("answers true in the boot that restored the file, and false in every later boot and in a second process on the same file", async () => {
+    const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "kestrel-backup-restored-"));
+    dirs.push(dir);
+    const file = join(dir, "kestrel.db");
+    const blobs = fakeBlobstore();
+    blobs.blobs.set("backups/db", { data: new TextEncoder().encode("hello"), contentType: "application/octet-stream" });
+    const config = configSchema.parse({ file, key: "backups/db" });
+    const start = async (): Promise<Backup> => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return boundaryCast<Backup>(await module.setup(config, moduleDeps(blobs, dir, Date.now())), "host");
+    };
+    const restoring = await start();
+    expect(await restored(restoring)).toBe(true);
+    expect(await restored(restoring)).toBe(true);
+    expect(await restored(await start())).toBe(false);
+    expect(await restored(await start())).toBe(false);
+  });
+
+  it("keeps the other members of the result", async () => {
+    const instance = await boot();
+    const run = await runPipeline(definePipeline({ name: "checkRestored", steps: ["test.earlier", "backup.checkRestored"] }), {}, { modules: [{ module, instance }], steps: { "test.earlier": writeResult({ kept: 1 }) }, writes: { "test.earlier": ["result"] } });
+    expect(run.result).toEqual({ kept: 1, _databaseRestored: false });
   });
 });

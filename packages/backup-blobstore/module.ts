@@ -5,7 +5,7 @@ import { first, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { applyPendingRestore, createBackupBlobstore, exists, type Backup } from "./impl.ts";
-import { checkSkippedRestore, markRestoredThisBoot } from "./restoreFreshness.ts";
+import { checkSkippedRestore, markRestoredThisBoot, restoredThisBoot } from "./restoreFreshness.ts";
 
 export const configSchema = z
   .object({
@@ -17,6 +17,12 @@ export const configSchema = z
   })
   .strict();
 
+type BackupInstance = Backup & { restoredThisBoot: () => boolean };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export default defineModule({
   name: "backup/blobstore",
   provides: [],
@@ -24,7 +30,7 @@ export default defineModule({
   before: [PERSISTENCE],
   configSchema,
 
-  async setup(cfg, deps): Promise<Backup> {
+  async setup(cfg, deps): Promise<BackupInstance> {
     const blobs = deps.get(BLOBSTORE);
     const bootStartedAt = deps.bootStartedAt ?? Date.now();
     const applied = await applyPendingRestore(cfg.file);
@@ -40,10 +46,14 @@ export default defineModule({
         if (result.restored) markRestoredThisBoot(cfg.file, bootStartedAt);
       }
     }
-    return backup;
+    return { ...backup, restoredThisBoot: () => restoredThisBoot(cfg.file, bootStartedAt) };
   },
 
   steps: (backup) => ({
+    checkRestored: async (ctx: Context) => {
+      const previous = isRecord(ctx.result) ? ctx.result : {};
+      return ok({ ...ctx, result: { ...previous, _databaseRestored: backup.restoredThisBoot() } });
+    },
     run: async (ctx: Context) => {
       const result = await backup.backup();
       if (isErr(result)) return ctx.fail(result.error);
@@ -68,6 +78,12 @@ export default defineModule({
   }),
 
   describe: () => ({
+    checkRestored: {
+      summary: "Whether this module or another one restored the file in this boot (adds `_databaseRestored` to the result)",
+      reads: [],
+      writes: ["result._databaseRestored"],
+      extendsOutput: { type: "object", properties: { _databaseRestored: { type: "boolean" } }, required: ["_databaseRestored"] },
+    },
     run: { summary: "Back up the file", reads: [], writes: ["result"], output: { type: "object", properties: { key: { type: "string" }, size: { type: "number" }, versions: { type: "array", items: { type: "string" } } }, required: ["key", "size", "versions"] } },
     restore: {
       summary: "Stage the latest or a chosen version next to the file; applied on the next start",
