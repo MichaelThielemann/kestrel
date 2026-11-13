@@ -577,11 +577,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const mediaId = lease.mediaId;
     const media = await readMedia(mediaId);
     if (isErr(media)) return media;
-    if (media.value === null) {
-      const removed = await removeVariants(mediaId);
-      return isErr(removed) ? removed : ok(undefined);
-    }
-    if (!eligible(media.value.contentType)) return ok(undefined);
+    if (media.value === null || !eligible(media.value.contentType)) return ok(undefined);
     if (lease.redo) {
       const requeued = await db.updateMany<Variant>(VARIANTS, { mediaId, state: "done", size: { in: effective.map((size) => size.name) } }, { state: "pending", attempts: 0, error: null, updatedAt: now() });
       if (isErr(requeued)) return requeued;
@@ -711,18 +707,15 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       return isErr(removed) ? removed : ok(undefined);
     }
     const fields = { focus: framing.focus, crops: framing.crops, width, height, updatedAt: now() };
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const found = await db.findOne<FramingRow>(FRAMING, { mediaId });
-      if (isErr(found)) return found;
-      if (found.value !== null) {
-        const updated = await db.updateOne<FramingRow>(FRAMING, found.value.id, fields);
-        return isErr(updated) ? updated : ok(undefined);
-      }
-      const created = await db.createOne<FramingRow>(FRAMING, { mediaId, ...fields });
-      if (!isErr(created)) return ok(undefined);
-      if (created.error.code !== "CONFLICT") return created;
+    const found = await db.findOne<FramingRow>(FRAMING, { mediaId });
+    if (isErr(found)) return found;
+    if (found.value !== null) {
+      const updated = await db.updateOne<FramingRow>(FRAMING, found.value.id, fields);
+      return isErr(updated) ? updated : ok(undefined);
     }
-    return err(failure("TRANSIENT", `images: the framing of media/${mediaId} was written by another process at the same time – set it again`));
+    const created = await db.createOne<FramingRow>(FRAMING, { mediaId, ...fields });
+    if (!isErr(created)) return ok(undefined);
+    return created.error.code === "CONFLICT" ? err(failure("TRANSIENT", `images: the framing of media/${mediaId} was written by another process at the same time – set it again`)) : created;
   }
 
   async function framingsOf(mediaIds: string[]): Promise<Result<Map<string, FramingView>, KestrelError>> {
@@ -845,20 +838,12 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok({ data: original.value.data, contentType: original.value.publishedType, rendered: false });
   }
 
-  async function keepCopyOwned(lease: Lease, file: string, wroteRow: boolean): Promise<Result<boolean, KestrelError>> {
-    const mediaId = lease.mediaId;
+  async function keepCopyOwned(mediaId: string, file: string): Promise<Result<boolean, KestrelError>> {
     const media = await readMedia(mediaId);
     if (isErr(media)) return media;
     const owner = await ownerOf(mediaId, file);
     if (isErr(owner)) return owner;
-    if (media.value !== null && owner.value.row !== null) return ok(true);
-    if (media.value !== null && owner.value.retired !== null) {
-      if (!wroteRow) return ok(true);
-      const original = await contentFor(media.value, null);
-      if (isErr(original) || original.value === null) return isErr(original) ? original : ok(true);
-      const put = await putCopyHeld(lease, file, original.value.data, original.value.contentType);
-      return isErr(put) ? put : ok(put.value === true);
-    }
+    if (media.value !== null && (owner.value.row !== null || owner.value.retired !== null)) return ok(true);
     const undone = await blobs.remove(copyKey(mediaId, file));
     return isErr(undone) ? undone : ok(false);
   }
@@ -868,7 +853,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(content) || content.value === null) return isErr(content) ? content : ok("missing");
     const put = await putCopyHeld(lease, fileOf(row), content.value.data, content.value.contentType);
     if (isErr(put) || put.value !== true) return isErr(put) ? put : ok("skipped");
-    const kept = await keepCopyOwned(lease, fileOf(row), true);
+    const kept = await keepCopyOwned(lease.mediaId, fileOf(row));
     return isErr(kept) ? kept : ok(kept.value ? "written" : "skipped");
   }
 
@@ -881,7 +866,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(original) || original.value === null) return isErr(original) ? original : ok("missing");
     const put = await putCopyHeld(lease, file, original.value.data, original.value.contentType);
     if (isErr(put) || put.value !== true) return isErr(put) ? put : ok("skipped");
-    const kept = await keepCopyOwned(lease, file, false);
+    const kept = await keepCopyOwned(lease.mediaId, file);
     return isErr(kept) ? kept : ok(kept.value ? "written" : "skipped");
   }
 
@@ -1056,7 +1041,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (config.publicCopy !== undefined) {
         const overwritten = await putCopyHeld(lease, oldFile, original.data, original.publishedType);
         if (isErr(overwritten)) return overwritten;
-        if (overwritten.value === "lost") return ok({ changed });
       }
       const fresh = newRow(item, size, decodable, ow, oh, framing);
       const replanned = await updateAsRead(row, { key: fresh.key, format: fresh.format, spec: fresh.spec, width: fresh.width, height: fresh.height, bytes: 0, state: "planned", error: fresh.error, attempts: 0, updatedAt: now(), crop: fresh.crop, renderedCrop: "", originalWidth: fresh.originalWidth, originalHeight: fresh.originalHeight });
@@ -1157,7 +1141,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const { touch } = signals;
     const stored = await rowsOfItem(mediaId);
     if (isErr(stored)) return stored;
-    let byName = stored.value;
+    const byName = stored.value;
 
     let original: Original | null = null;
     const missing = effective.filter((size) => !byName.has(size.name));
@@ -1173,15 +1157,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const framed = await readFraming(mediaId);
       if (isErr(framed)) return framed;
       const created = await db.createMany<Variant>(VARIANTS, missing.map((size) => newRow(item, size, decodable, ow, oh, framed.value)));
-      if (isErr(created)) {
-        if (created.error.code !== "CONFLICT") return created;
-        const reread = await rowsOfItem(mediaId);
-        if (isErr(reread)) return reread;
-        byName = reread.value;
-      } else {
-        touch();
-        for (const row of created.value) byName.set(row.size, row);
-      }
+      if (isErr(created)) return created;
+      touch();
+      for (const row of created.value) byName.set(row.size, row);
       if (!decodable) {
         schedulePlacement(mediaId);
         return ok(effective.flatMap((size) => byName.get(size.name) ?? []));
