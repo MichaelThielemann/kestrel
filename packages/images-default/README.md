@@ -88,9 +88,10 @@ Steps: `images.register` (`VALIDATION` on an empty or malformed list, `CONFLICT`
 collision), `images.listSizes`, `images.plan` (id from params/payload/event; places without
 rendering), `images.generate` (id from params/payload/event; `VALIDATION` without an id, `NOT_FOUND`
 for an id `media@1` does not report as ready), `images.sync` (`CONFLICT` while a fresh job runs), `images.resume` (cron: also
-places and renders any item whose lease ran out or that has a request left open, with a row that
-already had a render at its path and was left `pending` for longer than `staleAfterMs`, with a row
-still `planned`, and any recent item with no rows at all; `CONFLICT` once `close()` has begun), `images.retryFailed`
+places and renders any item whose lease ran out, with a request left open for longer than
+`staleAfterMs`, with a row that already had a render at its path and was left `pending` for longer
+than `staleAfterMs`, with a row left `planned` for longer than `staleAfterMs`, and any recent item
+with no rows at all; `CONFLICT` once `close()` has begun), `images.retryFailed`
 (`NOT_FOUND` for an id `media@1` does not report as ready), `images.prune` (`VALIDATION` for a name that is still declared or
 has no variants; retires rather than deletes the path), `images.readStatus`, `images.remove`
 (`VALIDATION` without an id), `images.removeMany` (after `media.listFolderItems` or
