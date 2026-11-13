@@ -194,6 +194,14 @@ export function persistenceContractTests(make: () => Promise<Persistence>) {
       expect(page.items.map((d) => d.name)).toEqual(["Beta", "Zulu", "alpha", "apple"]);
     });
 
+    it("findMany orders strings by their UTF-8 bytes, so a character beyond U+FFFF follows U+FFFF", async () => {
+      expectOk(await db.createMany<Document>("things", [{ id: "1", name: "\u{1F600}" }, { id: "2", name: "�" }, { id: "3", name: "z" }, { id: "4", name: "�\u{1F600}" }]));
+      const page = expectOk(await db.findMany<Thing>("things", {}, { sort: { name: "asc" } }));
+      expect(page.items.map((d) => d.id)).toEqual(["3", "2", "4", "1"]);
+      const above = expectOk(await db.findMany<Thing>("things", { name: { gt: "�" } }, { sort: { name: "asc" } }));
+      expect(above.items.map((d) => d.id)).toEqual(["4", "1"]);
+    });
+
     it("findMany sorts null fields first ascending and last descending", async () => {
       expectOk(await seed());
       expectOk(await db.createOne<Document>("things", { id: "d", name: "delta" }));

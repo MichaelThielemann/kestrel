@@ -58,9 +58,15 @@ function sqlText(column: Column, value: SqlValue): string | null {
   return column === "number" && typeof value === "number" ? realText(value) : String(value);
 }
 
+const SURROGATE = /[\uD800-\uDFFF]/;
+
 function compare(a: SqlValue, b: SqlValue): number {
   if (typeof a === "number" && typeof b === "number") return a === b ? 0 : a < b ? -1 : 1;
-  return Buffer.compare(Buffer.from(String(a)), Buffer.from(String(b)));
+  const x = String(a);
+  const y = String(b);
+  if (x === y) return 0;
+  if (SURROGATE.test(x) || SURROGATE.test(y)) return Buffer.compare(Buffer.from(x), Buffer.from(y));
+  return x < y ? -1 : 1;
 }
 
 function compareNullable(a: SqlValue, b: SqlValue): number {

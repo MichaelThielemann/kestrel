@@ -1404,6 +1404,9 @@ Net changes since 5.8.1.
 
 ### Changed
 
+- `contracts`: the testing fake `fakePersistence` compares two strings without converting them to
+  buffers unless one holds a surrogate, so filters and sorts over a few hundred rows run several times
+  faster. The order stays the UTF-8 byte order that SQLite's binary collation uses.
 - `kestrel-h3` answers a request body it could not read (closed connection, request timeout, other read
   error) itself with 400 or 408 and an `http` line, instead of rethrowing to the host's error handler,
   as the core server does.
