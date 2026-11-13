@@ -62,9 +62,36 @@ interface Unwrapped {
   description?: string;
 }
 
-/** True when `value` is a schema built with zod 4, the only kind whose definitions kestrel reads. */
+const MIN_ZOD: readonly [number, number, number] = [4, 6, 6];
+
+function zodVersionOf(internals: unknown): [number, number, number] | undefined {
+  const version: unknown = typeof internals === "object" && internals !== null ? Reflect.get(internals, "version") : undefined;
+  if (typeof version !== "object" || version === null) return undefined;
+  const major: unknown = Reflect.get(version, "major");
+  const minor: unknown = Reflect.get(version, "minor");
+  const patch: unknown = Reflect.get(version, "patch");
+  return typeof major === "number" && typeof minor === "number" && typeof patch === "number" ? [major, minor, patch] : undefined;
+}
+
+/**
+ * Why kestrel cannot read `value` as a module config schema, or `undefined` when it can: a schema
+ * built with zod 4.6.6 or a later 4.x. A zod 3 schema, one from an older zod 4 copy such as zod 3.25's
+ * `zod/v4` (which reports 4.0.0) and one from another major keep their descriptions, and with them
+ * the `"secret"` marks, where kestrel cannot see them.
+ */
+export function zodSchemaProblem(value: unknown): string | undefined {
+  const internals: unknown = typeof value === "object" && value !== null ? Reflect.get(value, "_zod") : undefined;
+  if (internals === undefined) return "configSchema is not a zod 4 schema";
+  const version = zodVersionOf(internals);
+  if (version === undefined) return "configSchema was built with a zod copy that reports no version";
+  const [major, minor, patch] = version;
+  const atLeast = major === MIN_ZOD[0] && (minor - MIN_ZOD[1] || patch - MIN_ZOD[2]) >= 0;
+  return atLeast ? undefined : `configSchema was built with zod ${major}.${minor}.${patch}`;
+}
+
+/** True when `value` is a schema built with zod 4.6.6 or a later 4.x, the only kind whose definitions kestrel reads. */
 export function isZod4Schema(value: unknown): boolean {
-  return typeof value === "object" && value !== null && "_zod" in value;
+  return zodSchemaProblem(value) === undefined;
 }
 
 const def = (schema: Schema): Def => boundaryCast<core.$ZodTypes>(schema, "host")._zod.def;

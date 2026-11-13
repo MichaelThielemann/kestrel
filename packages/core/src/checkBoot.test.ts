@@ -198,6 +198,18 @@ describe("checkBoot: collecting every problem", () => {
     await expect(boot(input)).rejects.toMatchObject({ code: "invalid-config-schema", module: "legacy/store" });
   });
 
+  it("reports a config schema from a zod copy older than 4.6.6, such as zod 3.25's zod/v4, with the version it found", async () => {
+    const olderCopy = z.object({ licence: z.string().describe("secret"), endpoint: z.string() });
+    Object.defineProperty(olderCopy._zod, "version", { value: { major: 4, minor: 0, patch: 0 } });
+    const older = defineModule({ name: "older/store", provides: [], requires: [], configSchema: olderCopy, setup: async () => ({}) });
+    const input: BootInput = { config: { modules: [{ use: "./older-store", config: { licence: "older-copy-licence", endpoint: "https://example.org" } }], triggers: [], http: null }, modules: [older], pipelines: [], logger: silentLogger };
+    const check = await checkBoot(input, { setup: "all" });
+    expect(check.errors).toEqual([{ code: "invalid-config-schema", owner: "older/store", module: "older/store", reason: "configSchema was built with zod 4.0.0; the module must depend on zod ^4.6.6" }]);
+    expect(check.notChecked).toContainEqual({ kind: "module", name: "older/store", because: "configSchema was built with zod 4.0.0" });
+    expect(JSON.stringify(check.manifest)).not.toContain("older-copy-licence");
+    await expect(boot(input)).rejects.toMatchObject({ code: "invalid-config-schema", module: "older/store" });
+  });
+
   it("setup: none runs no module code and reports every module as not checked", async () => {
     const setupSpy = vi.fn(async () => ({ ping: () => "pong" }));
     const good = { ...goodProvider(), setup: setupSpy };

@@ -23,8 +23,9 @@ Net changes since 5.8.1.
   project's `zod` range, `zod/record-key` inserts the key schema, `zod/object-default` renames such
   a `.default` to `.prefault` and `zod/describe-order` moves a `.describe()` after the object methods
   that follow it; `types/breaking-signatures` names the schema type. A module whose `configSchema`
-  is not a zod 4 schema, such as one from a package that still depends on zod 3, fails boot with the
-  new problem code `invalid-config-schema`, naming that module, before its config is parsed.
+  was not built with zod 4.6.6 or a later 4.x, such as one from a package that still depends on zod 3
+  or imports zod 3.25's `zod/v4`, fails boot with the new problem code `invalid-config-schema`, naming
+  that module and the zod version its schema reports, before its config is parsed.
 - An `invalid config: …` or `invalid kestrel.config: …` boot error carries zod 4's messages: a missing
   key reads `Invalid input: expected string, received undefined` (was `Required`), an unknown key
   `Unrecognized key: "name"` (was `Unrecognized key(s) in object: 'name'`). A secret path reports

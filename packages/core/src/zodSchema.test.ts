@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z, type core } from "zod";
 import { boundaryCast } from "./cast.ts";
-import { describeConfig, describeConfigIssue, effectiveModuleConfig, mergeConfigDefaults, toJsonSchema } from "./zodSchema.ts";
+import { describeConfig, describeConfigIssue, effectiveModuleConfig, isZod4Schema, mergeConfigDefaults, toJsonSchema } from "./zodSchema.ts";
 
 const schema = z
   .object({
@@ -637,5 +637,33 @@ describe("fields made required by .required() or .nonoptional()", () => {
     const result = required.safeParse({ host: "smtp.example.org" });
     const lines = result.success ? [] : result.error.issues.map((issue) => describeConfigIssue(required, issue));
     expect(lines).toEqual(["stripe: invalid_type", "port: Invalid input: expected number, received undefined"]);
+  });
+});
+
+describe("isZod4Schema", () => {
+  const withVersion = (version: unknown): z.ZodString => {
+    const schema = z.string();
+    Object.defineProperty(schema._zod, "version", { value: version });
+    return schema;
+  };
+
+  it("accepts a schema of the zod copy kestrel reads, at 4.6.6 or later within major 4", () => {
+    expect(isZod4Schema(z.object({}))).toBe(true);
+    expect(isZod4Schema(withVersion({ major: 4, minor: 6, patch: 6 }))).toBe(true);
+    expect(isZod4Schema(withVersion({ major: 4, minor: 7, patch: 0 }))).toBe(true);
+  });
+
+  it("refuses a zod 3 schema, a zod 4 copy below 4.6.6, another major and a schema without a version", () => {
+    expect(isZod4Schema({ _def: { typeName: "ZodObject" } })).toBe(false);
+    expect(isZod4Schema(withVersion({ major: 4, minor: 0, patch: 0 }))).toBe(false);
+    expect(isZod4Schema(withVersion({ major: 4, minor: 6, patch: 5 }))).toBe(false);
+    expect(isZod4Schema(withVersion({ major: 5, minor: 0, patch: 0 }))).toBe(false);
+    expect(isZod4Schema(withVersion(undefined))).toBe(false);
+  });
+
+  it("describes a schema from a zod copy below 4.6.6 as empty instead of reading it without its secret marks", () => {
+    const older = z.object({ licence: z.string().describe("secret") });
+    Object.defineProperty(older._zod, "version", { value: { major: 4, minor: 0, patch: 0 } });
+    expect(describeConfig(older, { licence: "older-copy-licence" })).toEqual({ schema: {}, variables: [] });
   });
 });

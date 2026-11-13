@@ -19,7 +19,7 @@ import { ok } from "./result.ts";
 import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
 import { collectSink, throwSink, type BootProblem, type Sink } from "./sink.ts";
 import { CONTEXT_KEYS, satisfied, stripOptional, writeRoot } from "./writes.ts";
-import { describeConfigIssue, effectiveModuleConfig, isZod4Schema, type ConfigDefaults } from "./zodSchema.ts";
+import { describeConfigIssue, effectiveModuleConfig, zodSchemaProblem, type ConfigDefaults } from "./zodSchema.ts";
 import { sortModules } from "./sort.ts";
 import { createCronEntry, startCron, type CronEntry } from "./triggers/cron.ts";
 import { createAllowlist } from "./triggers/allowlist.ts";
@@ -456,9 +456,10 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
 
   for (const mod of ordered) {
     if (notSetUp.has(mod)) continue;
-    if (!isZod4Schema(mod.configSchema)) {
-      sink.fail("invalid-config-schema", mod.name, "configSchema is not a zod 4 schema; the module must depend on zod ^4.6.6");
-      markNotSetUp(notSetUp, mod, "configSchema is not a zod 4 schema");
+    const schemaProblem = zodSchemaProblem(mod.configSchema);
+    if (schemaProblem !== undefined) {
+      sink.fail("invalid-config-schema", mod.name, `${schemaProblem}; the module must depend on zod ^4.6.6`);
+      markNotSetUp(notSetUp, mod, schemaProblem);
       continue;
     }
     const defaults = defaultsByModule.get(mod);
