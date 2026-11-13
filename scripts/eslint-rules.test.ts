@@ -39,17 +39,7 @@ const expectations: Expectation[] = [
 const fixtureProjectService: Linter.Config = {
   files: ["**/*.ts"],
   languageOptions: {
-    parserOptions: {
-      projectService: {
-        allowDefaultProject: [
-          "test-fixtures/eslint/casts/*.ts",
-          "test-fixtures/eslint/packages/*/*.ts",
-          "test-fixtures/eslint/packages/*/src/*.ts",
-          "test-fixtures/eslint/examples/*/pipelines/*.ts",
-        ],
-        maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 100,
-      },
-    },
+    parserOptions: { projectService: true, tsconfigRootDir: fixturesRoot },
   },
 };
 
