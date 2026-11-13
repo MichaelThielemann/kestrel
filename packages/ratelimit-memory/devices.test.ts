@@ -49,7 +49,7 @@ describe("device cookies", () => {
     const forged = (v: string) => ({ cookie: `${name}=${v}` });
     expect(cookies.verify(forged(`${Number(expires) + 1000}.${nonce}.${signature}`), "account")).toBeUndefined();
     expect(cookies.verify(forged(`${expires}.${"A".repeat(22)}.${signature}`), "account")).toBeUndefined();
-    expect(cookies.verify(forged(`${expires}.${nonce}.${signature.slice(0, -2)}AA`), "account")).toBeUndefined();
+    expect(cookies.verify(forged(`${expires}.${nonce}.${signature.startsWith("A") ? "B" : "A"}${signature.slice(1)}`), "account")).toBeUndefined();
     expect(cookies.verify(forged(`${expires}.${nonce}.${signature}.x`), "account")).toBeUndefined();
     const other = createDeviceCookies({ secretKey: OTHER_KEY, maxAgeSeconds: 60, secure: true });
     expect(other.verify(forged(value), "account")).toBeUndefined();
