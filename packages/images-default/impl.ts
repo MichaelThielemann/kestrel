@@ -1311,9 +1311,13 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const copied = await putCopy(lease.mediaId, fileOf(row), rendered.data, publicTypeOf(rendered.contentType));
     if (!isErr(copied)) return ok("written");
     const restored = previous.value === null ? await blobs.remove(row.key) : await blobs.put(row.key, previous.value, { contentType: contentTypeOf(row.format) });
-    const recopied = previous.value === null ? await putCopy(lease.mediaId, fileOf(row), original.data, original.publishedType) : await putCopy(lease.mediaId, fileOf(row), previous.value, publicTypeOf(contentTypeOf(row.format)));
-    const unrestored = isErr(restored) ? restored : isErr(recopied) ? recopied : null;
-    if (unrestored !== null) logger.error(`images: the earlier bytes of ${fileOf(row)} could not be put back after its public copy failed`, { mediaId: row.mediaId, error: unrestored.error.message });
+    const recopied = isErr(restored)
+      ? await putCopy(lease.mediaId, fileOf(row), rendered.data, publicTypeOf(rendered.contentType))
+      : previous.value === null
+        ? await putCopy(lease.mediaId, fileOf(row), original.data, original.publishedType)
+        : await putCopy(lease.mediaId, fileOf(row), previous.value, publicTypeOf(contentTypeOf(row.format)));
+    if (isErr(restored)) logger.error(`images: the earlier bytes of ${fileOf(row)} could not be put back after its public copy failed`, { mediaId: row.mediaId, error: restored.error.message });
+    if (isErr(recopied)) logger.error(`images: the public copy of ${fileOf(row)} could not be written after its first write failed`, { mediaId: row.mediaId, error: recopied.error.message });
     const kept = await wroteHeld(lease);
     if (!isErr(kept) && !kept.value) return ok("lost");
     return isErr(restored) ? ok({ landed: copied.error }) : err(copied.error);

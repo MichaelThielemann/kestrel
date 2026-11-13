@@ -404,6 +404,67 @@ describe("images/default variants[].crop in images.attach", () => {
     for (const open of [first, images]) await open.close();
   });
 
+  it("writes the render left at the path to the public copy once the copy store accepts it again, so origin and copy answer the listed crop", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.setFraming("m1", RIGHT_CROP));
+    expectOk(await first.generate("m1"));
+    expectOk(await first.setFraming("m1", LEFT_CROP));
+
+    let copyFailures = 1;
+    let variantPuts = 0;
+    const broken: Blobstore = {
+      ...w.blobs,
+      put: async (key, data, options) => {
+        if (key.startsWith("site/") && copyFailures > 0) {
+          copyFailures -= 1;
+          return err(failure("TRANSIENT", "copy store unavailable"));
+        }
+        if (key.startsWith("media-variants/") && (variantPuts += 1) === 2) return err(failure("TRANSIENT", "variant store unavailable"));
+        return w.blobs.put(key, data, options);
+      },
+    };
+    const images = await w.open([SQUARE], render, { blobs: broken });
+    await images.generate("m1");
+    const errored = (await attached(images)).get("square")!;
+    expect(errored).toMatchObject({ state: "error", crop: LEFT });
+    expect(errored.path).toMatch(VERSIONED_SQUARE);
+    const served = expectOk(await images.read("m1", "square.webp"))!.data;
+    expect(await leftEdgeIsBlue(images, "square.webp")).toBe(false);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(served);
+    for (const open of [first, images]) await open.close();
+  });
+
+  it("writes a first render left at a fresh path to the public copy instead of the original when the copy store accepts it again", async () => {
+    const w = await world();
+    const inside = await w.open([THUMB]);
+    expectOk(await inside.setFraming("m1", RIGHT_CROP));
+    expectOk(await inside.generate("m1"));
+    const planned = await w.open([THUMB, SQUARE]);
+    expectOk(await planned.plan(["m1"]));
+
+    let copyFailures = 1;
+    const broken: Blobstore = {
+      ...w.blobs,
+      put: async (key, data, options) => {
+        if (key.startsWith("site/") && copyFailures > 0) {
+          copyFailures -= 1;
+          return err(failure("TRANSIENT", "copy store unavailable"));
+        }
+        return w.blobs.put(key, data, options);
+      },
+      remove: async (key) => (key.startsWith("media-variants/") ? err(failure("TRANSIENT", "variant store unavailable")) : w.blobs.remove(key)),
+    };
+    const images = await w.open([THUMB, SQUARE], render, { blobs: broken });
+    await images.generate("m1");
+    const square = (await attached(images)).get("square")!;
+    expect(square).toMatchObject({ state: "error", crop: RIGHT, path: SQUARE_PATH });
+    const served = expectOk(await images.read("m1", "square.webp"))!.data;
+    expect(await leftEdgeIsBlue(images, "square.webp")).toBe(true);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(served);
+    for (const open of [inside, planned, images]) await open.close();
+  });
+
   it("answers the original at a size added to the configuration whose first render stayed at its key after its copy and removal failed, while the entry lists crop null", async () => {
     const w = await world();
     const inside = await w.open([THUMB]);
