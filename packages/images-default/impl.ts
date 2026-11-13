@@ -1066,6 +1066,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (config.publicCopy !== undefined) {
         const overwritten = await putCopyHeld(lease, oldFile, original.data, original.publishedType);
         if (isErr(overwritten)) return overwritten;
+        if (overwritten.value === "lost") return ok({ changed });
       }
       const fresh = newRow(item, size, decodable, ow, oh, framing);
       const replanned = await updateAsRead(row, { key: fresh.key, format: fresh.format, spec: fresh.spec, width: fresh.width, height: fresh.height, bytes: 0, state: "planned", error: fresh.error, attempts: 0, updatedAt: now(), crop: fresh.crop, renderedCrop: "", originalWidth: fresh.originalWidth, originalHeight: fresh.originalHeight });

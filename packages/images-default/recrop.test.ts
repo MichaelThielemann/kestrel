@@ -11,7 +11,7 @@ import type { Introspection, Manifest } from "@michaelthielemann/kestrel";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
-import { DEFAULT_RENDER_TIMEOUT_MS, FRAMING, HIDDEN, ITEMS, JOBS, VARIANTS, createImages, whenIdle, type Config, type FramingRow, type Images, type ItemLease, type Job, type Variant } from "./impl.ts";
+import { DEFAULT_RENDER_TIMEOUT_MS, FRAMING, HIDDEN, ITEMS, JOBS, RETIRED, VARIANTS, createImages, whenIdle, type Config, type FramingRow, type Images, type ItemLease, type Job, type Variant } from "./impl.ts";
 import { cropToken, parseCrop } from "./framing.ts";
 import type { PixelCrop } from "./framing.ts";
 import type { Renderer } from "./generate.ts";
@@ -2242,5 +2242,28 @@ describe("images/default writes racing a lease-free prune or a request left on a
     expect(expectOk(await w.db.findMany<Job>(JOBS, {})).items.map((job) => job.state)).toEqual(["done"]);
     expect((await rowsBySize(w, "m2")).get("square")).toMatchObject({ state: "done" });
     await images.close();
+  });
+
+  it("a format change whose holder lost the item before it overwrote the old path writes nothing more", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.generate("m1"));
+    const before = (await rowsBySize(w)).get("square")!;
+    const db: Persistence = {
+      ...w.db,
+      createOne: async <T extends Document>(collection: string, doc: Omit<T, "id">) => {
+        const created = await w.db.createOne<T>(collection, doc);
+        if (collection === RETIRED) await holdLeaseElsewhere(w);
+        return created;
+      },
+    };
+    const changing = await w.open([{ ...SQUARE, format: "original" }], undefined, { db });
+    expectOk(await changing.plan(["m1"]));
+    await whenIdle(changing);
+
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ id: before.id, key: before.key, format: "webp", state: "done" });
+    expect(w.blobs.blobs.has(before.key)).toBe(true);
+    expect(copyOf(w, "square.webp")).toContain("square|");
+    for (const images of [first, changing]) await images.close();
   });
 });
