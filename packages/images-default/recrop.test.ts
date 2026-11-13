@@ -613,6 +613,28 @@ describe("images/default re-cropping while a render runs", () => {
     for (const images of [p, other]) await images.close();
   });
 
+  it("close() starts no render after it returns, also not the one a render that lost its crop asks for while close() waits", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.setFraming("m1", { crops: { "1:1": { x: 0, y: 0, w: 0.6, h: 1 } } }));
+    const { render, gates } = heldRenders(2);
+    const slow = await w.open([SQUARE], render);
+
+    const generating = slow.generate("m1");
+    await gates[0]!.reached;
+    expectOk(await first.setFraming("m1", { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } }));
+    const closing = slow.close();
+    gates[0]!.open();
+    gates[1]!.open();
+    expectOk(await generating);
+    await closing;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "pending", crop: "400,0,600,600" });
+    expect(copyOf(w, "square.webp")).not.toContain("400,0,600,600");
+    await first.close();
+  });
+
   it("a newer crop's render that commits after a stale render wrote over its variant puts its bytes back, so ?v= names the bytes at the path", async () => {
     const w = await world();
     const first = await w.open([SQUARE]);

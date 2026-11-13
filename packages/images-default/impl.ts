@@ -401,6 +401,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   }
 
   function inBackground(mediaId: string, what: string, work: () => Promise<Result<unknown, KestrelError>>): void {
+    if (closed) return;
     const promise = new Promise<void>((resolve) => {
       setImmediate(() => {
         void work()
