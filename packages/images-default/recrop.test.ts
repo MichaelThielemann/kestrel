@@ -2078,11 +2078,11 @@ describe("images/default writes racing a lease-free prune or a request left on a
       else w.blobs.blobs.delete("site/media/m1/variants/square.webp");
 
       paused.arm();
-      const writing = writer === "images.showMany" ? declaring.show(["m1"]) : declaring.syncPublic();
+      const writing: Promise<{ ok: boolean }> = writer === "images.showMany" ? declaring.show(["m1"]) : declaring.syncPublic();
       await paused.g.reached;
       expectOk(await narrowed.prune(["square"]));
       paused.g.open();
-      expectOk(await writing);
+      expect((await writing).ok).toBe(true);
       await whenIdle(declaring);
 
       const original = expectOk(await w.media.load("m1"))!.data;
