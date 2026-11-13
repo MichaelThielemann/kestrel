@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Content, ContentDocument, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
+import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createPersistenceSqlite } from "@michaelthielemann/kestrel-persistence-sqlite/impl";
@@ -79,27 +80,36 @@ describe("link index limits", () => {
   });
 
   it("keeps the event loop responsive while checking many unreachable urls", async () => {
-    const db = createPersistenceSqlite({ file: ":memory:" });
+    const sqlite = createPersistenceSqlite({ file: ":memory:" });
+    let updated = 0;
+    const db: Persistence = {
+      ...sqlite,
+      updateOne: <T extends Document>(collection: string, id: string, patch: Partial<Omit<T, "id">>) => {
+        updated += 1;
+        return sqlite.updateOne<T>(collection, id, patch);
+      },
+    };
     const links = await createLinksDefault(base, contentOf({}), db, answering, Date.now, publicResolver);
     for (let doc = 0; doc < 40; doc++) {
       const rows = Array.from({ length: 1000 }, (_, i) => ({ url: `http://10.${doc}.${i >> 8}.${i & 255}/p`, fromType: "pages", fromId: `d${doc}`, field: "body", locale: "", ok: null, status: null, error: null, checkedAt: null }));
       expectOk(await db.createMany<LinkEntry>(INDEX, rows));
     }
-    let last = performance.now();
-    let longest = 0;
-    const timer = setInterval(() => {
-      const t = performance.now();
-      longest = Math.max(longest, t - last);
-      last = t;
-    }, 1);
+    const updatedAtTurn = [0];
+    let checking = true;
+    const turn = () => {
+      updatedAtTurn.push(updated);
+      if (checking) setImmediate(turn);
+    };
+    setImmediate(turn);
     try {
-      last = performance.now();
       expect(expectOk(await links.check())).toEqual({ urls: 40_000, checked: 0, broken: 40_000, skipped: 40_000 });
-      longest = Math.max(longest, performance.now() - last);
     } finally {
-      clearInterval(timer);
+      checking = false;
     }
-    expect(longest).toBeLessThan(50);
+    updatedAtTurn.push(updated);
+    const mostBetweenTurns = Math.max(...updatedAtTurn.slice(1).map((count, i) => count - (updatedAtTurn[i] ?? 0)));
+    expect(updated).toBe(40_000);
+    expect(mostBetweenTurns).toBeLessThanOrEqual(100);
     expect(expectOk(await db.count(INDEX, { error: "private address" }))).toBe(40_000);
   }, 60_000);
 
