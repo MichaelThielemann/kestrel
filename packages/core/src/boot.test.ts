@@ -1208,7 +1208,7 @@ describe("boot", () => {
 
   it("module config is validated by its schema", async () => {
     const config = { ...baseConfig, modules: [{ use: "./guard", config: {} }, { use: "./auth", config: {} }, { use: "./store", config: { file: 42 } }, { use: "./events", config: {} }] };
-    await expect(boot({ config, modules, pipelines: [], logger: silentLogger })).rejects.toThrow(new KestrelBootError("store/memory", "invalid config: file: Expected string, received number", "invalid-module-config"));
+    await expect(boot({ config, modules, pipelines: [], logger: silentLogger })).rejects.toThrow(new KestrelBootError("store/memory", "invalid config: file: Invalid input: expected string, received number", "invalid-module-config"));
   });
 
   it("missing provider names module and contract", async () => {

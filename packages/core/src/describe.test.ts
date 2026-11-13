@@ -319,13 +319,13 @@ describe("module config errors", () => {
     const enumMessage = await bootError(z.object({ apiKey: z.enum(["a", "b"]) }).strict(), { apiKey: "error-enum-secret" });
     expect(enumMessage).toContain("apiKey");
     expect(enumMessage).not.toContain("error-enum-secret");
-    const refineMessage = await bootError(z.object({ signing: z.string().describe("secret").refine((v) => v.length > 40, (v) => ({ message: `too short: ${v}` })) }).strict(), { signing: "error-refine-secret" });
+    const refineMessage = await bootError(z.object({ signing: z.string().describe("secret").refine((v) => v.length > 40, { error: (issue) => `too short: ${String(issue.input)}` }) }).strict(), { signing: "error-refine-secret" });
     expect(refineMessage).toContain("signing");
     expect(refineMessage).not.toContain("error-refine-secret");
   });
 
   it("never echoes a received value under a credential-like key or inside a union member", async () => {
-    const echo = (v: string) => ({ message: `got ${v}` });
+    const echo = { error: (issue: { input?: unknown }) => `got ${String(issue.input)}` };
     const keyed = await bootError(z.object({ apiKey: z.string().refine((v) => v.length > 40, echo) }).strict(), { apiKey: "error-keyed-secret" });
     expect(keyed).toContain("apiKey: custom");
     expect(keyed).not.toContain("error-keyed-secret");
@@ -334,7 +334,7 @@ describe("module config errors", () => {
   });
 
   it("redacts a credential URL an author's message repeats for a plain path", async () => {
-    const message = await bootError(z.object({ note: z.string().refine(() => false, (v) => ({ message: `got ${v}` })) }).strict(), { note: "postgres://app:error-url-pass@db/app" });
+    const message = await bootError(z.object({ note: z.string().refine(() => false, { error: (issue) => `got ${String(issue.input)}` }) }).strict(), { note: "postgres://app:error-url-pass@db/app" });
     expect(message).toContain("note: got");
     expect(message).not.toContain("error-url-pass");
   });
