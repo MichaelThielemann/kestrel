@@ -770,6 +770,11 @@ describe("info rules", () => {
     for (const part of ["MediaStatus gained trashed", "MediaItem gained trashedAt and trashVersion, and its location may be null", "Media gained trash, trashFolder, restore, listTrash, trashIds, selectTrash and purge", "Images gained hide, show and hidden"]) expect(findings[0]?.message).toContain(part);
   });
 
+  it("types/breaking-signatures names what focus and crop changed", async () => {
+    const findings = await typeSignaturesRule.check(contextFor(await project({})));
+    for (const part of ["Images gained setFraming and framingsOf", "Variant gained crop and renderedCrop"]) expect(findings[0]?.message).toContain(part);
+  });
+
   it("responses/breaking-step-shapes names the not-ready 404 and the sync job's eligible total", async () => {
     const p = await project({ pipelines: [{ name: "images", steps: ["images.generate", "images.retryFailed", "images.sync", "images.readStatus", "media.reconcile"] }] });
     const byStep = new Map((await breakingStepShapesRule.check(contextFor(p))).map((f) => [f.where.step, f.message]));
