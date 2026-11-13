@@ -516,20 +516,18 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok(updated.value === 1 ? { ...row, ...patch } : null);
   }
 
-  function withItem<T>(mediaId: string, work: (lease: Lease) => Promise<Result<T, KestrelError>>, handOver: () => Promise<Result<T, KestrelError>>, serveLater = false): Promise<Result<T, KestrelError>> {
+  function withItem<T>(mediaId: string, work: (lease: Lease) => Promise<Result<T, KestrelError>>, handOver: () => Promise<Result<T, KestrelError>>, options: { serveLater?: boolean } = {}): Promise<Result<T, KestrelError>> {
     return exclusive(mediaId, async (): Promise<Result<T, KestrelError>> => {
-      let lease = await acquire(mediaId);
+      const lease = await acquire(mediaId);
       if (isErr(lease)) return lease;
       if (lease.value === null) {
         const handed = await handOver();
         if (isErr(handed)) return handed;
         const asked = await ask(mediaId);
-        if (isErr(asked)) return asked;
-        lease = await acquire(mediaId);
-        if (isErr(lease) || lease.value === null) return handed;
+        return isErr(asked) ? asked : handed;
       }
       const held = lease.value;
-      return settleLease(held, await work(held), serveLater);
+      return settleLease(held, await work(held), options.serveLater === true);
     });
   }
 
@@ -561,7 +559,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       lease.request = found.value.request;
       lease.redo = found.value.redo;
       owed = false;
-      if (lease.request === "") continue;
       if (closed || serveLater) {
         const left = await letGo(lease, done, true);
         scheduleConverge(lease.mediaId);
@@ -916,7 +913,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   }
 
   function planOne(mediaId: string): Promise<Result<{ changed: boolean }, KestrelError>> {
-    return withItem(mediaId, (lease) => planItem(mediaId, lease), async () => ok({ changed: false }), true);
+    return withItem(mediaId, (lease) => planItem(mediaId, lease), async () => ok({ changed: false }), { serveLater: true });
   }
 
   async function renderWithin(original: Uint8Array, contentType: string, size: Size, planned: Planned): Promise<Result<Rendered, KestrelError>> {
@@ -2180,7 +2177,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
           if (focusChanged.value) raiseVariantsChanged([mediaId]);
           return ok(answer);
         },
-        true,
+        { serveLater: true },
       );
     },
 

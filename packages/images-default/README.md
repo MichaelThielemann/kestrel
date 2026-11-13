@@ -245,7 +245,8 @@ does what needs no lease (`images.setFraming` stores the framing and raises the 
 `images.generate` answers the rows as they are), leaves a request on the lease and returns. The
 holder sees the request before it lets go and places and renders the item again with what is stored
 then, writing its public copies as well; a holder that only places (`images.plan`,
-`images.setFraming`) leaves this to its background loop. A render that sees a request before it
+`images.setFraming`) leaves this to its background loop. A request left after the holder let go
+waits for `images.resume`, which serves it once `staleAfterMs` has passed. A render that sees a request before it
 writes drops its bytes and renders again, so two framings saved at once in two processes leave the
 rows on the framing that is stored. A call that stored its framing while another process held the
 item does not store it again when it gets the item, so the framing saved last is the one stored. A

@@ -1332,7 +1332,8 @@ Net changes since 5.8.1.
   collection `images_items`, held by one process at a time: a call that finds the item held by
   another process stores what it was asked to (a framing, for instance), leaves a request and
   returns, and the holder places and renders the item again before it lets go, so the rows end on
-  the stored framing and `?v=` names the bytes at the path. A failed `images.setFraming` plans and
+  the stored framing and `?v=` names the bytes at the path. A request left after the holder let go
+  is served by `images.resume` once `staleAfterMs` has passed. A failed `images.setFraming` plans and
   renders the item in the background; `images.resume` takes over a lease whose holder stopped once it
   has run out and serves a request left open. `variantCounts` counts a row rendered with another
   crop as `pending`.

@@ -1714,3 +1714,69 @@ describe("images/default writes of a holder whose item or row changed meanwhile"
     for (const images of [first, slow, later]) await images.close();
   });
 });
+
+describe("images/default work a call leaves unfinished", () => {
+  function heldRender(): { render: Renderer; g: ReturnType<typeof gate> } {
+    const g = gate();
+    let holding = true;
+    return {
+      g,
+      render: async (_d, s, p) => {
+        if (holding) {
+          holding = false;
+          g.arrive();
+          await g.wait;
+        }
+        return { data: bytesFor(s.name, p.crop ?? null, 0), width: p.width, height: p.height, format: p.format, ext: p.format, contentType: `image/${p.format}` };
+      },
+    };
+  }
+
+  it("a framing stored after the holder let go is left as a request, which images.resume serves once staleAfterMs has passed", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.generate("m1"));
+    expectOk(await first.setFraming("m1", LEFT));
+    const held = heldRender();
+    const holder = await w.open([SQUARE], held.render);
+    const leaseRead = gate();
+    let pausing = false;
+    const pausedDb: Persistence = {
+      ...w.db,
+      findOne: async <T extends Document>(collection: string, filter: Filter) => {
+        const found = await w.db.findOne<T>(collection, filter);
+        if (pausing && collection === ITEMS) {
+          pausing = false;
+          leaseRead.arrive();
+          await leaseRead.wait;
+        }
+        return found;
+      },
+    };
+    const saver = await w.open([SQUARE], undefined, { db: pausedDb });
+
+    const rendering = holder.generate("m1");
+    await held.g.reached;
+    const rendersBefore = w.renders.length;
+    pausing = true;
+    const saving = saver.setFraming("m1", RIGHT);
+    await leaseRead.reached;
+    held.g.open();
+    expectOk(await rendering);
+    await whenIdle(holder);
+    leaseRead.open();
+    expectOk(await saving);
+    await whenIdle(saver);
+
+    expect(w.renders.length).toBe(rendersBefore);
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", renderedCrop: "0,0,600,600" });
+    const lease = expectOk(await w.db.findOne<ItemLease>(ITEMS, { mediaId: "m1" }));
+    expect(lease?.writer).toBe("");
+    expect(lease?.request).not.toBe("");
+    const later = await w.open([SQUARE], undefined, { now: () => LATER });
+    expectOk(await later.resume());
+    await whenIdle(later);
+    await expectRenderedWith(w, later, "400,0,600,600");
+    for (const images of [first, holder, saver, later]) await images.close();
+  });
+});
