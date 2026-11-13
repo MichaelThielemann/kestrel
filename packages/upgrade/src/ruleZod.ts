@@ -11,7 +11,7 @@ import { finding, packageJsonPath, upgradingDocs } from "./ruleHelpers.ts";
 const ZOD_RANGE = "^4.6.6";
 const FIXED: readonly [number, number, number] = [4, 6, 6];
 const DEPENDENCY_MAPS = ["dependencies", "devDependencies", "peerDependencies"] as const;
-const OBJECT_FACTORIES = new Set(["object", "strictObject", "looseObject"]);
+const PARSED_DEFAULT_FACTORIES = new Set(["object", "strictObject", "looseObject", "union", "discriminatedUnion", "intersection"]);
 const OBJECT_COPIES = new Set(["strict", "passthrough", "strip", "catchall", "extend", "merge", "partial", "required", "pick", "omit", "safeExtend"]);
 const ZOD_IMPORT = /["']zod["']/;
 
@@ -123,15 +123,45 @@ function namespaceOf(node: AstNode, namespaces: ReadonlySet<string>): string | u
   return node.type === "Identifier" && typeof node.name === "string" && namespaces.has(node.name) ? node.name : undefined;
 }
 
-function rootsInObjectFactory(receiver: AstNode, namespaces: ReadonlySet<string>): boolean {
-  let node: AstNode | undefined = receiver;
-  while (node !== undefined) {
-    const call = memberCall(node);
-    if (call === undefined) return false;
-    if (namespaceOf(call.object, namespaces) !== undefined) return OBJECT_FACTORIES.has(call.name);
-    node = call.object;
+type ReceiverKind = "parsed" | "other" | "unknown";
+
+const MAX_BINDING_DEPTH = 8;
+
+function localBindings(root: AstNode): Map<string, AstNode | undefined> {
+  const bindings = new Map<string, AstNode | undefined>();
+  for (const declarator of findAll(root, "VariableDeclarator")) {
+    const { id, init } = declarator;
+    if (!isAstNode(id) || id.type !== "Identifier" || typeof id.name !== "string") continue;
+    bindings.set(id.name, bindings.has(id.name) || !isAstNode(init) ? undefined : init);
   }
-  return false;
+  return bindings;
+}
+
+function withoutTypeWrappers(node: AstNode): AstNode {
+  let current = node;
+  while ((current.type === "TSAsExpression" || current.type === "TSSatisfiesExpression" || current.type === "TSNonNullExpression" || current.type === "ParenthesizedExpression") && isAstNode(current.expression)) current = current.expression;
+  return current;
+}
+
+function receiverKind(receiver: AstNode, namespaces: ReadonlySet<string>, bindings: ReadonlyMap<string, AstNode | undefined>, depth = 0): ReceiverKind {
+  let node = withoutTypeWrappers(receiver);
+  for (;;) {
+    const call = memberCall(node);
+    if (call !== undefined) {
+      if (namespaceOf(call.object, namespaces) !== undefined) return PARSED_DEFAULT_FACTORIES.has(call.name) ? "parsed" : "other";
+      node = withoutTypeWrappers(call.object);
+      continue;
+    }
+    if (node.type !== "Identifier" || typeof node.name !== "string" || namespaces.has(node.name)) return "unknown";
+    const init = bindings.get(node.name);
+    return init === undefined || depth >= MAX_BINDING_DEPTH ? "unknown" : receiverKind(init, namespaces, bindings, depth + 1);
+  }
+}
+
+function lineOf(source: string, offset: number): number {
+  let line = 1;
+  for (let i = 0; i < offset; i++) if (source.charCodeAt(i) === 10) line++;
+  return line;
 }
 
 function recordKeyEdits(file: string, _source: string, root: AstNode, namespaces: ReadonlySet<string>): Edit[] {
@@ -166,22 +196,35 @@ function describeOrderEdits(file: string, source: string, root: AstNode): Edit[]
   return edits;
 }
 
-function objectDefaultEdits(file: string, _source: string, root: AstNode, namespaces: ReadonlySet<string>): Edit[] {
-  const edits: Edit[] = [];
+interface ObjectDefaults {
+  edits: Edit[];
+  untraced: number[];
+}
+
+function objectDefaults(file: string, source: string, root: AstNode, namespaces: ReadonlySet<string>): ObjectDefaults {
+  const out: ObjectDefaults = { edits: [], untraced: [] };
+  const bindings = localBindings(root);
   for (const node of findAll(root, "CallExpression")) {
     const call = memberCall(node);
     if (call === undefined || call.name !== "default" || call.args.length !== 1 || call.args[0]!.type !== "ObjectExpression") continue;
-    if (!rootsInObjectFactory(call.object, namespaces)) continue;
+    const kind = receiverKind(call.object, namespaces, bindings);
+    if (kind === "other") continue;
     const { start, end } = span(call.property);
-    edits.push({ file, start, end, text: "prefault" });
+    if (kind === "parsed") out.edits.push({ file, start, end, text: "prefault" });
+    else out.untraced.push(lineOf(source, start));
   }
-  return edits;
+  return out;
 }
 
-type ZodScan = (file: string, source: string, root: AstNode, namespaces: ReadonlySet<string>) => Edit[];
+interface ZodFile {
+  file: string;
+  source: string;
+  root: AstNode;
+  namespaces: ReadonlySet<string>;
+}
 
-function scanZodFiles(ctx: SourceRuleContext, scan: ZodScan): Array<{ file: string; edits: Edit[] }> {
-  const out: Array<{ file: string; edits: Edit[] }> = [];
+function zodFiles(ctx: SourceRuleContext): ZodFile[] {
+  const out: ZodFile[] = [];
   for (const file of projectSourceFiles(ctx.scratch)) {
     if (file.endsWith(".vue")) continue;
     const source = ctx.readFile(file);
@@ -193,11 +236,15 @@ function scanZodFiles(ctx: SourceRuleContext, scan: ZodScan): Array<{ file: stri
       continue;
     }
     const namespaces = zodNamespaces(root);
-    if (namespaces.size === 0) continue;
-    const edits = scan(file, source, root, namespaces);
-    if (edits.length > 0) out.push({ file, edits });
+    if (namespaces.size > 0) out.push({ file, source, root, namespaces });
   }
   return out;
+}
+
+function scanZodFiles(ctx: SourceRuleContext, scan: (file: string, source: string, root: AstNode, namespaces: ReadonlySet<string>) => Edit[]): Array<{ file: string; edits: Edit[] }> {
+  return zodFiles(ctx)
+    .map(({ file, source, root, namespaces }) => ({ file, edits: scan(file, source, root, namespaces) }))
+    .filter(({ edits }) => edits.length > 0);
 }
 
 /** `zod/record-key`: a one-argument `z.record(value)`, which zod 4's signature no longer accepts; the fix inserts `z.string()` as the key schema zod 3 assumed. */
@@ -211,23 +258,44 @@ export const zodRecordKeyRule: SourceRule = {
   },
 };
 
-/** `zod/object-default`: an object schema's `.default({...})`; zod 4 returns that object as written, so the fix renames it to `.prefault()`, which parses it and fills nested defaults as zod 3's `.default()` did. */
+/** `zod/object-default`: an object-literal `.default({...})` on an object, union or intersection schema, also one held in a variable of the same file; zod 4 returns that object as written, so the fix renames it to `.prefault()`, which parses it and fills nested defaults as zod 3's `.default()` did. One on a schema the rule cannot trace is a manual warning. */
 export const zodObjectDefaultRule: SourceRule = {
   id: "zod/object-default",
   needs: "source",
   check(ctx) {
-    return scanZodFiles(ctx, objectDefaultEdits).map(({ file, edits }) =>
-      finding(
-        `zod/object-default:${file}`,
-        "zod/object-default",
-        `gives an object schema an object-literal .default() (${edits.length}x); zod 4 returns that default as written and no longer fills the nested defaults inside it`,
-        "rename .default() to .prefault(), which parses the default the way zod 3's .default() did",
-        { file },
-        edits,
-        upgradingDocs("zod-object-default"),
-        "warning",
-      ),
-    );
+    const findings: Finding[] = [];
+    for (const { file, source, root, namespaces } of zodFiles(ctx)) {
+      const { edits, untraced } = objectDefaults(file, source, root, namespaces);
+      if (edits.length > 0) {
+        findings.push(
+          finding(
+            `zod/object-default:${file}`,
+            "zod/object-default",
+            `gives an object schema an object-literal .default() (${edits.length}x); zod 4 returns that default as written and no longer fills the nested defaults inside it`,
+            "rename .default() to .prefault(), which parses the default the way zod 3's .default() did",
+            { file },
+            edits,
+            upgradingDocs("zod-object-default"),
+            "warning",
+          ),
+        );
+      }
+      for (const line of untraced) {
+        findings.push(
+          finding(
+            `zod/object-default:${file}:${line}`,
+            "zod/object-default",
+            "gives an object-literal .default() to a schema this rule cannot trace to a zod factory in the same file; if that schema is an object or a union of objects, zod 4 returns the default as written and no longer fills the nested defaults inside it",
+            "if the schema is an object or a union of objects, rename .default() to .prefault()",
+            { file, line },
+            undefined,
+            upgradingDocs("zod-object-default"),
+            "warning",
+          ),
+        );
+      }
+    }
+    return findings;
   },
 };
 

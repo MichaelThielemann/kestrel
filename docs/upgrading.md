@@ -242,7 +242,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`deps/kestrel-range`](#deps-kestrel-range), `deps/mixed-majors`, `deps/pre-install` | source | auto / manual / none | a `@michaelthielemann/kestrel*` dependency range |
 | [`deps/zod-range`](#deps-zod-range) | source | auto | a `zod` dependency range that admits a release below 4.6.6 or another major |
 | [`zod/record-key`](#zod-record-key) | source | auto | a `z.record` call with only a value schema |
-| [`zod/object-default`](#zod-object-default) | source | auto (warning) | an object schema's object-literal `.default({…})` |
+| [`zod/object-default`](#zod-object-default) | source | auto / manual (warning) | an object or union schema's object-literal `.default({…})` |
 | [`zod/describe-order`](#zod-describe-order) | source | auto | a `.describe()` followed by `.strict()`, `.partial()` or another object method |
 | [`scripts/kestrel-binaries`](#scripts-kestrel-binaries) | source | auto / manual (warning) | a `kestrel-openapi` or `kestrel-upgrade` command, or an unscoped `npx kestrel`, in `package.json` scripts or another project file |
 | [`deps/host-outdated`](#deps-host-outdated), `deps/host-refused` | source | manual | a direct dependency whose plugin is not built for this version, or whose `kestrel` field is refused |
@@ -827,9 +827,14 @@ zod 3's `.default(value)` parsed `value` when the key was absent, so `z.object({
 z.number().default(5) }).default({})` produced `{ max: 5 }`. zod 4's `.default()` returns the value
 as written, `{}` here; `.prefault()` parses it the way zod 3 did. The rule renames `.default` to
 `.prefault` where the argument is an object literal and the schema it is called on starts at
-`z.object`, `z.strictObject` or `z.looseObject`. It is a warning: an object default that already
-spells out every nested value behaves the same either way, and the rename keeps it that way.
-A default given as a variable or a function, or on an array or a record, is not rewritten.
+`z.object`, `z.strictObject`, `z.looseObject`, `z.union`, `z.discriminatedUnion` or
+`z.intersection`, directly or through a variable declared in the same file
+(`const retry = z.object({ … }).strict()` and later `retry.default({})`). It is a warning: an
+object default that already spells out every nested value behaves the same either way, and the
+rename keeps it that way. A default given as a variable or a function, or on an array or a record,
+is not rewritten. An object-literal `.default({…})` on a schema the rule cannot trace, one imported
+from another file or returned by a function, is reported as a manual warning with its line; rename
+it by hand when that schema is an object or a union of objects.
 
 #### zod-describe-order
 zod 4's object methods `.strict()`, `.passthrough()`, `.strip()`, `.catchall()`, `.extend()`,

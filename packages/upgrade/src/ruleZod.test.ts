@@ -159,14 +159,54 @@ describe("zod/object-default", () => {
     expect(applied(findings[0], source)).toContain("z.object({ max: z.number().default(5) }).strict().prefault({})");
   });
 
+  it("follows a schema held in a variable of the same file, and an object default on a union", async () => {
+    const source = [
+      'import { z } from "zod";',
+      "const retry = z.object({ max: z.number().default(5) }).strict();",
+      "const timed = retry.extend({ ms: z.number().default(100) });",
+      "const http = z.union([z.object({ port: z.number().default(8080) }).strict(), z.null()]);",
+      "const transport = z.discriminatedUnion(\"kind\", [z.object({ kind: z.literal(\"smtp\"), port: z.number().default(25) })]);",
+      "export const configSchema = z.object({",
+      "  retry: retry.default({}),",
+      "  timed: timed.optional().default({}),",
+      "  http: http.default({}),",
+      '  transport: transport.default({ kind: "smtp" }),',
+      "});",
+      "",
+    ].join("\n");
+    await write("module.ts", source);
+    const findings = await zodObjectDefaultRule.check(context());
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const text = applied(findings[0], source);
+    expect(text).toContain("  retry: retry.prefault({}),");
+    expect(text).toContain("  timed: timed.optional().prefault({}),");
+    expect(text).toContain("  http: http.prefault({}),");
+    expect(text).toContain('  transport: transport.prefault({ kind: "smtp" }),');
+  });
+
+  it("warns about an object-literal default on a schema it cannot trace, with the line, and rewrites nothing there", async () => {
+    const source = ['import { z } from "zod";', 'import { limits } from "./shared.ts";', "export const configSchema = z.object({", "  limits: limits.default({}),", "  other: makeSchema().default({ a: 1 }),", "});", "function makeSchema() {", "  return z.object({ a: z.number() });", "}", ""].join("\n");
+    const file = await write("module.ts", source);
+    const findings = await zodObjectDefaultRule.check(context());
+    expect(findings.map((f) => [f.fix.kind, f.severity, f.where])).toEqual([
+      ["manual", "warning", { file, line: 4 }],
+      ["manual", "warning", { file, line: 5 }],
+    ]);
+    expect(findings[0]?.docs).toBe(upgradingDocs("zod-object-default"));
+    expect(new Set(findings.map((f) => f.id)).size).toBe(2);
+  });
+
   it("leaves scalar, array and record defaults and a default whose argument is not an object literal", async () => {
     const source = [
       'import { z } from "zod";',
       "const fallback = { max: 5 };",
+      "const named = z.record(z.string(), z.number());",
       "export const a = z.object({",
       '  name: z.string().default("x"),',
       "  tags: z.array(z.string()).default([]),",
       "  labels: z.record(z.string(), z.string()).default({}),",
+      "  named: named.default({}),",
       "  limits: z.object({ max: z.number() }).default(fallback),",
       "});",
       "",
