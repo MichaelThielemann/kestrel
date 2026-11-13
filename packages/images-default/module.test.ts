@@ -129,6 +129,14 @@ describe("images/default configSchema", () => {
     expect(parsed.error?.issues[0]).toMatchObject({ path: ["renderTimeoutMs"], message: "renderTimeoutMs must be less than staleAfterMs" });
     expect(configSchema.safeParse({ staleAfterMs: 30001, renderTimeoutMs: 30000 }).success).toBe(true);
   });
+
+  it("compares renderTimeoutMs with the default staleAfterMs, and reports it next to another invalid option", () => {
+    expect(configSchema.safeParse({ renderTimeoutMs: 60000 }).error?.issues).toMatchObject([{ path: ["renderTimeoutMs"], message: "renderTimeoutMs must be less than staleAfterMs" }]);
+    expect(configSchema.safeParse({ staleAfterMs: 20000, chunk: 0 }).error?.issues).toMatchObject([
+      { path: ["chunk"], message: "Too small: expected number to be >=1" },
+      { path: ["renderTimeoutMs"], message: "renderTimeoutMs must be less than staleAfterMs" },
+    ]);
+  });
 });
 
 describe("images/default at boot", () => {
