@@ -526,6 +526,29 @@ describe("images/default re-cropping while a render runs", () => {
     await images.close();
   });
 
+  it("answers NOT_FOUND and stores nothing when the item is hidden while images.setFraming waits for a render of it", async () => {
+    const w = await world();
+    const g = gate();
+    const gated: Renderer = async (d, s, p) => {
+      g.arrive();
+      await g.wait;
+      return { data: bytesFor(s.name, p.crop ?? null, 0), width: p.width, height: p.height, format: p.format, ext: p.format, contentType: `image/${p.format}` };
+    };
+    const images = await w.open([SQUARE], gated);
+    expectOk(await images.plan(["m1"]));
+    const generating = images.generate("m1");
+    await g.reached;
+    const framing = images.setFraming("m1", CORNER_FOCUS);
+    const hiding = images.hide(["m1"]);
+    while (!expectOk(await images.hidden(["m1"])).has("m1")) await new Promise((resolve) => setTimeout(resolve, 1));
+    g.open();
+    expectOk(await generating);
+    expectErr(await framing, "NOT_FOUND");
+    expectOk(await hiding);
+    expect(expectOk(await w.db.count(FRAMING, {}))).toBe(0);
+    await images.close();
+  });
+
   it("in one process, images.setFraming waits for a render of the item and re-plans after it", async () => {
     const w = await world();
     const g = gate();

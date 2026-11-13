@@ -1885,6 +1885,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (!parsed.ok) return err(failure("VALIDATION", `images: ${parsed.error}`));
       const framing = parsed.value;
       return exclusive(mediaId, async (): Promise<Result<{ id: string; framing: Framing }, KestrelError>> => {
+        const hiddenMeanwhile = await isHidden(mediaId);
+        if (isErr(hiddenMeanwhile)) return hiddenMeanwhile;
+        if (hiddenMeanwhile.value) return notFound();
         const previous = await readFraming(mediaId);
         if (isErr(previous)) return previous;
         const focusChanged = !sameRect(previous.value?.focus ?? null, framing.focus);
