@@ -151,6 +151,26 @@ describe("describeConfigIssue for record keys and set elements", () => {
   });
 });
 
+describe("describeConfigIssue for a value in a union", () => {
+  const targeted = z.object({ target: z.union([z.literal(false), z.object({ content: z.string(), label: z.string().optional() }).strict()]) }).strict();
+  const lines = (raw: unknown): string[] => {
+    const result = targeted.safeParse(raw);
+    return result.success ? [] : result.error.issues.map((issue) => describeConfigIssue(targeted, issue));
+  };
+
+  it("reports the issues of the one option the value fits, with their full path", () => {
+    expect(lines({ target: { content: "page", media: true } })).toEqual(['target: Unrecognized key: "media"']);
+  });
+
+  it("reports a nested issue through the union by its code only", () => {
+    expect(lines({ target: { content: "page", label: 5 } })).toEqual(["target.label: invalid_type"]);
+  });
+
+  it("keeps the union's own message when the value fits no option", () => {
+    expect(lines({ target: 5 })).toEqual(["target: Invalid input"]);
+  });
+});
+
 describe("describeConfig", () => {
   it("lists one row per path with type, required, default, secret, set, status, value and redacted", () => {
     const { variables } = describeConfig(schema, { file: "./x.db", buckets: {}, passwordHash: "scrypt$abc", bootstrap: { username: "admin" }, kind: "a", up: () => {}, ttl: null });

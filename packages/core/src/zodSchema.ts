@@ -414,14 +414,37 @@ function missingRequiredMessage(schema: Schema, issue: core.$ZodIssue): string |
   return node === undefined ? undefined : `Invalid input: expected ${kind(unwrap(node).inner)}, received undefined`;
 }
 
+const TYPE_MISMATCH = new Set(["invalid_type", "invalid_value", "invalid_union"]);
+
+/**
+ * The issues behind a failed union, with their full paths, when the value fits one option: an
+ * option without a type mismatch at the union's own path and, among several, the first without a
+ * type mismatch anywhere. Nested unions are resolved the same way. Any other issue, and a union
+ * whose value fits no option or several equally, is returned as it is.
+ */
+export function unionIssues(issue: core.$ZodIssue): core.$ZodIssue[] {
+  if (issue.code !== "invalid_union") return [issue];
+  const fitting = issue.errors.filter((option) => option.length > 0 && !option.some((i) => i.path.length === 0 && TYPE_MISMATCH.has(i.code)));
+  const chosen = fitting.find((option) => !option.some((i) => i.code === "invalid_type")) ?? (fitting.length === 1 ? fitting[0] : undefined);
+  if (chosen === undefined) return [issue];
+  return chosen.flatMap((inner) => unionIssues({ ...inner, path: [...issue.path, ...inner.path] }));
+}
+
 /**
  * One line per config validation problem. A secret path (a secret schema node, a credential-like key
  * or a path through a union or intersection) reports only the issue code and an enum mismatch only
  * what it expected; any other message is kept as its check wrote it, with credential URLs redacted.
  * An invalid record key or element reports the message of the key or element schema's own issue.
  * A missing key that `.required()` or `.nonoptional()` demands names the type the key expects.
+ * A failed union reports the issues of the option the value fits, as {@link unionIssues} picks it.
  */
 export function describeConfigIssue(schema: Schema, issue: core.$ZodIssue): string {
+  return unionIssues(issue)
+    .map((one) => describeOneIssue(schema, one))
+    .join("; ");
+}
+
+function describeOneIssue(schema: Schema, issue: core.$ZodIssue): string {
   const where = issue.path.map(String).join(".") || "(root)";
   if (isSecretPath(schema, issue.path)) return `${where}: ${issue.code}`;
   if (issue.code === "invalid_value" && isEnumAt(schema, issue.path)) return `${where}: Invalid enum value. Expected ${issue.values.map((o) => `'${String(o)}'`).join(" | ")}`;

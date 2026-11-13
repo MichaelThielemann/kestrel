@@ -198,6 +198,15 @@ describe("checkBoot: collecting every problem", () => {
     await expect(boot(input)).rejects.toMatchObject({ code: "invalid-config-schema", module: "legacy/store" });
   });
 
+  it("names the key inside a kestrel.config union that the value fits, instead of the union's own invalid input", async () => {
+    const reasons = async (config: unknown): Promise<string[]> => (await checkBoot({ config: boundaryCast<BootInput["config"]>(config, "host"), modules: [], pipelines: [], logger: silentLogger }, { setup: "all" })).errors.map((e) => e.reason);
+    expect(await reasons({ modules: [], triggers: [{ event: "page.saved", cron: "* * * * *", pipeline: "p" }] })).toEqual(['invalid kestrel.config: triggers.0: Unrecognized key: "cron"']);
+    expect(await reasons({ modules: [], triggers: [], http: { port: 3000.5 } })).toEqual(["invalid kestrel.config: http.port: Invalid input: expected int, received number"]);
+    expect(await reasons({ modules: [], triggers: [], http: { timeouts: { requestMs: Infinity } } })).toEqual(["invalid kestrel.config: http.timeouts.requestMs: Invalid input: expected number, received Infinity"]);
+    expect(await reasons({ modules: [], triggers: [], http: 5 })).toEqual(["invalid kestrel.config: http: Invalid input"]);
+    expect(await reasons({ modules: [], triggers: [{ pipeline: "p" }] })).toEqual(["invalid kestrel.config: triggers.0: Invalid input"]);
+  });
+
   it("reports a config schema from a zod copy older than 4.6.6, such as zod 3.25's zod/v4, with the version it found", async () => {
     const olderCopy = z.object({ licence: z.string().describe("secret"), endpoint: z.string() });
     Object.defineProperty(olderCopy._zod, "version", { value: { major: 4, minor: 0, patch: 0 } });

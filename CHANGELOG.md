@@ -34,7 +34,9 @@ Net changes since 5.8.1.
   `Unrecognized key: "name"` (was `Unrecognized key(s) in object: 'name'`). A secret path reports
   zod 4's issue code, `invalid_value` where zod 3 said `invalid_enum_value` or `invalid_literal` and
   `invalid_format` where it said `invalid_string`. An enum mismatch still reads
-  `Invalid enum value. Expected 'a' | 'b'`.
+  `Invalid enum value. Expected 'a' | 'b'`. A value in a union, such as `http` or a trigger, reports
+  the issue of the option it fits under that issue's full path (`http.port: Invalid input: expected
+  int, received number`), and `Invalid input` at the union's path when it fits no option.
 - `images-default`: the `VALIDATION` error of `images.register` for an invalid size carries zod 4's
   message after `images: <path>: `: a width below 16 reads `Too small: expected number to be >=16`
   (was `Number must be greater than or equal to 16`), a missing name `Invalid input: expected

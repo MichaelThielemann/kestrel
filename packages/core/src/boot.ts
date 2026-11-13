@@ -19,7 +19,7 @@ import { ok } from "./result.ts";
 import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
 import { collectSink, throwSink, type BootProblem, type Sink } from "./sink.ts";
 import { CONTEXT_KEYS, satisfied, stripOptional, writeRoot } from "./writes.ts";
-import { describeConfigIssue, effectiveModuleConfig, zodSchemaProblem, type ConfigDefaults } from "./zodSchema.ts";
+import { describeConfigIssue, effectiveModuleConfig, unionIssues, zodSchemaProblem, type ConfigDefaults } from "./zodSchema.ts";
 import { sortModules } from "./sort.ts";
 import { createCronEntry, startCron, type CronEntry } from "./triggers/cron.ts";
 import { createAllowlist } from "./triggers/allowlist.ts";
@@ -372,7 +372,7 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
 
   const parsed = configSchema.safeParse(input.config);
   if (!parsed.success) {
-    sink.fail("invalid-config", CORE, `invalid kestrel.config: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+    sink.fail("invalid-config", CORE, `invalid kestrel.config: ${parsed.error.issues.flatMap(unionIssues).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
     for (const mod of input.modules) notChecked.push({ kind: "module", name: mod.name, because: "kestrel.config is invalid" });
     for (const p of input.pipelines) notChecked.push({ kind: "pipeline", name: p.name, because: "kestrel.config is invalid" });
     return undefined;
