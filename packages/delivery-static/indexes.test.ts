@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
 import { createContentDefault } from "@michaelthielemann/kestrel-content-default/impl";
@@ -972,6 +972,157 @@ describe("a database restored from a backup", () => {
     expect(blobs.puts.filter((key) => key === MARKER_KEY)).toEqual([]);
     expect(blobs.files.get(MARKER_KEY)!.text).toBe(marker);
     expect(expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "marker" }))!.value).toBe(marker);
+  });
+
+  const stateValue = async (db: Persistence, id: string): Promise<string | undefined> => expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id }))?.value;
+  const blobMarker = (blobs: Files): string | undefined => blobs.files.get(MARKER_KEY)?.text;
+  const holdRenders = (h: Harness): (() => void) => {
+    let release = (): void => {};
+    h.state.held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return () => {
+      h.state.held = undefined;
+      release();
+    };
+  };
+
+  it("a process puts a new marker before its next write once another process stored its own, so a backup taken in between is detected", async () => {
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    const a = await harness({ db, blobs });
+    const b = await harness({ db, blobs, content: a.content });
+    expectOk(await a.delivery.checkBuild("b1"));
+    expectOk(await b.delivery.checkBuild("b1"));
+    await b.page({ slug: "von-b", title: "Von B", status: "published" });
+    await a.page({ slug: "von-a", title: "Von A", status: "published" });
+    expectOk(await a.delivery.resumeStale());
+    const backup = await stateValue(db, "marker");
+    expect(blobMarker(blobs)).toBe(backup);
+
+    const lost = await b.page({ slug: "verloren", title: "Verloren", status: "published" });
+    expect(blobs.files.has("site/verloren/index.html")).toBe(true);
+    expect(blobMarker(blobs)).not.toBe(backup);
+    await b.delivery.close();
+    await a.delivery.close();
+
+    expectOk(await db.deleteMany(STATUS, { docId: lost }));
+    expectOk(await db.updateMany(STATE, { id: "marker" }, { value: backup }));
+    const c = await harness({ db, blobs, content: a.content });
+    expect(expectOk(await c.delivery.checkBuild("b1"))).toMatchObject({ restored: true });
+  });
+
+  it("the database takes the marker of a recovery pass once the renders in flight at that pass finished, also while later renders keep starting", async () => {
+    const h = await harness();
+    const ids = await seed(h);
+    expectOk(await h.delivery.checkBuild("b1"));
+    await h.page({ slug: "eins", title: "Eins", status: "published" });
+    const sealedBefore = await stateValue(h.db, "marker");
+    for (const id of [ids.kontakt, ids.home]) {
+      const release = holdRenders(h);
+      const rendering = h.delivery.publish("pages", id);
+      const passMarker = blobMarker(h.blobs);
+      expectOk(await h.delivery.resumeStale());
+      expect(await stateValue(h.db, "marker")).not.toBe(passMarker);
+      release();
+      expectOk(await rendering);
+      await expect.poll(() => stateValue(h.db, "marker")).toBe(passMarker);
+    }
+    expect(await stateValue(h.db, "marker")).not.toBe(sealedBefore);
+  });
+
+  it("an idle process stores its marker a few seconds after its last write, so an unclean stop after that is no restore", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const db = createFakePersistence();
+      const blobs = memoryBlobs();
+      const first = await harness({ db, blobs });
+      await seed(first);
+      expectOk(await first.delivery.checkBuild("b1"));
+      await first.page({ slug: "neu", title: "Neu", status: "published" });
+      expect(await stateValue(db, "marker")).not.toBe(blobMarker(blobs));
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect.poll(() => stateValue(db, "marker")).toBe(blobMarker(blobs));
+      const restarted = await harness({ db, blobs, content: first.content });
+      expect(expectOk(await restarted.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a graceful stop waits for the render in flight and stores the marker, and refuses renders that start after it", async () => {
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    const first = await harness({ db, blobs });
+    const ids = await seed(first);
+    expectOk(await first.delivery.checkBuild("b1"));
+    expectOk(await first.delivery.markAll("pages"));
+    const release = holdRenders(first);
+    const rendering = first.delivery.publish("pages", ids.kontakt);
+    const closing = first.delivery.close();
+    expectErr(await first.delivery.publish("pages", ids.home), "TRANSIENT");
+    expectErr(await first.delivery.republishOutput({ type: "pages", docId: ids.home, locale: "de" }), "TRANSIENT");
+    expectErr(await first.delivery.unpublish("pages", ids.home), "TRANSIENT");
+    release();
+    expectOk(await rendering);
+    await closing;
+    expect(await stateValue(db, "marker")).toBe(blobMarker(blobs));
+    const restarted = await harness({ db, blobs, content: first.content });
+    expect(expectOk(await restarted.delivery.checkBuild("b1"))).toMatchObject({ changed: false, restored: false });
+  });
+
+  it("writes no file when the marker cannot be written, and the next write tries the marker again", async () => {
+    const h = await harness();
+    await seed(h);
+    expectOk(await h.delivery.checkBuild("b1"));
+    h.blobs.failPut.add(MARKER_KEY);
+    const zwei = await h.page({ slug: "zwei", title: "Zwei", status: "published" });
+    expect(h.blobs.files.has("site/zwei/index.html")).toBe(false);
+    expect(expectOk(await h.db.findOne<StatusRow>(STATUS, { docId: zwei, locale: "de" }))).toMatchObject({ state: "error" });
+    h.blobs.failPut.delete(MARKER_KEY);
+    h.blobs.puts.length = 0;
+    await h.page({ slug: "drei", title: "Drei", status: "published" });
+    expect(h.blobs.puts.indexOf(MARKER_KEY)).toBe(0);
+    expect(h.blobs.files.has("site/drei/index.html")).toBe(true);
+  });
+
+  it("a process whose build check could not read the marker reads it again before its first write, and writes no file while it cannot", async () => {
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    const first = await harness({ db, blobs });
+    await seed(first);
+    expectOk(await first.delivery.checkBuild("b1"));
+    await first.delivery.close();
+    const get = blobs.get.bind(blobs);
+    let unreadable = true;
+    blobs.get = async (key) => (key === MARKER_KEY && unreadable ? err(failure("TRANSIENT", "store unavailable")) : get(key));
+    const next = await harness({ db, blobs, content: first.content });
+    expect(expectOk(await next.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
+    await next.page({ slug: "neu", title: "Neu", status: "published" });
+    expect(blobs.files.has("site/neu/index.html")).toBe(false);
+    unreadable = false;
+    blobs.puts.length = 0;
+    await next.page({ slug: "spaeter", title: "Später", status: "published" });
+    expect(blobs.puts.indexOf(MARKER_KEY)).toBe(0);
+    expect(blobs.files.has("site/spaeter/index.html")).toBe(true);
+    expect(blobMarker(blobs)).not.toBe(await stateValue(db, "marker"));
+  });
+
+  it("a marker the database holds but the blob store lacks counts as a restore, as after a lost blob volume or a changed prefix", async () => {
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    const first = await harness({ db, blobs });
+    await seed(first);
+    expectOk(await first.delivery.checkBuild("b1"));
+    await first.delivery.close();
+    const moved = await harness({ db, blobs, content: first.content, config: { prefix: "www/" } });
+    const checked = expectOk(await moved.delivery.checkBuild("b1"));
+    expect(checked).toMatchObject({ changed: false, restored: true });
+    expect(checked.marked).toBeGreaterThan(0);
+    await moved.delivery.close();
+    blobs.files.clear();
+    const lost = await harness({ db, blobs, content: first.content });
+    expect(expectOk(await lost.delivery.checkBuild("b1"))).toMatchObject({ changed: false, restored: true });
   });
 
   it("a process that never checked a build writes no marker", async () => {

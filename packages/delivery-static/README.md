@@ -314,20 +314,29 @@ code. It answers `{ changed, restored, marked }`.
 **A restored database.** A database restored from a backup holds older status rows than the files in the blob
 store. After its first `delivery.checkBuild`, a process keeps a random marker both in `delivery_state` and in a blob
 next to `prefix`, outside the files it serves (`site/` keeps `site.delivery-marker`, `markerKeyFor` from `./impl`
-names it). Before the first file it writes or removes after the two last agreed, it writes a new marker to the blob
-only; the database takes that marker once no render or unpublish is in flight, on the next `delivery.resumeStale` run
-or when the process stops. So whenever files changed after the marker the database holds, the two differ. When they
-differ at the next check, every output is marked as for a new build, `restored` is `true`, a warning is logged, and both
-get a new marker. This covers a restore that lost the latest writes, and also a process that stopped without shutting
-down after it changed files and before the next recovery pass: that next start renders every output again although the
-database is current. A check that finds the two equal, and a process that changed no file, write no marker. A process
-that never ran `delivery.checkBuild` writes no marker, and the first check writes one. A `prefix` that does not end
-in `/`, the default empty one included, keeps no marker, because every key there could be served; a restore then
-goes undetected and needs a "Publish all". Sites that share a blob store under different prefixes keep apart markers.
-When the marker cannot be read, the check logs an error, still compares and stores the build (marking everything
-when it changed), and leaves the marker for the next check. When the blob cannot be written, an error is logged, and a
-restore that loses the files written next goes unnoticed. With several processes on one database, a process that
-stores its marker after another one wrote a newer one to the blob makes the next check render everything again.
+names it). Before it writes or removes a file, it puts a new marker into the blob only, unless the one it put last is
+still ahead of the database's; when the database took another process's marker meanwhile, it puts a new one. A
+marker is retired five seconds after it was put, on every `delivery.resumeStale` run and when the process stops, and
+the database takes it once every render and unpublish of this process that was in flight at that moment finished. So
+whenever files changed after the marker the database holds, the two differ. When they differ at the next check, or
+the database holds a marker the blob store lacks (a blob volume that was lost or not mounted, a changed `prefix`),
+every output is marked as for a new build, `restored` is `true`, a warning is logged, and both get a new marker. This
+covers a restore that lost the latest writes, and also a process that stopped without shutting down within a few
+seconds of changing files: that next start renders every output again although the database is current. A graceful
+stop refuses renders and unpublishes that start after it (they answer `TRANSIENT`, so a queue runs them again after
+the restart), waits up to `renderTimeoutSeconds` per format for the ones in flight, and then stores the marker. A
+check that finds the two equal, and a process that changed no file, write no marker. A process that never ran
+`delivery.checkBuild` writes no marker, and the first check writes one. A `prefix` that does not end in `/`, the
+default empty one included, keeps no marker, because every key there could be served; a restore then goes undetected
+and needs a "Publish all". Sites that share a blob store under different prefixes keep apart markers. When the marker
+cannot be read, the check logs an error, still compares and stores the build (marking everything when it changed),
+and the marker is read again before the process's first write and on each `delivery.resumeStale` run. While the
+marker cannot be read or written, no file is written or removed: the render fails as it does when its own file cannot
+be written, and is retried. With several processes on one database, each one waits only for its own renders before
+the database takes its marker, and stores none while the blob holds another process's. A backup taken in the moment
+between one process storing its marker and another process recording a render whose file it already wrote can miss
+that render without the next check noticing; processes that write at the same time can also make the next check
+render everything again.
 
 `delivery.resumeStale` (a recovery net, not the render path) releases expired claims, removes tombstones and
 orphaned sets, re-raises marks that are older than a minute, due and unclaimed, for example after a process

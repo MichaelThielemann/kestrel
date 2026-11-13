@@ -1109,12 +1109,19 @@ Net changes since 5.8.1.
   its last export failed.
 - `delivery.checkBuild` also renders everything again after a database restore with an unchanged
   build: a marker kept in `delivery_state` and in a blob next to `prefix` (`site/` keeps
-  `site.delivery-marker`, see `markerKeyFor`) moves ahead in the blob before the first file written
-  or removed after the two agreed, and the database takes it on the next recovery pass with no render
-  in flight or at shutdown. When the two differ, every output is marked; this also follows a process
-  that stopped without shutting down after it changed files. A check that finds them equal writes nothing. A `prefix` not ending in `/`, the default empty
-  one included, keeps no marker and detects no restore. A marker that cannot be read is logged and the
-  build is still checked. The result gains `restored`.
+  `site.delivery-marker`, see `markerKeyFor`) moves ahead in the blob before a file is written or
+  removed, also after another process's marker reached the database, and the database takes it once
+  the renders this process had in flight when it was retired finished: five seconds after it was
+  put, on every recovery pass and at shutdown. When the two differ, or the database holds a marker
+  the blob store lacks, every output is marked; this also follows a process that stopped without
+  shutting down within seconds of changing files. A check that finds them equal writes nothing. A
+  `prefix` not ending in `/`, the default empty one included, keeps no marker and detects no
+  restore. A marker that cannot be read is logged, the build is still checked, and the marker is read
+  again before the first write; no file is written or removed while the marker cannot be read or
+  written. The result gains `restored`.
+- `delivery-static`: once the module is stopping, `delivery.publish`, `delivery.unpublish`,
+  `delivery.republishOutput` and `delivery.resumeStale` answer `TRANSIENT`, and shutdown waits up to
+  `renderTimeoutSeconds` per format for the renders in flight.
 - `delivery.resumeStale` removes, once per database that held status rows at setup, page files under
   `prefix` at paths no status row has (left behind by older versions after a failed render and a slug
   change; listed under Breaking), logging each; it waits while outputs are marked or rendering, while
