@@ -242,7 +242,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`deps/kestrel-range`](#deps-kestrel-range), `deps/mixed-majors`, `deps/pre-install` | source | auto / manual / none | a `@michaelthielemann/kestrel*` dependency range |
 | [`deps/zod-range`](#deps-zod-range) | source | auto | a `zod` dependency range that admits a release below 4.6.6 or another major |
 | [`zod/record-key`](#zod-record-key) | source | auto | a `z.record` call with only a value schema |
-| [`zod/object-default`](#zod-object-default) | source | auto / manual (warning) | an object or union schema's object-literal `.default({…})` |
+| [`zod/object-default`](#zod-object-default) | source | auto / manual (warning) | an object or union schema's object-literal `.default({…})`; a default whose nested defaults zod 4 no longer fills |
 | [`zod/describe-order`](#zod-describe-order) | source | auto | a `.describe()` followed by `.strict()`, `.partial()`, `.or()` or another method that drops it |
 | [`scripts/kestrel-binaries`](#scripts-kestrel-binaries) | source | auto / manual (warning) | a `kestrel-openapi` or `kestrel-upgrade` command, or an unscoped `npx kestrel`, in `package.json` scripts or another project file |
 | [`deps/host-outdated`](#deps-host-outdated), `deps/host-refused` | source | manual | a direct dependency whose plugin is not built for this version, or whose `kestrel` field is refused |
@@ -835,9 +835,16 @@ as written, `{}` here; `.prefault()` parses it the way zod 3 did. The rule renam
 (`const retry = z.object({ … }).strict()` and later `retry.default({})`). It is a warning: an
 object default that already spells out every nested value behaves the same either way, and the
 rename keeps it that way. A default given as a variable or a function, or on an array or a record,
-is not rewritten. An object-literal `.default({…})` on a schema the rule cannot trace, one imported
-from another file or returned by a function, is reported as a manual warning with its line; rename
-it by hand when that schema is an object or a union of objects.
+is not rewritten. It is reported as a manual warning with its line when the object schema declares
+nested defaults in the same file, as in `z.object({ perMinute: z.number().default(10), burst:
+z.number().default(5) }).default(DEFAULT_LIMITS)` with `DEFAULT_LIMITS = { perMinute: 10 }`, where
+zod 4 leaves `burst` undefined; and likewise when an array or record default holds object literals
+for objects that declare nested defaults, as in `z.array(z.object({ host: z.string(), port:
+z.number().default(25) })).default([{ host: "localhost" }])`. Rename those to `.prefault()` where
+the value can leave out a key that has its own default. An object-literal `.default({…})` on a
+schema the rule cannot trace, one imported from another file or returned by a function, is
+reported as a manual warning with its line; rename it by hand when that schema is an object or a
+union of objects.
 
 #### zod-describe-order
 zod 4's object methods `.strict()`, `.passthrough()`, `.strip()`, `.catchall()`, `.extend()`,

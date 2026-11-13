@@ -197,7 +197,33 @@ describe("zod/object-default", () => {
     expect(new Set(findings.map((f) => f.id)).size).toBe(2);
   });
 
-  it("leaves scalar, array and record defaults and a default whose argument is not an object literal", async () => {
+  it("warns about a default given as a variable or a function on an object schema with nested defaults, and about array or record defaults holding objects", async () => {
+    const source = [
+      'import { z } from "zod";',
+      "const DEFAULT_LIMITS = { perMinute: 10 };",
+      "const shape = z.object({ perMinute: z.number().default(10), burst: z.number().default(5) });",
+      "export const configSchema = z.object({",
+      "  limits: z.object({ perMinute: z.number().default(10), burst: z.number().default(5) }).default(DEFAULT_LIMITS),",
+      "  traced: shape.strict().default(() => ({ perMinute: 10 })),",
+      '  servers: z.array(z.object({ host: z.string(), port: z.number().default(25) })).default([{ host: "localhost" }]),',
+      "  routes: z.record(z.string(), z.object({ weight: z.number().default(1) })).default({ main: {} }),",
+      "});",
+      "",
+    ].join("\n");
+    const file = await write("module.ts", source);
+    const findings = await zodObjectDefaultRule.check(context());
+    expect(findings.map((f) => [f.fix.kind, f.severity, f.where])).toEqual([
+      ["manual", "warning", { file, line: 5 }],
+      ["manual", "warning", { file, line: 6 }],
+      ["manual", "warning", { file, line: 7 }],
+      ["manual", "warning", { file, line: 8 }],
+    ]);
+    expect(findings[0]?.message).toContain("nested defaults");
+    expect(findings[2]?.message).toContain("array or record");
+    expect(new Set(findings.map((f) => f.id)).size).toBe(4);
+  });
+
+  it("leaves scalar defaults, array and record defaults without objects with nested defaults, and a non-literal default on an object without nested defaults", async () => {
     const source = [
       'import { z } from "zod";',
       "const fallback = { max: 5 };",
@@ -208,6 +234,8 @@ describe("zod/object-default", () => {
       "  labels: z.record(z.string(), z.string()).default({}),",
       "  named: named.default({}),",
       "  limits: z.object({ max: z.number() }).default(fallback),",
+      "  hosts: z.array(z.object({ host: z.string() })).default([{ host: \"localhost\" }]),",
+      "  weights: z.record(z.string(), z.number().default(1)).default({ main: 2 }),",
       "});",
       "",
     ].join("\n");
