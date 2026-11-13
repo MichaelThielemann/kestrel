@@ -55,18 +55,18 @@ export const configSchema = z
           })
           .strict(),
       ])
-      .default({}),
+      .prefault({}),
     llms: z
       .object({
         full: z.boolean().default(false),
-        settings: z.object({ type: z.string().default("settings"), titleField: z.string().default("title"), descriptionField: z.string().default("description") }).strict().default({}),
+        settings: z.object({ type: z.string().default("settings"), titleField: z.string().default("title"), descriptionField: z.string().default("description") }).strict().prefault({}),
         titleField: z.string().default("title"),
         seoField: z.string().default("seo"),
         headings: z.record(z.string()).default({}),
       })
       .strict()
-      .default({}),
-    dependencies: dependenciesSchema.default({}),
+      .prefault({}),
+    dependencies: dependenciesSchema.prefault({}),
   })
   .strict()
   .superRefine((value, ctx) => {
