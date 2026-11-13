@@ -31,11 +31,6 @@ Net changes since 5.8.1.
   still holds what an earlier export wrote is removed. `<prefix>llms.txt` is written on every export, whether or not a
   pipeline asked for llms files before, and overwrites a file of the site's own; without
   `llms.full`, only an llms-full.txt that still holds what an export of this version wrote is removed.
-- `delivery-static`: **a pipeline that runs `delivery.checkBuild` without a `checkRestored` step
-  before it fails at boot with `optional-read-order` when a later step writes `result`**, such as
-  `["delivery.checkBuild", "delivery.resumeStale"]`: `delivery.checkBuild` optionally reads
-  `result._databaseRestoredAt`. Put `replication.checkRestored` or `backup.checkRestored` before it,
-  or move the later steps into a pipeline of their own (see upgrading.md, "delivery-restore-check").
 - `delivery-static`: **deletes orphaned page files once after the upgrade.** On a database that held
   status rows when 6.0 first started, `delivery.resumeStale` (so only with the `*/5` recovery cron)
   removes every `index.<ext>` file under `prefix`, with the extension of a configured format, at a
@@ -1118,8 +1113,13 @@ Net changes since 5.8.1.
   build. The new steps `replication.checkRestored` (replication-sqlite) and `backup.checkRestored`
   (backup-blobstore) add `result._databaseRestoredAt`: the start of the boot that wrote the latest
   reported restore of the file, read from the `<file>.restored-at` sidecar, which gains
-  `"reported": true` for such a restore, or `null`; put one before `delivery.checkBuild` in the boot
-  pipeline. A prepared restore (`replication.prepareRestore`, `backup.restore`) and
+  `"reported": true` for such a restore, or `null`; put the one whose `file` is the database directly
+  before `delivery.checkBuild` in the boot pipeline, since a step in between that writes `result`
+  drops the member. Without one before it, no later step in that pipeline may write `result`: boot
+  fails with `optional-read-order` for `["delivery.checkBuild", "delivery.resumeStale"]`. No trigger
+  runs that pipeline at boot; the host runs it once after `start()` with
+  `kestrel.run(name, { trigger: { kind: "event", name: "boot" }, payload: { build } })`, and without
+  that run nothing is detected, exported at boot or removed as orphaned. A prepared restore (`replication.prepareRestore`, `backup.restore`) and
   backup-blobstore's restore of a missing file under `restoreOnStart` are reported, so on an
   ephemeral disk with backup-blobstore every start renders everything again. Both modules write the
   sidecar atomically before the restored file is moved into place. The check handles each value once
@@ -1128,7 +1128,8 @@ Net changes since 5.8.1.
   missing file under `restoreOnStart` and a database file copied into place by hand are no restore
   here; run `delivery.markAll` for every delivered type after one. The result gains `restored`.
   `kestrel upgrade` reports a pipeline that runs `delivery.checkBuild` without a `checkRestored` step
-  before it next to either module (`delivery/restore-check`).
+  directly before it, offering the step of either module only when its `file` is the
+  `persistence-sqlite` file (`delivery/restore-check`).
 - `delivery.resumeStale` removes, once per database that held status rows at setup, page files under
   `prefix` at paths no status row has (left behind by older versions after a failed render and a slug
   change; listed under Breaking), logging each; it waits while outputs are marked or rendering, while
