@@ -1999,4 +1999,39 @@ describe("images/default work a call leaves unfinished", () => {
     expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")?.data).toEqual(original);
     for (const images of [declaring, narrowed]) await images.close();
   });
+
+  it("a render whose commit misses a row another process re-planned after taking the item over renders the stored crop again", async () => {
+    for (const before of ["never rendered", "rendered"] as const) {
+      const w = await world();
+      const first = await w.open([SQUARE]);
+      expectOk(await first.plan(["m1"]));
+      if (before === "rendered") expectOk(await first.generate("m1"));
+      expectOk(await first.setFraming("m1", LEFT));
+      const committing = gate();
+      let pausing = true;
+      const db: Persistence = {
+        ...w.db,
+        updateMany: async (collection, filter, patch) => {
+          if (pausing && collection === VARIANTS && Reflect.get(patch, "state") === "done") {
+            pausing = false;
+            committing.arrive();
+            await committing.wait;
+          }
+          return w.db.updateMany(collection, filter, patch);
+        },
+      };
+      const slow = await w.open([SQUARE], undefined, { db });
+      const generating = slow.generate("m1");
+      await committing.reached;
+
+      const later = await w.open([SQUARE], undefined, { now: () => LATER });
+      expectOk(await later.setFraming("m1", RIGHT));
+      committing.open();
+      expectOk(await generating);
+      await whenIdle(slow);
+
+      await expectRenderedWith(w, later, "400,0,600,600");
+      for (const images of [first, slow, later]) await images.close();
+    }
+  });
 });
