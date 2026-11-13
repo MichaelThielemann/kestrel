@@ -19,6 +19,16 @@ Net changes since 5.8.1.
   robots.txt share. `llms.siteUrl` fails at boot; `kestrel upgrade`'s `delivery/site-url` moves it.
   `siteUrl` must be an absolute `http` or `https` URL without credentials, query or fragment; it is
   normalized (host lower-cased, default port dropped, trailing slashes stripped) and keeps a base path.
+  The fix also moves a value read from an environment variable that is unset where the check runs.
+- `delivery-static`: **writes and owns `<prefix>robots.txt` and `<prefix>sitemap.xml`** (`sitemap`
+  defaults to `true`), overwriting a file of either name found there. Without `robots.policy`,
+  robots.txt is `Disallow: /` unless `NODE_ENV` is `production`, which Kestrel never sets itself; boot
+  warns. `kestrel upgrade`'s `delivery/robots-policy` adds `robots: { policy: "allow" }`, the
+  behaviour of a site without robots.txt; `robots: false` keeps a robots.txt of the site's own.
+- `delivery-static`: **deletes orphaned page files once after the upgrade.** At the first start,
+  `delivery.resumeStale` removes every `index.<ext>` file under `prefix`, with the extension of a
+  configured format, at a path no status row has and outside `reservedPaths`, logging each key (see
+  upgrading.md, "delivery-orphan-removal"). It never runs with an empty `prefix`.
 - **A slug belongs to its locale; a translation without a slug of its own is never served.** `site@1`
   finds a locale only by its own slug there: `site.resolve`, `pathOf`, `resolveLinks`, `_paths`,
   `site.attachPaths`, the moves `site.pathsMoved` reports (and so the automatic redirects built from
@@ -1091,10 +1101,11 @@ Net changes since 5.8.1.
   one-time orphan removal runs again. A `prefix` not ending in `/`, the default empty one included,
   keeps no marker and detects no restore. A marker that cannot be read is logged and the build is
   still checked. The result gains `restored`.
-- `delivery.resumeStale` removes, once per database, `index.<ext>` files under `prefix` at paths no
-  status row has (left behind by older versions after a failed render and a slug change), logging
-  each; it waits while outputs are marked or a published document has no `live` output, and skips
-  `reservedPaths`. The result gains `orphans`.
+- `delivery.resumeStale` removes, once per database, page files under `prefix` at paths no status
+  row has (left behind by older versions after a failed render and a slug change; listed under
+  Breaking), logging each; it waits while outputs are marked, rendering or a published document has
+  no `live` output, gives up a run during which a page started to render, and leaves renderer assets,
+  media copies and `reservedPaths` alone. The result gains `orphans`.
 - `@michaelthielemann/kestrel/reads`: `observeReads`, `noteRead` and `unobserved`, one read scope per
   async context kept on `globalThis`; `noteRead` keeps a plain JSON copy of what it is given, and only
   while a scope is open. `content-default` notes the documents, single types and lists it

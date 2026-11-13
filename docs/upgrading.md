@@ -114,6 +114,9 @@ pipeline or a dead-letter row with no pipeline assigned, and translations publis
 their own ([`data/translation-slug`](#data-translation-slug)). Take a consistent snapshot close to
 cutover (a replication snapshot, or `sqlite3 <db> ".backup <copy>"`).
 
+`delivery-static` deletes files in the blob store once after the upgrade, without a command: see
+[delivery-orphan-removal](#delivery-orphan-removal).
+
 ## 7. Known devices at sign-in
 
 Nothing changes until a project opts in. A `username` bucket in front of the login blocks the account
@@ -216,6 +219,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`delivery/dependents`](#delivery-dependents) | source | none (info) | `delivery-static` publishing on events without marking dependent outputs |
 | [`delivery/export-llms`](#delivery-export-llms) | load | auto / manual | a pipeline file naming the removed `delivery.exportLlms` |
 | [`delivery/site-url`](#delivery-site-url) | load | auto / manual | `delivery-static`'s `llms.siteUrl`, moved to a top-level `siteUrl` |
+| [`delivery/robots-policy`](#delivery-robots-policy) | load | auto / manual (warning) | `delivery-static` without `robots.policy`, so robots.txt follows `NODE_ENV` |
 | [`delivery/index-triggers`](#delivery-index-triggers) | load | auto (pipeline files + triggers) / manual | `dependencies.render: "events"` without the jobs that export the index files |
 | [`site/routed-slug-unique`](#site-routed-slug-unique) | load | auto (error / warning) | a `unique` slug field on a type in `site-default`'s `routes` |
 | [`site/path-wiring`](#site-path-wiring) | boot | manual | a routed write without `site.indexPath`/`site.announcePaths`, or a read with another `home`/`slugField` |
@@ -629,6 +633,27 @@ expression such as `process.env.SITE_URL`. When a top-level `siteUrl` is already
 removes `llms.siteUrl`. A value the tool cannot find as a property in the config file, for example
 one that comes from a variable or from host-supplied defaults, is left to you. Without `siteUrl` there
 is no sitemap.xml, and boot warns about it.
+
+#### delivery-robots-policy
+`delivery-static` writes `<prefix>robots.txt` and `<prefix>sitemap.xml` (`sitemap` defaults to `true`)
+within a few minutes of the first start, and overwrites a file of either name it finds there. Without
+`robots.policy`, robots.txt is `User-agent: *` and `Disallow: /` unless the process runs with
+`NODE_ENV=production`, which Kestrel itself never sets; boot logs a warning naming the choice. A site
+that served no robots.txt before was open to every crawler, so the fix adds `robots: { policy: "allow" }`
+when the entry has no `robots` at all. A `robots` object without a policy is left to you. Set
+`policy: "disallow"` for a site crawlers must not index, read the policy from an environment variable
+per deployment, or set `robots: false` to keep a robots.txt of your own, which the module then neither
+writes nor removes. With `sitemap: false` the module removes a `<prefix>sitemap.xml` it finds.
+
+#### delivery-orphan-removal
+Older versions could leave a page's HTML at its old path after a failed render followed by a slug
+change, still served. At the first start of 6.0, once no output is marked or rendering and every
+published document has a `live` output, `delivery.resumeStale` deletes every `index.<ext>` file under
+`prefix` whose extension is one of `formats` (or one a status row recorded) at a path no status row
+has, outside `reservedPaths`. Each deleted key is logged at info level, and the run is recorded in
+`delivery_state` so it does not repeat; a detected database restore arms it once more. It never runs
+with an empty `prefix`. Before upgrading, move any hand-placed `index.html` under `prefix` that no
+page owns out of it, or list its path in `reservedPaths`.
 
 #### delivery-index-triggers
 With `dependencies.render: "events"`, boot fails unless a trigger runs `delivery.exportIndexes` on

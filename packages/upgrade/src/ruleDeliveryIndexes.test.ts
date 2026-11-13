@@ -7,7 +7,7 @@ import { applyEdits } from "./apply.ts";
 import { parseTs } from "./ast.ts";
 import type { LoadedProject, RuleContext } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
-import { exportLlmsRule, indexTriggersRule, siteUrlRule } from "./ruleDeliveryIndexes.ts";
+import { exportLlmsRule, indexTriggersRule, robotsPolicyRule, siteUrlRule } from "./ruleDeliveryIndexes.ts";
 import { upgradingDocs } from "./ruleHelpers.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
 
@@ -150,6 +150,21 @@ describe("delivery/site-url", () => {
     expect(findings[0]?.suggestion).toContain("by hand");
   });
 
+  it("moves llms.siteUrl read from an environment variable that is unset while the check runs", async () => {
+    const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-delivery-static", config: { llms: { siteUrl: process.env.SITE_URL, full: true } } }], triggers: [] });\n';
+    const p = await project({ configSource: source, deliveryConfig: { llms: { siteUrl: undefined, full: true } } });
+    const findings = await siteUrlRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(applyTo(p.configFile, source, autoEdits(findings[0]))).toContain("config: { llms: { full: true }, siteUrl: process.env.SITE_URL }");
+  });
+
+  it("only removes llms.siteUrl when the top-level siteUrl comes from an unset environment variable", async () => {
+    const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-delivery-static", config: { siteUrl: process.env.SITE_URL, llms: { siteUrl: process.env.SITE_URL } } }], triggers: [] });\n';
+    const p = await project({ configSource: source, deliveryConfig: { siteUrl: undefined, llms: { siteUrl: undefined } } });
+    const findings = await siteUrlRule.check(contextFor(p));
+    expect(applyTo(p.configFile, source, autoEdits(findings[0]))).toMatch(/config: \{ siteUrl: process\.env\.SITE_URL, llms: \{\s*\} \}/);
+  });
+
   it("stays quiet without llms.siteUrl", async () => {
     const p = await project({ deliveryConfig: { siteUrl: "https://example.org", llms: { full: true } } });
     expect(await siteUrlRule.check(contextFor(p))).toEqual([]);
@@ -225,9 +240,37 @@ describe("delivery/index-triggers", () => {
   });
 });
 
+describe("delivery/robots-policy", () => {
+  const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-delivery-static", config: { types: { pages: {} } } }], triggers: [] });\n';
+
+  it("sets robots.policy to allow when delivery-static has none, keeping the site open to crawlers", async () => {
+    const p = await project({ configSource: source, deliveryConfig: { types: { pages: {} } } });
+    const findings = await robotsPolicyRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ rule: "delivery/robots-policy", severity: "warning", where: { module: DELIVERY, path: "robots.policy" }, docs: upgradingDocs("delivery-robots-policy") });
+    expect(findings[0]?.message).toContain("Disallow: /");
+    const text = applyTo(p.configFile, source, autoEdits(findings[0]));
+    expect(text).toContain('config: { types: { pages: {} }, robots: { policy: "allow" } }');
+    expect(() => parseTs(text)).not.toThrow();
+  });
+
+  it("leaves a robots object without a policy to the user", async () => {
+    const withExtra = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-delivery-static", config: { robots: { extra: ["Disallow: /preview/"] } } }], triggers: [] });\n';
+    const p = await project({ configSource: withExtra, deliveryConfig: { robots: { extra: ["Disallow: /preview/"] } } });
+    const findings = await robotsPolicyRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("manual");
+  });
+
+  it("stays quiet with a policy, with one read from an unset environment variable, with robots: false and without delivery-static", async () => {
+    for (const deliveryConfig of [{ robots: { policy: "disallow" } }, { robots: { policy: undefined } }, { robots: false }]) expect(await robotsPolicyRule.check(contextFor(await project({ deliveryConfig })))).toEqual([]);
+    expect(await robotsPolicyRule.check(contextFor(await project({})))).toEqual([]);
+  });
+});
+
 describe("the delivery index rules are part of the default rule set", () => {
-  it("lists all three", () => {
+  it("lists all four", () => {
     const ids = DEFAULT_RULES.map((r) => r.id);
-    expect(ids).toEqual(expect.arrayContaining(["delivery/export-llms", "delivery/site-url", "delivery/index-triggers"]));
+    expect(ids).toEqual(expect.arrayContaining(["delivery/export-llms", "delivery/site-url", "delivery/index-triggers", "delivery/robots-policy"]));
   });
 });

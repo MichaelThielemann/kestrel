@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
-import { createPipelineFile, hoistModuleConfigProperty, insertTriggers, removeNestedModuleConfigProperty, renameStringLiterals } from "./edits.ts";
+import { createPipelineFile, hoistModuleConfigProperty, insertTriggers, removeNestedModuleConfigProperty, renameStringLiterals, setModuleConfigProperties } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
@@ -56,8 +56,8 @@ export const siteUrlRule: Rule = {
   id: "delivery/site-url",
   check(ctx) {
     const entry = moduleEntry(ctx, "delivery-static");
-    if (entry === undefined || !isRecord(entry.config) || !isRecord(entry.config.llms) || entry.config.llms.siteUrl === undefined) return [];
-    const hasTopLevel = entry.config.siteUrl !== undefined;
+    if (entry === undefined || !isRecord(entry.config) || !isRecord(entry.config.llms) || !("siteUrl" in entry.config.llms)) return [];
+    const hasTopLevel = "siteUrl" in entry.config;
     const source = ctx.readFile(ctx.project.configFile);
     let edits: Edit[] | undefined;
     if (source !== undefined) {
@@ -71,6 +71,22 @@ export const siteUrlRule: Rule = {
     const message = "delivery-static's llms.siteUrl moved to a top-level siteUrl, which llms.txt, sitemap.xml and robots.txt share; boot fails on llms.siteUrl";
     const suggestion = hasTopLevel ? "remove llms.siteUrl; the top-level siteUrl is the one used" : "move llms.siteUrl to delivery-static's top-level siteUrl";
     return [finding("delivery/site-url", "delivery/site-url", message, edits === undefined ? `${suggestion} by hand` : suggestion, { file: ctx.project.configFile, module: entry.use, path: "llms.siteUrl" }, edits, upgradingDocs("delivery-site-url"))];
+  },
+};
+
+/** `delivery/robots-policy`: `delivery-static` writes `<prefix>robots.txt`, and without `robots.policy` it is `Disallow: /` unless `NODE_ENV` is `production`. */
+export const robotsPolicyRule: Rule = {
+  id: "delivery/robots-policy",
+  check(ctx) {
+    const entry = moduleEntry(ctx, "delivery-static");
+    if (entry === undefined || !isRecord(entry.config)) return [];
+    const robots = entry.config.robots;
+    if (robots === false || (isRecord(robots) && "policy" in robots)) return [];
+    const source = ctx.readFile(ctx.project.configFile);
+    const edits = robots === undefined && source !== undefined ? setModuleConfigProperties(ctx.project.configFile, source, { use: entry.use, assignments: { robots: '{ policy: "allow" }' } }) : undefined;
+    const message = "delivery-static writes and owns <prefix>robots.txt and <prefix>sitemap.xml; without robots.policy, robots.txt is \"Disallow: /\" unless NODE_ENV is production";
+    const suggestion = 'set robots.policy to "allow" (what a site without robots.txt had), to "disallow" for a site crawlers must not index, or robots to false to keep your own robots.txt';
+    return [finding("delivery/robots-policy", "delivery/robots-policy", message, edits === undefined ? `${suggestion}, by hand` : suggestion, { file: ctx.project.configFile, module: entry.use, path: "robots.policy" }, edits, upgradingDocs("delivery-robots-policy"), "warning")];
   },
 };
 
@@ -129,4 +145,4 @@ export const indexTriggersRule: Rule = {
   },
 };
 
-export const DELIVERY_INDEX_RULES: readonly Rule[] = [exportLlmsRule, siteUrlRule, indexTriggersRule];
+export const DELIVERY_INDEX_RULES: readonly Rule[] = [exportLlmsRule, siteUrlRule, robotsPolicyRule, indexTriggersRule];
