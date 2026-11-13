@@ -479,6 +479,17 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok(asked.value === 1 ? mark.request : undefined);
   }
 
+  async function leaveRequest(mediaId: string): Promise<Result<void, KestrelError>> {
+    const asked = await askUnlessAsked(mediaId);
+    if (isErr(asked)) return asked;
+    if (asked.value !== undefined) return ok(undefined);
+    const found = await db.findOne<ItemLease>(ITEMS, { mediaId });
+    if (isErr(found)) return found;
+    if (found.value !== null) return ok(undefined);
+    const created = await db.createOne<ItemLease>(ITEMS, { mediaId, writer: "", writerUntil: 0, request: randomUUID(), redo: false, updatedAt: now() });
+    return isErr(created) && created.error.code !== "CONFLICT" ? created : ok(undefined);
+  }
+
   async function renew(lease: Lease): Promise<Result<"held" | "requested" | "lost", KestrelError>> {
     const until = now() + config.staleAfterMs;
     const renewed = await db.updateMany<ItemLease>(ITEMS, { mediaId: lease.mediaId, writer: lease.token, request: lease.request }, { writerUntil: until });
@@ -1921,7 +1932,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
 
     remove(mediaId) {
       removing.set(mediaId, (removing.get(mediaId) ?? 0) + 1);
-      return exclusive(mediaId, () => removeVariants(mediaId)).finally(() => {
+      return exclusive(mediaId, async () => {
+        const asked = await leaveRequest(mediaId);
+        return isErr(asked) ? asked : removeVariants(mediaId);
+      }).finally(() => {
         const left = (removing.get(mediaId) ?? 1) - 1;
         if (left === 0) removing.delete(mediaId);
         else removing.set(mediaId, left);

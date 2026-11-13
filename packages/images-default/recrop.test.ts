@@ -2483,4 +2483,64 @@ describe("images/default writes racing a lease-free prune or a request left on a
     expect([...w.blobs.blobs.keys()].filter((key) => key.includes("/m1/"))).toEqual([]);
     for (const opened of [images, later]) await opened.close();
   });
+
+  it("images.resume finishes an images.remove that failed partway after media.remove", async () => {
+    const w = await world();
+    const images = await w.open([THUMB, SQUARE]);
+    expectOk(await images.generate("m1"));
+    w.media.remove("m1");
+    let failing = true;
+    const blobs: Blobstore = {
+      ...w.blobs,
+      remove: async (key) => {
+        if (failing && key === "site/media/m1/variants/square.webp") {
+          failing = false;
+          return err(failure("TRANSIENT", "copy store unavailable"));
+        }
+        return w.blobs.remove(key);
+      },
+    };
+    const removing = await w.open([THUMB, SQUARE], undefined, { blobs });
+    expectErr(await removing.remove("m1"), "TRANSIENT");
+    expect(copyOf(w, "square.webp")).not.toBeNull();
+
+    const later = await w.open([THUMB, SQUARE], undefined, { now: () => LATER });
+    expectOk(await later.resume());
+    await whenIdle(later);
+
+    expect(expectOk(await w.db.count(VARIANTS, { mediaId: "m1" }))).toBe(0);
+    expect(expectOk(await w.db.count(ITEMS, { mediaId: "m1" }))).toBe(0);
+    expect([...w.blobs.blobs.keys()].filter((key) => key.includes("/m1/"))).toEqual([]);
+    for (const opened of [images, removing, later]) await opened.close();
+  });
+
+  it("images.resume finishes a failed images.remove of an item that never held a lease", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.generate("m1"));
+    expectOk(await w.db.deleteMany(ITEMS, { mediaId: "m1" }));
+    w.media.remove("m1");
+    let failing = true;
+    const blobs: Blobstore = {
+      ...w.blobs,
+      remove: async (key) => {
+        if (failing && key === "site/media/m1/variants/square.webp") {
+          failing = false;
+          return err(failure("TRANSIENT", "copy store unavailable"));
+        }
+        return w.blobs.remove(key);
+      },
+    };
+    const removing = await w.open([SQUARE], undefined, { blobs });
+    expectErr(await removing.remove("m1"), "TRANSIENT");
+
+    const later = await w.open([SQUARE], undefined, { now: () => LATER });
+    expectOk(await later.resume());
+    await whenIdle(later);
+
+    expect(expectOk(await w.db.count(VARIANTS, { mediaId: "m1" }))).toBe(0);
+    expect(expectOk(await w.db.count(ITEMS, { mediaId: "m1" }))).toBe(0);
+    expect([...w.blobs.blobs.keys()].filter((key) => key.includes("/m1/"))).toEqual([]);
+    for (const opened of [images, removing, later]) await opened.close();
+  });
 });

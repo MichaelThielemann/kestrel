@@ -1483,7 +1483,9 @@ Net changes since 5.8.1.
   whose check after writing it fails, puts the earlier bytes back at the private path and the public
   copy, so both paths keep the bytes they had under the row's current `?v=`. `close()` waits for an `images.resume` or a sync
   start under way, and neither starts the sync job again once it has begun; `images.resume` then
-  answers `CONFLICT`.
+  answers `CONFLICT`. `images.remove` leaves a request on the item before its first delete, so one
+  that fails partway after `media.remove` is finished by `images.resume`, which removes the rows,
+  private variants and public copies of an item `media@1` no longer reports as ready.
 
 ### Fixed
 
