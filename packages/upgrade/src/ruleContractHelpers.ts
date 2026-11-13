@@ -32,7 +32,7 @@ function newSpecifier(name: string): string {
 const SOURCE_EXTENSIONS = [".ts", ".mts", ".js", ".mjs", ".vue"];
 const EXCLUDED_DIRS = new Set(["node_modules", "dist"]);
 
-function projectSourceFiles(root: string): string[] {
+export function projectSourceFiles(root: string): string[] {
   const out: string[] = [];
   const walkDir = (dir: string): void => {
     let entries;

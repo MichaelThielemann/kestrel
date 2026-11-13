@@ -37,7 +37,12 @@ pnpm install
 `fix --write` bumps every `@michaelthielemann/kestrel*` range to `^6.0.0` and adds
 `@michaelthielemann/kestrel-cli` (see [`deps/kestrel-range`](#deps-kestrel-range)); it rewrites
 scripts that call the removed `kestrel-openapi` and `kestrel-upgrade` binaries
-([`scripts/kestrel-binaries`](#scripts-kestrel-binaries)).
+([`scripts/kestrel-binaries`](#scripts-kestrel-binaries)). It also raises the project's own `zod` to
+`^4.6.6` ([`deps/zod-range`](#deps-zod-range)), because kestrel 6.0.0 reads module config schemas
+built with zod 4, and rewrites two zod 3 forms in the project's own schemas: `z.record` with only a
+value schema ([`zod/record-key`](#zod-record-key)) and an object default that relies on being
+parsed ([`zod/object-default`](#zod-object-default)). [zod 4 schemas](#zod-4-schemas) lists what
+else to check by hand.
 
 `fix` without `--write` only previews: it shows a unified diff of every file it would change and
 never touches the project. `--write` on a terminal shows the same diff per file and asks `y` (write
@@ -234,6 +239,9 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`redirects/requires-persistence`](#redirects-requires-persistence) | load | manual | `redirects-default` without a `persistence@1` provider |
 | [`imports/redirects-impl`](#imports-redirects-impl) | load | none (info) | a local module importing `kestrel-redirects-default/impl` |
 | [`deps/kestrel-range`](#deps-kestrel-range), `deps/mixed-majors`, `deps/pre-install` | source | auto / manual / none | a `@michaelthielemann/kestrel*` dependency range |
+| [`deps/zod-range`](#deps-zod-range) | source | auto | a `zod` dependency range that admits a release below 4.6.6 or another major |
+| [`zod/record-key`](#zod-record-key) | source | auto | a `z.record` call with only a value schema |
+| [`zod/object-default`](#zod-object-default) | source | auto (warning) | an object schema's object-literal `.default({…})` |
 | [`scripts/kestrel-binaries`](#scripts-kestrel-binaries) | source | auto / manual (warning) | a `kestrel-openapi` or `kestrel-upgrade` command, or an unscoped `npx kestrel`, in `package.json` scripts or another project file |
 | [`deps/host-outdated`](#deps-host-outdated), `deps/host-refused` | source | manual | a direct dependency whose plugin is not built for this version, or whose `kestrel` field is refused |
 | [`offer/event-queue`](#offer-event-queue) | source | none / ask / auto | the switch from `events-direct` to `events-queue` |
@@ -541,6 +549,9 @@ unknown dimensions). `Planned`
 gains `crop`: a `Renderer` passed to `createImages` as `deps.render` must cut `planned.crop` from the
 original after its EXIF orientation before it resizes, or a framed size records a crop its bytes do
 not have.
+`ModuleDefinition["configSchema"]` and the `configSchema` that `defineModule` takes are
+zod 4 schemas (`ZodTypeAny` from `zod` `^4.6.6`); a schema built with zod 3 no longer typechecks
+there (see [`deps/zod-range`](#deps-zod-range)).
 
 #### responses-breaking-step-shapes
 A pipeline runs a step whose 6.0.0 response or manifest shape differs from 5.8's — `redirects.lookup`,
@@ -785,6 +796,53 @@ from 6.0.0, at the same range. A backend project gets it in `dependencies`, sinc
 command starts the production server and a production install omits `devDependencies`; a project
 a host package's plugin loads gets it in `devDependencies`. An entry in the other block is moved in
 the same edit.
+
+#### deps-zod-range
+kestrel 6.0.0 depends on `zod` `^4.6.6` and reads a module's `configSchema` through zod 4's own
+definitions: its JSON Schema, its variables, its defaults and its secrets. A schema built with zod 3
+cannot be read that way, so a project that declares its own modules needs zod 4.6.6 or later; with
+`^4.6.6` the install resolves one copy for the project and kestrel. The rule reads `zod` in `dependencies`, `devDependencies` and
+`peerDependencies` of `package.json` and sets every range whose lowest release is below 4.6.6, or
+on another major, to `^4.6.6`. A range it cannot read as a version (`latest`, `catalog:`,
+`workspace:*`, an `npm:` alias) is left alone. Like `deps/kestrel-range`, it reads `package.json`
+alone and runs even when the project could not load.
+
+#### zod-record-key
+zod 4's `z.record` takes the key schema as its first argument. The rule finds a `z.record(value)`
+with one argument in every `.ts`/`.mts`/`.js`/`.mjs` file of the project and inserts `z.string()`,
+the key zod 3 used, so `z.record(z.number())` becomes `z.record(z.string(), z.number())`. It follows
+the local name of the zod import (`import { z as schema } from "zod"`, `import * as schema from
+"zod"`); a `record` imported on its own, a `.vue` file and a file that does not parse are not
+rewritten, and the project's typecheck reports them.
+
+#### zod-object-default
+zod 3's `.default(value)` parsed `value` when the key was absent, so `z.object({ max:
+z.number().default(5) }).default({})` produced `{ max: 5 }`. zod 4's `.default()` returns the value
+as written, `{}` here; `.prefault()` parses it the way zod 3 did. The rule renames `.default` to
+`.prefault` where the argument is an object literal and the schema it is called on starts at
+`z.object`, `z.strictObject` or `z.looseObject`. It is a warning: an object default that already
+spells out every nested value behaves the same either way, and the rename keeps it that way.
+A default given as a variable or a function, or on an array or a record, is not rewritten.
+
+#### zod-4-schemas
+What a module's own config schema may need beyond the rules above:
+
+- Error messages are zod 4's. A missing key reads `Invalid input: expected string, received
+  undefined` instead of `Required`, an unknown key `Unrecognized key: "name"` instead of
+  `Unrecognized key(s) in object: 'name'`. A test that matches on the text of an
+  `invalid config: …` boot error needs the new wording. An enum mismatch still reads
+  `Invalid enum value. Expected 'a' | 'b'`, because kestrel writes that line itself.
+- Issue codes are zod 4's. A secret path in a boot error reports only the code, which is
+  `invalid_value` where zod 3 said `invalid_enum_value` or `invalid_literal`, and `invalid_format`
+  where it said `invalid_string`.
+- A custom message is passed as a string or as `{ error: … }`, where `error` may be a function of
+  the issue. A function as the second argument of `.refine()`, zod 3's way to build the message
+  from the value, is ignored by zod 4, and the issue reads `Invalid input`.
+- `.strict()` and `.passthrough()` still work and are read as `additionalProperties: false` and
+  `true`; `z.strictObject()` and `z.looseObject()` are the zod 4 spellings and are read the same
+  way. `.describe("secret")` still marks a value secret.
+- `.default()` on a schema with a `transform` takes the transformed output type; `.prefault()`
+  takes the input, as zod 3's `.default()` did.
 
 #### scripts-kestrel-binaries
 6.0.0 removes the `kestrel-openapi` and `kestrel-upgrade` binaries; both are subcommands of

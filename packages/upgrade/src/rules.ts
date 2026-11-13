@@ -23,6 +23,7 @@ import { verifiedUserRule } from "./ruleVerifiedUser.ts";
 import { mediaListRule } from "./ruleMediaList.ts";
 import { requireRoleRule } from "./ruleRequireRole.ts";
 import { useToken } from "./useToken.ts";
+import { ZOD_RULES } from "./ruleZod.ts";
 
 function modulesTsEdits(ctx: RuleContext, packageName: string): Edit[] | undefined {
   const file = join(dirname(ctx.project.configFile), "modules.ts");
@@ -191,6 +192,7 @@ export const DEFAULT_RULES: readonly Rule[] = [
   eventBusRule,
   removedStepsRule,
   kestrelRangeRule,
+  ...ZOD_RULES,
   kestrelBinariesRule,
   verifiedUserRule,
   requireRoleRule,

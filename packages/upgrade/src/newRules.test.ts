@@ -775,6 +775,11 @@ describe("info rules", () => {
     for (const part of ["Images gained setFraming and framingsOf", "Variant gained crop, renderedCrop, renders, originalWidth and originalHeight", "Planned gained crop, and a Renderer passed as deps.render must cut planned.crop from the oriented original before it resizes"]) expect(findings[0]?.message).toContain(part);
   });
 
+  it("types/breaking-signatures names the zod 4 config schema of a module", async () => {
+    const findings = await typeSignaturesRule.check(contextFor(await project({})));
+    expect(findings[0]?.message).toContain('ModuleDefinition["configSchema"] and defineModule\'s configSchema are zod 4 schemas');
+  });
+
   it("responses/breaking-step-shapes names the not-ready 404 and the sync job's eligible total", async () => {
     const p = await project({ pipelines: [{ name: "images", steps: ["images.generate", "images.retryFailed", "images.sync", "images.readStatus", "media.reconcile"] }] });
     const byStep = new Map((await breakingStepShapesRule.check(contextFor(p))).map((f) => [f.where.step, f.message]));

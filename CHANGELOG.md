@@ -6,6 +6,25 @@ Net changes since 5.8.1.
 
 ### Breaking
 
+- **zod 4.** Every package that lists `zod` requires `^4.6.6` (was `^3.23.8`), which fixes a published
+  advisory in array parsing that no zod 3 release fixes. A module's `configSchema` is read through
+  zod 4's own definitions for its JSON Schema, variables, defaults and secrets, so a project's own
+  modules build their schemas with zod 4: depend on `zod` `^4.6.6`, and the install resolves one copy
+  for the project and kestrel. `ModuleDefinition["configSchema"]` and the `configSchema` that
+  `defineModule` takes are zod 4 types. In a module's own schema, `z.record` takes the key schema
+  first (`z.record(z.string(), value)`); an object schema's `.default({})` no longer fills the nested
+  defaults inside it, `.prefault({})` does, as zod 3's `.default()` did; a function as the second
+  argument of `.refine()` is ignored, pass `{ error: … }`. `.strict()`, `.passthrough()` and
+  `.describe("secret")` keep working. The JSON Schema, variables and defaults of every bundled module's
+  config are unchanged. `kestrel upgrade`'s new `deps/zod-range` raises the project's `zod` range,
+  `zod/record-key` inserts the key schema and `zod/object-default` renames such a `.default` to
+  `.prefault`; `types/breaking-signatures` names the schema type.
+- An `invalid config: …` or `invalid kestrel.config: …` boot error carries zod 4's messages: a missing
+  key reads `Invalid input: expected string, received undefined` (was `Required`), an unknown key
+  `Unrecognized key: "name"` (was `Unrecognized key(s) in object: 'name'`). A secret path reports
+  zod 4's issue code, `invalid_value` where zod 3 said `invalid_enum_value` or `invalid_literal` and
+  `invalid_format` where it said `invalid_string`. An enum mismatch still reads
+  `Invalid enum value. Expected 'a' | 'b'`.
 - `delivery-static`: **`delivery.exportLlms` is gone.** A pipeline that still names it fails at boot
   as an unknown step. Index files are never written inside a request any more: put
   `delivery.requestIndexes` where `delivery.exportLlms` was, and with `dependencies.render: "events"`
