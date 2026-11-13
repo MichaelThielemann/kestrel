@@ -10,7 +10,7 @@ import type { Introspection, Manifest } from "@michaelthielemann/kestrel";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
-import { DEFAULT_RENDER_TIMEOUT_MS, FRAMING, HIDDEN, ITEMS, JOBS, VARIANTS, createImages, whenIdle, type Config, type Images, type ItemLease, type Job, type Variant } from "./impl.ts";
+import { DEFAULT_RENDER_TIMEOUT_MS, FRAMING, HIDDEN, ITEMS, JOBS, VARIANTS, createImages, whenIdle, type Config, type FramingRow, type Images, type ItemLease, type Job, type Variant } from "./impl.ts";
 import { cropToken, parseCrop } from "./framing.ts";
 import type { PixelCrop } from "./framing.ts";
 import type { Renderer } from "./generate.ts";
@@ -1417,5 +1417,57 @@ describe("images/default one writer per item across processes", () => {
     await whenIdle(second);
     expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done" });
     for (const images of [planner, redelivered, first, second]) await images.close();
+  });
+});
+
+describe("images/default writes of a holder whose item or row changed meanwhile", () => {
+
+  it("a framing saved while another save waits for the item is the one stored, also after the waiting save takes the item", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.generate("m1"));
+    const renderGate = gate();
+    let holdRender = true;
+    const held: Renderer = async (_d, s, p) => {
+      if (holdRender) {
+        holdRender = false;
+        renderGate.arrive();
+        await renderGate.wait;
+      }
+      return { data: bytesFor(s.name, p.crop ?? null, 0), width: p.width, height: p.height, format: p.format, ext: p.format, contentType: `image/${p.format}` };
+    };
+    const holder = await w.open([SQUARE], held);
+    const askGate = gate();
+    let pauseAsk = true;
+    const asking: Persistence = {
+      ...w.db,
+      updateMany: async (collection, filter, patch) => {
+        if (pauseAsk && collection === ITEMS && Reflect.has(patch, "request") && !Reflect.has(patch, "writer")) {
+          pauseAsk = false;
+          askGate.arrive();
+          await askGate.wait;
+        }
+        return w.db.updateMany(collection, filter, patch);
+      },
+    };
+    const earlier = await w.open([SQUARE], undefined, { db: asking });
+    const latest = await w.open([SQUARE]);
+
+    expectOk(await first.setFraming("m1", { crops: { "1:1": { x: 0.1, y: 0, w: 0.6, h: 1 } } }));
+    const rendering = holder.generate("m1");
+    await renderGate.reached;
+    const saving = earlier.setFraming("m1", RIGHT);
+    await askGate.reached;
+    expect(expectOk(await latest.setFraming("m1", LEFT)).framing.crops).toEqual(LEFT.crops);
+    renderGate.open();
+    expectOk(await rendering);
+    await whenIdle(holder);
+    askGate.open();
+    expect(expectOk(await saving).framing.crops).toEqual(RIGHT.crops);
+    for (const images of [holder, earlier, latest]) await whenIdle(images);
+
+    expect(expectOk(await w.db.findOne<FramingRow>(FRAMING, { mediaId: "m1" }))?.crops).toEqual(LEFT.crops);
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ crop: "0,0,600,600" });
+    for (const images of [first, holder, earlier, latest]) await images.close();
   });
 });

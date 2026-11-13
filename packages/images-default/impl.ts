@@ -2093,14 +2093,18 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const parsed = parseFraming(input, decodable ? { width: ow, height: oh } : undefined);
       if (!parsed.ok) return err(failure("VALIDATION", `images: ${parsed.error}`));
       const framing = parsed.value;
+      let stored = false;
       const store = async (): Promise<Result<boolean, KestrelError>> => {
+        if (stored) return ok(false);
         const hiddenMeanwhile = await isHidden(mediaId);
         if (isErr(hiddenMeanwhile)) return hiddenMeanwhile;
         if (hiddenMeanwhile.value) return notFound();
         const previous = await readFraming(mediaId);
         if (isErr(previous)) return previous;
         const written = await writeFraming(mediaId, framing, ow, oh);
-        return isErr(written) ? written : ok(!sameRect(previous.value?.focus ?? null, framing.focus));
+        if (isErr(written)) return written;
+        stored = true;
+        return ok(!sameRect(previous.value?.focus ?? null, framing.focus));
       };
       const answer = { id: mediaId, framing };
       return withItem(

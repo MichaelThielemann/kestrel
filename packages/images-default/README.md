@@ -236,9 +236,9 @@ are; a check that compares exported URLs with files ignores the query. Back at t
 has no query again.
 
 Placing, rendering and writing the public copies of one item happen under a lease on the item, a row
-per media id in `images_items` that one process holds at a time for `staleAfterMs` and renews
-before each write of a path; `renderTimeoutMs` is below `staleAfterMs`, so a render ends before the
-lease it renews runs out. `images.plan`, `images.generate`, `images.setFraming`, `images.showMany`,
+per media id in `images_items` that one process holds at a time for `staleAfterMs` and renews before
+each write of a path; `renderTimeoutMs` is below `staleAfterMs`, so a render ends before the lease it
+renews runs out. `images.plan`, `images.generate`, `images.setFraming`, `images.showMany`,
 `images.syncPublic` and `images.resume` take it; a call that finds the item held by another process
 does what needs no lease (`images.setFraming` stores the framing and raises the focus event,
 `images.generate` answers the rows as they are), leaves a request on the lease and returns. The
@@ -246,8 +246,10 @@ holder sees the request before it lets go and places and renders the item again 
 then, writing its public copies as well; a holder that only places (`images.plan`,
 `images.setFraming`) leaves this to its background loop. A render that sees a request before it
 writes drops its bytes and renders again, so two framings saved at once in two processes leave the
-rows on the framing that is stored. A render marks its row `done` with the crop it rendered after its
-bytes are at the path, so `?v=` names only bytes rendered with that crop.
+rows on the framing that is stored. A call that stored its framing while another process held the
+item does not store it again when it gets the item, so the framing saved last is the one stored. A
+render marks its row `done` with the crop it rendered after its bytes are at the path, so `?v=` names
+only bytes rendered with that crop.
 
 A holder that stops (the process ends) leaves its lease until `staleAfterMs` has passed;
 `images.resume` then takes it over and places and renders the item, and until that render is done the
