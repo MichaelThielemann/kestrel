@@ -312,21 +312,34 @@ output of every delivered type and stores the build only afterwards, so a failed
 the next start. Run it after every deploy: every output is then re-rendered, and its dependencies recorded by the new
 code. It answers `{ changed, restored, marked }`.
 
+No trigger runs a pipeline at boot. The host runs the one that holds `delivery.checkBuild` itself, once after
+`start()`, with a build id it supplies (a commit hash or release version, for example):
+
+```ts
+await kestrel.start();
+await kestrel.run("deliveryBuildCheck", { trigger: { kind: "event", name: "boot" }, payload: { build } });
+```
+
+Without that run, a new build renders nothing again, a restore is never detected, the index files are not exported at
+boot and the one-time removal of orphaned page outputs (see below) never runs, since it waits for the check.
+
 **A restored database.** A database restored from a backup holds older status rows than the files under `prefix`.
 `delivery.checkBuild` learns of a restore from `result._databaseRestoredAt`, the member that
 `replication.checkRestored` (replication-sqlite) and `backup.checkRestored` (backup-blobstore) set to the start of
 the boot that wrote the latest reported restore of the database file, or to `null`; a missing member means no
 restore. A prepared restore (`replication.prepareRestore`, `backup.restore`) is reported, and so is backup-blobstore's
 restore of a missing file under `restoreOnStart`, which brings back a periodic backup: on an ephemeral disk with that
-module, every start renders every output again. Put one of the two steps before `delivery.checkBuild` in the
-pipeline that runs it at boot:
+module, every start renders every output again. Put the step of the module whose `file` is the database directly
+before `delivery.checkBuild` in the pipeline that runs it at boot:
 
 ```ts
 definePipeline({ name: "deliveryBuildCheck", steps: ["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"] });
 ```
 
-Without one of the two steps before it, no step after `delivery.checkBuild` in that pipeline may write `result`: the
-boot rejects it with `optional-read-order`, because `delivery.checkBuild` optionally reads
+A step between the two that writes `result`, such as `delivery.resumeStale` or `delivery.readStaleStatus`,
+replaces the result and drops the member, and the boot check accepts that pipeline; the restore
+then goes unnoticed. Without one of the two steps before it, no step after `delivery.checkBuild` in that pipeline may
+write `result`: the boot rejects it with `optional-read-order`, because `delivery.checkBuild` optionally reads
 `result._databaseRestoredAt`. Run steps such as `delivery.resumeStale`, `delivery.markAll:<type>` or
 `delivery.readStaleStatus` in a pipeline of their own there.
 

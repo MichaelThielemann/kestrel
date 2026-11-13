@@ -93,8 +93,9 @@ every later boot until the next restore, so a step that keeps output derived fro
 the last value it acted on and treats any other one as a restore; a boot that stops before acting on it
 leaves it to the next one. The member is a shared convention: `backup.checkRestored` writes the same
 one, and `delivery.checkBuild` of delivery-static reads it to render every page again after a restore.
-Put the step first in the pipeline that runs that check at boot, for example
-`["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`.
+Put the step directly before that check in the pipeline that runs it at boot, for example
+`["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`, and only when `file` is
+the database: a step in between that writes `result` replaces it and drops the member.
 
 This module's rebuild of a missing file under `restoreOnStart` is not reported: it brings back the
 replica as of the last shipped WAL frames, which a stop through teardown ships, and on an ephemeral disk

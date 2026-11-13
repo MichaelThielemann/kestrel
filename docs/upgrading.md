@@ -116,9 +116,11 @@ cutover (a replication snapshot, or `sqlite3 <db> ".backup <copy>"`).
 
 `delivery-static` deletes files in the blob store once after the upgrade, in a `delivery.resumeStale`
 run of the recovery cron and without a command of its own: see
-[delivery-orphan-removal](#delivery-orphan-removal). With `replication-sqlite` or `backup-blobstore`,
-wire their `checkRestored` step before `delivery.checkBuild`, so that a restored database is rendered
-again and never runs that removal: see [delivery-restore-check](#delivery-restore-check).
+[delivery-orphan-removal](#delivery-orphan-removal). That removal and the restore
+detection wait for `delivery.checkBuild`, which no trigger runs at boot: the host runs its pipeline once
+after `start()` (see [delivery-restore-check](#delivery-restore-check)). With `replication-sqlite` or
+`backup-blobstore` backing up the database, wire their `checkRestored` step directly before
+`delivery.checkBuild`, so that a restored database is rendered again and never runs that removal.
 
 ## 7. Known devices at sign-in
 
@@ -223,7 +225,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`delivery/export-llms`](#delivery-export-llms) | load | auto / manual | a pipeline file naming the removed `delivery.exportLlms` |
 | [`delivery/site-url`](#delivery-site-url) | load | auto / manual | `delivery-static`'s `llms.siteUrl`, moved to a top-level `siteUrl` |
 | [`delivery/robots-policy`](#delivery-robots-policy) | load | manual (warning) | `delivery-static` without `robots.policy`, so robots.txt follows `NODE_ENV` |
-| [`delivery/restore-check`](#delivery-restore-check) | load | none (info) | a pipeline running `delivery.checkBuild` without a `checkRestored` step of `replication-sqlite`/`backup-blobstore` before it |
+| [`delivery/restore-check`](#delivery-restore-check) | load | none (info) | a pipeline running `delivery.checkBuild` without the `checkRestored` step of a `replication-sqlite`/`backup-blobstore` on the persistence-sqlite file directly before it |
 | [`delivery/index-triggers`](#delivery-index-triggers) | load | auto (pipeline files + triggers) / manual | `dependencies.render: "events"` without the jobs that export the index files |
 | [`site/routed-slug-unique`](#site-routed-slug-unique) | load | auto (error / warning) | a `unique` slug field on a type in `site-default`'s `routes` |
 | [`site/path-wiring`](#site-path-wiring) | boot | manual | a routed write without `site.indexPath`/`site.announcePaths`, or a read with another `home`/`slugField` |
@@ -681,10 +683,16 @@ those files (an uploaded tree of pages, a deployment of an older version) and of
 #### delivery-restore-check
 `delivery.checkBuild` renders every output again after a database restore with an unchanged build
 only when it is told about the restore: put `replication.checkRestored` (or `backup.checkRestored`,
-when that module backs up the database) before it in the pipeline that runs it at boot, for example
-`["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`. The rule reports a
-pipeline that runs `delivery.checkBuild` without one of them before it when either module is
-configured. In a pipeline without one of them before `delivery.checkBuild`, no step after it may
+when that module backs up the database) directly before it in the pipeline that runs it at boot, for
+example `["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`. A step in
+between that writes `result`, such as `delivery.resumeStale`, replaces the result and drops the
+member; the boot check accepts that pipeline. The rule reports a pipeline that runs
+`delivery.checkBuild` without such a step directly before it, offering only the step of a module whose
+`file` resolves to the `persistence-sqlite` file. No trigger runs that pipeline at boot: the host runs
+it once after `start()` with a build id it supplies,
+`await kestrel.run("deliveryBuildCheck", { trigger: { kind: "event", name: "boot" }, payload: { build } })`.
+Without that run (as in `examples/minimal`) there is no restore detection, no export of the index
+files at boot and no orphan removal. In a pipeline without one of them before `delivery.checkBuild`, no step after it may
 write `result`: boot rejects it with `optional-read-order`, so steps such as `delivery.resumeStale`,
 `delivery.markAll:<type>` or `delivery.readStaleStatus` go into a pipeline of their own there. The step sets `result._databaseRestoredAt`
 to the start of the boot that wrote the latest reported restore of the database file, and keeps that

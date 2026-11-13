@@ -31,9 +31,9 @@ every later boot until the next restore, so a step that keeps output derived fro
 the last value it acted on and treats any other one as a restore; a boot that stops before acting on it
 leaves it to the next one. The member is a shared convention: `replication.checkRestored` writes the
 same one, and `delivery.checkBuild` of delivery-static reads it to render every page again after a
-restore. Put the step first in the pipeline that runs that check at boot, for example
+restore. Put the step directly before that check in the pipeline that runs it at boot, for example
 `["backup.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`, and only when `file` is
-the database. A file copied into place by hand is not reported; restore through `backup.restore`
+the database: a step in between that writes `result` replaces it and drops the member. A file copied into place by hand is not reported; restore through `backup.restore`
 instead, or render everything again yourself (for delivery-static, `delivery.markAll` for every
 delivered type).
 
