@@ -14,7 +14,7 @@ through it: whether an item exists and is ready, its type, the type the provider
 its size, stored dimensions, folder and display name, and its bytes. It never reads another module's
 collection or a storage key of the original. The module's setup wraps the `persistence@1` handle
 with `ownedPersistence` before `createImages` ever sees it, so the only handle the implementation
-holds reaches `images_sizes`, `images_variants`, `images_jobs`, `images_retired` and `images_hidden` (`COLLECTIONS`),
+holds reaches `images_sizes`, `images_variants`, `images_jobs`, `images_retired`, `images_hidden` and `images_framing` (`COLLECTIONS`),
 and any other collection is a wiring error that names this module. Boot fails when no active module provides `media@1`
 (`missing-provider`), and a config that still sets the removed `media` option fails its schema.
 
@@ -91,8 +91,8 @@ places and renders any item still `planned`, or any recent item with no rows at 
 (`NOT_FOUND` for an id `media@1` does not report as ready), `images.prune` (`VALIDATION` for a name that is still declared or
 has no variants; retires rather than deletes the path), `images.readStatus`, `images.remove`
 (`VALIDATION` without an id), `images.removeMany` (after `media.listFolderItems` or
-`media.removeFolder`, reads `result.ids`), `images.attach` (adds `available` and `variants[]`/
-`variantCounts` to `result`), `images.serve` (binary; `VALIDATION` without id/file, `NOT_FOUND`
+`media.removeFolder`, reads `result.ids`), `images.setFraming` (see "Focus and crop"),
+`images.attach` (adds `available`, `variants[]`, `variantCounts`, `focus` and `framing` to `result`), `images.serve` (binary; `VALIDATION` without id/file, `NOT_FOUND`
 otherwise), `images.syncPublic` (reconciles the public copy tree), `images.export:<dir>` (nests its
 counts under their own key in `result`, so running it after `media.export` in one pipeline keeps
 that step's counts). Every step passes a persistence or blobstore failure through unchanged, so a
@@ -177,12 +177,88 @@ pipeline runs again with the same ids. That works because `media.trash` and `med
 id that is already trashed or ready into `result.ids` too. Nothing finds such an item on its own,
 since `media@1` reports it as ready.
 
+## Focus and crop
+
+A media item can carry a *framing*: one focus rectangle and, optionally, a manual crop per aspect
+ratio. Every rectangle is `{ x, y, w, h }`, normalised to 0..1 on the original as it is displayed,
+after its EXIF orientation: a portrait photo taken with a phone held upright uses its upright
+dimensions (in a browser, the image's `naturalWidth` and `naturalHeight`). `x`/`y` is the top-left
+corner; a focus with `w` and `h` of 0 is a point.
+
+A framing applies to `cover` sizes only. An `inside` size keeps the whole image and is never
+rendered again because of a framing; the default sizes are all `inside`, so without a `cover` size the
+focus is data for the page, for example for a CSS `object-position`. Each `cover` size has a ratio
+key: its width and height reduced by their greatest common divisor, so `1600x900` and `800x450` are
+both `"16:9"`. The key is exact: `1000x562` is `"500:281"`, a key of its own, although its ratio is
+nearly 16:9. A manual crop is stored per key and applies to every `cover` size of that ratio. A crop
+for a key that no `cover` size has stays stored and applies once such a size exists.
+
+The crop a ratio renders with is, in this order:
+
+- the manual crop for its key, brought to the exact ratio around its centre with the same area and
+  shifted back inside the image;
+- otherwise, with a focus, the largest rectangle of the ratio centred on the focus's centre and
+  shifted back inside the image, so a focus at an edge or in a corner moves the cut, not out of it;
+- otherwise the centre, exactly as without a framing.
+
+A crop that comes out equal to the centred one counts as the centre: nothing renders again and the
+variant's path gets no version. A focus larger than the ratio allows cannot fit: the cut is still
+centred on it, and `fits` (below) is `false`. A crop is never enlarged: a size larger than its crop
+renders at the size's ratio and no larger than the crop, so its `width`/`height` in `variants[]`
+shrink and several sizes of one ratio can end up with the same dimensions.
+
+`images.setFraming` replaces the framing of the item in `params.id` with the payload
+`{ focus?, crops? }`. A field left out is empty, so `{}` or `{ focus: null }` without crops removes
+the framing. It answers `VALIDATION` for an unknown field, a value outside 0..1, a rectangle that
+reaches past the image, a crop without width or height, a key that is not reduced (`"32:18"`), more
+than 64 crops, or a crop whose pixel ratio on the oriented original differs from its key by more
+than 2%; and `NOT_FOUND` for an id `media@1` does not report as ready, an item that is not an image
+with variants (see `ELIGIBLE`) and a hidden item. It answers `{ id, framing }`. The write and the
+re-planning of the item run in the item's own section, after a placement or render of the item
+already under way in this process. Re-planning turns every `cover` size whose crop changes
+`pending` at the same path, with its new width and height, and leaves the old variant there; a
+pipeline renders them by running `images.generate` after it, as `setMediaFraming` in
+`examples/minimal` does. A size added later is placed with the item's framing.
+
+Until the new render is at the path, the origin and the public copy serve the old variant, never the
+original's bytes. Once it is there, `variants[].path` gains `?v=<token>`, a short hash of the crop
+the bytes at the path were rendered with (`cropToken`), and `images.variantsChanged` is raised for
+the item, so pages that show it render again with the new URL. The path itself, the public copy's
+file name, `images.serve` (whose `:file` carries no query) and `images.export:<dir>` stay as they
+are; a check that compares exported URLs with files ignores the query. Back at the centre, the path
+has no query again. A render that started before the framing changed never marks its row `done`:
+its row's crop no longer matches, so the result is dropped and the row waits for the next render,
+in this process or another.
+
+`images.attach` adds `focus` (the rectangle or `null`), meant for anonymous readers, and
+`framing: { focus, crops, ratios }`, meant for an editor. `ratios` has one entry per ratio key of the
+effective `cover` sizes: `{ key, sizes, manual, fits, crop }`, with the names of its sizes, whether a
+manual crop is stored for it, whether the focus lies within its cut (`true` without a focus), and the
+pixel crop it renders with on the oriented original, `{ left, top, width, height }` or `null` for the
+centre. An item without variants gets `focus: null` and an empty framing without ratios.
+
+A framing outlives the trash: the item is hidden, not gone, so trash and restore keep it unchanged,
+and a render of a hidden item writes no public copy. `images.remove`, `images.removeMany` and the
+start's sweep of items `media@1` no longer has delete it with the variants. The framing is stored in
+`images_framing`, one row per media id; `images_variants` keeps the crop of each row and the crop of
+its last finished render as `"left,top,width,height"`, where an empty or missing value is the
+centre.
+
+The crop rules live in `@michaelthielemann/kestrel-images-default/framing`, a subpath that imports
+nothing, so an editor that runs in the browser can preview exactly what this module renders:
+`ratioKey`, `centredCrop`, `cropForRatio`, `effectiveCrop`, `focusFits`, `parseFraming`,
+`formatCrop`, `parseCrop` and `cropToken`, with the types `Rect`, `Framing`, `PixelCrop`,
+`FramingSize` and `FramingParse` and the constants `EMPTY_FRAMING`, `CROP_RATIO_TOLERANCE` and
+`MAX_CROPS`. This module uses the same functions. They take the oriented dimensions of the original;
+`media@1`'s stored `width`/`height` are not oriented and give a wrong cut for a rotated photo.
+
 ## `images.variantsChanged`
 
 `images-default` raises its own event `images.variantsChanged` (`{ id: null, ids, identity: null,
 params: {} }`, at most 200 ids per event) through the optional `events@1` contract — declared in
 `emits`, never required — whenever it changes what a page would need to re-render for: an item it
-placed (made `available`), the items a size-set change or `images.prune` touched. It never raises
+placed (made `available`), the items a size-set change or `images.prune` touched, and an item once a
+render with a changed crop is at its path (see "Focus and crop"). It never raises
 `media.updated`, which belongs to the pipeline that edits a medium; a pipeline that marks the pages
 showing a medium (`delivery.markDependents:media`) subscribes to both. A rejected emit (no
 subscriber, or a subscriber that throws) is logged with the affected ids and does not undo the
@@ -211,7 +287,7 @@ which a browser would open as a document that can run script), which has no vari
 always available.
 `variants[]` never lists a `planned` size; `variantCounts` (`{ done, pending, error, failed }`)
 counts a `planned` row as `pending` too, alongside a size with no row yet or a `done` row whose spec
-no longer matches the effective size; a row for a size nobody declares any more is ignored.
+no longer matches the effective size or whose render was cut with another crop than the row now has; a row for a size nobody declares any more is ignored.
 
 Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered HTML.
 
