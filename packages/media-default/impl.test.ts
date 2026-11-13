@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, it, expect, afterAll } from "vitest";
 import { createBlobstoreFilesystem } from "@michaelthielemann/kestrel-blobstore-filesystem/impl";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
-import type { Document, NewDocument, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Document, NewDocument, Persistence, Schema } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { EXTENSION_BY_TYPE } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
@@ -598,7 +598,16 @@ describe("media/default", () => {
   it("an other filter counts and pages correctly past several scan batches, not just the first one", async () => {
     const blobs = fakeBlobstore();
     const persistence = createFakePersistence();
-    const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], defaultLocale: undefined }, blobs, persistence, noLogger, () => 0);
+    let declared: Schema | undefined;
+    const seeding: Persistence = {
+      ...persistence,
+      ensureCollection: (name, schema) => {
+        if (name !== COLLECTION) return persistence.ensureCollection(name, schema);
+        declared = schema;
+        return persistence.ensureCollection(name, Object.fromEntries(Object.entries(schema).map(([field, raw]) => [field, typeof raw === "string" ? raw : raw.type])));
+      },
+    };
+    const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], defaultLocale: undefined }, blobs, seeding, noLogger, () => 0);
     const total = 5200;
     const rows: NewDocument<Document>[] = Array.from({ length: total }, (_, i) => ({
       id: `other-${String(i).padStart(5, "0")}`,
@@ -614,6 +623,7 @@ describe("media/default", () => {
       updatedAt: i,
     }));
     expectOk(await persistence.createMany(COLLECTION, rows));
+    expectOk(await persistence.ensureCollection(COLLECTION, declared!));
 
     const page = expectOk(await media.list({ mediaKind: "other", limit: 10, offset: 0 }));
     expect(page.total).toBe(total);
@@ -621,7 +631,7 @@ describe("media/default", () => {
 
     const lastPage = expectOk(await media.list({ mediaKind: "other", limit: 10, offset: total - 5 }));
     expect(lastPage.items).toHaveLength(5);
-  }, 30000);
+  });
 
   it("recursive list matches the exact subtree, not a LIKE prefix or byte range", async () => {
     const blobs = fakeBlobstore();
