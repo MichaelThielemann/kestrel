@@ -116,7 +116,9 @@ cutover (a replication snapshot, or `sqlite3 <db> ".backup <copy>"`).
 
 `delivery-static` deletes files in the blob store once after the upgrade, in a `delivery.resumeStale`
 run of the recovery cron and without a command of its own: see
-[delivery-orphan-removal](#delivery-orphan-removal).
+[delivery-orphan-removal](#delivery-orphan-removal). With `replication-sqlite` or `backup-blobstore`,
+wire their `checkRestored` step before `delivery.checkBuild`, so that a restored database is rendered
+again and never runs that removal: see [delivery-restore-check](#delivery-restore-check).
 
 ## 7. Known devices at sign-in
 
@@ -221,6 +223,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`delivery/export-llms`](#delivery-export-llms) | load | auto / manual | a pipeline file naming the removed `delivery.exportLlms` |
 | [`delivery/site-url`](#delivery-site-url) | load | auto / manual | `delivery-static`'s `llms.siteUrl`, moved to a top-level `siteUrl` |
 | [`delivery/robots-policy`](#delivery-robots-policy) | load | manual (warning) | `delivery-static` without `robots.policy`, so robots.txt follows `NODE_ENV` |
+| [`delivery/restore-check`](#delivery-restore-check) | load | none (info) | a pipeline running `delivery.checkBuild` without a `checkRestored` step of `replication-sqlite`/`backup-blobstore` before it |
 | [`delivery/index-triggers`](#delivery-index-triggers) | load | auto (pipeline files + triggers) / manual | `dependencies.render: "events"` without the jobs that export the index files |
 | [`site/routed-slug-unique`](#site-routed-slug-unique) | load | auto (error / warning) | a `unique` slug field on a type in `site-default`'s `routes` |
 | [`site/path-wiring`](#site-path-wiring) | boot | manual | a routed write without `site.indexPath`/`site.announcePaths`, or a read with another `home`/`slugField` |
@@ -679,18 +682,25 @@ those files (an uploaded tree of pages, a deployment of an older version) and of
 `delivery.checkBuild` renders every output again after a database restore with an unchanged build
 only when it is told about the restore: put `replication.checkRestored` (or `backup.checkRestored`,
 when that module backs up the database) before it in the pipeline that runs it at boot, for example
-`["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`. The step sets
-`result._databaseRestoredAt` to the start of the boot that applied the latest prepared restore
-(`replication.prepareRestore`, `backup.restore`) of the database file, and keeps that value in later
-boots; `delivery.checkBuild` handles each value once, also when the restoring boot stopped before the
-check. Such a restore also records the orphan removal above as done, so it never runs on a restored
-database. A rebuild of a missing database file under `restoreOnStart`, which on an ephemeral disk
-happens at every start, is no restore here. A database file copied into place by hand is not detected;
-restore through one of those steps, or run `delivery.markAll` for every delivered type after such a
-copy. The files of pages created or moved after the backup stay under `prefix`: no status row owns
-them, so they are absent from `sitemap.xml` and `llms.txt` and cannot be unpublished. Remove them by
-hand; they are the `index.<ext>` keys under `prefix` at paths that no `delivery.readStatus` row
-reports.
+`["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`. The rule reports a
+pipeline that runs `delivery.checkBuild` without one of them before it when either module is
+configured. In a pipeline without one of them before `delivery.checkBuild`, no step after it may
+write `result`: boot rejects it with `optional-read-order`, so steps such as `delivery.resumeStale`,
+`delivery.markAll:<type>` or `delivery.readStaleStatus` go into a pipeline of their own there. The step sets `result._databaseRestoredAt`
+to the start of the boot that wrote the latest reported restore of the database file, and keeps that
+value in later boots; `delivery.checkBuild` handles each value once, also when the restoring boot
+stopped before the check. A prepared restore (`replication.prepareRestore`, `backup.restore`) is
+reported, and so is backup-blobstore's restore of a missing file under `restoreOnStart`, which brings
+back the last `backup.run` copy: on an ephemeral disk with that module, every start renders every
+output again. Such a restore also records the orphan removal above as done, so it never runs on a
+restored database. replication-sqlite's rebuild of a missing database file under `restoreOnStart`
+brings back the latest replica and is no restore here; after a stop without teardown, pages saved
+since the last `replication.sync` keep files the rebuilt rows do not know. A database file copied into
+place by hand is not detected either. After either one, run `delivery.markAll` for every delivered
+type, or restore through one of those steps. The files of pages created or moved after the backup stay
+under `prefix`: no status row owns them, so they are absent from `sitemap.xml` and `llms.txt` and
+cannot be unpublished. Remove them by hand; they are the `index.<ext>` keys under `prefix` at paths
+that no `delivery.readStatus` row reports.
 
 #### delivery-index-triggers
 With `dependencies.render: "events"`, boot fails unless a trigger runs `delivery.exportIndexes` on
