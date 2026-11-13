@@ -932,7 +932,7 @@ its value.
 
 A config that fails validation aborts the boot with `invalid config: <path>: <problem>`. For a
 secret path, a path under a credential-like key or a path through a union or intersection, the
-problem is only the validation code (`invalid_enum_value`, `custom`, …). An enum mismatch names
+problem is only the validation code (`invalid_value`, `custom`, …). An enum mismatch names
 only the expected values. Any other message is shown as the check wrote it, with URLs that carry
 credentials replaced by `"[redacted]"`; a message a module author writes should not repeat the
 value it rejects.

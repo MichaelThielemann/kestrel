@@ -1,4 +1,4 @@
-import type { ZodIssue, ZodTypeAny } from "zod";
+import { globalRegistry, type core } from "zod";
 import { boundaryCast } from "./cast.ts";
 import { canHoldSecret, isSecretName, isSecretSchema, isSecretValue, REDACTED, redactCredentialUrls, snapshotValue, type JsonValue } from "./configValue.ts";
 import type { JsonSchema } from "./defineModule.ts";
@@ -36,37 +36,24 @@ export interface ConfigDescription {
 
 export const SECRET = "secret";
 
-interface Def {
-  typeName?: string;
-  description?: string;
-  innerType: ZodTypeAny;
-  schema: ZodTypeAny;
-  type: ZodTypeAny;
-  in: ZodTypeAny;
-  out?: ZodTypeAny;
-  getter: () => ZodTypeAny;
-  shape?: () => Record<string, ZodTypeAny>;
-  unknownKeys?: string;
-  catchall?: ZodTypeAny;
-  keyType?: ZodTypeAny;
-  valueType: ZodTypeAny;
-  values: Record<string, unknown>;
+type Schema = core.$ZodType;
+type Def = core.$ZodTypes["_zod"]["def"];
+
+interface CheckDef {
+  check: string;
+  format?: string;
+  pattern?: RegExp;
+  prefix?: string;
+  suffix?: string;
+  minimum?: number;
+  maximum?: number;
+  length?: number;
   value?: unknown;
-  options?: ZodTypeAny[] | Map<unknown, ZodTypeAny>;
-  items?: ZodTypeAny[];
-  rest?: ZodTypeAny | null;
-  left: ZodTypeAny;
-  right: ZodTypeAny;
-  checks?: Array<{ kind: string; value?: unknown; regex?: RegExp; inclusive?: boolean }>;
-  minLength?: { value: number } | null;
-  maxLength?: { value: number } | null;
-  exactLength?: { value: number } | null;
-  defaultValue?: () => unknown;
-  effect?: { type: string };
+  inclusive?: boolean;
 }
 
 interface Unwrapped {
-  inner: ZodTypeAny;
+  inner: Schema;
   optional: boolean;
   nullable: boolean;
   reshapes: boolean;
@@ -74,37 +61,43 @@ interface Unwrapped {
   description?: string;
 }
 
-const def = (schema: ZodTypeAny): Def => boundaryCast<Def>(schema._def, "host");
-const kind = (schema: ZodTypeAny): string => def(schema).typeName ?? "";
+const def = (schema: Schema): Def => boundaryCast<core.$ZodTypes>(schema, "host")._zod.def;
+const kind = (schema: Schema): string => schema._zod.def.type;
+const descriptionOf = (schema: Schema): string | undefined => globalRegistry.get(schema)?.description;
 
-function unwrap(schema: ZodTypeAny): Unwrapped {
+function checksOf(d: Def): CheckDef[] {
+  const own = "check" in d && typeof d.check === "string" ? [boundaryCast<CheckDef>(d, "host")] : [];
+  return [...own, ...(d.checks ?? []).map((check) => boundaryCast<CheckDef>(check._zod.def, "host"))];
+}
+
+function catchallOf(d: core.$ZodObjectDef): Schema | undefined {
+  const catchall = d.catchall;
+  return catchall === undefined || kind(catchall) === "never" || kind(catchall) === "unknown" ? undefined : catchall;
+}
+
+function unwrap(schema: Schema): Unwrapped {
   const out: Unwrapped = { inner: schema, optional: false, nullable: false, reshapes: false };
   let current = schema;
   for (;;) {
+    const description = descriptionOf(current);
+    if (description !== undefined && out.description === undefined) out.description = description;
     const d = def(current);
-    if (d.description !== undefined && out.description === undefined) out.description = d.description;
-    const name = d.typeName;
-    if (name === "ZodOptional") {
+    if (d.type === "optional") {
       out.optional = true;
       current = d.innerType;
-    } else if (name === "ZodDefault") {
+    } else if (d.type === "default" || d.type === "prefault") {
       out.optional = true;
-      if (out.defaultValue === undefined && d.defaultValue !== undefined) out.defaultValue = d.defaultValue;
+      if (out.defaultValue === undefined) out.defaultValue = () => d.defaultValue;
       current = d.innerType;
-    } else if (name === "ZodNullable") {
+    } else if (d.type === "nullable") {
       out.nullable = true;
       current = d.innerType;
-    } else if (name === "ZodCatch") {
+    } else if (d.type === "catch" || d.type === "readonly") {
       current = d.innerType;
-    } else if (name === "ZodEffects") {
-      if (d.effect?.type !== "refinement") out.reshapes = true;
-      current = d.schema;
-    } else if (name === "ZodBranded") {
-      current = d.type;
-    } else if (name === "ZodPipeline") {
+    } else if (d.type === "pipe") {
       out.reshapes = true;
-      current = d.in;
-    } else if (name === "ZodLazy") {
+      current = kind(d.in) === "transform" ? d.out : d.in;
+    } else if (d.type === "lazy") {
       current = d.getter();
     } else {
       break;
@@ -114,16 +107,19 @@ function unwrap(schema: ZodTypeAny): Unwrapped {
   return out;
 }
 
+const STRING_FORMATS: Readonly<Record<string, string>> = { email: "email", url: "url", uuid: "uuid", date: "date", datetime: "date-time", time: "time", ipv4: "ip", ipv6: "ip", cidrv4: "cidr", cidrv6: "cidr" };
+
 function stringSchema(d: Def): JsonSchema {
   const out: JsonSchema = { type: "string" };
-  for (const check of d.checks ?? []) {
-    if (check.kind === "min") out.minLength = check.value;
-    else if (check.kind === "max") out.maxLength = check.value;
-    else if (check.kind === "length") out.minLength = out.maxLength = check.value;
-    else if (check.kind === "regex" && check.regex) out.pattern = check.regex.source;
-    else if (check.kind === "startsWith") out.pattern = `^${escapeRegex(String(check.value))}`;
-    else if (check.kind === "endsWith") out.pattern = `${escapeRegex(String(check.value))}$`;
-    else if (["email", "url", "uuid", "date", "datetime", "time", "ip", "cidr"].includes(check.kind)) out.format = check.kind === "datetime" ? "date-time" : check.kind;
+  for (const check of checksOf(d)) {
+    if (check.check === "min_length") out.minLength = check.minimum;
+    else if (check.check === "max_length") out.maxLength = check.maximum;
+    else if (check.check === "length_equals") out.minLength = out.maxLength = check.length;
+    else if (check.check !== "string_format") continue;
+    else if (check.format === "regex" && check.pattern) out.pattern = check.pattern.source;
+    else if (check.format === "starts_with") out.pattern = `^${escapeRegex(String(check.prefix))}`;
+    else if (check.format === "ends_with") out.pattern = `${escapeRegex(String(check.suffix))}$`;
+    else if (check.format !== undefined && Object.hasOwn(STRING_FORMATS, check.format)) out.format = STRING_FORMATS[check.format];
   }
   return out;
 }
@@ -132,27 +128,50 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const INTEGER_FORMATS = new Set(["safeint", "int32", "uint32"]);
+
+function isInteger(d: Def): boolean {
+  return checksOf(d).some((c) => c.check === "number_format" && c.format !== undefined && INTEGER_FORMATS.has(c.format));
+}
+
 function numberSchema(d: Def): JsonSchema {
-  const checks = d.checks ?? [];
-  const out: JsonSchema = { type: checks.some((c) => c.kind === "int") ? "integer" : "number" };
-  for (const check of checks) {
-    if (check.kind === "min") out[check.inclusive === false ? "exclusiveMinimum" : "minimum"] = check.value;
-    else if (check.kind === "max") out[check.inclusive === false ? "exclusiveMaximum" : "maximum"] = check.value;
-    else if (check.kind === "multipleOf") out.multipleOf = check.value;
+  const out: JsonSchema = { type: isInteger(d) ? "integer" : "number" };
+  for (const check of checksOf(d)) {
+    if (check.check === "greater_than") out[check.inclusive === false ? "exclusiveMinimum" : "minimum"] = check.value;
+    else if (check.check === "less_than") out[check.inclusive === false ? "exclusiveMaximum" : "maximum"] = check.value;
+    else if (check.check === "multiple_of") out.multipleOf = check.value;
   }
   return out;
 }
 
-function optionsOf(d: Def): ZodTypeAny[] {
-  const options = d.options;
-  if (options instanceof Map) return [...options.values()];
-  return options ?? [];
+function arraySchema(d: core.$ZodArrayDef): JsonSchema {
+  let min: number | undefined;
+  let max: number | undefined;
+  let exact: number | undefined;
+  for (const check of checksOf(d)) {
+    if (check.check === "min_length") min = check.minimum;
+    else if (check.check === "max_length") max = check.maximum;
+    else if (check.check === "length_equals") exact = check.length;
+  }
+  const out: JsonSchema = { type: "array", items: toJsonSchema(d.element) };
+  if (min !== undefined) out.minItems = min;
+  if (max !== undefined) out.maxItems = max;
+  if (exact !== undefined) out.minItems = out.maxItems = exact;
+  return out;
 }
 
-function objectSchema(d: Def): JsonSchema {
+function enumSchema(d: core.$ZodEnumDef): JsonSchema {
+  const entries = Object.entries(d.entries);
+  const values = entries.map(([, value]) => value);
+  if (entries.every(([key, value]) => key === value)) return { type: "string", enum: values };
+  const numeric = values.filter((v) => typeof v === "number");
+  return { enum: numeric.length > 0 ? numeric : values };
+}
+
+function objectSchema(d: core.$ZodObjectDef): JsonSchema {
   const properties: Record<string, JsonSchema> = {};
   const required: string[] = [];
-  for (const [key, child] of Object.entries(d.shape?.() ?? {})) {
+  for (const [key, child] of Object.entries(d.shape)) {
     const property = toJsonSchema(child);
     if (isSecretName(key) && canHoldSecret(typeOf(unwrap(child).inner))) delete property.default;
     properties[key] = property;
@@ -160,63 +179,52 @@ function objectSchema(d: Def): JsonSchema {
   }
   const out: JsonSchema = { type: "object", properties };
   if (required.length > 0) out.required = required;
-  if (d.unknownKeys === "strict") out.additionalProperties = false;
-  else if (d.unknownKeys === "passthrough") out.additionalProperties = true;
-  else if (d.catchall !== undefined && kind(d.catchall) !== "ZodNever") out.additionalProperties = toJsonSchema(d.catchall);
+  if (d.catchall !== undefined && kind(d.catchall) === "never") out.additionalProperties = false;
+  else if (d.catchall !== undefined && kind(d.catchall) === "unknown") out.additionalProperties = true;
+  else if (d.catchall !== undefined) out.additionalProperties = toJsonSchema(d.catchall);
   return out;
 }
 
-function bareSchema(schema: ZodTypeAny): JsonSchema {
+function bareSchema(schema: Schema): JsonSchema {
   const d = def(schema);
-  switch (d.typeName) {
-    case "ZodString":
+  switch (d.type) {
+    case "string":
       return stringSchema(d);
-    case "ZodNumber":
+    case "number":
       return numberSchema(d);
-    case "ZodBigInt":
+    case "bigint":
       return { type: "integer" };
-    case "ZodBoolean":
+    case "boolean":
       return { type: "boolean" };
-    case "ZodDate":
+    case "date":
       return { type: "string", format: "date-time" };
-    case "ZodNull":
+    case "null":
       return { type: "null" };
-    case "ZodLiteral":
-      return { const: d.value };
-    case "ZodEnum":
-      return { type: "string", enum: d.values };
-    case "ZodNativeEnum": {
-      const values = Object.values(d.values);
-      const numeric = values.filter((v) => typeof v === "number");
-      return { enum: numeric.length > 0 ? numeric : values };
-    }
-    case "ZodArray": {
-      const out: JsonSchema = { type: "array", items: toJsonSchema(d.type) };
-      if (d.minLength) out.minItems = d.minLength.value;
-      if (d.maxLength) out.maxItems = d.maxLength.value;
-      if (d.exactLength) out.minItems = out.maxItems = d.exactLength.value;
-      return out;
-    }
-    case "ZodTuple": {
-      const out: JsonSchema = { type: "array", prefixItems: (d.items ?? []).map(toJsonSchema) };
+    case "literal":
+      return d.values.length === 1 ? { const: d.values[0] } : { enum: d.values };
+    case "enum":
+      return enumSchema(d);
+    case "array":
+      return arraySchema(d);
+    case "tuple": {
+      const out: JsonSchema = { type: "array", prefixItems: d.items.map(toJsonSchema) };
       if (d.rest) out.items = toJsonSchema(d.rest);
       return out;
     }
-    case "ZodObject":
+    case "object":
       return objectSchema(d);
-    case "ZodRecord":
+    case "record":
       return { type: "object", additionalProperties: toJsonSchema(d.valueType) };
-    case "ZodUnion":
-    case "ZodDiscriminatedUnion":
-      return { anyOf: optionsOf(d).map(toJsonSchema) };
-    case "ZodIntersection":
+    case "union":
+      return { anyOf: d.options.map(toJsonSchema) };
+    case "intersection":
       return { allOf: [toJsonSchema(d.left), toJsonSchema(d.right)] };
     default:
       return {};
   }
 }
 
-export function toJsonSchema(schema: ZodTypeAny): JsonSchema {
+export function toJsonSchema(schema: Schema): JsonSchema {
   const { inner, nullable, defaultValue, description } = unwrap(schema);
   const secret = isSecretNode(schema);
   let out = bareSchema(inner);
@@ -229,7 +237,7 @@ export function toJsonSchema(schema: ZodTypeAny): JsonSchema {
 
 const MAX_REDACT_DEPTH = 8;
 
-function isSecretField(key: string, child: ZodTypeAny): boolean {
+function isSecretField(key: string, child: Schema): boolean {
   return isSecretSchema(toJsonSchema(child)) || (isSecretName(key) && canHoldSecret(typeOf(unwrap(child).inner)));
 }
 
@@ -237,49 +245,46 @@ function assign(out: Record<string, unknown>, key: string, value: unknown): void
   Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
 }
 
-function containsSecret(schema: ZodTypeAny, depth: number): boolean {
+function containsSecret(schema: Schema, depth: number): boolean {
   if (depth > MAX_REDACT_DEPTH) return true;
+  if (descriptionOf(schema) === SECRET) return true;
+  const next = (child: Schema | null | undefined): boolean => child !== undefined && child !== null && containsSecret(child, depth + 1);
   const d = def(schema);
-  if (d.description === SECRET) return true;
-  const next = (child: ZodTypeAny | null | undefined): boolean => child !== undefined && child !== null && containsSecret(child, depth + 1);
-  switch (d.typeName) {
-    case "ZodOptional":
-    case "ZodDefault":
-    case "ZodNullable":
-    case "ZodCatch":
+  switch (d.type) {
+    case "optional":
+    case "default":
+    case "prefault":
+    case "nullable":
+    case "catch":
+    case "readonly":
       return next(d.innerType);
-    case "ZodEffects":
-      return next(d.schema);
-    case "ZodBranded":
-      return next(d.type);
-    case "ZodPipeline":
+    case "pipe":
       return next(d.in) || next(d.out);
-    case "ZodLazy":
+    case "lazy":
       return next(d.getter());
-    case "ZodObject":
-      return Object.entries(d.shape?.() ?? {}).some(([key, child]) => (isSecretName(key) && canHoldSecret(typeOf(unwrap(child).inner))) || next(child)) || next(d.catchall);
-    case "ZodRecord":
+    case "object":
+      return Object.entries(d.shape).some(([key, child]) => (isSecretName(key) && canHoldSecret(typeOf(unwrap(child).inner))) || next(child)) || next(catchallOf(d));
+    case "record":
       return next(d.valueType);
-    case "ZodArray":
-      return next(d.type);
-    case "ZodTuple":
-      return (d.items ?? []).some((item) => next(item)) || next(d.rest);
-    case "ZodUnion":
-    case "ZodDiscriminatedUnion":
-      return optionsOf(d).some((option) => next(option));
-    case "ZodIntersection":
+    case "array":
+      return next(d.element);
+    case "tuple":
+      return d.items.some((item) => next(item)) || next(d.rest);
+    case "union":
+      return d.options.some((option) => next(option));
+    case "intersection":
       return next(d.left) || next(d.right);
     default:
       return false;
   }
 }
 
-function isSecretNode(schema: ZodTypeAny): boolean {
+function isSecretNode(schema: Schema): boolean {
   const { description, reshapes } = unwrap(schema);
   return description === SECRET || (reshapes && containsSecret(schema, 0));
 }
 
-function redactEntries(value: Record<string, unknown>, childOf: (key: string) => ZodTypeAny | undefined, depth: number): Record<string, unknown> {
+function redactEntries(value: Record<string, unknown>, childOf: (key: string) => Schema | undefined, depth: number): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
     const child = childOf(key);
@@ -289,72 +294,72 @@ function redactEntries(value: Record<string, unknown>, childOf: (key: string) =>
   return out;
 }
 
-function redactSecrets(schema: ZodTypeAny, value: unknown, depth: number): unknown {
+function redactSecrets(schema: Schema, value: unknown, depth: number): unknown {
   if (value === undefined || value === null) return value;
   if (isSecretNode(schema)) return REDACTED;
   if (depth > MAX_REDACT_DEPTH) return REDACTED;
-  const { inner } = unwrap(schema);
-  const d = def(inner);
-  switch (kind(inner)) {
-    case "ZodObject": {
+  const d = def(unwrap(schema).inner);
+  switch (d.type) {
+    case "object": {
       if (!isPlainObject(value)) return value;
-      const shape = d.shape?.() ?? {};
-      const catchall = d.catchall !== undefined && kind(d.catchall) !== "ZodNever" ? d.catchall : undefined;
+      const shape = d.shape;
+      const catchall = catchallOf(d);
       return redactEntries(value, (key) => (Object.hasOwn(shape, key) ? shape[key] : catchall), depth);
     }
-    case "ZodRecord":
+    case "record":
       return isPlainObject(value) ? redactEntries(value, () => d.valueType, depth) : value;
-    case "ZodArray":
-      return Array.isArray(value) ? value.map((item: unknown) => redactSecrets(d.type, item, depth + 1)) : value;
-    case "ZodTuple": {
+    case "array":
+      return Array.isArray(value) ? value.map((item: unknown) => redactSecrets(d.element, item, depth + 1)) : value;
+    case "tuple": {
       if (!Array.isArray(value)) return value;
-      const items = d.items ?? [];
       return value.map((item: unknown, i) => {
-        const element = items[i] ?? d.rest ?? undefined;
+        const element = d.items[i] ?? d.rest ?? undefined;
         return element === undefined ? item : redactSecrets(element, item, depth + 1);
       });
     }
-    case "ZodUnion":
-    case "ZodDiscriminatedUnion":
-      return optionsOf(d).reduce<unknown>((current, option) => redactSecrets(option, current, depth + 1), value);
-    case "ZodIntersection":
+    case "union":
+      return d.options.reduce<unknown>((current, option) => redactSecrets(option, current, depth + 1), value);
+    case "intersection":
       return redactSecrets(d.right, redactSecrets(d.left, value, depth + 1), depth + 1);
     default:
       return value;
   }
 }
 
-function childAt(schema: ZodTypeAny, key: string | number): ZodTypeAny | undefined {
-  const { inner } = unwrap(schema);
-  const d = def(inner);
-  switch (kind(inner)) {
-    case "ZodObject": {
-      const shape = d.shape?.() ?? {};
-      if (typeof key === "string" && Object.hasOwn(shape, key)) return shape[key];
-      return d.catchall !== undefined && kind(d.catchall) !== "ZodNever" ? d.catchall : undefined;
-    }
-    case "ZodRecord":
+function childAt(schema: Schema, key: PropertyKey): Schema | undefined {
+  const d = def(unwrap(schema).inner);
+  switch (d.type) {
+    case "object":
+      if (typeof key === "string" && Object.hasOwn(d.shape, key)) return d.shape[key];
+      return catchallOf(d);
+    case "record":
       return d.valueType;
-    case "ZodArray":
-      return d.type;
-    case "ZodTuple":
-      return (typeof key === "number" ? d.items?.[key] : undefined) ?? d.rest ?? undefined;
+    case "array":
+      return d.element;
+    case "tuple":
+      return (typeof key === "number" ? d.items[key] : undefined) ?? d.rest ?? undefined;
     default:
       return undefined;
   }
 }
 
-function isSecretPath(schema: ZodTypeAny, path: ReadonlyArray<string | number>): boolean {
-  let node: ZodTypeAny | undefined = schema;
+function isSecretPath(schema: Schema, path: readonly PropertyKey[]): boolean {
+  let node: Schema | undefined = schema;
   for (const key of path) {
     if (node === undefined) return false;
     if (isSecretNode(node)) return true;
     const kindName = kind(unwrap(node).inner);
-    if (kindName === "ZodUnion" || kindName === "ZodDiscriminatedUnion" || kindName === "ZodIntersection") return true;
+    if (kindName === "union" || kindName === "intersection") return true;
     if (typeof key === "string" && isSecretName(key)) return true;
     node = childAt(node, key);
   }
   return node !== undefined && isSecretNode(node);
+}
+
+function isEnumAt(schema: Schema, path: readonly PropertyKey[]): boolean {
+  let node: Schema | undefined = schema;
+  for (const key of path) node = node === undefined ? undefined : childAt(node, key);
+  return node !== undefined && kind(unwrap(node).inner) === "enum";
 }
 
 /**
@@ -362,44 +367,43 @@ function isSecretPath(schema: ZodTypeAny, path: ReadonlyArray<string | number>):
  * or a path through a union or intersection) reports only the issue code and an enum mismatch only
  * what it expected; any other message is kept as its check wrote it, with credential URLs redacted.
  */
-export function describeConfigIssue(schema: ZodTypeAny, issue: ZodIssue): string {
-  const where = issue.path.join(".") || "(root)";
+export function describeConfigIssue(schema: Schema, issue: core.$ZodIssue): string {
+  const where = issue.path.map(String).join(".") || "(root)";
   if (isSecretPath(schema, issue.path)) return `${where}: ${issue.code}`;
-  if (issue.code === "invalid_enum_value") return `${where}: Invalid enum value. Expected ${issue.options.map((o) => `'${String(o)}'`).join(" | ")}`;
+  if (issue.code === "invalid_value" && isEnumAt(schema, issue.path)) return `${where}: Invalid enum value. Expected ${issue.values.map((o) => `'${String(o)}'`).join(" | ")}`;
   return `${where}: ${redactCredentialUrls(issue.message)}`;
 }
 
-function redactedSnapshot(schema: ZodTypeAny, value: unknown): JsonValue {
+function redactedSnapshot(schema: Schema, value: unknown): JsonValue {
   return snapshotValue(redactSecrets(schema, value, 0));
 }
 
-function typeOf(schema: ZodTypeAny): string {
-  switch (kind(schema)) {
-    case "ZodString":
-    case "ZodDate":
+function typeOf(schema: Schema): string {
+  const d = def(schema);
+  switch (d.type) {
+    case "string":
+    case "date":
       return "string";
-    case "ZodNumber":
-      return (def(schema).checks ?? []).some((c) => c.kind === "int") ? "integer" : "number";
-    case "ZodBigInt":
+    case "number":
+      return isInteger(d) ? "integer" : "number";
+    case "bigint":
       return "integer";
-    case "ZodBoolean":
+    case "boolean":
       return "boolean";
-    case "ZodArray":
-    case "ZodTuple":
+    case "array":
+    case "tuple":
       return "array";
-    case "ZodObject":
+    case "object":
       return "object";
-    case "ZodRecord":
+    case "record":
       return "record";
-    case "ZodEnum":
-    case "ZodNativeEnum":
+    case "enum":
       return "enum";
-    case "ZodUnion":
-    case "ZodDiscriminatedUnion":
+    case "union":
       return "union";
-    case "ZodLiteral":
+    case "literal":
       return "literal";
-    case "ZodFunction":
+    case "function":
       return "function";
     default:
       return "unknown";
@@ -452,12 +456,13 @@ interface Ancestors {
   redacted: boolean;
 }
 
-function collectVariables(schema: ZodTypeAny, raw: unknown, parsedInput: unknown, defaults: ConfigDefaults | undefined, path: string[], out: ConfigVariable[], ancestors: Ancestors): void {
+function collectVariables(schema: Schema, raw: unknown, parsedInput: unknown, defaults: ConfigDefaults | undefined, path: string[], out: ConfigVariable[], ancestors: Ancestors): void {
   const { inner, reshapes } = unwrap(schema);
   const parsed = reshapes ? undefined : parsedInput;
-  if (kind(inner) !== "ZodObject") return;
+  const d = def(inner);
+  if (d.type !== "object") return;
   const inherited = valueAt(raw, path) === undefined ? ancestors.default : undefined;
-  for (const [key, child] of Object.entries(def(inner).shape?.() ?? {})) {
+  for (const [key, child] of Object.entries(d.shape)) {
     const childPath = [...path, key];
     const unwrapped = unwrap(child);
     const secret = isSecretSchema(toJsonSchema(child));
@@ -476,7 +481,7 @@ function collectVariables(schema: ZodTypeAny, raw: unknown, parsedInput: unknown
     if (!set && hostValue !== undefined && defaults !== undefined) variable.source = defaults.from;
     if (effective !== undefined && !redacted) variable.default = redactedSnapshot(child, effective);
     out.push(variable);
-    if (kind(unwrapped.inner) === "ZodObject") collectVariables(child, raw, parsed, defaults, childPath, out, { optional, default: effective, redacted });
+    if (kind(unwrapped.inner) === "object") collectVariables(child, raw, parsed, defaults, childPath, out, { optional, default: effective, redacted });
   }
 }
 
@@ -489,7 +494,7 @@ function collectVariables(schema: ZodTypeAny, raw: unknown, parsedInput: unknown
  * `defaults` is the host layer merged under `raw`: a path it carries and `raw` does not is a
  * `"default"` with `source` set to `defaults.from`, ahead of any default the schema declares.
  */
-export function describeConfig(schema: ZodTypeAny, raw: unknown, parsed?: unknown, defaults?: ConfigDefaults): ConfigDescription {
+export function describeConfig(schema: Schema, raw: unknown, parsed?: unknown, defaults?: ConfigDefaults): ConfigDescription {
   const variables: ConfigVariable[] = [];
   collectVariables(schema, raw, parsed, defaults, [], variables, { optional: false, default: undefined, redacted: false });
   const root = toJsonSchema(schema);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boundaryCast } from "./cast.ts";
-import { describeConfig, effectiveModuleConfig, mergeConfigDefaults, toJsonSchema } from "./zodSchema.ts";
+import { describeConfig, describeConfigIssue, effectiveModuleConfig, mergeConfigDefaults, toJsonSchema } from "./zodSchema.ts";
 
 const schema = z
   .object({
@@ -9,7 +9,7 @@ const schema = z
     port: z.number().int().min(1).max(65535).default(3000),
     mode: z.enum(["apply", "check", "off"]).default("apply"),
     tags: z.array(z.string()).optional(),
-    buckets: z.record(z.object({ limit: z.number().int().positive() }).strict()),
+    buckets: z.record(z.string(), z.object({ limit: z.number().int().positive() }).strict()),
     passwordHash: z.string().startsWith("scrypt$").describe("secret"),
     bootstrap: z.object({ username: z.string().min(1), token: z.string().describe("secret").default("x") }).strict().optional(),
     kind: z.union([z.literal("a"), z.literal("b")]),
@@ -48,6 +48,83 @@ describe("toJsonSchema", () => {
   });
 });
 
+describe("toJsonSchema for formats, wrappers, literals and object modes", () => {
+  it("reads a format from a string check and from a standalone format schema", () => {
+    expect(toJsonSchema(z.string().email())).toEqual({ type: "string", format: "email" });
+    expect(toJsonSchema(z.email())).toEqual({ type: "string", format: "email" });
+    expect(toJsonSchema(z.iso.datetime())).toEqual({ type: "string", format: "date-time" });
+    expect(toJsonSchema(z.string().url().min(8))).toEqual({ type: "string", format: "url", minLength: 8 });
+    expect(toJsonSchema(z.ipv4())).toEqual({ type: "string", format: "ip" });
+    expect(toJsonSchema(z.string().startsWith("a.b").endsWith("$"))).toEqual({ type: "string", pattern: "\\$$" });
+  });
+
+  it("reads an integer from a number check and from a standalone integer schema", () => {
+    expect(toJsonSchema(z.number().int().gt(0).lte(9))).toEqual({ type: "integer", exclusiveMinimum: 0, maximum: 9 });
+    expect(toJsonSchema(z.int().min(2))).toEqual({ type: "integer", minimum: 2 });
+    expect(toJsonSchema(z.number().multipleOf(3))).toEqual({ type: "number", multipleOf: 3 });
+  });
+
+  it("lists array bounds as minItems before maxItems whatever order the checks were added in", () => {
+    expect(JSON.stringify(toJsonSchema(z.array(z.string()).max(3).min(1)))).toBe('{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":3}');
+    expect(toJsonSchema(z.array(z.number()).length(2))).toEqual({ type: "array", items: { type: "number" }, minItems: 2, maxItems: 2 });
+  });
+
+  it("reads the target of a preprocess, the input of a transform and the inside of readonly", () => {
+    expect(toJsonSchema(z.preprocess((v) => v, z.number().int()))).toEqual({ type: "integer" });
+    expect(toJsonSchema(z.string().min(1).transform((v) => v.length))).toEqual({ type: "string", minLength: 1 });
+    expect(toJsonSchema(z.array(z.string()).readonly())).toEqual({ type: "array", items: { type: "string" } });
+  });
+
+  it("reports a prefault as the default of an optional key", () => {
+    const limited = z.object({ limits: z.object({ max: z.number().default(5) }).strict().prefault({}) }).strict();
+    const out = toJsonSchema(limited);
+    expect(out).not.toHaveProperty("required");
+    expect(boundaryCast<Record<string, Record<string, unknown>>>(out.properties, "json").limits?.default).toEqual({});
+    const byPath = Object.fromEntries(describeConfig(limited, {}, limited.parse({})).variables.map((v) => [v.path, v]));
+    expect(byPath.limits).toMatchObject({ required: false, status: "default", default: {}, value: { max: 5 } });
+    expect(byPath["limits.max"]).toMatchObject({ required: false, status: "default", default: 5, value: 5 });
+  });
+
+  it("maps strict, loose, catchall and plain objects to additionalProperties", () => {
+    const shape = { a: z.string() };
+    expect(toJsonSchema(z.object(shape).strict()).additionalProperties).toBe(false);
+    expect(toJsonSchema(z.object(shape).passthrough()).additionalProperties).toBe(true);
+    expect(toJsonSchema(z.looseObject(shape)).additionalProperties).toBe(true);
+    expect(toJsonSchema(z.object(shape).catchall(z.number())).additionalProperties).toEqual({ type: "number" });
+    expect(toJsonSchema(z.object(shape))).not.toHaveProperty("additionalProperties");
+  });
+
+  it("maps a literal to const, several literals to enum, and an enum of strings to a string enum", () => {
+    expect(toJsonSchema(z.literal("x"))).toEqual({ const: "x" });
+    expect(toJsonSchema(z.literal(["a", "b"]))).toEqual({ enum: ["a", "b"] });
+    expect(toJsonSchema(z.enum(["a", "b"]))).toEqual({ type: "string", enum: ["a", "b"] });
+    expect(toJsonSchema(z.enum({ First: "first", Second: "second" }))).toEqual({ enum: ["first", "second"] });
+  });
+});
+
+describe("describeConfigIssue", () => {
+  const checked = z.object({ mode: z.enum(["apply", "off"]), apiKey: z.enum(["a", "b"]), tag: z.literal("fixed") }).strict();
+  const lines = (raw: unknown): string[] => {
+    const result = checked.safeParse(raw);
+    return result.success ? [] : result.error.issues.map((issue) => describeConfigIssue(checked, issue));
+  };
+
+  it("names only the expected values of an enum mismatch", () => {
+    expect(lines({ mode: "loud", apiKey: "a", tag: "fixed" })).toEqual(["mode: Invalid enum value. Expected 'apply' | 'off'"]);
+  });
+
+  it("reports a credential-like path by its issue code only", () => {
+    expect(lines({ mode: "off", apiKey: "leaked-value", tag: "fixed" })).toEqual(["apiKey: invalid_value"]);
+  });
+
+  it("keeps the message of any other issue and names the root for an unknown key", () => {
+    const [literal] = lines({ mode: "off", apiKey: "a", tag: "loose" });
+    expect(literal).toMatch(/^tag: /);
+    expect(literal).not.toContain("loose");
+    expect(lines({ mode: "off", apiKey: "a", tag: "fixed", extra: 1 })).toEqual([expect.stringMatching(/^\(root\): Unrecognized key/)]);
+  });
+});
+
 describe("describeConfig", () => {
   it("lists one row per path with type, required, default, secret, set, status, value and redacted", () => {
     const { variables } = describeConfig(schema, { file: "./x.db", buckets: {}, passwordHash: "scrypt$abc", bootstrap: { username: "admin" }, kind: "a", up: () => {}, ttl: null });
@@ -74,7 +151,7 @@ describe("describeConfig", () => {
   });
 
   it("a spelled-out parent gets no inherited default, an own default still applies", () => {
-    const nested = z.object({ archive: z.object({ folder: z.string(), format: z.string().default("zip") }).default({ folder: "old_posts" }) }).strict();
+    const nested = z.object({ archive: z.object({ folder: z.string(), format: z.string().default("zip") }).prefault({ folder: "old_posts" }) }).strict();
     const byPath = Object.fromEntries(describeConfig(nested, { archive: { folder: "drafts" } }).variables.map((v) => [v.path, v]));
     expect(byPath["archive.folder"]).toEqual({ path: "archive.folder", type: "string", required: false, secret: false, set: true, status: "set", value: "drafts", redacted: false });
     expect(byPath["archive.format"]).toEqual({ path: "archive.format", type: "string", required: false, default: "zip", secret: false, set: false, status: "default", value: "zip", redacted: false });
@@ -143,7 +220,7 @@ describe("describeConfig with host-supplied defaults", () => {
           timeoutSeconds: z.number().int().default(60),
         })
         .strict()
-        .default({}),
+        .prefault({}),
       backoffSeconds: z.array(z.number()).default([60, 300]),
       reservedPaths: z.array(z.string()).default([]),
       apiToken: z.string().optional(),
@@ -195,7 +272,7 @@ describe("describeConfig with host-supplied defaults", () => {
   });
 
   it("stops reporting host values below a parent the config replaces with a non-object", () => {
-    const nullable = z.object({ dep: z.object({ render: z.string().default("background") }).strict().nullable().default({}) }).strict();
+    const nullable = z.object({ dep: z.object({ render: z.string().default("background") }).strict().nullable().prefault({}) }).strict();
     const hostDefaults = { from: "site-preset", values: { dep: { render: "events" } } };
     const raw = { dep: null };
     const byPath = Object.fromEntries(describeConfig(nullable, raw, nullable.parse(mergeConfigDefaults(hostDefaults.values, raw)), hostDefaults).variables.map((v) => [v.path, v]));
@@ -273,7 +350,7 @@ describe("secrets nested in a default", () => {
         .strict()
         .default({ username: "admin", passwordHash: "scrypt$schema-default-hash", signing: "schema-default-signing" }),
       store: z.object({ url: z.string() }).strict().optional(),
-      tenants: z.record(z.object({ apiSeed: z.string().describe("secret") }).strict()).default({ one: { apiSeed: "schema-default-seed" } }),
+      tenants: z.record(z.string(), z.object({ apiSeed: z.string().describe("secret") }).strict()).default({ one: { apiSeed: "schema-default-seed" } }),
     })
     .strict();
 
@@ -302,12 +379,12 @@ describe("secrets nested in a default", () => {
 });
 
 describe("secrets reachable anywhere in a config", () => {
-  function emitted(schema: z.ZodTypeAny, raw: unknown): string {
+  function emitted(schema: z.ZodType, raw: unknown): string {
     return JSON.stringify(describeConfig(schema, raw, schema.parse(raw)));
   }
 
   it("keeps the default of a secret-named leaf out of the JSON Schema, at the top and nested", () => {
-    const schema = z.object({ apiKey: z.string().default("leaf-default-key"), db: z.object({ password: z.string().default("leaf-default-pass") }).strict().default({}) }).strict();
+    const schema = z.object({ apiKey: z.string().default("leaf-default-key"), db: z.object({ password: z.string().default("leaf-default-pass") }).strict().prefault({}) }).strict();
     const text = emitted(schema, {});
     expect(text).not.toContain("leaf-default-key");
     expect(text).not.toContain("leaf-default-pass");
@@ -317,7 +394,7 @@ describe("secrets reachable anywhere in a config", () => {
     const secretString = z.string().describe("secret");
     const schema = z
       .object({
-        byName: z.record(secretString).default({ a: "record-default-secret" }),
+        byName: z.record(z.string(), secretString).default({ a: "record-default-secret" }),
         list: z.array(secretString).default(["array-default-secret"]),
         pair: z.tuple([z.string(), secretString]).default(["visible-first", "tuple-default-secret"]),
       })
@@ -369,7 +446,7 @@ describe("secrets reachable anywhere in a config", () => {
 });
 
 describe("secrets behind a wrapper that changes the value", () => {
-  function emitted(schema: z.ZodTypeAny, raw: unknown): string {
+  function emitted(schema: z.ZodType, raw: unknown): string {
     return JSON.stringify(describeConfig(schema, raw, schema.parse(raw)));
   }
 
