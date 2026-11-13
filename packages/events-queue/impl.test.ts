@@ -1585,3 +1585,48 @@ describe("events/queue retry: a pending row of the same key supersedes a failed 
     for (const patch of patches) expect(patch).not.toHaveProperty("coalesceKey");
   });
 });
+
+describe("events/queue retry: repeated requests during an outage", () => {
+  const FAIL: RunResult = { runId: "r", status: 500, error: "down", code: "INTERNAL", retryable: false };
+
+  it("a request every five minutes to a delayed lane job that always fails leaves no dead letters and at most one retrying row", async () => {
+    const { queue, clock, rows } = await make({ maxAttempts: 5, backoffSeconds: [5, 30, 120, 600], lanes: { indexes: ["refresh"] }, delayMs: { refresh: 1000 } });
+    queue.setDelivery([{ event: "stale", pipeline: "refresh" }], async () => FAIL);
+    const start = clock.t;
+    for (let elapsed = 0; elapsed <= 4 * 3600_000; elapsed += 1000) {
+      clock.t = start + elapsed;
+      if (elapsed % 300_000 === 0) await queue.enqueue("stale", { coalesceKey: "indexes" });
+      while ((await queue.tickLane("indexes")) > 0);
+    }
+    const stored = await rows();
+    expect(stored.filter((r) => r.state === "dead")).toEqual([]);
+    expect(stored.filter((r) => r.state === "pending" && r.attempts > 0).length).toBeLessThanOrEqual(1);
+    expect(expectOk(await queue.deliveryStatus()).dead).toBe(0);
+  });
+
+  it("a newer request supersedes an older row that waits for its retry, and keeps the payload of the newer one", async () => {
+    const { queue, clock, rows } = await make({ maxAttempts: 5, backoffSeconds: [600] });
+    queue.setDelivery([{ event: "stale", pipeline: "refresh" }], async () => FAIL);
+    await queue.enqueue("stale", { coalesceKey: "k", n: 1 });
+    await queue.tick();
+    clock.t += 300_000;
+    await queue.enqueue("stale", { coalesceKey: "k", n: 2 });
+    await queue.tick();
+    const stored = await rows();
+    expect(stored.find((r) => r.payload.n === 1)).toMatchObject({ state: "done", attempts: 1 });
+    expect(stored.find((r) => r.payload.n === 2)).toMatchObject({ state: "pending", attempts: 1 });
+  });
+
+  it("rows of the same key for another pipeline are never superseded", async () => {
+    const { queue, clock, rows } = await make({ maxAttempts: 5, backoffSeconds: [600] });
+    queue.setDelivery([{ event: "stale", pipeline: "p1" }, { event: "stale", pipeline: "p2" }], async () => FAIL);
+    await queue.enqueue("stale", { coalesceKey: "k" });
+    await queue.tick();
+    clock.t += 300_000;
+    await queue.enqueue("stale", { coalesceKey: "k" });
+    await queue.tick();
+    await queue.tick();
+    const pending = (await rows()).filter((r) => r.state === "pending");
+    expect(pending.map((r) => r.pipeline).sort()).toEqual(["p1", "p2"]);
+  });
+});

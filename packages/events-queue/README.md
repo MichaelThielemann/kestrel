@@ -88,12 +88,17 @@ coalesced, and a `CONFLICT` on any other column still fails `emit` as before. `c
 plain string on the event's data; this module attaches no meaning to it beyond the key.
 **Coalescing keeps the first event's payload**: a later event that joins a pending row is dropped
 with its data, so a listener pipeline must read the current state rather than rely on the payload
-of the event it was started with. A failed row whose key a `pending` row holds by the time the
-failure is recorded is superseded: it is marked `done` with its attempt counted and its error kept,
-instead of being retried or moved to dead-letter, because the pending row will do the same work.
-The outcome is logged, and a relay reports such a row as `error`, never as `dead`. A failed row
-whose key nobody holds, or only a running row, is retried as before. Recording an outcome never
-writes the key back to the failed row.
+of the event it was started with. Each row also keeps its key in `originKey`, which is never
+cleared, so rows of the same key stay related after a claim. When a row fails, only the newest
+`pending` row of its key is kept: a failed row is superseded when a `pending` row holds the key or
+a newer `pending` row shares its `originKey`, and otherwise it supersedes every older `pending`
+row of its `originKey` (one waiting for its retry) before it is scheduled for its own. A superseded
+row is marked `done` with its error kept, instead of being retried or moved to dead-letter, because
+the row that is kept does the same work, so a job requested again and again during an outage keeps
+at most one retrying row and dead-letters nothing. Each supersede is logged, and a relay reports a
+superseded row as `error`, never as `dead`. A failed row with no other pending row of its key, or
+only a running one, is retried as usual. Recording an outcome never writes the key back to the
+failed row.
 
 `delayMs` (default `{}`) holds a pipeline's rows back: `{ "<pipeline>": <milliseconds> }`, whole
 non-negative numbers checked in the config schema. A row of a pipeline with a delay is written, and

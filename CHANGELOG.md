@@ -1002,9 +1002,10 @@ Net changes since 5.8.1.
   by the worker, a lane's own loop or the relay, clears the key so a fresh event with the same key
   can be enqueued again once that row is running. A key found on some other, non-pending row (for
   example one a pre-6.0 process claimed without knowing the column) is cleared and the row written,
-  instead of the event being silently dropped. A failed row whose key a pending row holds is
-  marked `done` (superseded) instead of being retried or dead-lettered, so repeated requests for
-  the same work during an outage do not pile up retries and dead letters.
+  instead of the event being silently dropped. When a row fails, only the newest pending row of its
+  key is kept and the others are marked `done` (superseded) instead of being retried or
+  dead-lettered, so repeated requests for the same work during an outage do not pile up retries and
+  dead letters. Rows keep their key in a new `originKey` column, which no claim clears.
 - `events-queue` runs named lanes: `lanes: { "<lane>": ["<pipeline>", …] }` gives each lane its own
   worker loop; a lane naming a pipeline the booted manifest does not know, or one no event trigger
   runs, fails boot at `attach()`, naming the lane and the pipeline. Each lane's loop claims and

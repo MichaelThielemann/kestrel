@@ -31,6 +31,8 @@ export interface QueueRow extends Document {
   runId: string | null;
   /** `"<pipeline>:<coalesceKey>"` from the event's `data.coalesceKey`, or `null`. Unique; cleared when a claim starts the row. */
   coalesceKey: string | null;
+  /** The same `"<pipeline>:<coalesceKey>"` as `coalesceKey`, never cleared and not unique: a failed row supersedes, or is superseded by, the other pending rows that share it. */
+  originKey: string | null;
   /** The worker loop that claims this row: `"main"`, or a name from the `lanes` config. */
   lane: string;
 }
@@ -154,6 +156,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     error: "string",
     runId: "string",
     coalesceKey: { type: "string", unique: true },
+    originKey: "string",
     lane: "string",
   });
   if (isErr(ensured)) throw new Error(`events/queue: cannot create the queue collection: ${ensured.error.message}`);
@@ -232,10 +235,23 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     return `${row.pipeline}:${row.payload.coalesceKey}`;
   }
 
-  async function pendingHolderExists(key: string | null): Promise<boolean> {
+  function isNewer(a: QueueRow, b: QueueRow): boolean {
+    return a.createdAt !== b.createdAt ? a.createdAt > b.createdAt : a.id > b.id;
+  }
+
+  async function supersedes(row: QueueRow, at: number): Promise<boolean> {
+    const key = originalKeyOf(row);
     if (key === null) return false;
     const holder = await db.findOne<QueueRow>(QUEUE, { coalesceKey: key, state: "pending" });
-    return !isErr(holder) && holder.value !== null;
+    if (!isErr(holder) && holder.value !== null && holder.value.id !== row.id) return true;
+    const others = await db.findMany<QueueRow>(QUEUE, { originKey: key, state: "pending", id: { ne: row.id } });
+    if (isErr(others)) return false;
+    if (others.value.items.some((other) => isNewer(other, row))) return true;
+    for (const older of others.value.items) {
+      const done = await db.updateMany<QueueRow>(QUEUE, { id: older.id, state: "pending", coalesceKey: null }, { state: "done", finishedAt: at, lockedAt: null, lockedBy: null });
+      if (!isErr(done) && done.value === 1) logger.info("events/queue: a newer failed row of the same coalesceKey supersedes this retrying one", { id: older.id, event: older.name, pipeline: older.pipeline, attempts: older.attempts });
+    }
+    return false;
   }
 
   async function settle(row: QueueRow, error: string | undefined): Promise<boolean> {
@@ -245,7 +261,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     if (error === undefined) Object.assign(patch, { state: "done", finishedAt: at, error: null });
     else {
       const attempts = row.attempts + 1;
-      superseded = await pendingHolderExists(originalKeyOf(row));
+      superseded = await supersedes(row, at);
       if (superseded) {
         Object.assign(patch, { state: "done", attempts, finishedAt: at, error });
         logger.info("events/queue: handler failed, a pending row of the same coalesceKey supersedes this one", { id: row.id, event: row.name, pipeline: row.pipeline, attempts, error });
@@ -286,7 +302,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       let allPresent = true;
       for (const pipeline of pipelines) {
         const coalesceKey = typeof row.payload.coalesceKey === "string" ? `${pipeline}:${row.payload.coalesceKey}` : null;
-        const created = await db.createOne<QueueRow>(QUEUE, { id: `${row.id}:${pipeline}`, name: row.name, payload: row.payload, pipeline, state: "pending", attempts: 0, createdAt: row.createdAt, availableAt: now() + delayOf(pipeline), lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: row.runId, coalesceKey, lane: laneOf(pipeline) });
+        const created = await db.createOne<QueueRow>(QUEUE, { id: `${row.id}:${pipeline}`, name: row.name, payload: row.payload, pipeline, state: "pending", attempts: 0, createdAt: row.createdAt, availableAt: now() + delayOf(pipeline), lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: row.runId, coalesceKey, originKey: coalesceKey, lane: laneOf(pipeline) });
         if (isErr(created) && created.error.code !== "CONFLICT") {
           allPresent = false;
           logger.error("events/queue: cannot fan out a stored event, leaving the original for the next tick", { id: row.id, event: row.name, pipeline, error: created.error.message });
@@ -511,7 +527,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
         const eligible = runId !== null && relayEligible(pipeline);
         const availableAt = eligible ? at + config.relayMs : at + delayOf(pipeline);
         const coalesceKey = pipeline !== null && coalesce !== null ? `${pipeline}:${coalesce}` : null;
-        const data0 = { name, payload: { ...data }, pipeline, state: "pending" as const, attempts: 0, createdAt: at, availableAt, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId, coalesceKey, lane: laneOf(pipeline) };
+        const data0 = { name, payload: { ...data }, pipeline, state: "pending" as const, attempts: 0, createdAt: at, availableAt, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId, coalesceKey, originKey: coalesceKey, lane: laneOf(pipeline) };
         let created = await db.createOne<QueueRow>(QUEUE, data0);
         if (isErr(created) && isCoalesceConflict(created.error) && coalesceKey !== null && (await clearStaleCoalesceKey(coalesceKey))) {
           created = await db.createOne<QueueRow>(QUEUE, data0);
