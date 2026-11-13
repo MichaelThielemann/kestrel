@@ -60,6 +60,7 @@ interface Unwrapped {
   defaultValue?: () => unknown;
   defaultKind?: "default" | "prefault";
   description?: string;
+  lazies: Schema[];
 }
 
 const MIN_ZOD: readonly [number, number, number] = [4, 6, 6];
@@ -109,7 +110,7 @@ function catchallOf(d: core.$ZodObjectDef): Schema | undefined {
 }
 
 function unwrap(schema: Schema): Unwrapped {
-  const out: Unwrapped = { inner: schema, optional: false, nullable: false, reshapes: false };
+  const out: Unwrapped = { inner: schema, optional: false, nullable: false, reshapes: false, lazies: [] };
   let current = schema;
   let required = false;
   for (;;) {
@@ -137,7 +138,8 @@ function unwrap(schema: Schema): Unwrapped {
     } else if (d.type === "pipe") {
       out.reshapes = true;
       current = kind(d.in) === "transform" ? d.out : d.in;
-    } else if (d.type === "lazy") {
+    } else if (d.type === "lazy" && !out.lazies.includes(current)) {
+      out.lazies.push(current);
       current = d.getter();
     } else {
       break;
@@ -264,8 +266,20 @@ function bareSchema(schema: Schema): JsonSchema {
   }
 }
 
+const expanding = new Set<Schema>();
+
 export function toJsonSchema(schema: Schema): JsonSchema {
-  const { inner, nullable, defaultValue, description } = unwrap(schema);
+  const { inner, nullable, defaultValue, description, lazies } = unwrap(schema);
+  if (lazies.some((lazy) => expanding.has(lazy))) return {};
+  for (const lazy of lazies) expanding.add(lazy);
+  try {
+    return annotatedSchema(schema, inner, nullable, defaultValue, description);
+  } finally {
+    for (const lazy of lazies) expanding.delete(lazy);
+  }
+}
+
+function annotatedSchema(schema: Schema, inner: Schema, nullable: boolean, defaultValue: (() => unknown) | undefined, description: string | undefined): JsonSchema {
   const secret = isSecretNode(schema);
   let out = bareSchema(inner);
   if (nullable) out = { anyOf: [out, { type: "null" }] };

@@ -687,3 +687,28 @@ describe("isZod4Schema", () => {
     expect(describeConfig(older, { licence: "older-copy-licence" })).toEqual({ schema: {}, variables: [] });
   });
 });
+
+describe("recursive schemas", () => {
+  it("describes a z.json() field, writing a recursive reference as an empty schema", () => {
+    const schema = z.object({ extra: z.json().optional() }).strict();
+    const raw = { extra: { tags: ["a", 1, null] } };
+    const out = describeConfig(schema, raw, schema.parse(raw));
+    const extra = boundaryCast<Record<string, Record<string, unknown>>>(out.schema.properties, "json").extra;
+    expect(extra?.anyOf).toEqual([{ type: "string" }, { type: "number" }, { type: "boolean" }, { type: "null" }, { type: "array", items: {} }, { type: "object", additionalProperties: {} }]);
+    expect(out.variables).toEqual([{ path: "extra", type: "union", required: false, secret: false, set: true, status: "set", value: { tags: ["a", 1, null] }, redacted: false }]);
+  });
+
+  it("describes a self-referencing lazy schema one level deep", () => {
+    interface Node {
+      name: string;
+      children: Node[];
+    }
+    const node: z.ZodType<Node> = z.lazy(() => z.object({ name: z.string(), children: z.array(node) }).strict());
+    expect(toJsonSchema(z.object({ tree: node }).strict())).toEqual({
+      type: "object",
+      properties: { tree: { type: "object", properties: { name: { type: "string" }, children: { type: "array", items: {} } }, required: ["name", "children"], additionalProperties: false } },
+      required: ["tree"],
+      additionalProperties: false,
+    });
+  });
+});
