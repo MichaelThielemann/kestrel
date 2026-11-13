@@ -1461,7 +1461,10 @@ Net changes since 5.8.1.
   `?v=<token>`, a short hash of that crop, which changes only once a render with a new crop is at the
   path; a variant cut from the centre has no query. The path, its public copy, `images.serve` and
   `images.export:<dir>` are unchanged, so a check that matches exported URLs to files strips the
-  query.
+  query. The token depends on the crop alone, so setting a crop back or resetting the framing to the
+  centre brings an earlier URL back, which a cache may have filled with other bytes while pages
+  still asked for it; keep variant URLs cached no longer than it takes to publish the pages that
+  show them again.
 - `images-default`: a request to generate an item while a render of it runs waits for that render and
   renders once more, instead of sharing the running render, which may have read the rows before the
   request. `images.resume` also places and renders items whose lease ran out, items with a request

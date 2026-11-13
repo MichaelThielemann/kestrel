@@ -256,8 +256,8 @@ places, renders and writes its public copies before it returns. An `images.setFr
 its framing but could not leave its request places and renders the item in its background loop. A
 render that sees a request before it writes drops its bytes and renders again, so two framings saved
 at once in two processes leave the rows on the framing that is stored. A render marks its row `done`
-with the crop it rendered after its bytes are at the path, so `?v=` names only bytes rendered with
-that crop.
+with the crop it rendered after its bytes are at the path, so a row's `?v=` changes only once bytes
+rendered with its crop are there.
 
 A holder that stops (the process ends) leaves its lease until `staleAfterMs` has passed;
 `images.resume` then takes it over and places and renders the item, and until that render is done the
@@ -268,10 +268,18 @@ records a failed attempt or marks a row `done` over what the new holder wrote. A
 path that stalls that long can still land after the new holder's; the stalled holder notices when
 it has finished its writes (after a failed public copy, once it put the earlier bytes back), marks
 the item, and every rendered size of the item renders again. Until then that path answers the
-stalled bytes, and a cache that fetched it meanwhile keeps them under the same `?v=`. `?v=` is
-derived from the crop alone, so when a crop is set back to one the item had before, the old token
-returns; a cache that stored other bytes under it during such a window, or while a render with a new
-crop was at the path before its row was marked `done`, can go on answering them.
+stalled bytes, and a cache that fetched it meanwhile keeps them under the same `?v=`.
+
+`?v=` is derived from the crop alone, and the centre has no query, so a URL does not name one set of
+bytes for good. A page published before a re-crop goes on asking for its URL (the bare path or the
+earlier `?v=`) until it is published again after `images.variantsChanged`, while the path already
+answers the new render; a cache that fetches that URL meanwhile stores the new bytes under it. When
+the crop is later set back to one the item had before, or the framing is reset to the centre, that
+URL comes back, and such a cache goes on answering the bytes it stored. The same holds for bytes a
+cache fetched during a stalled write or while a render with a new crop was at the path before its
+row was marked `done`. So keep variant URLs, with or without `?v=`, in a cache no longer than it
+takes to publish the pages that show them again, or purge an item's variant URLs when
+`images.variantsChanged` names it.
 
 `images.attach` adds `focus` (the rectangle or `null`), meant for anonymous readers, and
 `framing: { focus, crops, width, height, ratios }`, meant for an editor. `width` and `height` are the

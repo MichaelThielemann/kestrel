@@ -692,7 +692,9 @@ around the focus, else from the centre; the example's default sizes are all `ins
 framing changes no variant. A size whose cut changes renders again at the same path: until then its
 path keeps answering with the old variant, afterwards `variants[].path` ends in `?v=<token>` and the
 pages showing the item are marked for a re-render. A changed focus marks them at once, also when no
-variant renders again. Ratio keys are exact, so a size of `1000x562`
+variant renders again. The token depends on the crop alone, so a crop set back, or a framing reset
+to the centre, brings an earlier URL back; cache variant URLs no longer than it takes to publish the
+pages that show them again. Ratio keys are exact, so a size of `1000x562`
 gets a crop of its own, not the one of `"16:9"`. The `images-default` README, "Focus and crop", has
 the rules, and `@michaelthielemann/kestrel-images-default/framing` computes the same cuts in the
 browser.
