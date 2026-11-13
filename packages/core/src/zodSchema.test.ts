@@ -227,6 +227,23 @@ describe("describeConfig", () => {
     expect(byPath["retry.max"]).toMatchObject({ status: "default", value: 5 });
   });
 
+  it("marks an object secret when .describe(\"secret\") is its last call; an object method called after it drops the mark", () => {
+    const raw = { smtp: { host: "mail.example.com", user: "mailer", pass: "plain-value" } };
+    const shape = { host: z.string(), user: z.string(), pass: z.string() };
+    const last = z.object({ smtp: z.object(shape).strict().describe("secret") }).strict();
+    const lastRows = describeConfig(last, raw).variables.filter((v) => v.path.startsWith("smtp"));
+    expect(lastRows.map((v) => [v.path, v.redacted, v.value])).toEqual([
+      ["smtp", true, null],
+      ["smtp.host", true, null],
+      ["smtp.user", true, null],
+      ["smtp.pass", true, null],
+    ]);
+    for (const early of [z.object(shape).describe("secret").strict(), z.object(shape).describe("secret").passthrough(), z.object(shape).describe("secret").partial(), z.object(shape).describe("secret").extend({})]) {
+      const rows = describeConfig(z.object({ smtp: early }).strict(), raw).variables;
+      expect(rows.find((v) => v.path === "smtp.pass")).toMatchObject({ redacted: false, value: "plain-value" });
+    }
+  });
+
   it("reads the effective value from the parsed config, defaults included", () => {
     const parsed = schema.parse({ file: "./x.db", buckets: { a: { limit: 1 } }, passwordHash: "scrypt$abc", kind: "a", up: () => {}, ttl: null });
     const byPath = Object.fromEntries(describeConfig(schema, { file: "./x.db", buckets: { a: { limit: 1 } }, passwordHash: "scrypt$abc", kind: "a", up: () => {}, ttl: null }, parsed).variables.map((v) => [v.path, v]));
