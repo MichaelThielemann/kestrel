@@ -1,4 +1,4 @@
-import { request } from "node:http";
+import { request, type Server } from "node:http";
 import { connect } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "../logger.ts";
@@ -31,6 +31,10 @@ const duration = { asymmetricMatch: (value: unknown) => typeof value === "number
 async function serve(logger: Logger, run: Runner = echo, options: HttpOptions = {}, checkEveryMs?: number): Promise<string> {
   const server = createHttpServer(routes, run, logger, options);
   if (checkEveryMs !== undefined) Object.assign(server, { connectionsCheckingInterval: checkEveryMs });
+  return start(server);
+}
+
+async function start(server: Server): Promise<string> {
   const address = await listen(server, 0, "127.0.0.1");
   close = () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
   return `http://127.0.0.1:${address.port}`;
@@ -58,17 +62,19 @@ function rawRequest(base: string, method: string, path: string): Promise<number>
   });
 }
 
-function partialPost(base: string, headers: string, abortAfterMs?: number): Promise<string> {
+function partialPost(base: string, headers: string, abortAfterMs?: number): Promise<{ received: string; sentAt: number }> {
   const { hostname, port } = new URL(base);
   return new Promise((resolve) => {
     let received = "";
+    let sentAt = Number.NaN;
     const socket = connect(Number(port), hostname, () => {
+      sentAt = performance.now();
       socket.write(`POST /notes HTTP/1.1\r\nHost: notes.test\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n${headers}\r\n{"text":`);
       if (abortAfterMs !== undefined) setTimeout(() => socket.destroy(), abortAfterMs);
     });
     socket.on("data", (chunk: Buffer) => { received += chunk.toString("latin1"); });
     socket.on("error", () => {});
-    socket.on("close", () => resolve(received));
+    socket.on("close", () => resolve({ received, sentAt }));
   });
 }
 
@@ -179,7 +185,7 @@ describe("http server request log", () => {
   it("logs a body the client stops sending as a closed connection", async () => {
     const { logger, lines } = collectingLogger();
     const base = await serve(logger);
-    expect(await partialPost(base, "X-Request-Id: req-gone\r\n", 50)).toBe("");
+    expect((await partialPost(base, "X-Request-Id: req-gone\r\n", 50)).received).toBe("");
     await vi.waitFor(() => expect(lines).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(lines).toHaveLength(1);
@@ -188,13 +194,20 @@ describe("http server request log", () => {
 
   it("logs a body cut off by the request timeout as the 408 the client receives", async () => {
     const { logger, lines } = collectingLogger();
-    const base = await serve(logger, echo, { timeouts: { requestMs: 300, headersMs: 300 } }, 50);
-    expect(await partialPost(base, "X-Request-Id: req-slow\r\n")).toMatch(/^HTTP\/1\.1 408 /);
+    const requestMs = 300;
+    const server = createHttpServer(routes, echo, logger, { timeouts: { requestMs, headersMs: requestMs } });
+    Object.assign(server, { connectionsCheckingInterval: 50 });
+    let handlerAt = Number.NaN;
+    server.on("request", () => { handlerAt = performance.now(); });
+    const { received, sentAt } = await partialPost(await start(server), "X-Request-Id: req-slow\r\n");
+    expect(received).toMatch(/^HTTP\/1\.1 408 /);
     await vi.waitFor(() => expect(lines).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ requestId: "req-slow", pipeline: "createNote", status: 408, reason: "body not received: request timeout", declaredBytes: 1000 });
-    expect(lines[0]?.ms).toBeGreaterThanOrEqual(300);
+    const headersTook = handlerAt - sentAt;
+    expect(headersTook).toBeGreaterThanOrEqual(0);
+    expect(lines[0]?.ms).toBeGreaterThanOrEqual(requestMs - headersTook - 0.01);
   });
 
   it("logs only the path of an absolute-form request target, without userinfo or host", async () => {

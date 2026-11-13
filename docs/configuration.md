@@ -340,7 +340,10 @@ The `http` line has the same fields in the core server and in `kestrel-h3`'s han
 | 415 | `unsupported content type`, `this route does not accept multipart/form-data` |
 | 500 | `handler failed` (the handler threw; the core server also logs `http handler failed` with the stack) |
 
-`ms` runs from the arrival of the request, so it includes the time the body took to arrive. A line
+`ms` runs from the moment the request's header section has been read and the request handler
+starts, so it includes the time the body took to arrive but not the time the header section took.
+Node's request timeout counts from the first byte of the request instead, so the `ms` of a 408 line
+is at least `http.timeouts.requestMs` minus the time the header section took to arrive. A line
 holds no body, no cookie, no query string and no header value except a valid `X-Request-Id`
 (`requestId`), the declared `Content-Length` (`declaredBytes`) and the client address derived under
 the peer policy (`ip`, which may come from `X-Forwarded-For` or the trusted header). The health path
