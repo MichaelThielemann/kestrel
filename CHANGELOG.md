@@ -1549,8 +1549,9 @@ Net changes since 5.8.1.
   step answers `400` for it. `PUT /media/:id/framing` in `examples/minimal` documents only `focus`
   and `crops`.
 - `describe()`, `kestrel describe` and the manifest overflowed the stack for a module config field
-  whose schema refers to itself through `z.lazy()`, such as zod 4's `z.json()`; the recursive
-  reference now appears as an empty schema `{}`.
+  whose schema refers to itself, through `z.lazy()` such as zod 4's `z.json()`, or as an object
+  whose field is that object again behind a `z.lazy()` or a getter; the recursive reference now
+  appears as an empty schema `{}`, and the variables stop at the first repeated object.
 - `media-default`: `media.list` with a `q` containing `_` found no item, because the wildcard was
   dropped from the store's prefilter (`my_file` searched for `myfile`); a `q` with `_` or `%` now
   finds exactly the names that contain it. `q` also ignores case now (`Photo` finds `photo.jpg`); it

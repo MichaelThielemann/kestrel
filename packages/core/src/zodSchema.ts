@@ -329,14 +329,20 @@ function bareSchema(schema: Schema): JsonSchema {
 
 const expanding = new Set<Schema>();
 
+function recursionKeys(unwrapped: Unwrapped): Schema[] {
+  return kind(unwrapped.inner) === "object" ? [...unwrapped.lazies, unwrapped.inner] : unwrapped.lazies;
+}
+
 export function toJsonSchema(schema: Schema): JsonSchema {
-  const { inner, nullable, defaultValue, description, lazies } = unwrap(schema);
-  if (lazies.some((lazy) => expanding.has(lazy))) return {};
-  for (const lazy of lazies) expanding.add(lazy);
+  const unwrapped = unwrap(schema);
+  const { inner, nullable, defaultValue, description } = unwrapped;
+  const keys = recursionKeys(unwrapped).filter((key) => !expanding.has(key));
+  if (keys.length < recursionKeys(unwrapped).length) return {};
+  for (const key of keys) expanding.add(key);
   try {
     return annotatedSchema(schema, inner, nullable, defaultValue, description);
   } finally {
-    for (const lazy of lazies) expanding.delete(lazy);
+    for (const key of keys) expanding.delete(key);
   }
 }
 
@@ -613,13 +619,16 @@ interface Ancestors {
   default: unknown;
   redacted: boolean;
   unparsed: boolean;
+  expanded: readonly Schema[];
 }
 
 function collectVariables(schema: Schema, raw: unknown, parsedInput: unknown, defaults: ConfigDefaults | undefined, path: string[], out: ConfigVariable[], ancestors: Ancestors): void {
-  const { inner, reshapes } = unwrap(schema);
+  const unwrappedSchema = unwrap(schema);
+  const { inner, reshapes } = unwrappedSchema;
   const parsed = reshapes ? undefined : parsedInput;
   const d = def(inner);
   if (d.type !== "object") return;
+  const expanded = [...ancestors.expanded, ...recursionKeys(unwrappedSchema)];
   const inherited = valueAt(raw, path) === undefined ? ancestors.default : undefined;
   for (const [key, child] of Object.entries(d.shape)) {
     const childPath = [...path, key];
@@ -641,7 +650,8 @@ function collectVariables(schema: Schema, raw: unknown, parsedInput: unknown, de
     if (effective !== undefined && !redacted) variable.default = redactedSnapshot(child, effective);
     out.push(variable);
     const unparsed = !set && hostValue === undefined && (ancestors.unparsed || (fromAncestor === undefined && unwrapped.defaultKind === "default"));
-    if (kind(unwrapped.inner) === "object") collectVariables(child, raw, parsed, defaults, childPath, out, { optional, default: effective, redacted, unparsed });
+    const repeats = recursionKeys(unwrapped).some((key) => expanded.includes(key));
+    if (kind(unwrapped.inner) === "object" && !repeats) collectVariables(child, raw, parsed, defaults, childPath, out, { optional, default: effective, redacted, unparsed, expanded });
   }
 }
 
@@ -657,7 +667,7 @@ function collectVariables(schema: Schema, raw: unknown, parsedInput: unknown, de
 export function describeConfig(schema: Schema, raw: unknown, parsed?: unknown, defaults?: ConfigDefaults): ConfigDescription {
   if (!isZod4Schema(schema)) return { schema: {}, variables: [] };
   const variables: ConfigVariable[] = [];
-  collectVariables(schema, raw, parsed, defaults, [], variables, { optional: false, default: undefined, redacted: false, unparsed: false });
+  collectVariables(schema, raw, parsed, defaults, [], variables, { optional: false, default: undefined, redacted: false, unparsed: false, expanded: [] });
   const root = toJsonSchema(schema);
   if (root.writeOnly === true && unwrap(schema).description !== SECRET) delete root.writeOnly;
   return { schema: root, variables };

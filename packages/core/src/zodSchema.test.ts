@@ -742,6 +742,49 @@ describe("isZod4Schema", () => {
 });
 
 describe("recursive schemas", () => {
+  interface Tree {
+    name: string;
+    child?: Tree | undefined;
+  }
+
+  it("describes an object that refers to itself through a lazy field, writing the repeat as an empty schema", () => {
+    const node: z.ZodType<Tree> = z.object({ name: z.string(), child: z.lazy(() => node).optional() });
+    const schema = z.object({ tree: node });
+    const raw = { tree: { name: "root", child: { name: "leaf" } } };
+    const out = describeConfig(schema, raw, schema.parse(raw));
+    expect(out.schema).toEqual({
+      type: "object",
+      properties: { tree: { type: "object", properties: { name: { type: "string" }, child: {} }, required: ["name"] } },
+      required: ["tree"],
+    });
+    expect(out.variables.map((v) => v.path)).toEqual(["tree", "tree.name", "tree.child"]);
+  });
+
+  it("describes a lazy schema that builds a new object referring to the lazy on every call", () => {
+    const node: z.ZodType<Tree> = z.lazy(() => z.object({ name: z.string(), child: node.optional() }));
+    const schema = z.object({ tree: node });
+    const raw = { tree: { name: "root", child: { name: "leaf" } } };
+    expect(describeConfig(schema, raw, schema.parse(raw)).variables.map((v) => v.path)).toEqual(["tree", "tree.name", "tree.child"]);
+  });
+
+  it("describes an object that refers to itself through a getter, writing the repeat as an empty schema", () => {
+    const node: z.ZodType<Tree> = z.object({
+      name: z.string(),
+      get child() {
+        return node.optional();
+      },
+    });
+    const schema = z.object({ tree: node });
+    const raw = { tree: { name: "root", child: { name: "leaf" } } };
+    const out = describeConfig(schema, raw, schema.parse(raw));
+    expect(out.schema).toEqual({
+      type: "object",
+      properties: { tree: { type: "object", properties: { name: { type: "string" }, child: {} }, required: ["name"] } },
+      required: ["tree"],
+    });
+    expect(out.variables.map((v) => v.path)).toEqual(["tree", "tree.name", "tree.child"]);
+  });
+
   it("describes a z.json() field, writing a recursive reference as an empty schema", () => {
     const schema = z.object({ extra: z.json().optional() }).strict();
     const raw = { extra: { tags: ["a", 1, null] } };
