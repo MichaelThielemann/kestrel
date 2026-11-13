@@ -770,5 +770,6 @@ describe("events/images-variants-changed", () => {
     expect(findings[0]).toMatchObject({ rule: "events/images-variants-changed", severity: "info", where: { pipeline: "mediaDependents" }, docs: upgradingDocs("events-images-variants-changed") });
     expect(findings[0]?.suggestion).toContain('{ event: "images.variantsChanged", pipeline: "mediaDependents" }');
     expect(findings[0]?.message).toContain("a re-crop rendered, the focus changed");
+    expect(findings[0]?.message).toContain("any render that gave a variant a new ?v= (a changed size or format, a repair by images.resume, images.retryFailed, a size registered again after a prune)");
   });
 });
