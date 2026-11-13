@@ -517,6 +517,27 @@ describe("images/default ?v= of a re-rendered variant", () => {
     for (const open of [images, narrowed, grown]) await open.close();
   });
 
+  it("gives a format change back to a path a pruned size rendered before a query on its first render there", async () => {
+    const w = await world();
+    const images = await w.open([THUMB, SQUARE]);
+    expectOk(await images.generate("m1"));
+    expect(await squarePath(w, images)).toBe(SQUARE_PATH);
+    const narrowed = await w.open([THUMB]);
+    expectOk(await narrowed.prune(["square"]));
+
+    const original = await w.open([THUMB, { ...SQUARE, format: "original" }]);
+    expectOk(await original.plan(["m1"]));
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ format: "jpeg", renders: 0 });
+    const back = await w.open([THUMB, { ...SQUARE, width: 140, height: 140 }]);
+    expectOk(await back.plan(["m1"]));
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ format: "webp", state: "pending" });
+    expectOk(await back.generate("m1"));
+
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", format: "webp" });
+    expect(await squarePath(w, back)).toMatch(VERSIONED_SQUARE);
+    for (const open of [images, narrowed, original, back]) await open.close();
+  });
+
   it("exports each variant under its plain path with the bytes of its last render", async () => {
     const w = await world();
     const images = await w.open([SQUARE]);

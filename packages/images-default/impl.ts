@@ -1098,7 +1098,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         if (overwritten.value === "lost") return ok({ changed });
       }
       const fresh = newRow(item, size, decodable, ow, oh, framing);
-      const replanned = await updateAsRead(row, { key: fresh.key, format: fresh.format, spec: fresh.spec, width: fresh.width, height: fresh.height, bytes: 0, state: "planned", error: fresh.error, attempts: 0, updatedAt: now(), crop: fresh.crop, renderedCrop: "", originalWidth: fresh.originalWidth, originalHeight: fresh.originalHeight });
+      const heldBefore = await db.findOne<Retired>(RETIRED, { slot: slotOf(mediaId, fileOf(fresh)) });
+      if (isErr(heldBefore)) return heldBefore;
+      const renders = heldBefore.value === null ? (row.renders ?? 0) : Math.max(row.renders ?? 0, 1);
+      const replanned = await updateAsRead(row, { key: fresh.key, format: fresh.format, spec: fresh.spec, width: fresh.width, height: fresh.height, bytes: 0, state: "planned", error: fresh.error, attempts: 0, updatedAt: now(), crop: fresh.crop, renderedCrop: "", renders, originalWidth: fresh.originalWidth, originalHeight: fresh.originalHeight });
       if (isErr(replanned)) return replanned;
       if (replanned.value === null) {
         const handed = await handBack(mediaId, false);
