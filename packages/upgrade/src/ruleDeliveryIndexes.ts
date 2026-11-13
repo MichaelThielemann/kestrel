@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
-import { createPipelineFile, hoistModuleConfigProperty, insertTriggers, removeNestedModuleConfigProperty, renameStringLiterals, setModuleConfigProperties } from "./edits.ts";
+import { createPipelineFile, hoistModuleConfigProperty, insertTriggers, removeNestedModuleConfigProperty, renameStringLiterals } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
@@ -82,11 +82,9 @@ export const robotsPolicyRule: Rule = {
     if (entry === undefined || !isRecord(entry.config)) return [];
     const robots = entry.config.robots;
     if (robots === false || (isRecord(robots) && "policy" in robots)) return [];
-    const source = ctx.readFile(ctx.project.configFile);
-    const edits = robots === undefined && source !== undefined ? setModuleConfigProperties(ctx.project.configFile, source, { use: entry.use, assignments: { robots: '{ policy: "allow" }' } }) : undefined;
     const message = "delivery-static writes and owns <prefix>robots.txt and <prefix>sitemap.xml; without robots.policy, robots.txt is \"Disallow: /\" unless NODE_ENV is production";
-    const suggestion = 'set robots.policy to "allow" (what a site without robots.txt had), to "disallow" for a site crawlers must not index, or robots to false to keep your own robots.txt';
-    return [finding("delivery/robots-policy", "delivery/robots-policy", message, edits === undefined ? `${suggestion}, by hand` : suggestion, { file: ctx.project.configFile, module: entry.use, path: "robots.policy" }, edits, upgradingDocs("delivery-robots-policy"), "warning")];
+    const suggestion = 'run production with NODE_ENV=production, or set robots.policy by hand: "allow" (what a site without robots.txt had), "disallow" for a site crawlers must not index, a value read per deployment from an environment variable, or robots: false to keep your own robots.txt';
+    return [finding("delivery/robots-policy", "delivery/robots-policy", message, suggestion, { file: ctx.project.configFile, module: entry.use, path: "robots.policy" }, undefined, upgradingDocs("delivery-robots-policy"), "warning")];
   },
 };
 

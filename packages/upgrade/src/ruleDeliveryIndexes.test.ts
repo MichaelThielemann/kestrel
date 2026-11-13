@@ -243,15 +243,14 @@ describe("delivery/index-triggers", () => {
 describe("delivery/robots-policy", () => {
   const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-delivery-static", config: { types: { pages: {} } } }], triggers: [] });\n';
 
-  it("sets robots.policy to allow when delivery-static has none, keeping the site open to crawlers", async () => {
+  it("reports a delivery-static without robots.policy and changes nothing, so robots.txt follows NODE_ENV on every deployment", async () => {
     const p = await project({ configSource: source, deliveryConfig: { types: { pages: {} } } });
     const findings = await robotsPolicyRule.check(contextFor(p));
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ rule: "delivery/robots-policy", severity: "warning", where: { module: DELIVERY, path: "robots.policy" }, docs: upgradingDocs("delivery-robots-policy") });
     expect(findings[0]?.message).toContain("Disallow: /");
-    const text = applyTo(p.configFile, source, autoEdits(findings[0]));
-    expect(text).toContain('config: { types: { pages: {} }, robots: { policy: "allow" } }');
-    expect(() => parseTs(text)).not.toThrow();
+    expect(findings[0]?.fix.kind).toBe("manual");
+    expect(autoEdits(findings[0])).toEqual([]);
   });
 
   it("leaves a robots object without a policy to the user", async () => {
