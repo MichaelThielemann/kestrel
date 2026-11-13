@@ -11,6 +11,35 @@ async function jpeg(width: number, height: number): Promise<Uint8Array> {
   return sharp({ create: { width, height, channels: 3, background: "#336699" } }).jpeg().toBuffer();
 }
 
+async function storedQuadrantJpeg(orientation: number): Promise<Uint8Array> {
+  const quadrant = await sharp({ create: { width: 200, height: 100, channels: 3, background: "#ff0000" } }).png().toBuffer();
+  return sharp({ create: { width: 400, height: 200, channels: 3, background: "#0000ff" } })
+    .composite([{ input: quadrant, left: 0, top: 0 }])
+    .jpeg({ quality: 95 })
+    .withMetadata({ orientation })
+    .toBuffer();
+}
+
+async function meanColour(data: Uint8Array): Promise<[number, number, number]> {
+  const { channels } = await sharp(data).stats();
+  return [Math.round(channels[0]?.mean ?? -1), Math.round(channels[1]?.mean ?? -1), Math.round(channels[2]?.mean ?? -1)];
+}
+
+function isRed([r, g, b]: [number, number, number]): boolean {
+  return r > 230 && g < 25 && b < 25;
+}
+
+function isBlue([r, g, b]: [number, number, number]): boolean {
+  return r < 25 && g < 25 && b > 230;
+}
+
+const orientedCells = {
+  topLeft: { left: 0, top: 0, width: 100, height: 200 },
+  topRight: { left: 100, top: 0, width: 100, height: 200 },
+  bottomLeft: { left: 0, top: 200, width: 100, height: 200 },
+  bottomRight: { left: 100, top: 200, width: 100, height: 200 },
+} as const;
+
 describe("eligible", () => {
   it("accepts raster image content types", () => {
     expect(eligible("image/jpeg")).toBe(true);
@@ -112,6 +141,20 @@ describe("render", () => {
     const data = await jpeg(1200, 800);
     const truncated = data.slice(0, Math.floor(data.byteLength * 0.6));
     await expect(render(truncated, medium, { width: 1024, height: 683, format: "webp" })).rejects.toThrow();
+  });
+});
+
+describe("sharp cuts after rotate() in the coordinates of the oriented image", () => {
+  it("orientation 6 shows the stored top-left quadrant as the oriented top-right cell", async () => {
+    const data = await storedQuadrantJpeg(6);
+    const cells = await Promise.all(Object.values(orientedCells).map(async (cell) => meanColour(await sharp(data).rotate().extract(cell).png().toBuffer())));
+    expect(cells.map((c) => (isRed(c) ? "red" : isBlue(c) ? "blue" : "mixed"))).toEqual(["blue", "red", "blue", "blue"]);
+  });
+
+  it("orientation 8 shows the stored top-left quadrant as the oriented bottom-left cell", async () => {
+    const data = await storedQuadrantJpeg(8);
+    const cells = await Promise.all(Object.values(orientedCells).map(async (cell) => meanColour(await sharp(data).rotate().extract(cell).png().toBuffer())));
+    expect(cells.map((c) => (isRed(c) ? "red" : isBlue(c) ? "blue" : "mixed"))).toEqual(["blue", "blue", "red", "blue"]);
   });
 });
 
