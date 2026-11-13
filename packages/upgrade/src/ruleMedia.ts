@@ -533,6 +533,29 @@ export const imagesMediaOptionRule: Rule = {
   },
 };
 
+const IMAGES_RENDER_TIMEOUT_RULE_ID = "modules/images-render-timeout";
+const DEFAULT_STALE_AFTER_MS = 60000;
+const DEFAULT_RENDER_TIMEOUT_MS = 30000;
+
+/** `modules/images-render-timeout`: images-default's config requires `renderTimeoutMs` below `staleAfterMs` from 6.0.0 on, so a render ends before the item lease it renews runs out. */
+export const imagesRenderTimeoutRule: Rule = {
+  id: IMAGES_RENDER_TIMEOUT_RULE_ID,
+  check(ctx) {
+    const images = moduleEntry(ctx, "images-default");
+    if (images === undefined) return [];
+    const config = isRecord(images.config) ? images.config : {};
+    const stale = config.staleAfterMs ?? DEFAULT_STALE_AFTER_MS;
+    const timeout = config.renderTimeoutMs ?? DEFAULT_RENDER_TIMEOUT_MS;
+    if (typeof stale !== "number" || typeof timeout !== "number" || timeout < stale) return [];
+    const staleText = `staleAfterMs (${stale}${config.staleAfterMs === undefined ? ", the default" : ""})`;
+    const timeoutText = `renderTimeoutMs (${timeout}${config.renderTimeoutMs === undefined ? ", the default" : ""})`;
+    const message = `images-default's ${timeoutText} is not below its ${staleText}; from 6.0.0 on its config fails validation with "renderTimeoutMs must be less than staleAfterMs", since a render has to end before the lease on its media item runs out`;
+    const suggestion = `raise staleAfterMs above ${timeout} or lower renderTimeoutMs below ${stale}`;
+    const where = { module: images.use, path: config.renderTimeoutMs === undefined ? "staleAfterMs" : "renderTimeoutMs" };
+    return [finding(IMAGES_RENDER_TIMEOUT_RULE_ID, IMAGES_RENDER_TIMEOUT_RULE_ID, message, suggestion, where, undefined, upgradingDocs("modules-images-render-timeout"))];
+  },
+};
+
 const REFERENCES_MEDIA_TARGET_RULE_ID = "modules/references-media-target";
 
 /** `modules/references-media-target`: a references-default target reading media-default's collection becomes `{ media: true }`, which reads the ready files through `media@1`; any other `{ collection }` target must name the project's own collection. */
@@ -589,6 +612,7 @@ export const imagesVariantsChangedRule: Rule = {
 
 export const mediaRules: readonly Rule[] = [
   imagesMediaOptionRule,
+  imagesRenderTimeoutRule,
   referencesMediaTargetRule,
   imagesVariantsChangedRule,
   deliveryMediaRule,

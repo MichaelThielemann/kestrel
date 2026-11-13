@@ -194,6 +194,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`modules/delivery-media`](#modules-delivery-media) | source | auto | `delivery-static`'s removed `media` option |
 | [`modules/media-public-path`](#modules-media-public-path) | source | auto (warning) | `images-default`'s `publicPath` not matching `media-default`'s |
 | [`modules/images-media-option`](#modules-images-media-option) | source | auto (error / warning) | `images-default`'s removed `media` option |
+| [`modules/images-render-timeout`](#modules-images-render-timeout) | source | manual | `images-default`'s `renderTimeoutMs` not below its `staleAfterMs` |
 | [`modules/references-media-target`](#modules-references-media-target) | source | auto (warning) / none (info) | a `references-default` target reading `media_items`, or any other collection, directly |
 | [`events/images-variants-changed`](#events-images-variants-changed) | source | none (info) | a pipeline on `media.updated` that does not also listen to `images.variantsChanged` |
 | [`pipelines/media-serve`](#pipelines-media-serve) | source | auto (pipeline files + trigger) / manual | `publicCopy` set with no pipeline serving it, or anonymous callers refused it |
@@ -375,6 +376,15 @@ collection is `media_items` (or unset), since `media-default` provides `media@1`
 when it names another collection, since whichever module owns that store has to provide `media@1`
 now for `images-default` to boot. Without any `media@1` provider, boot reports
 `boot/missing-provider`.
+
+#### modules-images-render-timeout
+`images-default` holds a lease on a media item for `staleAfterMs` while it places, renders and writes
+its paths, and renews it before each write, so a render has to end before the lease runs out. From
+6.0.0 on its config fails validation with `renderTimeoutMs must be less than staleAfterMs` unless
+`renderTimeoutMs` (default 30000) is below `staleAfterMs` (default 60000). Both options exist in 5.8,
+so a project that set `staleAfterMs` to 30000 or less and left `renderTimeoutMs` at its default
+booted there and fails here. The finding names both values, defaults included; raise `staleAfterMs`
+above `renderTimeoutMs` or lower `renderTimeoutMs` below `staleAfterMs` by hand.
 
 #### modules-references-media-target
 A `references-default` target `{ collection: "media_items" }` reads `media-default`'s collection

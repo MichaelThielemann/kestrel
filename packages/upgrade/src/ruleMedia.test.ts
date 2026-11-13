@@ -15,6 +15,7 @@ import {
   deliveryMediaRule,
   imagesMediaOptionRule,
   imagesPlanRule,
+  imagesRenderTimeoutRule,
   imagesResumeCronRule,
   imagesVariantsChangedRule,
   mediaDeleteOrderRule,
@@ -715,6 +716,37 @@ describe("modules/images-media-option", () => {
     expect(findings[0]?.fix.kind).toBe("auto");
     expect(findings[0]?.suggestion).toContain("provides media@1");
     expect(findings[0]?.message).toContain("asset_rows");
+  });
+});
+
+describe("modules/images-render-timeout", () => {
+  it("does not fire without images-default, with the defaults, or with renderTimeoutMs below staleAfterMs", async () => {
+    expect(await imagesRenderTimeoutRule.check(contextFor(await project([{ use: MEDIA_DEFAULT, config: {} }])))).toEqual([]);
+    expect(await imagesRenderTimeoutRule.check(contextFor(await project([{ use: IMAGES_DEFAULT, config: {} }])))).toEqual([]);
+    expect(await imagesRenderTimeoutRule.check(contextFor(await project([{ use: IMAGES_DEFAULT, config: { staleAfterMs: 20000, renderTimeoutMs: 10000 } }])))).toEqual([]);
+    expect(await imagesRenderTimeoutRule.check(contextFor(await project([{ use: IMAGES_DEFAULT, config: { staleAfterMs: 120000 } }])))).toEqual([]);
+  });
+
+  it("reports a staleAfterMs at or below the default renderTimeoutMs, which fails config validation", async () => {
+    const findings = await imagesRenderTimeoutRule.check(contextFor(await project([{ use: IMAGES_DEFAULT, config: { staleAfterMs: 20000 } }])));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ rule: "modules/images-render-timeout", severity: "error", tier: "source", where: { module: IMAGES_DEFAULT, path: "staleAfterMs" }, fix: { kind: "manual" }, docs: upgradingDocs("modules-images-render-timeout") });
+    expect(findings[0]?.message).toContain("renderTimeoutMs (30000, the default)");
+    expect(findings[0]?.message).toContain("staleAfterMs (20000)");
+    expect(findings[0]?.message).toContain("renderTimeoutMs must be less than staleAfterMs");
+    expect(findings[0]?.suggestion).toContain("raise staleAfterMs above 30000");
+    expect(findings[0]?.suggestion).toContain("lower renderTimeoutMs below 20000");
+  });
+
+  it("reports a renderTimeoutMs at or above the default staleAfterMs", async () => {
+    const findings = await imagesRenderTimeoutRule.check(contextFor(await project([{ use: IMAGES_DEFAULT, config: { renderTimeoutMs: 60000 } }])));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ where: { module: IMAGES_DEFAULT, path: "renderTimeoutMs" } });
+    expect(findings[0]?.message).toContain("staleAfterMs (60000, the default)");
+  });
+
+  it("leaves values it cannot read as numbers to config validation", async () => {
+    expect(await imagesRenderTimeoutRule.check(contextFor(await project([{ use: IMAGES_DEFAULT, config: { staleAfterMs: "20000" } }])))).toEqual([]);
   });
 });
 

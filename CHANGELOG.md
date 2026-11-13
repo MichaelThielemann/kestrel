@@ -700,6 +700,8 @@ Net changes since 5.8.1.
   upgrade`'s `types/breaking-signatures` names them.
 - `images-default`'s config must set `renderTimeoutMs` below `staleAfterMs` (the defaults are 30000
   and 60000); a config that does not fails boot, since a render could outlast the lease on its item.
+  `kestrel upgrade`'s `modules/images-render-timeout` reports (manual) such a config, defaults
+  included.
 
 ### Added
 
