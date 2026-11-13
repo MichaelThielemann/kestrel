@@ -145,8 +145,8 @@ without Nuxt: [`../examples/h3`](../examples/h3).
   (`pages.*`, `media.*`, `images.read`, `settings.read`, `redirects.*`).
 - **What an anonymous caller receives**: the fields `anonymousFields` grants, cut by the last step of
   every public read (`authz.fields`). A document comes without `createdAt` and `updatedAt`; a media
-  item without `folder`, `createdAt`, `updatedAt`, `available` and `variantCounts`, and each variant
-  without `bytes` and `state`; a file answer keeps `cache-control`, `x-content-provenance` and
+  item without `folder`, `createdAt`, `updatedAt`, `available`, `variantCounts` and `framing` (it
+  keeps `focus`), and each variant without `bytes` and `state`; a file answer keeps `cache-control`, `x-content-provenance` and
   `x-kestrel-variant` of the headers its step sets. A signed-in caller with a role receives the whole
   answer; one whose roles are all unknown to the config receives the anonymous one. The
   OpenAPI document describes both: `#/components/schemas/<operationId>` and
@@ -595,9 +595,10 @@ variant per *effective size*, at `/media/<id>/variants/<size>.<ext>`. It learns 
 through `media@1`, which `media-default` provides, so an upload still in flight or an item being
 deleted gets no variants and `POST /admin/images/retry-failed` with its id answers 404. Its path,
 dimensions and format are decided from the original
-right after upload — before any variant is actually rendered — so the path never needs a republish:
-until the render lands, it answers with the original's own bytes and type instead of the resized
-image. `available` on the media item (`false` while any size still lacks its path, `true` once every
+right after upload — before any variant is actually rendered — so the first render needs no
+republish: until it lands, the path answers with the original's own bytes and type instead of the
+resized image. Only a re-crop changes `variants[].path` (its `?v=`), and it marks the pages that
+show the item for a re-render (see [Focus and crop](#focus-and-crop)). `available` on the media item (`false` while any size still lacks its path, `true` once every
 size has one) is what an editor UI should gate insertion on; a page or an admin view can otherwise
 link every `variants[]` entry from the very first read. Generation is caught up by a resumable sync
 job if needed, and the item's variants are deleted only on request. The original is never modified.
@@ -637,8 +638,9 @@ error, failed } }], job, orphaned: { sizes: [name], variants: n }, registrySeen,
   their last error text.
 
 `GET /media/:id` and `GET /media` additionally return `available` and
-`variants: [{ size, width, height, format, bytes, state, path }]`; `path` is the stable public path
-`/media/<id>/variants/<size>.<ext>`, and `width`/`height` are the planned dimensions, present in
+`variants: [{ size, width, height, format, bytes, state, path }]`; `path` is the public path
+`/media/<id>/variants/<size>.<ext>`, followed by `?v=<token>` once a render with a crop is at it (the
+file name never carries the query), and `width`/`height` are the planned dimensions, present in
 every state, not only once the render is `done`. `variants[]` never lists a size whose path has no
 object at all yet (still `planned`, internal to `images-default`) — every listed path always answers.
 `available` is `false` for an eligible image with at least one such size still unplaced, `true`

@@ -1334,7 +1334,8 @@ Net changes since 5.8.1.
   exactly the server's cut.
 - `examples/minimal` wires `PUT /media/:id/framing` to `setMediaFraming` (`images.setFraming`, then
   `images.generate`, answering the item as `GET /media/:id` does, behind `media.write`) and grants
-  `focus` to anonymous media reads.
+  `focus` to anonymous media reads; `kestrel upgrade` proposes `focus` in the anonymous media grant
+  when `images.attach` runs.
 
 ### Changed
 
