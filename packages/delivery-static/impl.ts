@@ -13,8 +13,9 @@ import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import { observeReads, type ObservedRead } from "@michaelthielemann/kestrel/reads";
 import { canonicalJson, normalizeReads, type DependencySpec } from "./dependencies.ts";
 import { dependencyPrefix, dependencyRowId, scan, setIdOf, statusIdOf, type DependencyKind, type OutputRef } from "./keys.ts";
-import { createIndexFiles, normalizeSiteUrl, type ExportCount, type IndexCandidate } from "./indexes.ts";
+import { createIndexFiles, type ExportCount, type IndexCandidate } from "./indexes.ts";
 import { validateLlmsConfig } from "./llms.ts";
+import { normalizeSiteUrl } from "./site-url.ts";
 import { createBackgroundLoop, type BackgroundLoop, type PassOutcome } from "./loop.ts";
 import type { configSchema } from "./module.ts";
 
@@ -40,7 +41,7 @@ export function markerKeyFor(prefix: string): string | null {
   return `${prefix.replace(/\/+$/, "")}.delivery-marker`;
 }
 
-export { normalizeSiteUrl, pageUrl } from "./indexes.ts";
+export { normalizeSiteUrl, pageUrl } from "./site-url.ts";
 
 export type Config = z.output<typeof configSchema>;
 export type TypeConfig = Config["types"][string];

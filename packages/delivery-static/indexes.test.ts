@@ -5,7 +5,8 @@ import { createContentDefault } from "@michaelthielemann/kestrel-content-default
 import { err, failure, ok } from "@michaelthielemann/kestrel-contracts/errors";
 import type { EventData, Events } from "@michaelthielemann/kestrel-contracts/events";
 import { renderFailed } from "@michaelthielemann/kestrel-contracts/helpers/renderer";
-import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Document, FindOptions, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Filter } from "@michaelthielemann/kestrel-contracts/query";
 import type { Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
@@ -610,8 +611,8 @@ function probeLoop(db: Persistence): LoopProbe {
     if (collection === STATUS && Object.keys(filter).join() === "claimedAt") current = ++started;
     return updateMany(collection, filter, patch);
   };
-  db.findMany = async (collection, filter, options) => {
-    const found = await findMany(collection, filter, options);
+  db.findMany = async <T extends Document>(collection: string, filter: Filter, options?: FindOptions) => {
+    const found = await findMany<T>(collection, filter, options);
     if (collection === STATUS && options?.limit === 1 && isRecord(filter.staleRetryAt) && "gt" in filter.staleRetryAt) endedStart = current;
     return found;
   };

@@ -1070,8 +1070,9 @@ Net changes since 5.8.1.
   `delivery.readStaleStatus` answers `exports: { indexes, llmsFull }` with each export's last `at`,
   `entries`, `error` and `skipped` (no list written because no output is rendered yet).
   `robots: false` leaves robots.txt to the site; a `siteUrl` with a base path warns at boot, since
-  crawlers read robots.txt only at the host's root. `normalizeSiteUrl` and `pageUrl` from `kestrel-delivery-static/impl` give
-  the URL form the sitemap uses, for a canonical link that must match it.
+  crawlers read robots.txt only at the host's root. `normalizeSiteUrl` and `pageUrl` from the dependency-free subpath
+  `kestrel-delivery-static/site-url` give the URL form the sitemap uses, for a canonical link that
+  must match it, also in page code that runs in the browser.
 - `delivery.requestIndexes` asks for those exports without running them: coalesced
   `delivery.indexesStale` (`coalesceKey: "indexes"`) and, with `llms.full`, `delivery.llmsStale`
   events with `"events"`; with `"background"`, the loop exports the index files

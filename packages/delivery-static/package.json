@@ -9,7 +9,8 @@
   },
   "exports": {
     ".": "./module.ts",
-    "./impl": "./impl.ts"
+    "./impl": "./impl.ts",
+    "./site-url": "./site-url.ts"
   },
   "publishConfig": {
     "exports": {
@@ -20,6 +21,10 @@
       "./impl": {
         "types": "./dist/impl.d.ts",
         "default": "./dist/impl.js"
+      },
+      "./site-url": {
+        "types": "./dist/site-url.d.ts",
+        "default": "./dist/site-url.js"
       }
     }
   },

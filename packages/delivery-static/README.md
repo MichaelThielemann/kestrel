@@ -122,8 +122,8 @@ and answered by `delivery.readStaleStatus` as `exports: { indexes, llmsFull }`. 
 normalized by lower-casing the host, dropping a default port and stripping trailing slashes; a base path
 stays (`https://example.org/de/` → `https://example.org/de`), so the home page's URL is `https://example.org/de/`
 and every other page's has no trailing slash. `normalizeSiteUrl` and `pageUrl` from
-`@michaelthielemann/kestrel-delivery-static/impl` give that same form, for a canonical link that has to
-equal the sitemap's `<loc>`.
+`@michaelthielemann/kestrel-delivery-static/site-url` give that same form, for a canonical link that has to
+equal the sitemap's `<loc>`; that subpath imports nothing, so page code that also runs in the browser can use it.
 
 ## Dependent outputs
 

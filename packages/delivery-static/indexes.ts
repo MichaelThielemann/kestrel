@@ -5,7 +5,10 @@ import { publishedLocale } from "@michaelthielemann/kestrel-contracts/helpers/co
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Filter } from "@michaelthielemann/kestrel-contracts/query";
 import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
+import { pageUrl } from "./site-url.ts";
 import { BODY_HEADING_OFFSET, bodyOf, buildLlmsFullTxt, buildLlmsTxt, extractMain, htmlToMarkdown, LLMS_CONTENT_TYPE, LLMS_FULL_KEY, LLMS_KEY, type LlmsConfig, type LlmsFullPage, type LlmsFullSection, type LlmsSection } from "./llms.ts";
+
+export { normalizeSiteUrl, pageUrl } from "./site-url.ts";
 
 export const SITEMAP_KEY = "sitemap.xml";
 export const ROBOTS_KEY = "robots.txt";
@@ -13,30 +16,6 @@ export const SITEMAP_CONTENT_TYPE = "application/xml; charset=utf-8";
 export const ROBOTS_CONTENT_TYPE = "text/plain; charset=utf-8";
 
 export type RobotsPolicy = "allow" | "disallow";
-
-/**
- * The canonical form of a site URL: an `http` or `https` URL without credentials, query or fragment, with its host
- * lower-cased, its default port dropped and its trailing slashes stripped. A base path is kept, so
- * `https://Example.org/de/` becomes `https://example.org/de`. Throws on anything else.
- */
-export function normalizeSiteUrl(value: string): string {
-  let url: URL;
-  try {
-    url = new URL(value.trim());
-  } catch {
-    throw new Error(`siteUrl ${JSON.stringify(value)} is not an absolute URL`);
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`siteUrl ${JSON.stringify(value)} must use http or https`);
-  if (url.hostname === "") throw new Error(`siteUrl ${JSON.stringify(value)} has no host`);
-  if (url.username !== "" || url.password !== "") throw new Error(`siteUrl ${JSON.stringify(value)} must not carry credentials`);
-  if (url.search !== "" || url.hash !== "") throw new Error(`siteUrl ${JSON.stringify(value)} must not carry a query or a fragment`);
-  return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, "")}`;
-}
-
-/** The absolute URL of a delivered path under a normalized site URL: the site URL plus the path, so the home page ends in `/` and every other page has no trailing slash. Without a site URL, the path itself. */
-export function pageUrl(siteUrl: string | undefined, path: string): string {
-  return `${siteUrl ?? ""}${path}`;
-}
 
 export function escapeXml(value: string): string {
   return value.replace(/[&<>"']/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&apos;"));
