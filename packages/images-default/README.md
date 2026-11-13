@@ -339,7 +339,9 @@ run one at a time, so `images.remove` waits for a plan or a render of that item 
 a render stops after the size it is rendering once a remove of its item is waiting. Across processes
 the lease on the item (see "Focus and crop") lets one process place, render and write its public
 copies at a time. `images.remove` and `images.prune` take no lease. `images.remove` leaves a request
-on the item before its first delete, so one that fails partway is finished by `images.resume`. A plan or a render reads the
+on the item before its first delete, so one that fails partway is finished by `images.resume`; when
+leaving that request fails, it still deletes everything and answers that error only when a delete
+fails too. A plan or a render reads the
 media item through `media@1` again after its last write and, when the item stopped being ready
 meanwhile, removes everything it wrote, and a render or public copy written at a path a prune retired
 meanwhile leaves no bytes at the private path and the original's bytes in the public copy. Two

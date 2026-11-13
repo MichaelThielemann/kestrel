@@ -1956,7 +1956,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       removing.set(mediaId, (removing.get(mediaId) ?? 0) + 1);
       return exclusive(mediaId, async () => {
         const asked = await leaveRequest(mediaId);
-        return isErr(asked) ? asked : removeVariants(mediaId);
+        const removed = await removeVariants(mediaId);
+        return isErr(asked) && isErr(removed) ? asked : removed;
       }).finally(() => {
         const left = (removing.get(mediaId) ?? 1) - 1;
         if (left === 0) removing.delete(mediaId);

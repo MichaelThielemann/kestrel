@@ -435,7 +435,7 @@ describe("images/default publicCopy: a TRANSIENT failure at each call of a delet
       const stopFailing = intercept(w, (index) => index === failAt);
       const first = await op(w);
       stopFailing();
-      expect(first.ok, `failure injected at call ${failAt}`).toBe(false);
+      if (first.ok) await check(w, `failure at call ${failAt} of ${n}, answered Ok without a retry`);
       await retry(w);
       await check(w, `failure at call ${failAt} of ${n}, then a retry`);
     }

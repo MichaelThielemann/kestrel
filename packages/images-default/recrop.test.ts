@@ -2528,6 +2528,53 @@ describe("images/default writes racing a lease-free prune or a request left on a
     for (const opened of [images, removing, later]) await opened.close();
   });
 
+  it("images.remove still deletes an item's variants when leaving its request fails", async () => {
+    const w = await world();
+    const images = await w.open([THUMB, SQUARE]);
+    expectOk(await images.generate("m1"));
+    w.media.remove("m1");
+    let failing = true;
+    const writes: Persistence = {
+      ...w.db,
+      updateMany: async (collection, filter, patch) => {
+        if (failing && collection === ITEMS && "request" in patch) {
+          failing = false;
+          return err(failure("TRANSIENT", "busy"));
+        }
+        return w.db.updateMany(collection, filter, patch);
+      },
+    };
+    const removing = await w.open([THUMB, SQUARE], undefined, { db: writes });
+    expectOk(await removing.remove("m1"));
+
+    expect(failing).toBe(false);
+    expect(expectOk(await w.db.count(VARIANTS, { mediaId: "m1" }))).toBe(0);
+    expect(expectOk(await w.db.count(ITEMS, { mediaId: "m1" }))).toBe(0);
+    expect([...w.blobs.blobs.keys()].filter((key) => key.includes("/m1/"))).toEqual([]);
+    for (const opened of [images, removing]) await opened.close();
+  });
+
+  it("images.remove answers the error of leaving its request when deleting the variants fails too", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.generate("m1"));
+    w.media.remove("m1");
+    const writes: Persistence = {
+      ...w.db,
+      updateMany: async (collection, filter, patch) => {
+        if (collection === ITEMS && "request" in patch) return err(failure("TRANSIENT", "busy"));
+        return w.db.updateMany(collection, filter, patch);
+      },
+    };
+    const blobs: Blobstore = {
+      ...w.blobs,
+      remove: async (key) => (key === "site/media/m1/variants/square.webp" ? err(failure("TRANSIENT", "copy store unavailable")) : w.blobs.remove(key)),
+    };
+    const removing = await w.open([SQUARE], undefined, { db: writes, blobs });
+    expect(expectErr(await removing.remove("m1"), "TRANSIENT").message).toBe("busy");
+    for (const opened of [images, removing]) await opened.close();
+  });
+
   it("images.resume finishes a failed images.remove of an item that never held a lease", async () => {
     const w = await world();
     const images = await w.open([SQUARE]);

@@ -1491,7 +1491,9 @@ Net changes since 5.8.1.
   start under way, and neither starts the sync job again once it has begun; `images.resume` then
   answers `CONFLICT`. `images.remove` leaves a request on the item before its first delete, so one
   that fails partway after `media.remove` is finished by `images.resume`, which removes the rows,
-  private variants and public copies of an item `media@1` no longer reports as ready.
+  private variants and public copies of an item `media@1` no longer reports as ready. When leaving
+  that request fails, `images.remove` still deletes everything and answers that error only when a
+  delete fails too.
 
 ### Fixed
 
