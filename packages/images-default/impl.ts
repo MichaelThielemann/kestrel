@@ -1282,8 +1282,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok(results);
   }
 
-  function failurePatch(row: Variant, attempts: number, message: string): Partial<Variant> {
-    return row.state === "planned" ? { error: message } : { state: attempts >= maxAttempts ? "failed" : "error", attempts, error: message, updatedAt: now() };
+  function failurePatch(row: Variant, attempts: number, message: string, landed: Partial<Variant>): Partial<Variant> {
+    return row.state === "planned" ? { error: message } : { state: attempts >= maxAttempts ? "failed" : "error", attempts, error: message, updatedAt: now(), ...landed };
   }
 
   function logFailure(row: Variant, size: Size): void {
@@ -1291,14 +1291,14 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (row.state === "failed") logger.error(`images: variant ${size.name} for media/${row.mediaId} gave up after ${row.attempts} attempts`, { mediaId: row.mediaId, size: size.name, error: row.error });
   }
 
-  async function recordFailure(row: Variant, size: Size, attempts: number, message: string): Promise<Result<Variant | null, KestrelError>> {
-    const recorded = await updateAsRead(row, failurePatch(row, attempts, message));
+  async function recordFailure(row: Variant, size: Size, attempts: number, message: string, landed: Partial<Variant> = {}): Promise<Result<Variant | null, KestrelError>> {
+    const recorded = await updateAsRead(row, failurePatch(row, attempts, message, landed));
     if (isErr(recorded) || recorded.value === null) return recorded;
     logFailure(recorded.value, size);
     return recorded;
   }
 
-  async function writeRender(lease: Lease, row: Variant, rendered: Rendered, original: Original): Promise<Result<"written" | "lost", KestrelError>> {
+  async function writeRender(lease: Lease, row: Variant, rendered: Rendered, original: Original): Promise<Result<"written" | "lost" | { landed: KestrelError }, KestrelError>> {
     const previous = config.publicCopy !== undefined && row.bytes > 0 ? await blobs.get(row.key) : ok(null);
     if (isErr(previous)) return previous;
     const stored = await blobs.put(row.key, rendered.data, { contentType: rendered.contentType });
@@ -1312,7 +1312,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (unrestored !== null) logger.error(`images: the earlier bytes of ${fileOf(row)} could not be put back after its public copy failed`, { mediaId: row.mediaId, error: unrestored.error.message });
     const kept = await wroteHeld(lease);
     if (!isErr(kept) && !kept.value) return ok("lost");
-    return copied;
+    return isErr(restored) ? ok({ landed: copied.error }) : err(copied.error);
   }
 
   async function dropStaleRender(item: MediaFile, row: Variant, original: Original): Promise<Result<null | "gone", KestrelError>> {
@@ -1334,6 +1334,17 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return isErr(droppedCopy) ? droppedCopy : ok("gone");
   }
 
+  async function recordWriteFailure(item: MediaFile, size: Size, row: Variant, original: Original, attempts: number, failed: KestrelError, landed: Rendered | null, signals: RenderSignals): Promise<Result<Variant | null | "gone", KestrelError>> {
+    const renders = (row.renders ?? 0) + 1;
+    const recorded = await recordFailure(row, size, attempts, failed.message, landed === null ? {} : { bytes: landed.data.byteLength, renderedCrop: cropOf(row), renders });
+    if (isErr(recorded)) return recorded;
+    if (recorded.value === null) {
+      const dropped = await dropStaleRender(item, row, original);
+      if (isErr(dropped) || dropped.value === "gone") return dropped;
+    } else if (landed !== null && row.state !== "planned" && (renders >= 2 || cropOf(row) !== renderedCropOf(row))) signals.recrop();
+    return err(failed);
+  }
+
   async function renderVariant(lease: Lease, item: MediaFile, size: Size, row: Variant, original: Original, signals: RenderSignals): Promise<Result<Variant | null | "gone", KestrelError>> {
     const attempt = await renderWithin(original.data, item.contentType, size, { width: row.width, height: row.height, format: row.format, crop: parseCrop(row.crop) });
     const attempts = row.attempts + 1;
@@ -1344,16 +1355,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     signals.touch();
     const rendered = attempt.value;
     const written = await writeRender(lease, row, rendered, original);
-    if (!isErr(written) && written.value === "lost") return ok(null);
-    if (isErr(written)) {
-      const recorded = await recordFailure(row, size, attempts, written.error.message);
-      if (isErr(recorded)) return recorded;
-      if (recorded.value === null) {
-        const dropped = await dropStaleRender(item, row, original);
-        if (isErr(dropped) || dropped.value === "gone") return dropped;
-      }
-      return err(written.error);
-    }
+    if (isErr(written)) return recordWriteFailure(item, size, row, original, attempts, written.error, null, signals);
+    if (written.value === "lost") return ok(null);
+    if (written.value !== "written") return recordWriteFailure(item, size, row, original, attempts, written.value.landed, rendered, signals);
     const kept = await wroteHeld(lease);
     if (isErr(kept) || !kept.value) return isErr(kept) ? kept : ok(null);
 

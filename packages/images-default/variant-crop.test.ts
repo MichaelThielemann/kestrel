@@ -353,4 +353,35 @@ describe("images/default variants[].crop in images.attach", () => {
     expect(await leftEdgeIsBlue(later, "square.webp")).toBe(false);
     for (const images of [first, slow, later]) await images.close();
   });
+
+  it("moves the entry to the new render's crop and a new ?v= when its public copy fails and the earlier bytes cannot be put back", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.setFraming("m1", RIGHT_CROP));
+    expectOk(await first.generate("m1"));
+    const before = (await attached(first)).get("square")!;
+    expectOk(await first.setFraming("m1", LEFT_CROP));
+
+    let variantPuts = 0;
+    const broken: Blobstore = {
+      ...w.blobs,
+      put: async (key, data, options) => {
+        if (key.startsWith("site/")) return err(failure("TRANSIENT", "copy store unavailable"));
+        if (key.startsWith("media-variants/") && (variantPuts += 1) > 1) return err(failure("TRANSIENT", "variant store unavailable"));
+        return w.blobs.put(key, data, options);
+      },
+    };
+    const images = await w.open([SQUARE], render, { blobs: broken });
+    await images.generate("m1");
+    const errored = (await attached(images)).get("square")!;
+    expect(errored).toMatchObject({ state: "error", crop: LEFT });
+    expect(errored.path).toMatch(VERSIONED_SQUARE);
+    expect(errored.path).not.toBe(before.path);
+    expect(await leftEdgeIsBlue(images, "square.webp")).toBe(false);
+
+    for (let attempt = 1; attempt < CONFIG.maxAttempts; attempt += 1) await images.generate("m1");
+    expect((await attached(images)).get("square")).toEqual({ ...errored, state: "failed" });
+    expect(await leftEdgeIsBlue(images, "square.webp")).toBe(false);
+    for (const open of [first, images]) await open.close();
+  });
 });
