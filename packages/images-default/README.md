@@ -266,7 +266,10 @@ records a failed attempt or marks a row `done` over what the new holder wrote. A
 path that stalls that long can still land after the new holder's; the stalled holder notices when
 it has finished its writes (after a failed public copy, once it put the earlier bytes back), marks
 the item, and every rendered size of the item renders again. Until then that path answers the
-stalled bytes, and a cache that fetched it meanwhile keeps them under the same `?v=`.
+stalled bytes, and a cache that fetched it meanwhile keeps them under the same `?v=`. `?v=` is
+derived from the crop alone, so when a crop is set back to one the item had before, the old token
+returns; a cache that stored other bytes under it during such a window, or while a render with a new
+crop was at the path before its row was marked `done`, can go on answering them.
 
 `images.attach` adds `focus` (the rectangle or `null`), meant for anonymous readers, and
 `framing: { focus, crops, width, height, ratios }`, meant for an editor. `width` and `height` are the
