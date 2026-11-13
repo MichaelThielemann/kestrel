@@ -8,7 +8,7 @@ import type { SourceRuleContext } from "./plugin.ts";
 import type { Finding } from "./report.ts";
 import { upgradingDocs } from "./ruleHelpers.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
-import { zodObjectDefaultRule, zodRangeRule, zodRecordKeyRule } from "./ruleZod.ts";
+import { zodDescribeOrderRule, zodObjectDefaultRule, zodRangeRule, zodRecordKeyRule } from "./ruleZod.ts";
 
 let dir: string;
 beforeEach(async () => {
@@ -154,9 +154,48 @@ describe("zod/object-default", () => {
   });
 });
 
+describe("zod/describe-order", () => {
+  it("moves a .describe() that an object method follows to the end of the chain", async () => {
+    const source = 'import { z } from "zod";\nexport const configSchema = z.object({ smtp: z.object({ host: z.string(), pass: z.string() }).describe("secret").strict() });\n';
+    const file = await write("modules/mailer/module.ts", source);
+    const findings = await zodDescribeOrderRule.check(context());
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.where).toEqual({ file });
+    expect(findings[0]?.severity).toBe("error");
+    expect(findings[0]?.docs).toBe(upgradingDocs("zod-describe-order"));
+    expect(applied(findings[0], source)).toBe('import { z } from "zod";\nexport const configSchema = z.object({ smtp: z.object({ host: z.string(), pass: z.string() }).strict().describe("secret") });\n');
+  });
+
+  it("moves it past every object method that follows, on one line or across lines, and keeps a wrapper after it", async () => {
+    const source = [
+      'import { z } from "zod";',
+      "const base = z.object({ user: z.string() });",
+      'export const a = base.describe("secret").partial().passthrough().optional();',
+      "export const b = z",
+      "  .object({ user: z.string() })",
+      '  .describe("Mail account")',
+      "  .extend({ pass: z.string() })",
+      "  .strict();",
+      "",
+    ].join("\n");
+    await write("module.ts", source);
+    const findings = await zodDescribeOrderRule.check(context());
+    expect(findings).toHaveLength(1);
+    const text = applied(findings[0], source);
+    expect(text).toContain('export const a = base.partial().passthrough().describe("secret").optional();');
+    expect(text).toContain('export const b = z\n  .object({ user: z.string() })\n  .extend({ pass: z.string() })\n  .strict().describe("Mail account");');
+  });
+
+  it("leaves a .describe() that is last or followed only by a wrapper, and a file without a zod import", async () => {
+    await write("a.ts", 'import { z } from "zod";\nexport const a = z.object({ pass: z.string() }).strict().describe("secret").optional().default({ pass: "" });\n');
+    await write("b.ts", 'const doc = { describe: (x: string) => ({ strict: () => x }) };\nexport const b = doc.describe("x").strict();\n');
+    expect(await zodDescribeOrderRule.check(context())).toEqual([]);
+  });
+});
+
 describe("the zod rules", () => {
   it("run with the default rules", () => {
     const ids = DEFAULT_RULES.map((r) => r.id);
-    for (const id of ["deps/zod-range", "zod/record-key", "zod/object-default"]) expect(ids).toContain(id);
+    for (const id of ["deps/zod-range", "zod/record-key", "zod/object-default", "zod/describe-order"]) expect(ids).toContain(id);
   });
 });

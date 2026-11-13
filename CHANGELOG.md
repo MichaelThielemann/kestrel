@@ -15,12 +15,16 @@ Net changes since 5.8.1.
   first (`z.record(z.string(), value)`); an object schema's `.default({})` no longer fills the nested
   defaults inside it, `.prefault({})` does, as zod 3's `.default()` did; a function as the second
   argument of `.refine()` is ignored, pass `{ error: … }`. `.strict()`, `.passthrough()` and
-  `.describe("secret")` keep working. The JSON Schema, variables and defaults of every bundled module's
-  config are unchanged. `kestrel upgrade`'s new `deps/zod-range` raises the project's `zod` range,
-  `zod/record-key` inserts the key schema and `zod/object-default` renames such a `.default` to
-  `.prefault`; `types/breaking-signatures` names the schema type. A module whose `configSchema` is
-  not a zod 4 schema, such as one from a package that still depends on zod 3, fails boot with the new
-  problem code `invalid-config-schema`, naming that module, before its config is parsed.
+  `.describe("secret")` keep working, but `.describe()` must be the last call on an object schema:
+  zod 4's `.strict()`, `.passthrough()`, `.extend()`, `.partial()`, `.pick()` and the other object
+  methods return a copy without the description, so a `"secret"` mark set before them is lost and
+  the value shows in plain text in `describe()`. The JSON Schema, variables and defaults of every
+  bundled module's config are unchanged. `kestrel upgrade`'s new `deps/zod-range` raises the
+  project's `zod` range, `zod/record-key` inserts the key schema, `zod/object-default` renames such
+  a `.default` to `.prefault` and `zod/describe-order` moves a `.describe()` after the object methods
+  that follow it; `types/breaking-signatures` names the schema type. A module whose `configSchema`
+  is not a zod 4 schema, such as one from a package that still depends on zod 3, fails boot with the
+  new problem code `invalid-config-schema`, naming that module, before its config is parsed.
 - An `invalid config: …` or `invalid kestrel.config: …` boot error carries zod 4's messages: a missing
   key reads `Invalid input: expected string, received undefined` (was `Required`), an unknown key
   `Unrecognized key: "name"` (was `Unrecognized key(s) in object: 'name'`). A secret path reports

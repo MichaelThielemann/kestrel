@@ -11,6 +11,7 @@ const ZOD_RANGE = "^4.6.6";
 const FIXED: readonly [number, number, number] = [4, 6, 6];
 const DEPENDENCY_MAPS = ["dependencies", "devDependencies", "peerDependencies"] as const;
 const OBJECT_FACTORIES = new Set(["object", "strictObject", "looseObject"]);
+const OBJECT_COPIES = new Set(["strict", "passthrough", "strip", "catchall", "extend", "merge", "partial", "required", "pick", "omit", "safeExtend"]);
 const ZOD_IMPORT = /["']zod["']/;
 
 type Version = readonly [number, number, number];
@@ -126,7 +127,7 @@ function rootsInObjectFactory(receiver: AstNode, namespaces: ReadonlySet<string>
   return false;
 }
 
-function recordKeyEdits(file: string, root: AstNode, namespaces: ReadonlySet<string>): Edit[] {
+function recordKeyEdits(file: string, _source: string, root: AstNode, namespaces: ReadonlySet<string>): Edit[] {
   const edits: Edit[] = [];
   for (const node of findAll(root, "CallExpression")) {
     const call = memberCall(node);
@@ -139,7 +140,26 @@ function recordKeyEdits(file: string, root: AstNode, namespaces: ReadonlySet<str
   return edits;
 }
 
-function objectDefaultEdits(file: string, root: AstNode, namespaces: ReadonlySet<string>): Edit[] {
+function describeOrderEdits(file: string, source: string, root: AstNode): Edit[] {
+  const calls = findAll(root, "CallExpression")
+    .map(memberCall)
+    .filter((call): call is MemberCall => call !== undefined);
+  const byReceiver = new Map<AstNode, MemberCall>();
+  for (const call of calls) byReceiver.set(call.object, call);
+  const edits: Edit[] = [];
+  for (const call of calls) {
+    if (call.name !== "describe" || call.args.length !== 1) continue;
+    let last = call;
+    for (let next = byReceiver.get(last.call); next !== undefined && OBJECT_COPIES.has(next.name); next = byReceiver.get(last.call)) last = next;
+    if (last === call) continue;
+    const describeEnd = span(call.call).end;
+    edits.push({ file, start: span(call.object).end, end: describeEnd, text: "" });
+    edits.push({ file, start: span(last.call).end, end: span(last.call).end, text: `.${source.slice(span(call.property).start, describeEnd)}` });
+  }
+  return edits;
+}
+
+function objectDefaultEdits(file: string, _source: string, root: AstNode, namespaces: ReadonlySet<string>): Edit[] {
   const edits: Edit[] = [];
   for (const node of findAll(root, "CallExpression")) {
     const call = memberCall(node);
@@ -151,7 +171,7 @@ function objectDefaultEdits(file: string, root: AstNode, namespaces: ReadonlySet
   return edits;
 }
 
-type ZodScan = (file: string, root: AstNode, namespaces: ReadonlySet<string>) => Edit[];
+type ZodScan = (file: string, source: string, root: AstNode, namespaces: ReadonlySet<string>) => Edit[];
 
 function scanZodFiles(ctx: SourceRuleContext, scan: ZodScan): Array<{ file: string; edits: Edit[] }> {
   const out: Array<{ file: string; edits: Edit[] }> = [];
@@ -167,7 +187,7 @@ function scanZodFiles(ctx: SourceRuleContext, scan: ZodScan): Array<{ file: stri
     }
     const namespaces = zodNamespaces(root);
     if (namespaces.size === 0) continue;
-    const edits = scan(file, root, namespaces);
+    const edits = scan(file, source, root, namespaces);
     if (edits.length > 0) out.push({ file, edits });
   }
   return out;
@@ -204,4 +224,23 @@ export const zodObjectDefaultRule: SourceRule = {
   },
 };
 
-export const ZOD_RULES: readonly SourceRule[] = [zodRangeRule, zodRecordKeyRule, zodObjectDefaultRule];
+/** `zod/describe-order`: a `.describe()` followed by an object method such as `.strict()` or `.partial()`, which in zod 4 returns a copy without the description, so a `"secret"` mark is lost; the fix moves the `.describe()` after the last such method. */
+export const zodDescribeOrderRule: SourceRule = {
+  id: "zod/describe-order",
+  needs: "source",
+  check(ctx) {
+    return scanZodFiles(ctx, describeOrderEdits).map(({ file, edits }) =>
+      finding(
+        `zod/describe-order:${file}`,
+        "zod/describe-order",
+        `calls .describe() before an object method such as .strict() or .partial() (${edits.length / 2}x); zod 4 returns a copy without the description, so a "secret" mark no longer applies`,
+        "move .describe() after the last object method of the chain",
+        { file },
+        edits,
+        upgradingDocs("zod-describe-order"),
+      ),
+    );
+  },
+};
+
+export const ZOD_RULES: readonly SourceRule[] = [zodRangeRule, zodRecordKeyRule, zodObjectDefaultRule, zodDescribeOrderRule];
