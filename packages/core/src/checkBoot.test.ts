@@ -219,6 +219,19 @@ describe("checkBoot: collecting every problem", () => {
     await expect(boot(input)).rejects.toMatchObject({ code: "invalid-config-schema", module: "older/store" });
   });
 
+  it("reports a field from an older zod copy inside a zod 4.6 schema with its path and version", async () => {
+    const olderField = z.string();
+    Object.defineProperty(olderField._zod, "version", { value: { major: 4, minor: 1, patch: 12 } });
+    z.registry<{ description: string }>().add(olderField, { description: "secret" });
+    const configSchema = z.object({ servers: z.array(z.object({ host: z.string(), endpoint: olderField })) });
+    const mixed = defineModule({ name: "mixed/store", provides: [], requires: [], configSchema, setup: async () => ({}) });
+    const input: BootInput = { config: { modules: [{ use: "./mixed-store", config: { servers: [{ host: "a", endpoint: "older-copy-endpoint" }] } }], triggers: [], http: null }, modules: [mixed], pipelines: [], logger: silentLogger };
+    const check = await checkBoot(input, { setup: "all" });
+    expect(check.errors).toEqual([{ code: "invalid-config-schema", owner: "mixed/store", module: "mixed/store", reason: "configSchema.servers[].endpoint was built with zod 4.1.12; the module must depend on zod ^4.6.6" }]);
+    expect(JSON.stringify(check.manifest)).not.toContain("older-copy-endpoint");
+    await expect(boot(input)).rejects.toMatchObject({ code: "invalid-config-schema", module: "mixed/store" });
+  });
+
   it("setup: none runs no module code and reports every module as not checked", async () => {
     const setupSpy = vi.fn(async () => ({ ping: () => "pong" }));
     const good = { ...goodProvider(), setup: setupSpy };

@@ -804,8 +804,10 @@ kestrel 6.0.0 depends on `zod` `^4.6.6` and reads a module's `configSchema` thro
 definitions: its JSON Schema, its variables, its defaults and its secrets. A schema built with zod 3
 cannot be read that way, so a project that declares its own modules needs zod 4.6.6 or later; with
 `^4.6.6` the install resolves one copy for the project and kestrel. A module whose `configSchema`
-was not built with zod 4.6.6 or a later 4.x fails boot with `invalid-config-schema`, naming that
-module and the zod version its schema reports. That covers a package that depends on zod 3 itself,
+holds a node not built with zod 4.6.6 or a later 4.x fails boot with `invalid-config-schema`, naming
+that module, the path of the first such node and the zod version it reports. Every node counts, not
+only the root: a field, an array element, a union member or a lazy schema taken from another package
+and nested in the module's own `z.object()`. That covers a package that depends on zod 3 itself,
 and also one that depends on zod 3.25 and imports `zod/v4`: those schemas report zod 4.0.0 and keep
 their descriptions, the `"secret"` marks included, in a registry of their own that kestrel does not
 read. Such a package needs zod `^4.6.6` and `import { z } from "zod"`. The rule reads `zod` in `dependencies`, `devDependencies` and

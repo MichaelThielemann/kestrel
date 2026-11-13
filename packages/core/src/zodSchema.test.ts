@@ -681,6 +681,59 @@ describe("isZod4Schema", () => {
     expect(isZod4Schema(withVersion(undefined))).toBe(false);
   });
 
+  const olderField = (): z.ZodString => {
+    const field = z.string();
+    Object.defineProperty(field._zod, "version", { value: { major: 4, minor: 1, patch: 12 } });
+    z.registry<{ description: string }>().add(field, { description: "secret" });
+    return field;
+  };
+
+  it("refuses a schema that holds a field from an older zod copy at any depth", () => {
+    const placements: Array<(field: z.ZodString) => z.ZodType> = [
+      (field) => z.object({ endpoint: field }),
+      (field) => z.object({ nested: z.object({ endpoint: field }).optional() }),
+      (field) => z.object({}).catchall(field),
+      (field) => z.object({ map: z.record(z.string(), field) }),
+      (field) => z.object({ list: z.array(field).default([]) }),
+      (field) => z.object({ pair: z.tuple([z.string(), field]) }),
+      (field) => z.object({ rest: z.tuple([z.string()]).rest(field) }),
+      (field) => z.object({ either: z.union([z.number(), field]) }),
+      (field) => z.object({ both: z.intersection(z.object({}), z.object({ endpoint: field })) }),
+      (field) => z.object({ piped: z.string().pipe(field) }),
+      (field) => z.object({ later: z.lazy(() => field) }),
+      (field) => z.object({ endpoint: field.nullable().catch(null).readonly() }),
+      (field) => z.object({ endpoint: field.optional().nonoptional() }),
+      (field) => z.object({ endpoint: field }).extend({ port: z.number() }),
+    ];
+    for (const place of placements) expect(isZod4Schema(place(olderField()))).toBe(false);
+  });
+
+  it("refuses a zod 3 node inside a zod 4 object", () => {
+    const zod3 = boundaryCast<z.ZodType>({ _def: { typeName: "ZodString" } }, "host");
+    expect(isZod4Schema(z.object({ endpoint: zod3 }))).toBe(false);
+  });
+
+  it("walks a recursive schema once, through a getter or a lazy, without overflowing", () => {
+    interface Node {
+      name: string;
+      children?: Node[] | undefined;
+    }
+    const getter: z.ZodType<Node> = z.object({
+      name: z.string(),
+      get children() {
+        return z.array(getter).optional();
+      },
+    });
+    const lazy: z.ZodType<Node> = z.object({ name: z.string(), children: z.lazy(() => z.array(lazy)).optional() });
+    expect(isZod4Schema(z.object({ tree: getter }))).toBe(true);
+    expect(isZod4Schema(z.object({ tree: lazy }))).toBe(true);
+  });
+
+  it("describes a schema with a field from an older zod copy as empty instead of showing its secret value", () => {
+    const schema = z.object({ endpoint: olderField(), port: z.number() });
+    expect(describeConfig(schema, { endpoint: "older-copy-endpoint", port: 1 })).toEqual({ schema: {}, variables: [] });
+  });
+
   it("describes a schema from a zod copy below 4.6.6 as empty instead of reading it without its secret marks", () => {
     const older = z.object({ licence: z.string().describe("secret") });
     Object.defineProperty(older._zod, "version", { value: { major: 4, minor: 0, patch: 0 } });

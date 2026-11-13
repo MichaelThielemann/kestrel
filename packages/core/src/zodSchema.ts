@@ -74,23 +74,84 @@ function zodVersionOf(internals: unknown): [number, number, number] | undefined 
   return typeof major === "number" && typeof minor === "number" && typeof patch === "number" ? [major, minor, patch] : undefined;
 }
 
-/**
- * Why kestrel cannot read `value` as a module config schema, or `undefined` when it can: a schema
- * built with zod 4.6.6 or a later 4.x. A zod 3 schema, one from an older zod 4 copy such as zod 3.25's
- * `zod/v4` (which reports 4.0.0) and one from another major keep their descriptions, and with them
- * the `"secret"` marks, where kestrel cannot see them.
- */
-export function zodSchemaProblem(value: unknown): string | undefined {
-  const internals: unknown = typeof value === "object" && value !== null ? Reflect.get(value, "_zod") : undefined;
-  if (internals === undefined) return "configSchema is not a zod 4 schema";
+function nodeProblem(internals: unknown): string | undefined {
+  if (internals === undefined) return "is not a zod 4 schema";
   const version = zodVersionOf(internals);
-  if (version === undefined) return "configSchema was built with a zod copy that reports no version";
+  if (version === undefined) return "was built with a zod copy that reports no version";
   const [major, minor, patch] = version;
   const atLeast = major === MIN_ZOD[0] && (minor - MIN_ZOD[1] || patch - MIN_ZOD[2]) >= 0;
-  return atLeast ? undefined : `configSchema was built with zod ${major}.${minor}.${patch}`;
+  return atLeast ? undefined : `was built with zod ${major}.${minor}.${patch}`;
 }
 
-/** True when `value` is a schema built with zod 4.6.6 or a later 4.x, the only kind whose definitions kestrel reads. */
+const WRAPPER_TYPES = new Set(["optional", "nullable", "default", "prefault", "nonoptional", "catch", "readonly", "success", "promise"]);
+
+function field(d: object, key: string): unknown {
+  return Reflect.get(d, key);
+}
+
+function childNodes(d: object): Array<[string, unknown]> {
+  const type = field(d, "type");
+  const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+  const present = (entries: Array<[string, unknown]>): Array<[string, unknown]> => entries.filter(([, child]) => child !== undefined && child !== null);
+  if (typeof type === "string" && WRAPPER_TYPES.has(type)) return present([["", field(d, "innerType")]]);
+  switch (type) {
+    case "object": {
+      const shape = field(d, "shape");
+      const entries = typeof shape === "object" && shape !== null ? Object.keys(shape).map((key): [string, unknown] => [`.${key}`, Reflect.get(shape, key)]) : [];
+      return present([...entries, [".*", field(d, "catchall")]]);
+    }
+    case "record":
+    case "map":
+      return present([[".<key>", field(d, "keyType")], [".*", field(d, "valueType")]]);
+    case "set":
+      return present([["[]", field(d, "valueType")]]);
+    case "array":
+      return present([["[]", field(d, "element")]]);
+    case "tuple":
+      return present([...list(field(d, "items")).map((item, i): [string, unknown] => [`[${i}]`, item]), ["[]", field(d, "rest")]]);
+    case "union":
+      return present(list(field(d, "options")).map((option): [string, unknown] => ["", option]));
+    case "intersection":
+      return present([["", field(d, "left")], ["", field(d, "right")]]);
+    case "pipe":
+      return present([["", field(d, "in")], ["", field(d, "out")]]);
+    case "lazy": {
+      const getter = field(d, "getter");
+      return typeof getter === "function" ? present([["", Reflect.apply(getter, d, [])]]) : [];
+    }
+    default:
+      return [];
+  }
+}
+
+function firstNodeProblem(node: unknown, path: string, visited: Set<object>): string | undefined {
+  const internals: unknown = typeof node === "object" && node !== null ? Reflect.get(node, "_zod") : undefined;
+  const problem = nodeProblem(internals);
+  if (problem !== undefined) return `${path} ${problem}`;
+  if (typeof node !== "object" || node === null || visited.has(node)) return undefined;
+  visited.add(node);
+  const d: unknown = typeof internals === "object" && internals !== null ? Reflect.get(internals, "def") : undefined;
+  if (typeof d !== "object" || d === null) return undefined;
+  for (const [segment, child] of childNodes(d)) {
+    const found = firstNodeProblem(child, `${path}${segment}`, visited);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * Why kestrel cannot read `value` as a module config schema, or `undefined` when it can: a schema
+ * whose every node, from the root through object fields, catchalls, record keys and values, array and
+ * tuple elements, union and intersection members, wrappers, pipes and lazy getters, is built with zod
+ * 4.6.6 or a later 4.x. A zod 3 node, one from an older zod 4 copy such as zod 3.25's `zod/v4` (which
+ * reports 4.0.0) and one from another major keep their descriptions, and with them the `"secret"`
+ * marks, where kestrel cannot see them. The problem names the path of the first such node.
+ */
+export function zodSchemaProblem(value: unknown): string | undefined {
+  return firstNodeProblem(value, "configSchema", new Set());
+}
+
+/** True when `value` is a schema whose every node is built with zod 4.6.6 or a later 4.x, the only kind whose definitions kestrel reads. */
 export function isZod4Schema(value: unknown): boolean {
   return zodSchemaProblem(value) === undefined;
 }
