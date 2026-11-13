@@ -6,6 +6,16 @@ Net changes since 5.8.1.
 
 ### Breaking
 
+- `delivery-static`: **`delivery.exportLlms` is gone.** A pipeline that still names it fails at boot
+  as an unknown step. Index files are never written inside a request any more: put
+  `delivery.requestIndexes` where `delivery.exportLlms` was, and subscribe `delivery.exportIndexes`
+  (sitemap.xml, robots.txt, llms.txt) to `delivery.indexesStale` and `delivery.exportLlmsFull`
+  (llms-full.txt) to `delivery.llmsStale` with `dependencies.render: "events"`. `publishAllPages`
+  answers without `_llms`. `kestrel upgrade` rewrites the step.
+- `delivery-static`: **`llms.siteUrl` moved to a top-level `siteUrl`**, which llms.txt, sitemap.xml and
+  robots.txt share. `llms.siteUrl` fails at boot; `kestrel upgrade` moves it. `siteUrl` must be an
+  absolute `http` or `https` URL without credentials, query or fragment; it is normalized (host
+  lower-cased, default port dropped, trailing slashes stripped) and keeps a base path.
 - **A slug belongs to its locale; a translation without a slug of its own is never served.** `site@1`
   finds a locale only by its own slug there: `site.resolve`, `pathOf`, `resolveLinks`, `_paths`,
   `site.attachPaths`, the moves `site.pathsMoved` reports (and so the automatic redirects built from
@@ -1038,11 +1048,41 @@ Net changes since 5.8.1.
   `{ stale, failed, rendering, unknown, oldestStaleAt, abandoned }`. `readStatus` rows and `_delivery`
   gain `stale`, `staleSince`, `staleFailed`, `staleError` and `dependencies`. With `"events"`, boot
   fails unless triggers run `delivery.republishOutput` on `delivery.outputStale` and
-  `delivery.exportLlms` on `delivery.llmsStale`, and under `events-direct`.
-- `delivery.requestLlms` asks for an `llms.txt` export without running it: a coalesced
-  `delivery.llmsStale` event with `"events"`, the background loop's next idle moment with
-  `"background"`. Every re-render asks for one, so a site-wide re-render writes `llms.txt` once,
-  after the pages it summarizes.
+  `delivery.exportIndexes` on `delivery.indexesStale` (plus `delivery.exportLlmsFull` on
+  `delivery.llmsStale` with `llms.full`), and under `events-direct`.
+- `delivery-static` writes `sitemap.xml` and `robots.txt` next to `llms.txt`.
+  `delivery.exportIndexes` writes sitemap.xml, robots.txt and llms.txt from the database alone;
+  `delivery.exportLlmsFull` writes llms-full.txt from the stored HTML. Both list every output that
+  serves a file — `live`, or `error` with a path, so a renderer outage empties nothing — re-checked
+  against its published document, without `noindex` pages, one entry per URL (the `live` row first),
+  sorted by URL; while published documents exist but none has a rendered output, sitemap.xml and
+  llms.txt are left as they are and robots.txt is still written. sitemap.xml has absolute `<loc>`s,
+  `<lastmod>` from the document's `updatedAt` for `live` outputs, and `hreflang` alternates with
+  `x-default` across a document's locales. robots.txt takes `robots.policy` (`allow` or `disallow`;
+  unset: `allow` under `NODE_ENV=production`, otherwise `disallow`, with a boot warning),
+  `robots.extra` lines and a `Sitemap:` line. `sitemap: false` turns the sitemap off; without
+  `siteUrl` there is none and boot warns. Unchanged files are not written again within a process.
+  The result gains `_indexes: { entries }` or `_llmsFull: { entries }`, and
+  `delivery.readStaleStatus` answers `exports: { indexes, llmsFull }` with each export's last `at`,
+  `entries` and `error`. `normalizeSiteUrl` and `pageUrl` from `kestrel-delivery-static/impl` give
+  the URL form the sitemap uses, for a canonical link that must match it.
+- `delivery.requestIndexes` asks for those exports without running them: coalesced
+  `delivery.indexesStale` (`coalesceKey: "indexes"`) and, with `llms.full`, `delivery.llmsStale`
+  events with `"events"`; with `"background"`, the loop exports the index files
+  `dependencies.indexesDelayMs` (default 1000) after the first request, before its next batch of
+  re-renders, retries a failed export with `dependencies.backoffSeconds` without holding up the
+  renders, and exports llms-full.txt once no render is due. A re-render asks for llms-full.txt every
+  time and for the index files only when the output's path changed or it started or stopped serving
+  a file. `delivery.resumeStale` asks for the index files on every run and for llms-full.txt while
+  its last export failed.
+- `delivery.checkBuild` also renders everything again after a database restore with an unchanged
+  build: a marker kept in `delivery_state` and in the blob `.delivery-static-marker` is replaced after
+  every check, after a recovery pass that saw an output change, and at shutdown; when the two differ,
+  every output is marked. The result gains `restored`.
+- `delivery.resumeStale` removes, once per database, `index.<ext>` files under `prefix` at paths no
+  status row has (left behind by older versions after a failed render and a slug change), logging
+  each; it waits while outputs are marked or a published document has no `live` output, and skips
+  `reservedPaths`. The result gains `orphans`.
 - `@michaelthielemann/kestrel/reads`: `observeReads`, `noteRead` and `unobserved`, one read scope per
   async context kept on `globalThis`; `noteRead` keeps a plain JSON copy of what it is given, and only
   while a scope is open. `content-default` notes the documents, single types and lists it

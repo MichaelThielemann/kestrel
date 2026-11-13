@@ -682,7 +682,7 @@ language), `site/en/<slug>/index.html`, home page (`slug = home`) → `site/inde
 | Method | Path | Response |
 |---|---|---|
 | GET | `/admin/publish-status/pages/:id` | `[{ locale, state: live \| error \| draft, path, error, publishedAt, updatedAt, stale, staleSince, staleFailed, staleError, dependencies }]` (`pages.manage`) |
-| POST | `/admin/publish-all/pages` | `{ documents, live, errors, redirects: { rules, skipped }, _llms: { entries, full } }` – re-render everything, and afterwards also rewrite `redirects.json` and `llms.txt` (the pipeline chains `redirects.export` and `delivery.exportLlms` onto `delivery.publishAll:pages`) (`pages.manage`) |
+| POST | `/admin/publish-all/pages` | `{ documents, live, errors, redirects: { rules, skipped } }` – re-render everything, and afterwards also rewrite `redirects.json` and ask for an export of `sitemap.xml`, `robots.txt` and `llms.txt` (the pipeline chains `redirects.export` and `delivery.requestIndexes` onto `delivery.publishAll:pages`) (`pages.manage`) |
 
 `state`: `live` = delivered, `draft` = not published in that language, `error` = rendering or saving
 failed (`error` names the cause; the last `live` output stays in place).
@@ -713,24 +713,33 @@ reserved path fails with `state: "error"` instead of writing the file. Kestrel i
 reject the save for a colliding slug; a consumer that wants the collision rejected earlier validates
 it itself before the document reaches `content.create`/`content.update`.
 
-### llms.txt and llms-full.txt (GEO)
+### sitemap.xml, robots.txt, llms.txt and llms-full.txt
 
-With `llms` configured, `delivery.exportLlms` writes two files per [llmstxt.org](https://llmstxt.org)
-next to `redirects.json` in the blob store (`site/llms.txt`, `site/llms-full.txt`); nginx serves
-them statically. The step takes no argument and, in the example instance, runs at the end of
-`publishAllPages`, where it adds `_llms: { entries, full }` to the result; after a page save, a page
-delete or a settings change, `delivery.requestLlms` asks the background loop for one export after
-the re-renders instead, so those responses carry no `_llms`. The source is the `live` rows of the publish traffic light
-for every type configured under `types` — i.e. exactly what is delivered: drafts are absent, and a
-language only appears once it is itself published. For each row, the document is read; an empty
-`seo`/title field is filled from the default language only when the default language is itself
-published, the same rule `GET /site/*path` and static delivery apply — a draft default language
-never fills a field here either. `seo.noindex === true` excludes the page from both files. If
-`llms.txt` cannot be
-written, `POST /admin/publish-all/pages` answers with 503 (`TRANSIENT`, `retryable: true`,
-`Retry-After`) instead of the `_llms` field it would otherwise contain — the same request can be
-retried; a background export that fails is logged and tried again. Likewise, `PUT /redirects` and
-`POST /admin/publish-all/pages` answer with 503 if `redirects.json` could not be written.
+`delivery-static` writes four files next to `redirects.json` in the blob store (`site/sitemap.xml`,
+`site/robots.txt`, `site/llms.txt`, `site/llms-full.txt`); nginx serves them statically. No editor
+request writes them: after a page save, a page delete, a settings change and `publishAllPages`,
+`delivery.requestIndexes` asks for an export, which in the example instance the background loop runs
+about a second later, before its next batch of re-renders. `delivery.resumeStale` asks again on every
+run, so a lost or failed export is repaired by the next recovery pass. A failed export is logged and
+retried and never fails a save; its outcome (`at`, `entries`, `error`) is part of
+`delivery.readStaleStatus` as `exports`.
+
+The source is every row of the publish traffic light that serves a file — `live`, or `error` with a
+path, since a failed render keeps its previous output online — for every type configured under
+`types`: drafts are absent, and a language only appears once it is itself published. For each row,
+the document is read; an empty `seo`/title field is filled from the default language only when the
+default language is itself published, the same rule `GET /site/*path` and static delivery apply.
+`seo.noindex === true` excludes the page from `sitemap.xml` and both llms files. While published
+pages exist but none has a rendered output yet, `sitemap.xml` and `llms.txt` are left as they are.
+
+`sitemap.xml`: one `<url>` per page with the absolute `<loc>` (`siteUrl` plus the path, `/` for the
+home page and no trailing slash otherwise), `<lastmod>` from the document's `updatedAt` when the page
+is `live`, and `hreflang` alternates plus `x-default` for a page published in several languages.
+Without `siteUrl` no sitemap is written.
+
+`robots.txt`: `User-agent: *`, then `Allow: /` or `Disallow: /` from `robots.policy` (without it:
+`allow` when `NODE_ENV` is `production`, otherwise `disallow`, with a warning at boot), then the
+lines of `robots.extra`, then a `Sitemap:` line when a sitemap is written.
 
 `llms.txt`: `# <settings.title>` (default language; empty → the host from `siteUrl`, otherwise
 `Website`), a blockquote `> <settings.description>` (only if set), then a
@@ -738,30 +747,33 @@ retried; a background export that fails is logged and tried again. Likewise, `PU
 `- [<seo.title || title>](<siteUrl><path>): <seo.description>` per page, sorted by URL. Without
 `siteUrl`, only paths appear in the file.
 
-`llms-full.txt` only with `full: true` (opt-in — this file bundles the entire site into one document
-and reads every rendered page): per page `### <Title>`, `Source: <URL>`, the description, then the
-stored HTML (`site/<path>/index.html`, which is why `full` requires the `html` format) restricted
-to the `<main>` element and converted to Markdown with turndown (headings pushed three levels
-deeper, root-relative links and images made absolute with `siteUrl`, `#` anchors lose their link,
-`script`/`style`/`nav` chrome outside `<main>` is absent; without a `<main>`, the whole `<body>`,
-logged). If `full` is off, an existing `llms-full.txt` is deleted. If the HTML for a `live` row is
-missing, the page is included without a body and logged.
+`llms-full.txt` only with `llms.full: true` (opt-in — this file bundles the entire site into one
+document and reads every rendered page): per page `### <Title>`, `Source: <URL>`, the description,
+then the stored HTML (`site/<path>/index.html`, which is why `full` requires the `html` format)
+restricted to the `<main>` element and converted to Markdown with turndown (headings pushed three
+levels deeper, root-relative links and images made absolute with the origin of `siteUrl`, `#`
+anchors lose their link, `script`/`style`/`nav` chrome outside `<main>` is absent; without a
+`<main>`, the whole `<body>`, logged). It is exported after the re-renders, since it reads their
+HTML. If `full` is off, an existing `llms-full.txt` is deleted. If the HTML for a page is missing,
+the page is included without a body and logged.
 
-Config (`delivery-static`, everything optional — without `llms` the export is active with paths
-instead of URLs and without `llms-full.txt`):
+Config (`delivery-static`, everything optional):
 ```ts
+siteUrl: "https://example.org",       // absolute base, a base path is kept; without it: paths, no sitemap
+sitemap: true,                        // false: no sitemap.xml
+robots: { policy: "allow", extra: ["Disallow: /preview/"] },
 llms: {
-  siteUrl: "https://example.org",     // absolute base; without it: paths
   full: false,                        // write llms-full.txt
   settings: { type: "settings", titleField: "title", descriptionField: "description" },
   titleField: "title", seoField: "seo",
   headings: { pages: "Pages" },       // section heading per type, default = type name
 }
 ```
-Boot checks: if `settings.type` exists in the model, it must be a `single` type with `titleField`
-(if the type is absent entirely, only the fallback heading is used); `full` requires `"html"` in
-`formats`. If `seoField` or `descriptionField` is missing from the model, only the filter or the
-blockquote is skipped, respectively.
+Boot checks: `siteUrl` must be an absolute `http` or `https` URL without query or fragment; if
+`settings.type` exists in the model, it must be a `single` type with `titleField` (if the type is
+absent entirely, only the fallback heading is used); `full` requires `"html"` in `formats`. If
+`seoField` or `descriptionField` is missing from the model, only the filter or the blockquote is
+skipped, respectively.
 
 ## Database replication (admin, permission `system.manage`)
 
