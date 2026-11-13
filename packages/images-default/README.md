@@ -252,13 +252,12 @@ and renders the item again with what is stored then, writing its public copies a
 them while the item is hidden); a holder that only places (`images.plan`, `images.setFraming`) leaves
 this to its background loop. A request left after the holder let go waits for `images.resume`, which
 serves it once `staleAfterMs` has passed; `images.showMany` takes the item itself in that case and
-places, renders and writes its public copies before it returns. An `images.setFraming` that stored its framing but could not
-leave its request places and renders the item in its background loop. A render that sees a request before it
-writes drops its bytes and renders again, so two framings saved at once in two processes leave the
-rows on the framing that is stored. A call that stored its framing while another process held the
-item does not store it again when it gets the item, so the framing saved last is the one stored. A
-render marks its row `done` with the crop it rendered after its bytes are at the path, so `?v=` names
-only bytes rendered with that crop.
+places, renders and writes its public copies before it returns. An `images.setFraming` that stored
+its framing but could not leave its request places and renders the item in its background loop. A
+render that sees a request before it writes drops its bytes and renders again, so two framings saved
+at once in two processes leave the rows on the framing that is stored. A render marks its row `done`
+with the crop it rendered after its bytes are at the path, so `?v=` names only bytes rendered with
+that crop.
 
 A holder that stops (the process ends) leaves its lease until `staleAfterMs` has passed;
 `images.resume` then takes it over and places and renders the item, and until that render is done the

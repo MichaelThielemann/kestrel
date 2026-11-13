@@ -2174,7 +2174,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const framing = parsed.value;
       let stored = false;
       const store = async (): Promise<Result<boolean, KestrelError>> => {
-        if (stored) return ok(false);
         const still = await readMedia(mediaId);
         if (isErr(still)) return still;
         if (still.value === null) return notFound();
