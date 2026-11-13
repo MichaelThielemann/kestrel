@@ -1215,7 +1215,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         continue;
       }
       results.push(rendered.value);
-      if (rendered.value.error?.startsWith(TIMED_OUT) === true) stopped = true;
+      if (rendered.value.state !== "failed" && rendered.value.error?.startsWith(TIMED_OUT) === true) stopped = true;
     }
 
     if (results.some((row) => row.state === "planned")) schedulePlacement(mediaId);
@@ -1701,6 +1701,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(stalePending)) return stalePending;
     const stalePlanned = await db.findMany<Variant>(VARIANTS, { state: "planned", size: declared, updatedAt: { lt: stale } }, oldestFirst);
     if (isErr(stalePlanned)) return stalePlanned;
+    const failedOnce = await db.findMany<Variant>(VARIANTS, { state: "error", size: declared, updatedAt: { lt: stale } }, oldestFirst);
+    if (isErr(failedOnce)) return failedOnce;
     const unstarted: string[] = [];
     const recent = await eachMediaFile({ ...ELIGIBLE, createdSince: at - NEW_ITEM_WINDOW_MS }, async (file) => {
       if (unstarted.length >= REPAIR_SAMPLE) return ok(undefined);
@@ -1711,7 +1713,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     });
     if (isErr(recent)) return recent;
     const mediaIdsOf = (rows: Array<{ mediaId: string }>): string[] => rows.map((row) => row.mediaId);
-    const list = takeTurns([mediaIdsOf(cutOff.value.items), mediaIdsOf(requested.value.items), mediaIdsOf(stalePending.value.items), mediaIdsOf(stalePlanned.value.items), unstarted], REPAIR_SAMPLE);
+    const list = takeTurns([mediaIdsOf(cutOff.value.items), mediaIdsOf(requested.value.items), mediaIdsOf(stalePending.value.items), mediaIdsOf(stalePlanned.value.items), mediaIdsOf(failedOnce.value.items), unstarted], REPAIR_SAMPLE);
     for (const id of list) {
       if (closed) return shuttingDown();
       const repaired = await withItem(id, (lease) => (lease.request === "" ? converge(lease) : Promise.resolve(ok(undefined))), async () => ok(undefined));
@@ -1719,7 +1721,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     }
     if (closed) return shuttingDown();
     const tried = new Set(list);
-    for (const row of [...stalePending.value.items, ...stalePlanned.value.items]) {
+    for (const row of [...stalePending.value.items, ...stalePlanned.value.items, ...failedOnce.value.items]) {
       if (!tried.has(row.mediaId)) continue;
       const passed = await db.updateMany<Variant>(VARIANTS, { id: row.id, state: row.state, updatedAt: row.updatedAt }, { updatedAt: now() });
       if (isErr(passed)) logger.error(`images: repair pass could not move media/${row.mediaId} behind the rows still waiting`, { mediaId: row.mediaId, size: row.size, error: passed.error.message });

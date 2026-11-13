@@ -1750,6 +1750,19 @@ describe("images/default work a call leaves unfinished", () => {
     };
   }
 
+  function timingOut(slow: (size: string, call: number) => boolean): Renderer {
+    let calls = 0;
+    return async (_d, s, p) => {
+      calls += 1;
+      if (slow(s.name, calls)) await new Promise((resolve) => setTimeout(resolve, 200));
+      return { data: bytesFor(s.name, p.crop ?? null, calls), width: p.width, height: p.height, format: p.format, ext: p.format, contentType: `image/${p.format}` };
+    };
+  }
+
+  function openTimingOut(w: World, render: Renderer, now: () => number): Promise<Images> {
+    return createImages({ ...CONFIG, sizes: [SQUARE, WIDE_SMALL], renderTimeoutMs: 50 }, { blobs: w.blobs, db: w.db, media: w.media, logger: quiet, render, events: w.events }, now);
+  }
+
   it("a framing stored while another process renders the item is placed and rendered when the request to the holder cannot be written", async () => {
     const w = await world();
     const first = await w.open([SQUARE]);
@@ -1817,6 +1830,65 @@ describe("images/default work a call leaves unfinished", () => {
     await whenIdle(later);
     await expectRenderedWith(w, later, "400,0,600,600");
     for (const images of [first, holder, saver, later]) await images.close();
+  });
+
+  it("a queued render that runs out of time leaves the item to images.resume, which renders the sizes it did not reach once staleAfterMs has passed", async () => {
+    const w = await world();
+    const render = timingOut((_size, call) => call === 1);
+    const images = await openTimingOut(w, render, () => 1000);
+    expectOk(await images.plan(["m1"]));
+    expectOk(await images.generate("m1"));
+    await whenIdle(images);
+    expect(await rowsBySize(w)).toMatchObject(new Map([["square", expect.objectContaining({ state: "error" })], ["wide-small", expect.objectContaining({ state: "pending", bytes: 0 })]]));
+
+    const soon = await openTimingOut(w, render, () => 1000 + CONFIG.staleAfterMs);
+    expectOk(await soon.resume());
+    await whenIdle(soon);
+    expect((await rowsBySize(w)).get("wide-small")).toMatchObject({ state: "pending", bytes: 0 });
+
+    const later = await openTimingOut(w, render, () => LATER);
+    expectOk(await later.resume());
+    await whenIdle(later);
+    expect([...(await rowsBySize(w)).values()].map((row) => row.state)).toEqual(["done", "done"]);
+    for (const opened of [images, soon, later]) await opened.close();
+  });
+
+  it("a size that gives up after a last render that ran out of time no longer holds back the sizes after it", async () => {
+    const w = await world();
+    const render = timingOut((size) => size === "square");
+    const images = await openTimingOut(w, render, () => 1000);
+    expectOk(await images.plan(["m1"]));
+    expectOk(await images.generate("m1"));
+    const later = await openTimingOut(w, render, () => LATER);
+    expectOk(await later.resume());
+    await whenIdle(later);
+
+    expect(await rowsBySize(w)).toMatchObject(new Map([["square", expect.objectContaining({ state: "failed", attempts: CONFIG.maxAttempts })], ["wide-small", expect.objectContaining({ state: "done" })]]));
+    for (const opened of [images, later]) await opened.close();
+  });
+
+  it("a re-crop render that fails leaves its row to images.resume, which renders it with the new crop", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.generate("m1"));
+    let failing = true;
+    const failingOnceRender: Renderer = async (_d, s, p) => {
+      if (failing) {
+        failing = false;
+        throw new Error("premature end of input");
+      }
+      return { data: bytesFor(s.name, p.crop ?? null, 0), width: p.width, height: p.height, format: p.format, ext: p.format, contentType: `image/${p.format}` };
+    };
+    const editor = await w.open([SQUARE], failingOnceRender);
+    expectOk(await editor.setFraming("m1", RIGHT));
+    expectOk(await editor.generate("m1"));
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "error", crop: "400,0,600,600", renderedCrop: "" });
+
+    const later = await w.open([SQUARE], undefined, { now: () => LATER });
+    expectOk(await later.resume());
+    await whenIdle(later);
+    await expectRenderedWith(w, later, "400,0,600,600");
+    for (const images of [first, editor, later]) await images.close();
   });
 
   it("images.setFraming answers NOT_FOUND and stores nothing when the item is removed after it was read", async () => {

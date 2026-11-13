@@ -90,8 +90,8 @@ rendering), `images.generate` (id from params/payload/event; `VALIDATION` withou
 for an id `media@1` does not report as ready), `images.sync` (`CONFLICT` while a fresh job runs), `images.resume` (cron: also
 places and renders any item whose lease ran out, with a request left open for longer than
 `staleAfterMs`, with a row that already had a render at its path and was left `pending` for longer
-than `staleAfterMs`, with a row left `planned` for longer than `staleAfterMs`, and any recent item
-with no rows at all; `CONFLICT` once `close()` has begun), `images.retryFailed`
+than `staleAfterMs`, with a row left `planned` or in `error` for longer than `staleAfterMs`, and any
+recent item with no rows at all; `CONFLICT` once `close()` has begun), `images.retryFailed`
 (`NOT_FOUND` for an id `media@1` does not report as ready), `images.prune` (`VALIDATION` for a name that is still declared or
 has no variants; retires rather than deletes the path), `images.readStatus`, `images.remove`
 (`VALIDATION` without an id), `images.removeMany` (after `media.listFolderItems` or
@@ -342,7 +342,9 @@ next `images.generate` or sync pass picks it up once the lease has run out, and 
 `images.resume`, which takes over a lease older than `staleAfterMs`. A `pending` row that never had a
 render and whose item no process holds is left to the render queued for it: the `images.planned`
 subscriber with a queuing event delivery, or with inline delivery the render this module's background
-loop runs after it placed the row. A row whose queued render is lost with its process waits for
+loop runs after it placed the row. Once that render has run and left a row in `error` (a failed
+attempt, or a timeout that kept it from the item's later sizes), `images.resume` renders the item
+again once `staleAfterMs` has passed. A row whose queued render is lost with its process waits for
 `images.generate` or `images.sync`. Meanwhile `images.serve` hands out that earlier render, or the
 full-size original when the path has none yet (header `x-kestrel-variant: original`). A job row whose
 `updatedAt` is older than `staleAfterMs` counts as abandoned, so `images.sync` and the
@@ -353,7 +355,8 @@ and renders any item whose lease ran out (a holder that stopped, see "Focus and 
 a request left open for longer than `staleAfterMs` (one whose last placement or render failed, or
 whose holder stopped before it served the request), any row that already had a render at its path and
 was left `pending` for longer than `staleAfterMs` (a re-render that never finished), any row left
-`planned` for longer than `staleAfterMs` (a placement that never finished), and any media item
+`planned` for longer than `staleAfterMs` (a placement that never finished), any row left in `error`
+for longer than `staleAfterMs` (a failed attempt below `maxAttempts`), and any media item
 created in the last 24 hours with no rows at all (a generation that never started). It takes one item
 from each of these in turn, at most 200 items per pass, so no group keeps it from the others. It
 considers only rows of sizes that are still declared, and moves the rows and requests of the items it
@@ -370,7 +373,8 @@ its own processing when it passes; an encoder that reports no progress (AVIF) ru
 background regardless, and its result is dropped: the variant already carries the failed attempt, and
 writing the late result would resurrect a variant the admin was told had failed. The timeout counts as
 a normal failed attempt with the error text `render timed out after <n>ms`, and the remaining sizes of
-the same item are not rendered in that run; they stay as they are for the next one. Without it the render
+the same item are not rendered in that run, unless that attempt was the size's last; they stay as
+they are for the next one, which `images.resume` starts once `staleAfterMs` has passed. Without it the render
 would hold its slot for good and the sync job would never reach the next image. A `planned` row
 whose render fails this way is left `planned`, not counted as an attempt, and handed to the
 background loop to place and render right after the request.

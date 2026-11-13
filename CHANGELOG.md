@@ -1465,9 +1465,12 @@ Net changes since 5.8.1.
   request. `images.resume` also places and renders items whose lease ran out, items with a request
   left open, items with a row of a declared size that already had a render at its path and was left
   `pending` for longer than `staleAfterMs`, items with a row left `planned` for longer than
-  `staleAfterMs`, and items created in the last 24 hours without rows, taking one item from each of
-  these in turn up to 200 per pass, and moves the rows it tried behind the others. A row that never
-  had a render is left to the render queued for it. A render whose public copy cannot be written, or
+  `staleAfterMs`, items with a row left in `error` for longer than `staleAfterMs`, and items created
+  in the last 24 hours without rows, taking one item from each of these in turn up to 200 per pass,
+  and moves the rows it tried behind the others. A row that never had a render is left to the render
+  queued for it; once that render has run and left a row in `error`, or ran out of time before the
+  item's later sizes, `images.resume` renders the item again. A render that runs out of time on a
+  size's last attempt goes on with the item's later sizes. A render whose public copy cannot be written, or
   whose check after writing it fails, puts the earlier bytes back at the private path and the public
   copy, so both paths keep the bytes `?v=` names. `close()` waits for an `images.resume` or a sync
   start under way, and neither starts the sync job again once it has begun; `images.resume` then
