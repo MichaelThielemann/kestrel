@@ -578,7 +578,7 @@ export const imagesVariantsChangedRule: Rule = {
       infoFinding(
         `${IMAGES_VARIANTS_CHANGED_RULE_ID}:${pipeline}`,
         IMAGES_VARIANTS_CHANGED_RULE_ID,
-        `pipeline "${pipeline}" runs on media.updated; images-default announces that an item's variants changed (placed, a size added or changed, a size pruned) as images.variantsChanged, never as media.updated`,
+        `pipeline "${pipeline}" runs on media.updated; images-default announces that an item's variants changed (placed, a size added or changed, a size pruned, a re-crop rendered, the focus changed) as images.variantsChanged, never as media.updated`,
         `if "${pipeline}" should also react to variant changes (it re-renders pages that show media, for one), add the trigger { event: "images.variantsChanged", pipeline: "${pipeline}" }`,
         { pipeline },
         upgradingDocs("events-images-variants-changed"),

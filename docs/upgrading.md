@@ -386,7 +386,7 @@ owns is read through that module's contract.
 
 #### events-images-variants-changed
 `images-default` announces that an item's variants changed — it placed the item, a size was added or
-changed, a size was pruned — as its own event `images.variantsChanged` (`{ id: null, ids,
+changed, a size was pruned, a re-crop was rendered or the focus changed — as its own event `images.variantsChanged` (`{ id: null, ids,
 identity: null, params: {} }`), never as `media.updated`, which belongs to the pipeline that edits a
 medium. A pipeline triggered by `media.updated` that should also follow variant changes, such as one
 running `delivery.markDependents:media`, needs a second trigger on `images.variantsChanged`; the info
