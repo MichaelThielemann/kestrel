@@ -8,6 +8,7 @@ prefix).
 
 | Step | State |
 |---|---|
+| `replication.checkRestored` | none |
 | `replication.sync` | none |
 | `replication.snapshot` | none |
 | `replication.listPoints` | none |

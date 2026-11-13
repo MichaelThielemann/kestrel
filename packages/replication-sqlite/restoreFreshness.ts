@@ -71,7 +71,8 @@ export function markRestoredThisBoot(file: string, bootStartedAt: number): void 
   writeFileSync(restoreSidecar(file), JSON.stringify({ restoredAtBootStartedAt: bootStartedAt }));
 }
 
-function restoredThisBoot(file: string, bootStartedAt: number): boolean {
+/** Whether the `restoreSidecar` of `file` names the boot that started at `bootStartedAt`. */
+export function restoredThisBoot(file: string, bootStartedAt: number): boolean {
   const sidecar = restoreSidecar(file);
   if (!existsSync(sidecar)) return false;
   try {

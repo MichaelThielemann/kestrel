@@ -67,6 +67,7 @@ unknown `generation`, is `Err(NOT_FOUND)`; an unparsable `at` in the payload is 
 
 | Step | reads | writes | errors |
 |---|---|---|---|
+| `replication.checkRestored` | – | `result._databaseRestored` | – |
 | `replication.sync` | – | `result` | `TRANSIENT` |
 | `replication.snapshot` | – | `result` | `TRANSIENT` |
 | `replication.listPoints` | – | `result` | `TRANSIENT` |
@@ -79,6 +80,15 @@ either module restores the file, it writes `<file>.restored-at` (the epoch ms th
 next to it; the other module, if configured on the same file, recognizes a matching value as "this
 boot already restored the file" and skips its own check — neither module has to know the other
 exists. A sidecar from an earlier boot is ignored and simply overwritten on the next restore.
+
+`replication.checkRestored` tells the rest of a pipeline whether the database file was restored in this
+boot: it adds `_databaseRestored` to the result, `true` when the sidecar names this boot (whichever of the
+two modules restored the file) and `false` otherwise. The member is
+a shared convention: `backup.checkRestored` writes the same one, and a step that keeps output derived from
+the database reads it, as `delivery.checkBuild` of delivery-static does to render every page again after a
+restore. Put the step first in the pipeline that runs that check at boot, for example
+`["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`. Only a restore one of
+the two modules performs is signalled; a database file copied into place by hand is not.
 Not included: multi-process setups, encryption, restore without restart.
 
 <!-- kestrel-docs:start -->
@@ -97,6 +107,7 @@ Not included: multi-process setups, encryption, restore without restart.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
+| `replication.checkRestored` | Whether this module or another one restored the database file in this boot (adds `_databaseRestored` to the result) | – | `result._databaseRestored` | – | { _databaseRestored: boolean, … } | – | – | no |
 | `replication.sync` | Ship new WAL frames, checkpoint, snapshot and prune when due | – | `result` | – | { generation: string, shippedBytes: number, frames: number, checkpointed: boolean, pruned: number, … } | – | – | no |
 | `replication.snapshot` | Start a new generation with a full snapshot | – | `result` | – | { generation: string, bytes: number, … } | – | – | no |
 | `replication.listPoints` | Restore points (snapshots and WAL segments) | – | `result` | – | object[] | – | – | no |

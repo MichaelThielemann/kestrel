@@ -7,7 +7,7 @@ import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { applyPendingRestore, createReplicationSqlite, restoreFromBlobs, type Replication } from "./impl.ts";
-import { checkSkippedRestore, markRestoredThisBoot } from "./restoreFreshness.ts";
+import { checkSkippedRestore, markRestoredThisBoot, restoredThisBoot } from "./restoreFreshness.ts";
 
 export const configSchema = z
   .object({
@@ -23,7 +23,11 @@ export const configSchema = z
 
 const POINT = { type: "object", properties: { generation: { type: "string" }, at: { type: "number" }, kind: { type: "string", enum: ["snapshot", "wal"] }, key: { type: "string" } }, required: ["generation", "at", "kind", "key"] };
 
-type ReplicationInstance = Replication & { logger: Logger };
+type ReplicationInstance = Replication & { logger: Logger; restoredThisBoot: () => boolean };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 export default defineModule({
   name: "replication/sqlite",
@@ -46,7 +50,7 @@ export default defineModule({
         await checkSkippedRestore(config, blobs, deps.logger, bootStartedAt);
       }
     }
-    return { ...createReplicationSqlite(config, blobs), logger: deps.logger };
+    return { ...createReplicationSqlite(config, blobs), logger: deps.logger, restoredThisBoot: () => restoredThisBoot(config.file, bootStartedAt) };
   },
 
   health: (r) => r.health(),
@@ -62,6 +66,10 @@ export default defineModule({
   },
 
   steps: (replication) => ({
+    checkRestored: async (ctx: Context) => {
+      const previous = isRecord(ctx.result) ? ctx.result : {};
+      return ok({ ...ctx, result: { ...previous, _databaseRestored: replication.restoredThisBoot() } });
+    },
     sync: async (ctx: Context) => {
       const result = await replication.sync();
       if (isErr(result)) return ctx.fail(result.error);
@@ -98,6 +106,12 @@ export default defineModule({
   }),
 
   describe: () => ({
+    checkRestored: {
+      summary: "Whether this module or another one restored the database file in this boot (adds `_databaseRestored` to the result)",
+      reads: [],
+      writes: ["result._databaseRestored"],
+      extendsOutput: { type: "object", properties: { _databaseRestored: { type: "boolean" } }, required: ["_databaseRestored"] },
+    },
     sync: { summary: "Ship new WAL frames, checkpoint, snapshot and prune when due", reads: [], writes: ["result"], output: { type: "object", properties: { generation: { type: "string" }, shippedBytes: { type: "number" }, frames: { type: "number" }, checkpointed: { type: "boolean" }, pruned: { type: "number" } }, required: ["generation", "shippedBytes", "frames", "checkpointed", "pruned"] } },
     snapshot: { summary: "Start a new generation with a full snapshot", reads: [], writes: ["result"], output: { type: "object", properties: { generation: { type: "string" }, bytes: { type: "number" } }, required: ["generation", "bytes"] } },
     listPoints: { summary: "Restore points (snapshots and WAL segments)", reads: [], writes: ["result"], output: { type: "array", items: POINT } },

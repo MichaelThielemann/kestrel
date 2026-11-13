@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import type { Step } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
@@ -43,8 +44,9 @@ function fakeBlobs(): Blobstore & { blobs: Map<string, { data: Uint8Array; conte
   };
 }
 
-function moduleDeps(blobs: Blobstore, root: string): Deps {
+function moduleDeps(blobs: Blobstore, root: string, bootStartedAt?: number): Deps {
   return {
+    ...(bootStartedAt === undefined ? {} : { bootStartedAt }),
     get<T>(contract: Contract<T>): T {
       if (contract.name !== BLOBSTORE.name) throw new Error(`no provider for "${contract.name}"`);
       return boundaryCast<T>(blobs, "host");
@@ -137,5 +139,54 @@ describe("replication/sqlite module via runPipeline", () => {
     const result = await runPipeline(pipeline, { body: { nope: true } }, { modules: [{ module, instance }] });
     expect(result.status).toBe(400);
     expect(result.code).toBe("VALIDATION");
+  });
+});
+
+function writeResult(result: unknown): Step {
+  return async (ctx) => ok({ ...ctx, result });
+}
+
+describe("replication/sqlite checkRestored", () => {
+  async function start(file: string, dir: string, blobs: Blobstore): Promise<Replication> {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return boundaryCast<Replication>(await module.setup(configSchema.parse({ file, restoreOnStart: true }), moduleDeps(blobs, dir, Date.now())), "host");
+  }
+
+  async function restored(instance: Replication): Promise<unknown> {
+    const run = await runPipeline(definePipeline({ name: "checkRestored", steps: ["replication.checkRestored"] }), {}, { modules: [{ module, instance }] });
+    expect(run.status).toBe(200);
+    return boundaryCast<Record<string, unknown>>(run.result, "host")._databaseRestored;
+  }
+
+  it("answers true in the boot that restored the database file, and false in every later boot and in a second process on the same file", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-restored-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    const app = new DatabaseSync(file);
+    app.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+    app.close();
+    const blobs = fakeBlobs();
+    const first = await start(file, dir, blobs);
+    expect(await restored(first)).toBe(false);
+    expect((await first.snapshot()).ok).toBe(true);
+    first.close();
+    for (const suffix of ["", "-wal", "-shm"]) rmSync(`${file}${suffix}`, { force: true });
+
+    const restoring = await start(file, dir, blobs);
+    expect(await restored(restoring)).toBe(true);
+    expect(await restored(restoring)).toBe(true);
+    const second = await start(file, dir, blobs);
+    expect(await restored(second)).toBe(false);
+    restoring.close();
+    second.close();
+    const restarted = await start(file, dir, blobs);
+    expect(await restored(restarted)).toBe(false);
+    restarted.close();
+  });
+
+  it("keeps the other members of the result", async () => {
+    const { instance } = await boot();
+    const run = await runPipeline(definePipeline({ name: "checkRestored", steps: ["test.earlier", "replication.checkRestored"] }), {}, { modules: [{ module, instance }], steps: { "test.earlier": writeResult({ kept: 1 }) }, writes: { "test.earlier": ["result"] } });
+    expect(run.result).toEqual({ kept: 1, _databaseRestored: false });
   });
 });

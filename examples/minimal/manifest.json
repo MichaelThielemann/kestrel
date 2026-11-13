@@ -190,6 +190,7 @@
         ]
       },
       "steps": [
+        "replication.checkRestored",
         "replication.sync",
         "replication.snapshot",
         "replication.listPoints",
@@ -3692,6 +3693,29 @@
     }
   ],
   "steps": [
+    {
+      "name": "replication.checkRestored",
+      "module": "replication/sqlite",
+      "factory": false,
+      "description": {
+        "summary": "Whether this module or another one restored the database file in this boot (adds `_databaseRestored` to the result)",
+        "reads": [],
+        "writes": [
+          "result._databaseRestored"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "_databaseRestored": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "_databaseRestored"
+          ]
+        }
+      }
+    },
     {
       "name": "replication.sync",
       "module": "replication/sqlite",
