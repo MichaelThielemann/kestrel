@@ -1317,6 +1317,28 @@ describe("images/default one writer per item across processes", () => {
     await images.close();
   });
 
+  it("a public copy images.show writes that stalls past staleAfterMs is written again from the newer render another process left at the path", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.setFraming("m1", LEFT));
+    expectOk(await first.generate("m1"));
+    const held = holdOnce(w, "site/");
+    const copier = await w.open([SQUARE], undefined, { blobs: held.blobs });
+    const showing = copier.show(["m1"]);
+    await held.g.reached;
+
+    const later = await w.open([SQUARE], undefined, { now: () => LATER });
+    expectOk(await later.setFraming("m1", RIGHT));
+    expectOk(await later.generate("m1"));
+    await expectRenderedWith(w, later, "400,0,600,600");
+    held.g.open();
+    expectOk(await showing);
+    await whenIdle(copier);
+
+    await expectRenderedWith(w, later, "400,0,600,600");
+    for (const images of [first, copier, later]) await images.close();
+  });
+
   it("an upload placed in one process while images.syncPublic runs in another ends rendered", async () => {
     const w = await world();
     const boot = await w.open([SQUARE]);
