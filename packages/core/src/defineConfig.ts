@@ -34,7 +34,7 @@ export const configSchema = z
                 maxFields: z.number().int().nonnegative().default(100),
               })
               .strict()
-              .default({}),
+              .prefault({}),
         trustProxy: z.boolean().default(false),
             proxyHops: z.number().int().positive().default(1),
             trustedHeader: z.string().min(1).optional(),
@@ -49,11 +49,11 @@ export const configSchema = z
                 keepAliveMs: z.number().int().nonnegative().default(5_000),
               })
               .strict()
-              .default({}),
+              .prefault({}),
           })
           .strict(),
       ])
-      .default({}),
+      .prefault({}),
     pipelinesDir: z.string().default("./pipelines"),
     shutdownTimeoutMs: z.number().int().nonnegative().default(30_000),
   })
