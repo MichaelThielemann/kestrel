@@ -1324,13 +1324,18 @@ Net changes since 5.8.1.
   dimensions (never enlarged), and the old variant is served until the new render is there; then the
   item raises `images.variantsChanged`, as it does at once when the focus changes. A render that started before the framing changed never
   marks its row `done` and renders the item again, in the background, until its rows have the stored
-  crop; a failed `images.setFraming` plans and renders the item in the background. `variantCounts`
-  counts a row rendered with another crop as `pending`.
+  crop. Every write of a variant's path claims the variant's row first, so a render of an older crop
+  never writes over a newer one and `?v=` names only bytes rendered with its crop; `images.resume`
+  takes over a claim left by a stopped process once it is older than `staleAfterMs`. A failed
+  `images.setFraming` plans and renders the item in the background, and `images.resume` applies a
+  stored framing whose re-planning never ran. `variantCounts` counts a row rendered with another crop
+  as `pending`.
   `images.attach` adds `focus` and `framing: { focus, crops, width, height, ratios: [{ key, sizes,
   manual, fits, crop }] }` to each item, `width` and `height` being the original's oriented
   dimensions. Ratio keys are exact, so sizes with nearly the same ratio get separate
   keys. A framing survives trash and restore and is deleted with the item's variants;
-  `images_variants` gains `crop`, `renderedCrop`, `originalWidth` and `originalHeight`. The new subpath
+  `images_variants` gains `crop`, `renderedCrop`, `originalWidth`, `originalHeight`, `writer` and
+  `writerUntil`. The new subpath
   `@michaelthielemann/kestrel-images-default/framing` imports nothing and exports the crop rules this
   module renders with (`ratioKey`, `centredCrop`, `cropForRatio`, `effectiveCrop`, `focusFits`,
   `parseFraming`, `formatCrop`, `parseCrop`, `cropToken`), so an editor in the browser previews
@@ -1450,9 +1455,13 @@ Net changes since 5.8.1.
   query.
 - `images-default`: a request to generate an item while a render of it runs waits for that render and
   renders once more, instead of sharing the running render, which may have read the rows before the
-  request. `images.resume` also renders items with a row of a declared size that already had a render
-  at its path and was left `pending` for longer than `staleAfterMs`; a row that never had a render is
-  left to the render queued for it.
+  request. `images.resume` also renders items with a row of a declared size whose write was cut off, or
+  that already had a render at its path and was left `pending` for longer than `staleAfterMs`, ahead of
+  rows still `planned`, and moves behind only the items it tried. A row that never had a render is
+  left to the render queued for it; with inline event delivery, a size the request could not render is
+  now placed and then rendered by the background loop, where it was only placed. `close()` waits for an
+  `images.resume` or a sync start under way, and neither starts the sync job again once it has begun;
+  `images.resume` then answers `CONFLICT`.
 
 ### Fixed
 
