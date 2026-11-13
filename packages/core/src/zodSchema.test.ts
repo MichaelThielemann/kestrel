@@ -169,6 +169,44 @@ describe("describeConfigIssue for a value in a union", () => {
   it("keeps the union's own message when the value fits no option", () => {
     expect(lines({ target: 5 })).toEqual(["target: Invalid input"]);
   });
+
+  const targets = z.object({ targets: z.record(z.string(), z.union([z.object({ content: z.string().min(1) }).strict(), z.object({ media: z.literal(true) }).strict(), z.object({ collection: z.string().min(1) }).strict()])) }).strict();
+  const targetLines = (raw: unknown, withInput: boolean): string[] => {
+    const result = targets.safeParse(raw);
+    return result.success ? [] : result.error.issues.map((issue) => describeConfigIssue(targets, issue, withInput ? raw : undefined));
+  };
+
+  it("reports the option whose key the value sets, not an earlier option that fails only on a literal", () => {
+    for (const withInput of [true, false]) {
+      expect(targetLines({ targets: { page: { content: 5 } } }, withInput)).toEqual(["targets.page.content: invalid_type"]);
+      expect(targetLines({ targets: { page: { collection: 5 } } }, withInput)).toEqual(["targets.page.collection: invalid_type"]);
+    }
+  });
+
+  it("reports the option a tagged value names when an earlier option differs in the tag literal", () => {
+    const store = z.object({ store: z.union([z.object({ kind: z.literal("memory") }), z.object({ kind: z.literal("redis"), url: z.string(), mode: z.enum(["single", "cluster"]).optional() })]) });
+    const described = (raw: unknown): string[] => {
+      const result = store.safeParse(raw);
+      return result.success ? [] : result.error.issues.map((issue) => describeConfigIssue(store, issue, raw));
+    };
+    expect(described({ store: { kind: "redis", url: 5 } })).toEqual(["store.url: invalid_type"]);
+    expect(described({ store: { kind: "redis", url: "redis://cache", mode: "ring" } })).toEqual(["store.mode: invalid_value"]);
+    expect(described({ store: { kind: "disk" } })).toEqual(["store: Invalid input"]);
+  });
+
+  it("prefers the option that declares more of the value's keys over one that only lacks a key the value leaves out", () => {
+    const either = z.object({ either: z.union([z.object({ a: z.string(), b: z.number().optional() }).strict(), z.object({ c: z.string() })]) });
+    const raw = { either: { a: "x", z: 1 } };
+    const result = either.safeParse(raw);
+    expect(result.success ? [] : result.error.issues.map((issue) => describeConfigIssue(either, issue, raw))).toEqual(['either: Unrecognized key: "z"']);
+  });
+
+  it("keeps the union's own message when the value sets keys that two options each recognize", () => {
+    const either = z.object({ either: z.union([z.object({ a: z.string() }).strict(), z.object({ b: z.string() }).strict()]) });
+    const raw = { either: { a: "x", b: "y" } };
+    const result = either.safeParse(raw);
+    expect(result.success ? [] : result.error.issues.map((issue) => describeConfigIssue(either, issue, raw))).toEqual(["either: Invalid input"]);
+  });
 });
 
 describe("describeConfig", () => {

@@ -7,6 +7,7 @@ import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakeMedia } from "@michaelthielemann/kestrel-contracts/testing/fakeMedia";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { checkBoot } from "@michaelthielemann/kestrel";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Context, Step, StepFactory } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
@@ -190,6 +191,16 @@ describe("references/default: a media target", () => {
     expect(configSchema.safeParse({ targets: { media: { media: true }, pages: { content: "pages" }, files: { collection: "file_rows" } } }).success).toBe(true);
     expect(configSchema.safeParse({ targets: { media: { media: false } } }).success).toBe(false);
     expect(configSchema.safeParse({ targets: { media: { media: true, collection: "file_rows" } } }).success).toBe(false);
+  });
+
+  it("names the key of the target a value sets in a boot error, not the literal of the media target", async () => {
+    const reasons = async (target: unknown): Promise<string[]> => {
+      const input = { config: { modules: [{ use: "@michaelthielemann/kestrel-references-default", config: { targets: { page: target } } }], triggers: [] }, modules: [{ ...module, requires: [] }], pipelines: [], logger: silentLogger };
+      return (await checkBoot(input, { setup: "all" })).errors.filter((error) => error.code === "invalid-module-config").map((error) => error.reason);
+    };
+    expect(await reasons({ content: 5 })).toEqual(["invalid config: targets.page.content: invalid_type"]);
+    expect(await reasons({ collection: 5 })).toEqual(["invalid config: targets.page.collection: invalid_type"]);
+    expect(await reasons({ media: false })).toEqual(["invalid config: targets.page.media: invalid_value"]);
   });
 
   it("declares media@1 as optional and fails setup, naming the target, when a media target has no provider", async () => {

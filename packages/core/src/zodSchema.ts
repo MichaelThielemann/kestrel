@@ -495,20 +495,87 @@ function missingRequiredMessage(schema: Schema, issue: core.$ZodIssue): string |
   return node === undefined ? undefined : `Invalid input: expected ${kind(unwrap(node).inner)}, received undefined`;
 }
 
-const TYPE_MISMATCH = new Set(["invalid_type", "invalid_value", "invalid_union"]);
+const MISMATCH_ANYWHERE = new Set(["invalid_value", "invalid_union"]);
+
+type KeySet = ReadonlySet<string> | "any";
+
+function declaredKeys(schema: Schema): KeySet {
+  const d = def(unwrap(schema).inner);
+  if (d.type === "object") return new Set(Object.keys(d.shape));
+  if (d.type === "record") return "any";
+  if (d.type !== "intersection") return new Set();
+  const left = declaredKeys(d.left);
+  const right = declaredKeys(d.right);
+  return left === "any" || right === "any" ? "any" : new Set([...left, ...right]);
+}
+
+function valueAtPath(value: unknown, path: readonly PropertyKey[]): unknown {
+  let current = value;
+  for (const key of path) {
+    if (typeof current !== "object" || current === null) return undefined;
+    current = Reflect.get(current, key);
+  }
+  return current;
+}
+
+interface UnionOption {
+  issues: core.$ZodIssue[];
+  schema: Schema | undefined;
+  unrecognized: ReadonlySet<string>;
+  rootMismatch: boolean;
+  nestedMismatchKeys: string[];
+  recognizes(key: string): boolean;
+}
+
+function unionOptions(issue: core.$ZodIssueInvalidUnion, schema: Schema | undefined): UnionOption[] {
+  const union = schema === undefined ? undefined : nodeAt(schema, issue.path);
+  const unionDef = union === undefined ? undefined : def(unwrap(union).inner);
+  const schemas = unionDef?.type === "union" && unionDef.options.length === issue.errors.length ? unionDef.options : undefined;
+  return issue.errors.map((issues, i) => {
+    const optionSchema = schemas?.[i];
+    const unrecognized = new Set(issues.flatMap((one) => (one.code === "unrecognized_keys" && one.path.length === 0 ? one.keys : [])));
+    const rootMismatch = issues.some((one) => one.path.length === 0 && (MISMATCH_ANYWHERE.has(one.code) || one.code === "invalid_type"));
+    const nestedMismatchKeys = issues.filter((one) => one.path.length > 0 && MISMATCH_ANYWHERE.has(one.code)).map((one) => String(one.path[0]));
+    const declared = optionSchema === undefined ? undefined : declaredKeys(optionSchema);
+    const recognizes = (key: string): boolean => (declared === undefined ? !issues.some((one) => one.path.length === 0 && one.code !== "unrecognized_keys") && !unrecognized.has(key) : declared === "any" || declared.has(key));
+    return { issues, schema: optionSchema, unrecognized, rootMismatch, nestedMismatchKeys, recognizes };
+  });
+}
+
+function fittingOption(options: readonly UnionOption[], value: unknown): UnionOption | undefined {
+  const valueKeys = isPlainObject(value) ? Object.keys(value) : [...new Set(options.flatMap((option) => [...option.unrecognized]))];
+  const recognizedElsewhere = (option: UnionOption, key: string): boolean => options.some((other) => other !== option && other.recognizes(key));
+  const fits = (option: UnionOption): boolean =>
+    option.issues.length > 0 &&
+    !option.rootMismatch &&
+    option.nestedMismatchKeys.every((key) => valueKeys.includes(key) && !recognizedElsewhere(option, key)) &&
+    ![...option.unrecognized].some((key) => recognizedElsewhere(option, key));
+  const fitting = options.filter(fits);
+  const score = (option: UnionOption): number => valueKeys.filter((key) => option.recognizes(key)).length;
+  const best = Math.max(...fitting.map(score));
+  const top = fitting.filter((option) => score(option) === best);
+  if (top.length === 1) return top[0];
+  const clean = top.filter((option) => !option.issues.some((one) => one.code === "invalid_type"));
+  return clean.length === 1 ? clean[0] : undefined;
+}
 
 /**
- * The issues behind a failed union, with their full paths, when the value fits one option: an
- * option without a type mismatch at the union's own path and, among several, the first without a
- * type mismatch anywhere. Nested unions are resolved the same way. Any other issue, and a union
- * whose value fits no option or several equally, is returned as it is.
+ * The issues behind a failed union, with their full paths, when the value clearly fits one option.
+ * An option does not fit when it fails on the type, a literal, an enum or a nested union at the
+ * union's own path, on a literal, an enum or a nested union below a key that the value leaves out or
+ * that another option declares too, or names as unrecognized a key that another option declares. Among the
+ * rest the option that declares the most of the value's own keys wins, then the only one without a
+ * type mismatch. `schema` is the schema the issue's path starts at and `input` the value parsed
+ * against it; without them the keys come from the options' unrecognized-key issues. Nested unions
+ * are resolved the same way. Any other issue, and a union whose value fits no option or several
+ * equally, is returned as it is.
  */
-export function unionIssues(issue: core.$ZodIssue): core.$ZodIssue[] {
+export function unionIssues(issue: core.$ZodIssue, schema?: Schema, input?: unknown): core.$ZodIssue[] {
   if (issue.code !== "invalid_union") return [issue];
-  const fitting = issue.errors.filter((option) => option.length > 0 && !option.some((i) => i.path.length === 0 && TYPE_MISMATCH.has(i.code)));
-  const chosen = fitting.find((option) => !option.some((i) => i.code === "invalid_type")) ?? (fitting.length === 1 ? fitting[0] : undefined);
+  const value = valueAtPath(input, issue.path);
+  const chosen = fittingOption(unionOptions(issue, schema), value);
   if (chosen === undefined) return [issue];
-  return chosen.flatMap((inner) => unionIssues({ ...inner, path: [...issue.path, ...inner.path] }));
+  return chosen.issues.flatMap((inner) => unionIssues(inner, chosen.schema, value).map((one) => ({ ...one, path: [...issue.path, ...one.path] })));
 }
 
 /**
@@ -517,10 +584,11 @@ export function unionIssues(issue: core.$ZodIssue): core.$ZodIssue[] {
  * what it expected; any other message is kept as its check wrote it, with credential URLs redacted.
  * An invalid record key or element reports the message of the key or element schema's own issue.
  * A missing key that `.required()` or `.nonoptional()` demands names the type the key expects.
- * A failed union reports the issues of the option the value fits, as {@link unionIssues} picks it.
+ * A failed union reports the issues of the option the value fits, as {@link unionIssues} picks it
+ * from `input`, the value parsed against `schema`.
  */
-export function describeConfigIssue(schema: Schema, issue: core.$ZodIssue): string {
-  return unionIssues(issue)
+export function describeConfigIssue(schema: Schema, issue: core.$ZodIssue, input?: unknown): string {
+  return unionIssues(issue, schema, input)
     .map((one) => describeOneIssue(schema, one))
     .join("; ");
 }

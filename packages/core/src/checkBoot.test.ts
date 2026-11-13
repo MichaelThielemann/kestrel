@@ -200,7 +200,9 @@ describe("checkBoot: collecting every problem", () => {
 
   it("names the key inside a kestrel.config union that the value fits, instead of the union's own invalid input", async () => {
     const reasons = async (config: unknown): Promise<string[]> => (await checkBoot({ config: boundaryCast<BootInput["config"]>(config, "host"), modules: [], pipelines: [], logger: silentLogger }, { setup: "all" })).errors.map((e) => e.reason);
-    expect(await reasons({ modules: [], triggers: [{ event: "page.saved", cron: "* * * * *", pipeline: "p" }] })).toEqual(['invalid kestrel.config: triggers.0: Unrecognized key: "cron"']);
+    expect(await reasons({ modules: [], triggers: [{ event: "page.saved", pipeline: "p", schedule: "daily" }] })).toEqual(['invalid kestrel.config: triggers.0: Unrecognized key: "schedule"']);
+    expect(await reasons({ modules: [], triggers: [{ event: "page.saved", cron: "* * * * *", pipeline: "p" }] })).toEqual(["invalid kestrel.config: triggers.0: Invalid input"]);
+    expect(await reasons({ modules: [], triggers: [{ cron: 5, pipeline: "p" }] })).toEqual(["invalid kestrel.config: triggers.0.cron: Invalid input: expected string, received number"]);
     expect(await reasons({ modules: [], triggers: [], http: { port: 3000.5 } })).toEqual(["invalid kestrel.config: http.port: Invalid input: expected int, received number"]);
     expect(await reasons({ modules: [], triggers: [], http: { timeouts: { requestMs: Infinity } } })).toEqual(["invalid kestrel.config: http.timeouts.requestMs: Invalid input: expected number, received Infinity"]);
     expect(await reasons({ modules: [], triggers: [], http: 5 })).toEqual(["invalid kestrel.config: http: Invalid input"]);

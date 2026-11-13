@@ -372,7 +372,7 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
 
   const parsed = configSchema.safeParse(input.config);
   if (!parsed.success) {
-    sink.fail("invalid-config", CORE, `invalid kestrel.config: ${parsed.error.issues.flatMap(unionIssues).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+    sink.fail("invalid-config", CORE, `invalid kestrel.config: ${parsed.error.issues.flatMap((issue) => unionIssues(issue, configSchema, input.config)).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
     for (const mod of input.modules) notChecked.push({ kind: "module", name: mod.name, because: "kestrel.config is invalid" });
     for (const p of input.pipelines) notChecked.push({ kind: "pipeline", name: p.name, because: "kestrel.config is invalid" });
     return undefined;
@@ -463,10 +463,11 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
       continue;
     }
     const defaults = defaultsByModule.get(mod);
-    const cfg = mod.configSchema.safeParse(effectiveModuleConfig({ config: configByModule.get(mod), defaults }));
+    const effective = effectiveModuleConfig({ config: configByModule.get(mod), defaults });
+    const cfg = mod.configSchema.safeParse(effective);
     if (!cfg.success) {
       const origin = defaults === undefined ? "" : ` (with defaults from "${defaults.from}")`;
-      sink.fail("invalid-module-config", mod.name, `invalid config${origin}: ${cfg.error.issues.map((i) => describeConfigIssue(mod.configSchema, i)).join("; ")}`);
+      sink.fail("invalid-module-config", mod.name, `invalid config${origin}: ${cfg.error.issues.map((i) => describeConfigIssue(mod.configSchema, i, effective)).join("; ")}`);
       markNotSetUp(notSetUp, mod, "invalid config");
       continue;
     }
