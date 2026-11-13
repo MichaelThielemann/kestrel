@@ -81,6 +81,12 @@ interface Options {
   extraRoles?: Record<string, string[]>;
   anonymous?: string[];
   storeFault?: StoreFault;
+  holdFailedRenders?: FailedRenders;
+}
+
+interface FailedRenders {
+  gate: Gate;
+  recorded: number;
 }
 
 interface StoreFault {
@@ -114,6 +120,28 @@ interface Example {
   dispose: () => Promise<void>;
 }
 
+function holdingFailedRenders(real: object, hold: FailedRenders): object {
+  return new Proxy(real, {
+    get(target, prop) {
+      const value: unknown = Reflect.get(target, prop, target);
+      if (typeof value !== "function") return value;
+      const method = boundaryCast<(...args: unknown[]) => unknown>(value, "host").bind(target);
+      if (prop !== "updateMany") return method;
+      return async (collection: unknown, filter: unknown, patch: unknown, ...rest: unknown[]) => {
+        const state: unknown = typeof patch === "object" && patch !== null ? Reflect.get(patch, "state") : undefined;
+        if (collection !== "images_variants" || (state !== "error" && state !== "failed")) return method(collection, filter, patch, ...rest);
+        if (hold.gate.closed) {
+          hold.gate.arrive();
+          await hold.gate.wait;
+        }
+        const updated = boundaryCast<{ ok: boolean; value?: unknown }>(await method(collection, filter, patch, ...rest), "host");
+        if (updated.ok && typeof updated.value === "number") hold.recorded += updated.value;
+        return updated;
+      };
+    },
+  });
+}
+
 async function bootExample(options: Options = {}): Promise<Example> {
   const configInput = await loadConfig(join(root, "kestrel.config.ts"));
   const dataDir = mkdtempSync(join(tmpdir(), "kestrel-minimal-media-"));
@@ -132,12 +160,15 @@ async function bootExample(options: Options = {}): Promise<Example> {
   const loaded = await loadModules(root, { ...configInput, modules: modulesConfig });
   const hold = options.holdVariantWrites;
   const fault = options.storeFault;
+  const failedRenders = options.holdFailedRenders;
   const modules = loaded.map((mod) => {
-    if (fault !== undefined && mod.name === "persistence/sqlite") {
+    if ((fault !== undefined || failedRenders !== undefined) && mod.name === "persistence/sqlite") {
       return defineModule({
         ...mod,
         async setup(config, deps) {
-          return failingOnce(boundaryCast<object>(await mod.setup(config, deps), "host"), fault);
+          const real = boundaryCast<object>(await mod.setup(config, deps), "host");
+          const faulty = fault === undefined ? real : failingOnce(real, fault);
+          return failedRenders === undefined ? faulty : holdingFailedRenders(faulty, failedRenders);
         },
       });
     }
@@ -197,6 +228,7 @@ async function bootExample(options: Options = {}): Promise<Example> {
     notes,
     dispose: async () => {
       hold?.open();
+      failedRenders?.gate.open();
       await kestrel.stop();
       rmSync(dataDir, { recursive: true, force: true });
     },
@@ -363,13 +395,15 @@ describe("examples/minimal media: nothing active reaches the public copy", () =>
 
 describe("examples/minimal media: an image whose render fails", () => {
   it("is placed right after the upload with the original at every variant path, and a later failed render keeps that placeholder", async () => {
-    const example = await bootExample();
+    const failedRenders: FailedRenders = { gate: gate(), recorded: 0 };
+    const example = await bootExample({ holdFailedRenders: failedRenders });
     try {
       const token = await adminToken(example);
       const png = pngWithTruncatedPixels(16, 12);
       const item = await upload(example, token, "broken.png", "image/png", png);
-      await pollUntil(async () => (await getItem(example, item.id, token)).available);
+      await failedRenders.gate.reached;
       const placed = await getItem(example, item.id, token);
+      expect(placed.available).toBe(true);
       expect(placed.variants.length).toBe(5);
       for (const variant of placed.variants) {
         expect(variant.state).toBe("pending");
@@ -381,9 +415,13 @@ describe("examples/minimal media: an image whose render fails", () => {
         expect(Buffer.compare(readFileSync(join(example.blobRoot, "site", "media", item.id, "variants", file)), png)).toBe(0);
       }
 
+      failedRenders.gate.open();
+      await pollUntil(async () => failedRenders.recorded === 5);
+      expect((await getItem(example, item.id, token)).variants.every((variant) => variant.state === "error")).toBe(true);
       const synced = await example.kestrel.run("syncImages", { trigger, headers: bearer(token) });
       expect(synced.status).toBe(200);
-      await pollUntil(async () => (await getItem(example, item.id, token)).variants.every((variant) => variant.state === "error"));
+      await pollUntil(async () => failedRenders.recorded === 10);
+      expect((await getItem(example, item.id, token)).variants.every((variant) => variant.state === "error")).toBe(true);
       for (const variant of placed.variants) {
         const file = fileOf(variant.path);
         expect(Buffer.compare(readFileSync(join(example.blobRoot, "site", "media", item.id, "variants", file)), png)).toBe(0);
