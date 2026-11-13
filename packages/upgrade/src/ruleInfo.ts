@@ -4,7 +4,7 @@ import type { Rule, SourceRule } from "./plugin.ts";
 import type { Finding } from "./report.ts";
 import { hasModule, infoFinding, localModuleFiles, moduleEntry, upgradingDocs } from "./ruleHelpers.ts";
 
-const DELIVERY_STEPS = ["delivery.publish", "delivery.unpublish", "delivery.exportLlms"];
+const PUBLISH_STEPS = ["delivery.publish", "delivery.unpublish"];
 
 /** `responses/delivery-members`: an HTTP-triggered pipeline running a delivery step answers with the 6.0.0 response shape, not the 5.8 one. */
 export const deliveryMembersRule: Rule = {
@@ -15,9 +15,12 @@ export const deliveryMembersRule: Rule = {
       if (!("http" in t)) continue;
       const def = ctx.project.input.pipelines.find((p) => p.name === t.pipeline);
       if (def === undefined) continue;
-      const usesDelivery = def.steps.some((s) => typeof s === "string" && DELIVERY_STEPS.includes(s.split(":")[0]!));
-      if (!usesDelivery) continue;
-      findings.push(infoFinding(`responses/delivery-members:${t.http}`, "responses/delivery-members", `${t.http} runs a delivery step whose response shape changed: delivery.publish now merges { document, delivery } into _delivery instead of replacing the result with it, delivery.exportLlms writes _llms instead of llms, and a missing id is 400 instead of 500`, "update any client reading the old field names", { file: ctx.project.configFile, pipeline: t.pipeline }, upgradingDocs("responses-delivery-members")));
+      const names = pipelineSteps(def.steps).map((s) => s.split(":")[0]!);
+      const changes: string[] = [];
+      if (names.some((n) => PUBLISH_STEPS.includes(n))) changes.push("delivery.publish now merges { document, delivery } into _delivery instead of replacing the result with it, and a missing id is 400 instead of 500");
+      if (names.includes("delivery.exportLlms")) changes.push("delivery.exportLlms is gone and delivery.requestIndexes, which replaces it, adds nothing to the result, so the response has no llms member");
+      if (changes.length === 0) continue;
+      findings.push(infoFinding(`responses/delivery-members:${t.http}`, "responses/delivery-members", `${t.http} runs a delivery step whose response shape changed: ${changes.join("; ")}`, "update any client reading the old field names", { file: ctx.project.configFile, pipeline: t.pipeline }, upgradingDocs("responses-delivery-members")));
     }
     return findings;
   },
@@ -178,7 +181,7 @@ export const deliveryDependentsRule: Rule = {
     const dependencies = isRecord(entry.config) && isRecord(entry.config.dependencies) ? entry.config.dependencies : {};
     if (dependencies.render === "events" && !eventTriggers.some((t) => t.event === "delivery.outputStale" && runs(t.pipeline, "delivery.republishOutput"))) missing.push('dependencies.render is "events" but no trigger runs delivery.republishOutput on delivery.outputStale, which fails boot');
     if (missing.length === 0) return [];
-    return [infoFinding("delivery/dependents", "delivery/dependents", `delivery-static publishes on events, but ${missing.join("; ")}`, "add dependents pipelines (delivery.markDependents:<type>) on the change events of pages, settings, media and every collection a page shows, and a resumeStale cron; with render \"events\", also the delivery.outputStale and delivery.llmsStale job triggers", { file: ctx.project.configFile }, upgradingDocs("delivery-dependents"))];
+    return [infoFinding("delivery/dependents", "delivery/dependents", `delivery-static publishes on events, but ${missing.join("; ")}`, "add dependents pipelines (delivery.markDependents:<type>) on the change events of pages, settings, media and every collection a page shows, and a resumeStale cron; with render \"events\", also the job triggers on delivery.outputStale, delivery.indexesStale and, with llms.full, delivery.llmsStale", { file: ctx.project.configFile }, upgradingDocs("delivery-dependents"))];
   },
 };
 

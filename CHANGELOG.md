@@ -8,14 +8,17 @@ Net changes since 5.8.1.
 
 - `delivery-static`: **`delivery.exportLlms` is gone.** A pipeline that still names it fails at boot
   as an unknown step. Index files are never written inside a request any more: put
-  `delivery.requestIndexes` where `delivery.exportLlms` was, and subscribe `delivery.exportIndexes`
-  (sitemap.xml, robots.txt, llms.txt) to `delivery.indexesStale` and `delivery.exportLlmsFull`
-  (llms-full.txt) to `delivery.llmsStale` with `dependencies.render: "events"`. `publishAllPages`
-  answers without `_llms`. `kestrel upgrade` rewrites the step.
+  `delivery.requestIndexes` where `delivery.exportLlms` was, and with `dependencies.render: "events"`
+  subscribe `delivery.exportIndexes` (sitemap.xml, robots.txt, llms.txt) to `delivery.indexesStale`
+  and `delivery.exportLlmsFull` (llms-full.txt) to `delivery.llmsStale`. A response that carried
+  `llms` from the old step no longer has it. `kestrel upgrade`'s `delivery/export-llms` renames the
+  step, to `delivery.exportLlmsFull` in a pipeline on `delivery.llmsStale` and to
+  `delivery.requestIndexes` everywhere else, and `delivery/index-triggers` adds the `refreshIndexes`
+  and `refreshLlms` jobs that `"events"` needs.
 - `delivery-static`: **`llms.siteUrl` moved to a top-level `siteUrl`**, which llms.txt, sitemap.xml and
-  robots.txt share. `llms.siteUrl` fails at boot; `kestrel upgrade` moves it. `siteUrl` must be an
-  absolute `http` or `https` URL without credentials, query or fragment; it is normalized (host
-  lower-cased, default port dropped, trailing slashes stripped) and keeps a base path.
+  robots.txt share. `llms.siteUrl` fails at boot; `kestrel upgrade`'s `delivery/site-url` moves it.
+  `siteUrl` must be an absolute `http` or `https` URL without credentials, query or fragment; it is
+  normalized (host lower-cased, default port dropped, trailing slashes stripped) and keeps a base path.
 - **A slug belongs to its locale; a translation without a slug of its own is never served.** `site@1`
   finds a locale only by its own slug there: `site.resolve`, `pathOf`, `resolveLinks`, `_paths`,
   `site.attachPaths`, the moves `site.pathsMoved` reports (and so the automatic redirects built from
@@ -186,8 +189,8 @@ Net changes since 5.8.1.
   members the system adds to a document (`_locale`, `_links`, `_translations`, and any future one), and
   closes a collision that nothing previously guarded.
 - `delivery-static`: `delivery.publish` merges its result into `_delivery` instead of replacing it
-  with `{ document, delivery }`, and `delivery.exportLlms` writes `_llms` instead of `llms` — both
-  now members of the reserved underscore namespace. `delivery.publish` and `delivery.unpublish`
+  with `{ document, delivery }`, a member of the reserved underscore namespace (the index exports add
+  `_indexes` and `_llmsFull` the same way). `delivery.publish` and `delivery.unpublish`
   take the document id from `result.id`/`params.id` or, when neither is present, from an event
   envelope's `payload.id`, so both can run as the first step of a pipeline an event triggers.
   `delivery.publish` answers `VALIDATION` (400) when no id is available; it used to throw, which
@@ -283,7 +286,7 @@ Net changes since 5.8.1.
   longer part of the public type; code that only read a booted instance's steps is unaffected.
   `RegisteredStep`, already `list()`'s return type, is now exported alongside `Steps`.
 - `site-default`'s `site.resolve` and `resolveLinks`, and `delivery-static`'s `delivery.publish` and
-  `delivery.exportLlms`, no longer fill an empty localized field from the default locale unless the
+  its llms.txt and llms-full.txt exports, no longer fill an empty localized field from the default locale unless the
   default locale's own values pass the request's filter too (e.g. `status=published`); with no such
   default locale the field stays empty instead of showing a draft value — including a linked page's
   slug (`resolveLinks`, so a link no longer points at a path taken from a draft default locale) and a
@@ -303,8 +306,8 @@ Net changes since 5.8.1.
   filter alike, not only a public one: an editorial step such as
   `content.list:pages?status=draft` now reports `_translations` as "complete and matching that
   filter" too, not just "complete".
-  `delivery.exportLlms` re-checks a source locale's own current values instead of trusting its
-  `delivery_publish_status` row being `live` (that row can lag one failed or queued publish behind).
+  `delivery-static`'s index exports re-check a source locale's own current values instead of trusting
+  its `delivery_publish_status` row being `live` (that row can lag one failed or queued publish behind).
   `delivery.publish` removes a locale's previous static output once it can no longer be published at
   all (no slug of its own), instead of leaving the old file live at its old path. A step
   argument may no longer combine a fixed filter with `fallback=true`; boot refuses it, naming the

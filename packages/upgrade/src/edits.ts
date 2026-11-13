@@ -326,6 +326,42 @@ export function replaceModuleConfigProperty(file: string, source: string, option
   return { file, start, end, text: options.toText };
 }
 
+export interface HoistModuleConfigPropertyOptions {
+  use: string;
+  /** Property names leading from the entry's `config` object down to the object holding `key`. */
+  path: readonly string[];
+  key: string;
+}
+
+/**
+ * Moves the property `key` from the object literal at `path` inside a module-list entry's `config` up to `config`
+ * itself, keeping its value's source text as written. `undefined` when the entry, an object on the path or the key
+ * cannot be found as a literal, when `config` has a spread or a method, or when `config` already has `key`.
+ */
+export function hoistModuleConfigProperty(file: string, source: string, options: HoistModuleConfigPropertyOptions): Edit[] | undefined {
+  const array = moduleListArray(source);
+  if (array === undefined) return undefined;
+  const entry = elements(array).find((e) => entryUse(e) === options.use);
+  if (entry === undefined) return undefined;
+  const config = objectProperty(entry, "config");
+  if (config === undefined || config.type !== "ObjectExpression") return undefined;
+  const members = Array.isArray(config.properties) ? config.properties : [];
+  if (members.some((m) => isAstNode(m) && m.type !== "ObjectProperty")) return undefined;
+  if (objectProperty(config, options.key) !== undefined) return undefined;
+  let holder: AstNode | undefined = config;
+  for (const key of options.path) {
+    if (holder === undefined || holder.type !== "ObjectExpression") return undefined;
+    holder = objectProperty(holder, key);
+  }
+  if (holder === undefined || holder.type !== "ObjectExpression") return undefined;
+  const prop = objectPropertyNodes(holder).find((p) => propertyKeyName(p) === options.key);
+  if (prop === undefined || !isAstNode(prop.value)) return undefined;
+  const value = span(prop.value);
+  const removal = removePropertyFrom(file, source, holder, options.key);
+  if (removal === undefined) return undefined;
+  return [removal, appendProperty(source, config, file, `${options.key}: ${source.slice(value.start, value.end)}`)];
+}
+
 /** Every string-literal occurrence of `from` in the file becomes `to`, keeping the original quote character. */
 export function renameStringLiterals(file: string, source: string, from: string, to: string): Edit[] {
   let root: AstNode;

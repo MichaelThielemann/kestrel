@@ -5,6 +5,7 @@ import { findCalls, firstArgument, isArrayExpression, objectProperty, parseTs, t
 import {
   addModuleEmits,
   createPipelineFile,
+  hoistModuleConfigProperty,
   insertModuleListEntry,
   insertModulesTsEntry,
   insertPipelineStep,
@@ -305,6 +306,42 @@ describe("replaceModuleConfigProperty", () => {
     const source = 'export default defineConfig({ modules: [{ use: "kestrel-delivery-static", config: { prefix: "" } }], triggers: [] });\n';
     expect(replaceModuleConfigProperty("kestrel.config.ts", source, { use: "kestrel-delivery-static", fromKey: "media", toText: "x: 1" })).toBeUndefined();
     expect(replaceModuleConfigProperty("kestrel.config.ts", source, { use: "nope", fromKey: "media", toText: "x: 1" })).toBeUndefined();
+  });
+});
+
+describe("hoistModuleConfigProperty", () => {
+  const options = { use: "kestrel-delivery-static", path: ["llms"], key: "siteUrl" };
+
+  it("moves a nested property up to config, keeping its value as written", () => {
+    const source = 'export default defineConfig({ modules: [{ use: "kestrel-delivery-static", config: { prefix: "site/", llms: { full: true, siteUrl: process.env.SITE_URL ?? "https://example.org" } } }], triggers: [] });\n';
+    const edits = hoistModuleConfigProperty("kestrel.config.ts", source, options);
+    expect(edits).toHaveLength(2);
+    const { text } = applyEdits(source, edits!);
+    expect(text).toContain('config: { prefix: "site/", llms: { full: true }, siteUrl: process.env.SITE_URL ?? "https://example.org" }');
+  });
+
+  it("leaves an empty object behind when the moved property was the only one", () => {
+    const source = 'export default defineConfig({ modules: [{ use: "kestrel-delivery-static", config: { llms: { siteUrl: "https://example.org" } } }], triggers: [] });\n';
+    const { text } = applyEdits(source, hoistModuleConfigProperty("kestrel.config.ts", source, options)!);
+    expect(text).toMatch(/config: \{ llms: \{\s*\}, siteUrl: "https:\/\/example\.org" \}/);
+  });
+
+  it("keeps a multi-line config valid", () => {
+    const source = ["export default defineConfig({", "  modules: [", "    {", '      use: "kestrel-delivery-static",', "      config: {", "        llms: {", '          siteUrl: "https://example.org",', "          full: true,", "        },", "      },", "    },", "  ],", "  triggers: [],", "});", ""].join("\n");
+    const { text } = applyEdits(source, hoistModuleConfigProperty("kestrel.config.ts", source, options)!);
+    expect(text).toContain("full: true,");
+    expect(text).not.toContain("llms: {\n          siteUrl");
+    expect(text).toContain('}, siteUrl: "https://example.org"');
+    expect(() => parseTs(text)).not.toThrow();
+  });
+
+  it("returns undefined when config already has the key, has a spread, or the nested key is missing", () => {
+    const both = 'export default defineConfig({ modules: [{ use: "kestrel-delivery-static", config: { siteUrl: "https://a.example", llms: { siteUrl: "https://b.example" } } }], triggers: [] });\n';
+    expect(hoistModuleConfigProperty("kestrel.config.ts", both, options)).toBeUndefined();
+    const spread = 'export default defineConfig({ modules: [{ use: "kestrel-delivery-static", config: { ...base, llms: { siteUrl: "https://b.example" } } }], triggers: [] });\n';
+    expect(hoistModuleConfigProperty("kestrel.config.ts", spread, options)).toBeUndefined();
+    const missing = 'export default defineConfig({ modules: [{ use: "kestrel-delivery-static", config: { llms: { full: true } } }], triggers: [] });\n';
+    expect(hoistModuleConfigProperty("kestrel.config.ts", missing, options)).toBeUndefined();
   });
 });
 

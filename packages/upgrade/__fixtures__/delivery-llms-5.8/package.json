@@ -1,0 +1,10 @@
+{
+  "name": "upgrade-fixture-delivery-llms",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@michaelthielemann/kestrel": "^5.8.0",
+    "@michaelthielemann/kestrel-delivery-static": "^5.8.0",
+    "@michaelthielemann/kestrel-persistence-sqlite": "^5.8.0"
+  }
+}

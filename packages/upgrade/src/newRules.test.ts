@@ -627,7 +627,21 @@ describe("info rules", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.severity).toBe("info");
     expect(findings[0]?.message).toContain("merges { document, delivery } into _delivery");
-    expect(findings[0]?.message).toContain("writes _llms instead of llms");
+    expect(findings[0]?.message).not.toContain("llms");
+  });
+
+  it("responses/delivery-members names the llms member a pipeline running delivery.exportLlms loses", async () => {
+    const p = await project({ triggers: [{ http: "POST /admin/publish-all/pages", pipeline: "publishAllPages" }], pipelines: [{ name: "publishAllPages", steps: ["delivery.publishAll:pages", "delivery.exportLlms"] }] });
+    const findings = await deliveryMembersRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain("delivery.requestIndexes");
+    expect(findings[0]?.message).toContain("no llms member");
+    expect(findings[0]?.message).not.toContain("_delivery");
+  });
+
+  it("responses/delivery-members stays quiet for an HTTP pipeline running no delivery step with a changed response", async () => {
+    const p = await project({ triggers: [{ http: "GET /admin/publish-status/pages/:id", pipeline: "pagePublishStatus" }], pipelines: [{ name: "pagePublishStatus", steps: ["delivery.readStatus:pages"] }] });
+    expect(await deliveryMembersRule.check(contextFor(p))).toEqual([]);
   });
 
   it("runtime/bus-handler-throws fires when events-direct is configured and a module subscribes with .on(", async () => {

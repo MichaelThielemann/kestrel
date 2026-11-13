@@ -214,6 +214,9 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`runtime/restore-freshness`](#runtime-restore-freshness) | load | none (info) | `restoreOnStart` left on for `replication-sqlite`/`backup-blobstore` |
 | [`http/trusted-proxies`](#http-trusted-proxies) | load | none (info) | `http.trustProxy` or `http.trustedHeader` without `http.trustedProxies` |
 | [`delivery/dependents`](#delivery-dependents) | source | none (info) | `delivery-static` publishing on events without marking dependent outputs |
+| [`delivery/export-llms`](#delivery-export-llms) | load | auto / manual | a pipeline file naming the removed `delivery.exportLlms` |
+| [`delivery/site-url`](#delivery-site-url) | load | auto / manual | `delivery-static`'s `llms.siteUrl`, moved to a top-level `siteUrl` |
+| [`delivery/index-triggers`](#delivery-index-triggers) | load | auto (pipeline files + triggers) / manual | `dependencies.render: "events"` without the jobs that export the index files |
 | [`site/routed-slug-unique`](#site-routed-slug-unique) | load | auto (error / warning) | a `unique` slug field on a type in `site-default`'s `routes` |
 | [`site/path-wiring`](#site-path-wiring) | boot | manual | a routed write without `site.indexPath`/`site.announcePaths`, or a read with another `home`/`slugField` |
 | [`site/path-events`](#site-path-events) | load | manual (error / warning) | `routes` without an `events@1` provider, or without a pipeline on `site.pathsMoved` |
@@ -316,8 +319,9 @@ Where a stored value can exist, rename it in two phases instead of trusting a me
 #### responses-delivery-members
 An HTTP-triggered pipeline running a delivery step answers with the 6.0.0 response shape:
 `delivery.publish` merges `{ document, delivery }` into `_delivery` instead of replacing the result
-with it, `delivery.exportLlms` writes `_llms` instead of `llms`, and a missing id is `400` instead
-of `500`.
+with it, and a missing id is `400` instead of `500`. A pipeline that ran `delivery.exportLlms` runs
+`delivery.requestIndexes` instead (see [delivery-export-llms](#delivery-export-llms)), which adds
+nothing to the result, so the response no longer has an `llms` member.
 
 #### runtime-bus-handler-throws
 A local module subscribes to `events@1` with `.on(...)`. Under `events-direct`, a handler that
@@ -601,12 +605,42 @@ hour. List the proxy's address or network in `http.trustedProxies`.
 #### delivery-dependents
 `delivery-static` publishes on events, but no pipeline runs `delivery.markDependents:<type>`, no cron runs
 `delivery.resumeStale`, or `dependencies.render` is `"events"` without a trigger that runs
-`delivery.republishOutput` on `delivery.outputStale` (boot fails in that last case). Without marking, a
-published page is re-rendered only when it is saved itself; a change to the settings, a document it shows or
-a page it links to leaves its output stale. The `delivery-static` README ("Dependent outputs") shows the
+`delivery.republishOutput` on `delivery.outputStale` (boot fails in that last case). The jobs on
+`delivery.indexesStale` and `delivery.llmsStale` have their own rule,
+[delivery-index-triggers](#delivery-index-triggers). Without marking, a published page is re-rendered only
+when it is saved itself; a change to the settings, a document it shows or a page it links to leaves its
+output stale. The `delivery-static` README ("Dependent outputs") shows the
 wiring for both render modes. Outputs rendered before the upgrade have no recorded dependencies and are
 re-rendered on every change until they render once; run "Publish all" (`delivery.publishAll`) or
 `delivery.checkBuild` once after upgrading to record them all.
+
+#### delivery-export-llms
+`delivery.exportLlms` is removed, and a pipeline that still names it fails at boot as an unknown step.
+The index files are no longer written inside the request that changed them: `delivery.requestIndexes`
+asks for their export, and the export runs later, in the background loop or as a queued job. The fix
+renames the step to `delivery.requestIndexes` wherever a page, a settings change or "Publish all" ran
+it. In a pipeline on `delivery.llmsStale` it becomes `delivery.exportLlmsFull`, the step that writes
+`llms-full.txt`. A file that holds both kinds of pipeline is left to you.
+
+#### delivery-site-url
+`delivery-static` takes `siteUrl` at the top level of its config, because llms.txt, sitemap.xml and
+robots.txt all use it. `llms.siteUrl` fails at boot. The fix moves the value as written, including an
+expression such as `process.env.SITE_URL`. When a top-level `siteUrl` is already set, the fix only
+removes `llms.siteUrl`. A value the tool cannot find as a property in the config file, for example
+one that comes from a variable or from host-supplied defaults, is left to you. Without `siteUrl` there
+is no sitemap.xml, and boot warns about it.
+
+#### delivery-index-triggers
+With `dependencies.render: "events"`, boot fails unless a trigger runs `delivery.exportIndexes` on
+`delivery.indexesStale`, and, with `llms.full`, `delivery.exportLlmsFull` on `delivery.llmsStale`. The
+fix creates a `refreshIndexes` pipeline and, where needed, a `refreshLlms` pipeline next to the
+project's other pipeline files, and adds their event triggers. When a pipeline of that name already
+exists and runs the step, the fix only adds the trigger. When it runs something else, the fix is
+left to you. A pipeline on `delivery.llmsStale` that still runs `delivery.exportLlms` counts as wired,
+because [delivery-export-llms](#delivery-export-llms) renames its step. With `events-queue`, give
+`refreshIndexes` a lane of its own and both jobs a `delayMs` window, so the index files never wait
+behind a re-render backlog and one export follows a burst of saves (the `delivery-static` README,
+"Dependent outputs", shows the wiring).
 
 #### site-routed-slug-unique
 A type listed in `site-default`'s `routes` has a public path that is unique per locale, so its slug
