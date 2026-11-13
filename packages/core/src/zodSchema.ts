@@ -371,12 +371,19 @@ function isEnumAt(schema: Schema, path: readonly PropertyKey[]): boolean {
  * One line per config validation problem. A secret path (a secret schema node, a credential-like key
  * or a path through a union or intersection) reports only the issue code and an enum mismatch only
  * what it expected; any other message is kept as its check wrote it, with credential URLs redacted.
+ * An invalid record key or element reports the message of the key or element schema's own issue.
  */
 export function describeConfigIssue(schema: Schema, issue: core.$ZodIssue): string {
   const where = issue.path.map(String).join(".") || "(root)";
   if (isSecretPath(schema, issue.path)) return `${where}: ${issue.code}`;
   if (issue.code === "invalid_value" && isEnumAt(schema, issue.path)) return `${where}: Invalid enum value. Expected ${issue.values.map((o) => `'${String(o)}'`).join(" | ")}`;
-  return `${where}: ${redactCredentialUrls(issue.message)}`;
+  return `${where}: ${redactCredentialUrls(innermostMessage(issue))}`;
+}
+
+function innermostMessage(issue: core.$ZodIssue | core.$ZodRawIssue): string {
+  const nested = issue.code === "invalid_key" || issue.code === "invalid_element" ? issue.issues[0] : undefined;
+  if (nested !== undefined) return innermostMessage(nested);
+  return typeof issue.message === "string" ? issue.message : "Invalid input";
 }
 
 function redactedSnapshot(schema: Schema, value: unknown): JsonValue {

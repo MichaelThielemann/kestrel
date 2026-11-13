@@ -460,6 +460,11 @@ describe("authz/roles: authz.fields cuts the answer to the caller's field grant"
     );
   });
 
+  it("fails boot with its own message for a resource name that is not a name, in anonymousFields and in fields", async () => {
+    await expect(bootRecords({ roles: { admin: ["*"] }, anonymousFields: { "Bad Name": ["id"] } })).rejects.toThrow('invalid config: anonymousFields.Bad Name: a resource is a name such as "media"');
+    await expect(bootRecords({ roles: { admin: ["*"] }, fields: { admin: { "Bad Name": ["id"] } } })).rejects.toThrow('invalid config: fields.admin.Bad Name: a resource is a name such as "media"');
+  });
+
   it("fails boot for a step argument without a resource and a shape", async () => {
     await expect(bootRecords(grants, [definePipeline({ name: "getRecord", steps: ["records.get", "authz.fields:records"] })])).rejects.toThrow('authz.fields:records – write authz.fields:<resource>?shape=<item|list|array|file>, e.g. authz.fields:media?shape=list');
   });

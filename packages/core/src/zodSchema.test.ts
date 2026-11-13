@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
+import { z, type core } from "zod";
 import { boundaryCast } from "./cast.ts";
 import { describeConfig, describeConfigIssue, effectiveModuleConfig, mergeConfigDefaults, toJsonSchema } from "./zodSchema.ts";
 
@@ -122,6 +122,32 @@ describe("describeConfigIssue", () => {
     expect(literal).toMatch(/^tag: /);
     expect(literal).not.toContain("loose");
     expect(lines({ mode: "off", apiKey: "a", tag: "fixed", extra: 1 })).toEqual([expect.stringMatching(/^\(root\): Unrecognized key/)]);
+  });
+});
+
+describe("describeConfigIssue for record keys and set elements", () => {
+  const keyed = z.object({ grants: z.record(z.string().regex(/^[a-z]+$/, 'a resource is a name such as "media"'), z.number()), urls: z.record(z.string().regex(/^[a-z]+$/, "a short name"), z.string()) }).strict();
+  const lines = (raw: unknown): string[] => {
+    const result = keyed.safeParse(raw);
+    return result.success ? [] : result.error.issues.map((issue) => describeConfigIssue(keyed, issue));
+  };
+
+  it("reports the message the key schema wrote for an invalid record key", () => {
+    expect(lines({ grants: { "Bad Name": 1 }, urls: {} })).toEqual(['grants.Bad Name: a resource is a name such as "media"']);
+  });
+
+  it("reports the message the element schema wrote for an invalid element", () => {
+    const issue: core.$ZodIssue = { code: "invalid_element", origin: "map", key: "x", path: ["urls"], message: "Invalid element", issues: [{ code: "custom", path: [], message: "an element is a short name", input: "X" }] };
+    expect(describeConfigIssue(keyed, issue)).toBe("urls: an element is a short name");
+  });
+
+  it("redacts a credential url in the nested message", () => {
+    const urlKeyed = z.object({ hosts: z.record(z.string().refine(() => false, "cannot reach https://user:hunter2@example.com"), z.number()) }).strict();
+    const result = urlKeyed.safeParse({ hosts: { local: 1 } });
+    const described = result.success ? [] : result.error.issues.map((issue) => describeConfigIssue(urlKeyed, issue));
+    expect(described).toHaveLength(1);
+    expect(described[0]).toBe("hosts.local: cannot reach [redacted]");
+    expect(described[0]).not.toContain("hunter2");
   });
 });
 
