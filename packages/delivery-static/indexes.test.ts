@@ -315,9 +315,45 @@ describe("delivery.exportIndexes", () => {
     expect(expectOk(await h.delivery.exportIndexes())).toEqual({ entries: 0 });
     expect(h.text("sitemap.xml")).toBeUndefined();
     expect(h.text("llms.txt")).toBeUndefined();
-    expect(h.text("robots.txt")).toContain("User-agent: *");
+    expect(h.text("robots.txt")).toBe("User-agent: *\nAllow: /\n");
     expect(h.logger.warnings).toContain("delivery/static: published documents exist but none has a rendered output yet; sitemap.xml and llms.txt are left as they are");
-    expect(expectOk(await h.delivery.readStaleStatus()).exports.indexes).toMatchObject({ entries: 0, error: null });
+    expect(expectOk(await h.delivery.readStaleStatus()).exports.indexes).toMatchObject({ entries: 0, error: null, skipped: true });
+  });
+
+  it("keeps the Sitemap line while published documents have no rendered output when an earlier sitemap.xml is still there, and removes files that are turned off", async () => {
+    const blobs = memoryBlobs();
+    for (const name of ["sitemap.xml", "llms-full.txt"]) blobs.files.set(`site/${name}`, { text: "old", contentType: "text/plain" });
+    const h = await harness({ blobs });
+    h.state.down = true;
+    await seed(h);
+    expectOk(await h.delivery.exportIndexes());
+    expect(h.text("robots.txt")).toBe("User-agent: *\nAllow: /\n\nSitemap: https://example.org/sitemap.xml\n");
+    expect(h.text("sitemap.xml")).toBe("old");
+    expect(h.text("llms-full.txt")).toBeUndefined();
+    const off = await harness({ blobs, config: { sitemap: false } });
+    off.state.down = true;
+    await seed(off);
+    expectOk(await off.delivery.exportIndexes());
+    expect(off.text("sitemap.xml")).toBeUndefined();
+    expect(off.text("robots.txt")).toBe("User-agent: *\nAllow: /\n");
+  });
+
+  it("records a regular export as not skipped", async () => {
+    const h = await harness();
+    await seed(h);
+    expectOk(await h.delivery.exportIndexes());
+    expect(expectOk(await h.delivery.readStaleStatus()).exports.indexes).toMatchObject({ entries: 4, error: null, skipped: false });
+  });
+
+  it("with robots: false neither writes nor removes robots.txt, and does not warn about a policy", async () => {
+    const blobs = memoryBlobs();
+    blobs.files.set("site/robots.txt", { text: "User-agent: *\nAllow: /own\n", contentType: "text/plain" });
+    const h = await harness({ blobs, nodeEnv: "staging", config: { robots: false } });
+    expect(h.logger.warnings).toEqual([]);
+    await seed(h);
+    expectOk(await h.delivery.exportIndexes());
+    expect(h.text("robots.txt")).toBe("User-agent: *\nAllow: /own\n");
+    expect(h.text("sitemap.xml")).toContain("<urlset");
   });
 
   it("writes an empty urlset and robots.txt for a site whose every page is noindex", async () => {
@@ -346,6 +382,12 @@ describe("delivery.exportIndexes", () => {
     expect(h.text("robots.txt")).toBe("User-agent: *\nAllow: /\n");
     expect(h.text("llms.txt")).toContain("- [Kontakt](/kontakt)");
     expect((await harness({ config: { siteUrl: undefined, sitemap: false } })).logger.warnings).toEqual([]);
+  });
+
+  it("warns at setup that a robots.txt under a base path of siteUrl is not read by crawlers", async () => {
+    const h = await harness({ config: { siteUrl: "https://staging.example.org/firma" } });
+    expect(h.logger.warnings).toEqual(["delivery/static: siteUrl has the base path /firma, so robots.txt is served at https://staging.example.org/firma/robots.txt, where crawlers do not look; serve a robots.txt at the root of the host"]);
+    expect((await harness({ config: { siteUrl: "https://staging.example.org/firma", robots: false } })).logger.warnings).toEqual([]);
   });
 
   it("keeps a base path of siteUrl in every URL and takes the llms.txt fallback name from its host", async () => {

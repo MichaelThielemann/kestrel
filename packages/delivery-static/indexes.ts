@@ -129,7 +129,8 @@ export function sitemapUrls(entries: readonly IndexEntry[], defaultLocale: strin
 export interface IndexFilesConfig {
   siteUrl: string | undefined;
   sitemap: boolean;
-  robots: { policy: RobotsPolicy; extra: string[] };
+  /** `null` leaves robots.txt alone. */
+  robots: { policy: RobotsPolicy; extra: string[] } | null;
   llms: LlmsConfig;
   prefix: string;
 }
@@ -152,9 +153,15 @@ export interface IndexFilesDeps {
   interleave(): Promise<void>;
 }
 
+/** How many entries an export wrote; `skipped` when it wrote no list because published documents have no rendered output yet. */
+export interface ExportCount {
+  entries: number;
+  skipped?: true;
+}
+
 export interface IndexFiles {
-  exportIndexes(): Promise<Result<{ entries: number }, KestrelError>>;
-  exportLlmsFull(): Promise<Result<{ entries: number }, KestrelError>>;
+  exportIndexes(): Promise<Result<ExportCount, KestrelError>>;
+  exportLlmsFull(): Promise<Result<ExportCount, KestrelError>>;
 }
 
 const REMOVED = "-";
@@ -243,8 +250,30 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
     deps.types.map((type) => ({ heading: config.llms.headings[type] ?? type, items: entries.filter((e) => e.type === type).map(map) }));
 
   const writeRobots = async (sitemapWritten: boolean): Promise<Result<void, KestrelError>> => {
+    if (config.robots === null) return ok();
     const sitemapUrl = sitemapWritten && config.siteUrl !== undefined ? `${config.siteUrl}/${SITEMAP_KEY}` : undefined;
     return putIfChanged(ROBOTS_KEY, buildRobotsTxt({ policy: config.robots.policy, extra: config.robots.extra, sitemapUrl }), ROBOTS_CONTENT_TYPE);
+  };
+
+  const sitemapPresent = async (): Promise<Result<boolean, KestrelError>> => {
+    const key = `${config.prefix}${SITEMAP_KEY}`;
+    const known = written.get(key);
+    if (known !== undefined) return ok(known !== REMOVED);
+    const listed = await blobs.list(key);
+    if (isErr(listed)) return listed;
+    return ok(listed.value.some((entry) => entry.key === key));
+  };
+
+  const removeTurnedOff = async (sitemapOn: boolean): Promise<Result<void, KestrelError>> => {
+    if (!sitemapOn) {
+      const sitemap = await removeIfPresent(SITEMAP_KEY);
+      if (isErr(sitemap)) return sitemap;
+    }
+    if (!config.llms.full) {
+      const full = await removeIfPresent(LLMS_FULL_KEY);
+      if (isErr(full)) return full;
+    }
+    return ok();
   };
 
   const exportIndexes: IndexFiles["exportIndexes"] = async () => {
@@ -258,9 +287,13 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
       if (isErr(published)) return published;
       if (published.value) {
         logWarn(logger, "delivery/static: published documents exist but none has a rendered output yet; sitemap.xml and llms.txt are left as they are");
-        const robots = await writeRobots(sitemapOn);
+        const removed = await removeTurnedOff(sitemapOn);
+        if (isErr(removed)) return removed;
+        const present = sitemapOn ? await sitemapPresent() : ok(false);
+        if (isErr(present)) return present;
+        const robots = await writeRobots(present.value);
         if (isErr(robots)) return robots;
-        return ok({ entries: 0 });
+        return ok({ entries: 0, skipped: true });
       }
     }
     const head = await header();
@@ -268,14 +301,14 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
     const sections: LlmsSection[] = sectionsOf(entries, (e) => ({ title: e.title, url: e.url, ...(e.description === undefined ? {} : { description: e.description }) })).map((s) => ({ heading: s.heading, entries: s.items }));
     const llms = await putIfChanged(LLMS_KEY, buildLlmsTxt({ ...head.value, sections }), LLMS_CONTENT_TYPE);
     if (isErr(llms)) return llms;
-    const sitemap = sitemapOn ? await putIfChanged(SITEMAP_KEY, buildSitemapXml(sitemapUrls(entries, deps.defaultLocale)), SITEMAP_CONTENT_TYPE) : await removeIfPresent(SITEMAP_KEY);
-    if (isErr(sitemap)) return sitemap;
+    if (sitemapOn) {
+      const sitemap = await putIfChanged(SITEMAP_KEY, buildSitemapXml(sitemapUrls(entries, deps.defaultLocale)), SITEMAP_CONTENT_TYPE);
+      if (isErr(sitemap)) return sitemap;
+    }
+    const removed = await removeTurnedOff(sitemapOn);
+    if (isErr(removed)) return removed;
     const robots = await writeRobots(sitemapOn);
     if (isErr(robots)) return robots;
-    if (!config.llms.full) {
-      const full = await removeIfPresent(LLMS_FULL_KEY);
-      if (isErr(full)) return full;
-    }
     return ok({ entries: entries.length });
   };
 
@@ -288,7 +321,7 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
     if (candidates === 0) {
       const published = await deps.publishedExists();
       if (isErr(published)) return published;
-      if (published.value) return ok({ entries: 0 });
+      if (published.value) return ok({ entries: 0, skipped: true });
     }
     const head = await header();
     if (isErr(head)) return head;

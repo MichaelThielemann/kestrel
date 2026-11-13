@@ -13,7 +13,7 @@ import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import { observeReads, type ObservedRead } from "@michaelthielemann/kestrel/reads";
 import { canonicalJson, normalizeReads, type DependencySpec } from "./dependencies.ts";
 import { dependencyPrefix, dependencyRowId, scan, setIdOf, statusIdOf, type DependencyKind, type OutputRef } from "./keys.ts";
-import { createIndexFiles, normalizeSiteUrl, type IndexCandidate, type RobotsPolicy } from "./indexes.ts";
+import { createIndexFiles, normalizeSiteUrl, type ExportCount, type IndexCandidate } from "./indexes.ts";
 import { validateLlmsConfig } from "./llms.ts";
 import { createBackgroundLoop, type BackgroundLoop, type PassOutcome } from "./loop.ts";
 import type { configSchema } from "./module.ts";
@@ -101,6 +101,8 @@ export interface ExportOutcome {
   at: number;
   entries: number;
   error: string | null;
+  /** The export wrote neither sitemap.xml nor llms.txt (or llms-full.txt), because published documents exist but none has a rendered output yet. */
+  skipped: boolean;
 }
 
 export interface StaleStatus {
@@ -346,8 +348,10 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   const markerKey = markerKeyFor(config.prefix);
   if (siteUrl === undefined && config.sitemap) logWarn(logger, "delivery/static: no siteUrl is set, so no sitemap.xml is written and llms.txt lists paths instead of URLs");
   const nodeEnv = "nodeEnv" in deps ? deps.nodeEnv : process.env.NODE_ENV;
-  const robotsPolicy: RobotsPolicy = config.robots.policy ?? (nodeEnv === "production" ? "allow" : "disallow");
-  if (config.robots.policy === undefined) logWarn(logger, `delivery/static: robots.policy is not set, robots.txt uses "${robotsPolicy}" because NODE_ENV is ${nodeEnv === undefined ? "not set" : JSON.stringify(nodeEnv)}`);
+  const robots = config.robots === false ? null : { policy: config.robots.policy ?? (nodeEnv === "production" ? "allow" : "disallow"), extra: config.robots.extra };
+  if (config.robots !== false && config.robots.policy === undefined) logWarn(logger, `delivery/static: robots.policy is not set, robots.txt uses "${robots?.policy}" because NODE_ENV is ${nodeEnv === undefined ? "not set" : JSON.stringify(nodeEnv)}`);
+  const basePath = siteUrl === undefined ? "" : new URL(siteUrl).pathname.replace(/\/+$/, "");
+  if (robots !== null && basePath !== "") logWarn(logger, `delivery/static: siteUrl has the base path ${basePath}, so robots.txt is served at ${siteUrl}/robots.txt, where crawlers do not look; serve a robots.txt at the root of the host`);
 
   const prepared = [
     await db.ensureCollection(STATUS, {
@@ -1004,7 +1008,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   };
 
   const indexFiles = createIndexFiles(
-    { siteUrl, sitemap: config.sitemap, robots: { policy: robotsPolicy, extra: config.robots.extra }, llms: config.llms, prefix: config.prefix },
+    { siteUrl, sitemap: config.sitemap, robots, llms: config.llms, prefix: config.prefix },
     {
       content,
       blobs,
@@ -1028,7 +1032,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     },
   );
 
-  const isOutcome = (value: unknown): value is ExportOutcome => isRecord(value) && typeof value.at === "number" && typeof value.entries === "number" && (value.error === null || typeof value.error === "string");
+  const isOutcome = (value: unknown): value is Omit<ExportOutcome, "skipped"> & { skipped?: unknown } => isRecord(value) && typeof value.at === "number" && typeof value.entries === "number" && (value.error === null || typeof value.error === "string");
 
   const readOutcome = async (id: string): Promise<Result<ExportOutcome | null, DeliveryError>> => {
     const row = await db.findOne<StateRow>(STATE, { id });
@@ -1037,7 +1041,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     if (raw === null || raw === undefined) return ok(null);
     try {
       const parsed: unknown = JSON.parse(raw);
-      return ok(isOutcome(parsed) ? parsed : null);
+      return ok(isOutcome(parsed) ? { at: parsed.at, entries: parsed.entries, error: parsed.error, skipped: parsed.skipped === true } : null);
     } catch {
       return ok(null);
     }
@@ -1056,12 +1060,12 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return err(transient(`delivery/static: the state row ${id} kept changing – try again`));
   };
 
-  const recorded = (id: string) => async (outcome: Result<{ entries: number }, KestrelError>): Promise<Result<{ entries: number }, DeliveryError>> => {
+  const recorded = (id: string) => async (outcome: Result<ExportCount, KestrelError>): Promise<Result<{ entries: number }, DeliveryError>> => {
     if (isErr(outcome) && stopping) return err(transientOnly(outcome.error, "index export"));
-    const entry: ExportOutcome = isErr(outcome) ? { at: now(), entries: 0, error: outcome.error.message } : { at: now(), entries: outcome.value.entries, error: null };
+    const entry: ExportOutcome = isErr(outcome) ? { at: now(), entries: 0, error: outcome.error.message, skipped: false } : { at: now(), entries: outcome.value.entries, error: null, skipped: outcome.value.skipped === true };
     logged("could not record the outcome of an export", { id })(await writeState(id, JSON.stringify(entry)));
     if (isErr(outcome)) return err(transientOnly(outcome.error, "index export"));
-    return ok(outcome.value);
+    return ok({ entries: outcome.value.entries });
   };
 
   const exportIndexesNow: Delivery["exportIndexes"] = async () => recorded(INDEXES_OUTCOME)(await indexFiles.exportIndexes());

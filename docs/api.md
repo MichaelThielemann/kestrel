@@ -721,7 +721,7 @@ request writes them: after a page save, a page delete, a settings change and `pu
 `delivery.requestIndexes` asks for an export, which in the example instance the background loop runs
 about a second later, before its next batch of re-renders. `delivery.resumeStale` asks again on every
 run, so a lost or failed export is repaired by the next recovery pass. A failed export is logged and
-retried and never fails a save; its outcome (`at`, `entries`, `error`) is part of
+retried and never fails a save; its outcome (`at`, `entries`, `error`, `skipped`) is part of
 `delivery.readStaleStatus` as `exports`.
 
 The source is every row of the publish traffic light that serves a file — `live`, or `error` with a
@@ -739,7 +739,9 @@ Without `siteUrl` no sitemap is written.
 
 `robots.txt`: `User-agent: *`, then `Allow: /` or `Disallow: /` from `robots.policy` (without it:
 `allow` when `NODE_ENV` is `production`, otherwise `disallow`, with a warning at boot), then the
-lines of `robots.extra`, then a `Sitemap:` line when a sitemap is written.
+lines of `robots.extra`, then a `Sitemap:` line when a sitemap is written. `robots: false` leaves
+`site/robots.txt` alone. Crawlers only read the file at the root of the host, so a `siteUrl` with a
+base path logs a warning at boot.
 
 `llms.txt`: `# <settings.title>` (default language; empty → the host from `siteUrl`, otherwise
 `Website`), a blockquote `> <settings.description>` (only if set), then a
@@ -761,7 +763,7 @@ Config (`delivery-static`, everything optional):
 ```ts
 siteUrl: "https://example.org",       // absolute base, a base path is kept; without it: paths, no sitemap
 sitemap: true,                        // false: no sitemap.xml
-robots: { policy: "allow", extra: ["Disallow: /preview/"] },
+robots: { policy: "allow", extra: ["Disallow: /preview/"] }, // false: leave robots.txt alone
 llms: {
   full: false,                        // write llms-full.txt
   settings: { type: "settings", titleField: "title", descriptionField: "description" },

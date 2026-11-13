@@ -46,11 +46,15 @@ export const configSchema = z
     siteUrl: siteUrlSchema.optional(),
     sitemap: z.boolean().default(true),
     robots: z
-      .object({
-        policy: z.enum(["allow", "disallow"]).optional(),
-        extra: z.array(z.string().regex(/^[^\r\n]*$/, "a robots.txt line must not contain a line break")).default([]),
-      })
-      .strict()
+      .union([
+        z.literal(false),
+        z
+          .object({
+            policy: z.enum(["allow", "disallow"]).optional(),
+            extra: z.array(z.string().regex(/^[^\r\n]*$/, "a robots.txt line must not contain a line break")).default([]),
+          })
+          .strict(),
+      ])
       .default({}),
     llms: z
       .object({
@@ -140,7 +144,7 @@ const STATUS_SCHEMA = {
 
 const MARKED = { type: "object", properties: { marked: { type: "integer" } }, required: ["marked"] };
 
-const EXPORT_OUTCOME = { type: ["object", "null"], properties: { at: { type: "number" }, entries: { type: "integer" }, error: NULLABLE_STRING }, required: ["at", "entries", "error"] };
+const EXPORT_OUTCOME = { type: ["object", "null"], properties: { at: { type: "number" }, entries: { type: "integer" }, error: NULLABLE_STRING, skipped: { type: "boolean" } }, required: ["at", "entries", "error", "skipped"] };
 
 const STALE_STATUS_SCHEMA = {
   type: "object",

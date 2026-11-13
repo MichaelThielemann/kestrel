@@ -77,7 +77,8 @@ same URL give one entry, the `live` one first, then the lower row id. Entries ar
 
 **Guard.** When published documents exist but no row serves a file yet (before the first render, or after
 every first render failed), sitemap.xml and llms.txt are left as they are and a warning is logged; robots.txt
-is still written. A site whose every page is `noindex` gets an empty `<urlset>` and an llms.txt without
+is still written, with a `Sitemap:` line only when a sitemap.xml from an earlier export is there, and the
+outcome is recorded with `skipped: true`. A site whose every page is `noindex` gets an empty `<urlset>` and an llms.txt without
 sections.
 
 **sitemap.xml** (`application/xml; charset=utf-8`) lists one `<url>` per entry: `<loc>`, `<lastmod>` from the
@@ -90,7 +91,11 @@ stale one is removed; a missing `siteUrl` with the sitemap on logs one warning a
 **robots.txt** (`text/plain; charset=utf-8`) is `User-agent: *` and `Allow: /` or `Disallow: /` from
 `robots.policy`, then the lines of `robots.extra`, then `Sitemap: <siteUrl>/sitemap.xml` when a sitemap is
 written. Without `robots.policy` the policy is `allow` when `NODE_ENV` is `production` and `disallow`
-otherwise, and setup logs a warning that names the choice.
+otherwise, and setup logs a warning that names the choice. The module owns `<prefix>robots.txt` and
+`<prefix>sitemap.xml` and overwrites a file of that name it finds there; `robots: false` leaves robots.txt to
+the site, neither writing nor removing it. Crawlers read robots.txt only at the root of a host, so with a base
+path in `siteUrl` (`https://example.org/de`) the file this module writes is not read, and setup warns: serve a
+robots.txt at the host's root instead.
 
 **llms.txt** follows [llmstxt.org](https://llmstxt.org): `# <settings title>` (default language; empty → the
 host of `siteUrl`, otherwise `Website`), `> <settings description>`, one `## <headings[type] ?? type>`
@@ -109,7 +114,7 @@ format-name assumption only when that key does not lie under the page's own path
 
 **Unchanged files** are not written again: each process keeps a hash of what it last wrote per file, so
 the first export after a start always writes. The result gains `_indexes: { entries }` or
-`_llmsFull: { entries }`; the outcome of each export (`at`, `entries`, `error`) is stored in `delivery_state`
+`_llmsFull: { entries }`; the outcome of each export (`at`, `entries`, `error`, `skipped`) is stored in `delivery_state`
 and answered by `delivery.readStaleStatus` as `exports: { indexes, llmsFull }`. Both exports answer
 `TRANSIENT` once the process is stopping.
 
@@ -340,9 +345,7 @@ Not included: CDN invalidation, a sitemap index for more than 50 000 URLs.
 | `reservedPaths` | array | no | `[]` |
 | `siteUrl` | string | no | – |
 | `sitemap` | boolean | no | `true` |
-| `robots` | object | no | `{}` |
-| `robots.policy` | enum | no | – |
-| `robots.extra` | array | no | `[]` |
+| `robots` | union | no | `{}` |
 | `llms` | object | no | `{}` |
 | `llms.full` | boolean | no | `false` |
 | `llms.settings` | object | no | `{}` |

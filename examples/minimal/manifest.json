@@ -2653,25 +2653,32 @@
               "default": true
             },
             "robots": {
-              "type": "object",
-              "properties": {
-                "policy": {
-                  "type": "string",
-                  "enum": [
-                    "allow",
-                    "disallow"
-                  ]
+              "anyOf": [
+                {
+                  "const": false
                 },
-                "extra": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "pattern": "^[^\\r\\n]*$"
+                {
+                  "type": "object",
+                  "properties": {
+                    "policy": {
+                      "type": "string",
+                      "enum": [
+                        "allow",
+                        "disallow"
+                      ]
+                    },
+                    "extra": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[^\\r\\n]*$"
+                      },
+                      "default": []
+                    }
                   },
-                  "default": []
+                  "additionalProperties": false
                 }
-              },
-              "additionalProperties": false,
+              ],
               "default": {}
             },
             "llms": {
@@ -2896,7 +2903,7 @@
           },
           {
             "path": "robots",
-            "type": "object",
+            "type": "union",
             "required": false,
             "secret": false,
             "set": true,
@@ -2907,27 +2914,6 @@
             },
             "redacted": false,
             "default": {}
-          },
-          {
-            "path": "robots.policy",
-            "type": "enum",
-            "required": false,
-            "secret": false,
-            "set": true,
-            "status": "set",
-            "value": "disallow",
-            "redacted": false
-          },
-          {
-            "path": "robots.extra",
-            "type": "array",
-            "required": false,
-            "secret": false,
-            "set": false,
-            "status": "default",
-            "value": [],
-            "redacted": false,
-            "default": []
           },
           {
             "path": "llms",
@@ -11708,12 +11694,16 @@
                         "string",
                         "null"
                       ]
+                    },
+                    "skipped": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "at",
                     "entries",
-                    "error"
+                    "error",
+                    "skipped"
                   ]
                 },
                 "llmsFull": {
@@ -11733,12 +11723,16 @@
                         "string",
                         "null"
                       ]
+                    },
+                    "skipped": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "at",
                     "entries",
-                    "error"
+                    "error",
+                    "skipped"
                   ]
                 }
               },

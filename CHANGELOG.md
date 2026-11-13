@@ -1068,7 +1068,9 @@ Net changes since 5.8.1.
   `siteUrl` there is none and boot warns. Unchanged files are not written again within a process.
   The result gains `_indexes: { entries }` or `_llmsFull: { entries }`, and
   `delivery.readStaleStatus` answers `exports: { indexes, llmsFull }` with each export's last `at`,
-  `entries` and `error`. `normalizeSiteUrl` and `pageUrl` from `kestrel-delivery-static/impl` give
+  `entries`, `error` and `skipped` (no list written because no output is rendered yet).
+  `robots: false` leaves robots.txt to the site; a `siteUrl` with a base path warns at boot, since
+  crawlers read robots.txt only at the host's root. `normalizeSiteUrl` and `pageUrl` from `kestrel-delivery-static/impl` give
   the URL form the sitemap uses, for a canonical link that must match it.
 - `delivery.requestIndexes` asks for those exports without running them: coalesced
   `delivery.indexesStale` (`coalesceKey: "indexes"`) and, with `llms.full`, `delivery.llmsStale`
