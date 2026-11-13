@@ -9,7 +9,8 @@
   },
   "exports": {
     ".": "./module.ts",
-    "./impl": "./impl.ts"
+    "./impl": "./impl.ts",
+    "./framing": "./framing.ts"
   },
   "publishConfig": {
     "exports": {
@@ -20,6 +21,10 @@
       "./impl": {
         "types": "./dist/impl.d.ts",
         "default": "./dist/impl.js"
+      },
+      "./framing": {
+        "types": "./dist/framing.d.ts",
+        "default": "./dist/framing.js"
       }
     }
   },
