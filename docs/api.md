@@ -722,7 +722,8 @@ request writes them: after a page save, a page delete, a settings change and `pu
 about a second later, before its next batch of re-renders. `delivery.resumeStale` asks again on every
 run, so a lost or failed export is repaired by the next recovery pass. A failed export is logged and
 retried and never fails a save; its outcome (`at`, `entries`, `error`, `skipped`) is part of
-`delivery.readStaleStatus` as `exports`.
+`delivery.readStaleStatus` as `exports`. `PUT /redirects` and `POST /admin/publish-all/pages`
+answer with 503 if `redirects.json` could not be written.
 
 The source is every row of the publish traffic light that serves a file — `live`, or `error` with a
 path, since a failed render keeps its previous output online — for every type configured under

@@ -352,7 +352,7 @@ export default defineModule({
       summary: "Ask for a sitemap.xml, robots.txt and llms.txt export (and an llms-full.txt export with `llms.full`) without running it here",
       reads: [],
       writes: [],
-      errors: { 503: "the request could not be queued" },
+      errors: { 503: 'with dependencies.render "events": the export request could not be queued' },
     },
     resumeStale: {
       summary: "Release expired render claims, remove old tombstones and orphaned dependency sets, start the re-renders a stopped process or a lost job left marked, and ask for an index export",

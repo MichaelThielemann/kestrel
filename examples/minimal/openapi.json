@@ -5454,7 +5454,7 @@
             }
           },
           "503": {
-            "description": "the request could not be queued",
+            "description": "with dependencies.render \"events\": the export request could not be queued",
             "headers": {
               "Retry-After": {
                 "description": "seconds until the client may retry",
