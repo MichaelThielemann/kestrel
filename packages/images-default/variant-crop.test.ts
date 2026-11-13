@@ -465,6 +465,48 @@ describe("images/default variants[].crop in images.attach", () => {
     for (const open of [inside, planned, images]) await open.close();
   });
 
+  it("gives the path a new ?v= and raises images.variantsChanged when a public copy that held other bytes is written again after an outage", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.setFraming("m1", RIGHT_CROP));
+    expectOk(await first.generate("m1"));
+    expectOk(await first.setFraming("m1", LEFT_CROP));
+
+    let copyDown = true;
+    let variantPuts = 0;
+    const broken: Blobstore = {
+      ...w.blobs,
+      put: async (key, data, options) => {
+        if (key.startsWith("site/") && copyDown) return err(failure("TRANSIENT", "copy store unavailable"));
+        if (key.startsWith("media-variants/") && (variantPuts += 1) > 1) return err(failure("TRANSIENT", "variant store unavailable"));
+        return w.blobs.put(key, data, options);
+      },
+    };
+    const images = await w.open([SQUARE], render, { blobs: broken });
+    for (let attempt = 0; attempt < CONFIG.maxAttempts; attempt += 1) await images.generate("m1");
+    const errored = (await attached(images)).get("square")!;
+    expect(errored).toMatchObject({ state: "failed", crop: LEFT });
+    expect(errored.path).toMatch(VERSIONED_SQUARE);
+    const stale = w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data;
+    expect(stale).not.toEqual(expectOk(await images.read("m1", "square.webp"))!.data);
+
+    copyDown = false;
+    w.events.emitted.length = 0;
+    expectOk(await images.syncPublic());
+    const synced = (await attached(images)).get("square")!;
+    expect(synced).toMatchObject({ state: "failed", crop: LEFT });
+    expect(synced.path).toMatch(VERSIONED_SQUARE);
+    expect(synced.path).not.toBe(errored.path);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(expectOk(await images.read("m1", "square.webp"))!.data);
+    expect(w.events.emitted).toEqual([{ name: "images.variantsChanged", ids: ["m1"] }]);
+
+    w.events.emitted.length = 0;
+    expectOk(await images.syncPublic());
+    expect((await attached(images)).get("square")).toEqual(synced);
+    expect(w.events.emitted).toEqual([]);
+    for (const open of [first, images]) await open.close();
+  });
+
   it("answers the original at a size added to the configuration whose first render stayed at its key after its copy and removal failed, while the entry lists crop null", async () => {
     const w = await world();
     const inside = await w.open([THUMB]);
