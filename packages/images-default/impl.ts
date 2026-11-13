@@ -523,7 +523,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok(updated.value === 1 ? { ...row, ...patch } : null);
   }
 
-  function withItem<T>(mediaId: string, work: (lease: Lease) => Promise<Result<T, KestrelError>>, handOver: () => Promise<Result<T, KestrelError>>, options: { serveLater?: boolean; asked?: string | undefined } = {}): Promise<Result<T, KestrelError>> {
+  function withItem<T>(mediaId: string, work: (lease: Lease) => Promise<Result<T, KestrelError>>, handOver: () => Promise<Result<T, KestrelError>>, options: { serveLater?: boolean; asked?: string | undefined; takeIfLetGo?: boolean } = {}): Promise<Result<T, KestrelError>> {
     return exclusive(mediaId, async (): Promise<Result<T, KestrelError>> => {
       const lease = await acquire(mediaId);
       if (isErr(lease)) return lease;
@@ -531,7 +531,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         const handed = await handOver();
         if (isErr(handed)) return handed;
         const asked = await ask(mediaId);
-        return isErr(asked) ? asked : handed;
+        if (isErr(asked) || options.takeIfLetGo !== true) return isErr(asked) ? asked : handed;
+        const again = await acquire(mediaId);
+        if (isErr(again) || again.value === null) return isErr(again) ? again : handed;
+        return settleLease(again.value, handed, options.serveLater === true, true);
       }
       const held = lease.value;
       const owed = held.request !== "" && held.request !== options.asked;
@@ -2137,7 +2140,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
             return hidden.value ? ok(undefined) : writeCopiesOf(mediaId, lease);
           },
           async () => ok(undefined),
-          { asked: asked.value },
+          { asked: asked.value, takeIfLetGo: true },
         );
         if (isErr(rewritten)) return rewritten;
       }

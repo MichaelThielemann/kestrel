@@ -2186,6 +2186,34 @@ describe("images/default writes racing a lease-free prune or a request left on a
     for (const images of [first, saver, trashing]) await images.close();
   });
 
+  it("a restore that finds the item held and whose holder lets go before the request is written writes the public copies itself", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.generate("m1"));
+    expectOk(await images.hide(["m1"]));
+    await holdLeaseElsewhere(w);
+
+    let letGoAfterRead = true;
+    const db: Persistence = {
+      ...w.db,
+      findOne: async <T extends Document>(collection: string, filter: Filter) => {
+        const found = await w.db.findOne<T>(collection, filter);
+        if (letGoAfterRead && collection === ITEMS) {
+          letGoAfterRead = false;
+          await freeLease(w);
+        }
+        return found;
+      },
+    };
+    const restoring = await w.open([SQUARE], undefined, { db });
+    expectOk(await restoring.show(["m1"]));
+
+    expect(letGoAfterRead).toBe(false);
+    expect(copyOf(w, "square.webp")).toContain("square|");
+    expect(expectOk(await w.db.findOne<ItemLease>(ITEMS, { mediaId: "m1" }))?.writer).toBe("");
+    for (const opened of [images, restoring]) await opened.close();
+  });
+
   it("images.generate renders the item after one failed read of its lease, and a sync job finishes past it", async () => {
     const w = await world();
     let failing = false;

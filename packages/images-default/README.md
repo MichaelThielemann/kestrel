@@ -251,7 +251,8 @@ leaves a request on the lease and returns. The holder sees the request before it
 and renders the item again with what is stored then, writing its public copies as well (or removing
 them while the item is hidden); a holder that only places (`images.plan`, `images.setFraming`) leaves
 this to its background loop. A request left after the holder let go waits for `images.resume`, which
-serves it once `staleAfterMs` has passed. An `images.setFraming` that stored its framing but could not
+serves it once `staleAfterMs` has passed; `images.showMany` takes the item itself in that case and
+places, renders and writes its public copies before it returns. An `images.setFraming` that stored its framing but could not
 leave its request places and renders the item in its background loop. A render that sees a request before it
 writes drops its bytes and renders again, so two framings saved at once in two processes leave the
 rows on the framing that is stored. A call that stored its framing while another process held the
