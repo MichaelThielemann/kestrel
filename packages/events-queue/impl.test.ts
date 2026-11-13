@@ -1495,3 +1495,93 @@ describe("events/queue delayMs: a fixed window per pipeline", () => {
     expect(await queue.tickLane("indexes")).toBe(1);
   });
 });
+
+describe("events/queue retry: a pending row of the same key supersedes a failed one", () => {
+  const FAIL: RunResult = { runId: "r", status: 500, error: "down", code: "INTERNAL", retryable: false };
+
+  it("a failed row whose key a pending row holds is marked done as superseded instead of retried", async () => {
+    const { queue, rows } = await make();
+    let calls = 0;
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      calls++;
+      if (calls === 1) await queue.enqueue("x", { coalesceKey: "k", n: 2 });
+      return FAIL;
+    });
+    await queue.enqueue("x", { coalesceKey: "k", n: 1 });
+    expect(await queue.tick()).toBe(1);
+    const stored = await rows();
+    expect(stored).toHaveLength(2);
+    expect(stored.find((r) => r.payload.n === 1)).toMatchObject({ state: "done", attempts: 1, coalesceKey: null, lockedAt: null, lockedBy: null, finishedAt: 1_000_000, error: "down" });
+    expect(stored.find((r) => r.payload.n === 2)).toMatchObject({ state: "pending", attempts: 0, coalesceKey: "p1:k" });
+  });
+
+  it("a failed row whose key no pending row holds is retried as before", async () => {
+    const { queue, rows } = await make();
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => FAIL);
+    await queue.enqueue("x", { coalesceKey: "k" });
+    expect(await queue.tick()).toBe(1);
+    expect(await rows()).toMatchObject([{ state: "pending", attempts: 1, coalesceKey: null, error: "down" }]);
+  });
+
+  it("a row at maxAttempts whose key a pending row holds is superseded, not dead", async () => {
+    const { queue, rows } = await make({ maxAttempts: 1 });
+    let calls = 0;
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      calls++;
+      if (calls === 1) await queue.enqueue("x", { coalesceKey: "k", n: 2 });
+      return FAIL;
+    });
+    await queue.enqueue("x", { coalesceKey: "k", n: 1 });
+    await queue.tick();
+    expect((await rows()).find((r) => r.payload.n === 1)).toMatchObject({ state: "done" });
+    expect(expectOk(await queue.deliveryStatus()).dead).toBe(0);
+  });
+
+  it("a key held only by a running row does not supersede", async () => {
+    const { db, queue, rows } = await make();
+    await db.createOne<QueueRow>(QUEUE, { name: "x", payload: { coalesceKey: "k" }, pipeline: "p1", state: "running", attempts: 0, createdAt: 1, availableAt: 1, lockedAt: 1_000_000, lockedBy: "other@host", finishedAt: null, error: null, runId: null, coalesceKey: "p1:k", lane: "main" });
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => FAIL);
+    await queue.enqueue("x", { coalesceKey: "k", n: 1 });
+    await queue.tick();
+    expect((await rows()).find((r) => r.payload.n === 1)).toMatchObject({ state: "pending", attempts: 1 });
+  });
+
+  it("the relay reports a superseded row as an error, never as dead", async () => {
+    const { queue } = await make({ maxAttempts: 1, relayMs: 1000 });
+    let calls = 0;
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      calls++;
+      if (calls === 1) await queue.enqueue("x", { coalesceKey: "k", n: 2 });
+      return FAIL;
+    });
+    await queue.enqueue("x", { runId: "run-1", coalesceKey: "k", n: 1 });
+    const report = await queue.relay("run-1");
+    expect(report.pipelines).toEqual([{ event: "x", pipeline: "p1", status: "error", attempts: 1, dead: false, error: "down" }]);
+  });
+
+  it("no outcome patch ever writes coalesceKey, whether the row is done, retried, dead or superseded", async () => {
+    const { db, queue, clock } = await make({ maxAttempts: 2 });
+    const patches: Record<string, unknown>[] = [];
+    const originalUpdateOne = db.updateOne.bind(db);
+    db.updateOne = boundaryCast<typeof db.updateOne>(async (collection: string, id: string, patch: Record<string, unknown>) => {
+      patches.push(patch);
+      return originalUpdateOne(collection, id, boundaryCast<Parameters<typeof originalUpdateOne>[2]>(patch, "host"));
+    }, "host");
+    let calls = 0;
+    queue.setDelivery([{ event: "x", pipeline: "p1" }, { event: "y", pipeline: "p2" }], async (pipeline) => {
+      calls++;
+      if (pipeline === "p2") return OK;
+      if (calls === 1) await queue.enqueue("x", { coalesceKey: "k" });
+      return FAIL;
+    });
+    await queue.enqueue("x", { coalesceKey: "k" });
+    await queue.enqueue("y", { coalesceKey: "k" });
+    for (let i = 0; i < 4; i++) {
+      clock.t += 200_000;
+      await queue.tick();
+    }
+    const states = patches.map((p) => p.state);
+    expect(states).toEqual(expect.arrayContaining(["done", "pending", "dead"]));
+    for (const patch of patches) expect(patch).not.toHaveProperty("coalesceKey");
+  });
+});

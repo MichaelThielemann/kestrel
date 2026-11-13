@@ -88,7 +88,12 @@ coalesced, and a `CONFLICT` on any other column still fails `emit` as before. `c
 plain string on the event's data; this module attaches no meaning to it beyond the key.
 **Coalescing keeps the first event's payload**: a later event that joins a pending row is dropped
 with its data, so a listener pipeline must read the current state rather than rely on the payload
-of the event it was started with.
+of the event it was started with. A failed row whose key a `pending` row holds by the time the
+failure is recorded is superseded: it is marked `done` with its attempt counted and its error kept,
+instead of being retried or moved to dead-letter, because the pending row will do the same work.
+The outcome is logged, and a relay reports such a row as `error`, never as `dead`. A failed row
+whose key nobody holds, or only a running row, is retried as before. Recording an outcome never
+writes the key back to the failed row.
 
 `delayMs` (default `{}`) holds a pipeline's rows back: `{ "<pipeline>": <milliseconds> }`, whole
 non-negative numbers checked in the config schema. A row of a pipeline with a delay is written, and

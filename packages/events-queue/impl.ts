@@ -227,13 +227,29 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     return undefined;
   }
 
-  async function settle(row: QueueRow, error: string | undefined): Promise<void> {
+  function originalKeyOf(row: QueueRow): string | null {
+    if (row.pipeline === null || typeof row.payload.coalesceKey !== "string") return null;
+    return `${row.pipeline}:${row.payload.coalesceKey}`;
+  }
+
+  async function pendingHolderExists(key: string | null): Promise<boolean> {
+    if (key === null) return false;
+    const holder = await db.findOne<QueueRow>(QUEUE, { coalesceKey: key, state: "pending" });
+    return !isErr(holder) && holder.value !== null;
+  }
+
+  async function settle(row: QueueRow, error: string | undefined): Promise<boolean> {
     const at = now();
     const patch: Partial<Omit<QueueRow, "id">> = { lockedAt: null, lockedBy: null };
+    let superseded = false;
     if (error === undefined) Object.assign(patch, { state: "done", finishedAt: at, error: null });
     else {
       const attempts = row.attempts + 1;
-      if (attempts >= config.maxAttempts) {
+      superseded = await pendingHolderExists(originalKeyOf(row));
+      if (superseded) {
+        Object.assign(patch, { state: "done", attempts, finishedAt: at, error });
+        logger.info("events/queue: handler failed, a pending row of the same coalesceKey supersedes this one", { id: row.id, event: row.name, pipeline: row.pipeline, attempts, error });
+      } else if (attempts >= config.maxAttempts) {
         Object.assign(patch, { state: "dead", attempts, finishedAt: at, error });
         logger.error("events/queue: event moved to dead-letter", { id: row.id, event: row.name, pipeline: row.pipeline, attempts, error });
       } else {
@@ -244,6 +260,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     }
     const updated = await db.updateOne<QueueRow>(QUEUE, row.id, patch);
     if (isErr(updated)) logger.error("events/queue: cannot record the outcome, the lock expires and the event runs again", { id: row.id, error: updated.error.message });
+    return superseded;
   }
 
   async function fanOutUnfanned(): Promise<number> {
@@ -379,10 +396,10 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     return !isErr(won) && won.value === 1;
   }
 
-  function relayEntryOf(row: QueueRow, error: string | undefined): RelayEntry {
+  function relayEntryOf(row: QueueRow, error: string | undefined, superseded: boolean): RelayEntry {
     if (error === undefined) return { event: row.name, pipeline: row.pipeline ?? "", status: "done", attempts: row.attempts, dead: false, error: null };
     const attempts = row.attempts + 1;
-    return { event: row.name, pipeline: row.pipeline ?? "", status: "error", attempts, dead: attempts >= config.maxAttempts, error };
+    return { event: row.name, pipeline: row.pipeline ?? "", status: "error", attempts, dead: !superseded && attempts >= config.maxAttempts, error };
   }
 
   function pendingEntryOf(row: QueueRow): RelayEntry {
@@ -416,8 +433,8 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
           }
           const claimed: QueueRow = { ...row, state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null };
           const error = await runRow(claimed);
-          await settle(claimed, error);
-          pipelines.push(relayEntryOf(row, error));
+          const superseded = await settle(claimed, error);
+          pipelines.push(relayEntryOf(row, error, superseded));
         } catch (error) {
           logger.error("events/queue: relay could not deliver a row", { id: row.id, error: errorText(error) });
           pipelines.push(pendingEntryOf(row));
