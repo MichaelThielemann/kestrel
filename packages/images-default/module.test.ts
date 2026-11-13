@@ -113,7 +113,7 @@ describe("images/default configSchema", () => {
   it("rejects a media option: media is read through media@1, never from a configured collection", () => {
     const parsed = configSchema.safeParse({ media: { collection: "media_items" } });
     expect(parsed.success).toBe(false);
-    expect(parsed.error?.issues[0]?.message).toBe("Unrecognized key(s) in object: 'media'");
+    expect(parsed.error?.issues[0]?.message).toBe('Unrecognized key: "media"');
   });
 
   it("rejects unknown keys and an invalid publicPath", () => {
@@ -146,7 +146,7 @@ describe("images/default at boot", () => {
 
   it("fails with a media option in its config", async () => {
     const booting = boot({ config: { modules: [{ use: "./blobstore-memory" }, { use: "./persistence-memory" }, { use: "./media-memory" }, images({ media: { collection: "media_items" } })], triggers: [] }, modules: [blobstoreModule, persistenceModule, mediaModule, module], pipelines: [], logger: silentLogger });
-    await expect(booting).rejects.toThrow(new KestrelBootError("images/default", "invalid config: (root): Unrecognized key(s) in object: 'media'", "invalid-module-config"));
+    await expect(booting).rejects.toThrow(new KestrelBootError("images/default", 'invalid config: (root): Unrecognized key: "media"', "invalid-module-config"));
   });
 
   it("boots with a media@1 provider and requires it", async () => {
