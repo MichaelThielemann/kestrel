@@ -14,7 +14,7 @@ import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import { validateSchema } from "@michaelthielemann/kestrel/schema";
 import module from "./module.ts";
-import { DEFAULT_RENDER_TIMEOUT_MS, VARIANTS, createImages, type Config, type Images, type Variant } from "./impl.ts";
+import { DEFAULT_RENDER_TIMEOUT_MS, VARIANTS, createImages, whenIdle, type Config, type Images, type Variant } from "./impl.ts";
 import type { PixelCrop } from "./framing.ts";
 import { render, type Renderer } from "./generate.ts";
 import type { Size } from "./sizes.ts";
@@ -47,6 +47,7 @@ const RIGHT_CROP = { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } };
 const LEFT_CROP = { crops: { "1:1": { x: 0, y: 0, w: 0.6, h: 1 } } };
 const RIGHT: PixelCrop = { left: 400, top: 0, width: 600, height: 600 };
 const LEFT: PixelCrop = { left: 0, top: 0, width: 600, height: 600 };
+const LATER = 1001 + CONFIG.staleAfterMs;
 const SQUARE_PATH = "/media/m1/variants/square.webp";
 const VERSIONED_SQUARE = /^\/media\/m1\/variants\/square\.webp\?v=[0-9a-z]+$/;
 
@@ -64,7 +65,7 @@ interface AttachedVariant {
 interface World {
   blobs: MemoryBlobs;
   db: FakePersistence;
-  open(sizes?: Size[], renderer?: Renderer): Promise<Images>;
+  open(sizes?: Size[], renderer?: Renderer, deps?: { blobs?: Blobstore; now?: () => number }): Promise<Images>;
 }
 
 async function world(): Promise<World> {
@@ -77,7 +78,7 @@ async function world(): Promise<World> {
   return {
     blobs,
     db,
-    open: (sizes = SIZES, renderer = render) => createImages({ ...CONFIG, sizes }, { blobs, db, media, logger: quiet, render: renderer }, () => 1000),
+    open: (sizes = SIZES, renderer = render, deps = {}) => createImages({ ...CONFIG, sizes }, { blobs: deps.blobs ?? blobs, db, media, logger: quiet, render: renderer }, deps.now ?? (() => 1000)),
   };
 }
 
@@ -310,5 +311,46 @@ describe("images/default variants[].crop in images.attach", () => {
       await rm(dir, { recursive: true, force: true });
     }
     await images.close();
+  });
+  it("renders a failed size again after a write that stalled past staleAfterMs lands late, so crop and ?v= follow the bytes at the path", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.setFraming("m1", RIGHT_CROP));
+    expectOk(await first.generate("m1"));
+    const before = (await attached(first)).get("square")!;
+    expectOk(await first.setFraming("m1", LEFT_CROP));
+
+    const held = gate();
+    let armed = true;
+    const stalling: Blobstore = {
+      ...w.blobs,
+      put: async (key, data, options) => {
+        if (armed && key.startsWith("media-variants/")) {
+          armed = false;
+          held.arrive();
+          await held.wait;
+        }
+        return w.blobs.put(key, data, options);
+      },
+    };
+    const slow = await w.open([SQUARE], render, { blobs: stalling });
+    const generating = slow.generate("m1");
+    await held.reached;
+
+    const failing: Renderer = async () => { throw new Error("render failed"); };
+    const later = await w.open([SQUARE], failing, { now: () => LATER });
+    for (let attempt = 0; attempt < CONFIG.maxAttempts; attempt += 1) expectOk(await later.generate("m1"));
+    expect((await attached(later)).get("square")).toMatchObject({ state: "failed", crop: RIGHT, path: before.path });
+
+    held.open();
+    await generating;
+    await whenIdle(slow);
+    await whenIdle(later);
+    const after = (await attached(later)).get("square")!;
+    expect(after).toMatchObject({ state: "done", crop: LEFT });
+    expect(after.path).toMatch(VERSIONED_SQUARE);
+    expect(after.path).not.toBe(before.path);
+    expect(await leftEdgeIsBlue(later, "square.webp")).toBe(false);
+    for (const images of [first, slow, later]) await images.close();
   });
 });

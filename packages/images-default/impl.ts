@@ -615,7 +615,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     }
     if (!eligible(media.value.contentType)) return ok(undefined);
     if (lease.redo) {
-      const requeued = await db.updateMany<Variant>(VARIANTS, { mediaId, state: "done", size: { in: effective.map((size) => size.name) } }, { state: "pending", attempts: 0, error: null, updatedAt: now() });
+      const requeued = await db.updateMany<Variant>(VARIANTS, { mediaId, state: { in: ["done", "error", "failed"] }, size: { in: effective.map((size) => size.name) } }, { state: "pending", attempts: 0, error: null, updatedAt: now() });
       if (isErr(requeued)) return requeued;
     }
     const placed = await planItem(mediaId, lease);
