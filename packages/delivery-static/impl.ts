@@ -249,7 +249,6 @@ const INDEXES_COALESCE_KEY = "indexes";
 const BUILD = "build";
 const MARKER = "marker";
 const ORPHANS = "orphans";
-const SITEMAP_WRITTEN = "sitemap";
 const INDEXES_OUTCOME = "export:indexes";
 const LLMS_FULL_OUTCOME = "export:llmsFull";
 const INDEX_FILE = /^index\.([A-Za-z0-9]+)$/;
@@ -1038,12 +1037,12 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
           return ok();
         }),
       publishedExists,
-      sitemapWritten: {
-        read: async () => {
-          const row = await db.findOne<StateRow>(STATE, { id: SITEMAP_WRITTEN });
+      written: {
+        read: async (file) => {
+          const row = await db.findOne<StateRow>(STATE, { id: file });
           return isErr(row) ? err(dbFailure(row.error)) : ok(row.value?.value === "yes");
         },
-        write: (written) => writeState(SITEMAP_WRITTEN, written ? "yes" : "no"),
+        write: (file, written) => writeState(file, written ? "yes" : "no"),
       },
       stopping: () => stopping,
       interleave: () => runDueIndexes(),

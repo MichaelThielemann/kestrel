@@ -649,8 +649,11 @@ staging instance stays closed to crawlers while production with `NODE_ENV=produc
 production with `NODE_ENV=production`, or set `robots.policy` by hand: `"allow"` (what a site that served
 no robots.txt had), `"disallow"` for a site crawlers must not index, a value read per deployment from an
 environment variable, or `robots: false` to keep a robots.txt of your own, which the module then neither
-writes nor removes. `sitemap: false` leaves a `<prefix>sitemap.xml` alone in the same way. Without
-`siteUrl` the module writes no sitemap and removes only one an earlier export of its own wrote.
+writes nor removes. With `sitemap: false` or without `siteUrl` the module writes no sitemap and
+removes only one an earlier export of its own wrote, so a sitemap.xml of the site's own stays.
+`<prefix>llms.txt` is written on every export and overwrites a file of the site's own; without
+`llms.full` only an llms-full.txt this version wrote is removed, and one an older version wrote stays
+until you delete it.
 
 #### delivery-orphan-removal
 Older versions could leave a page's HTML at its old path after a failed render followed by a slug

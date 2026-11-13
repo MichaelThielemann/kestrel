@@ -125,14 +125,15 @@ async function setup(config: Config) {
   const { content, put } = fakeContent();
   const blobs = fakeBlobs();
   const logger = fakeLogger();
-  const delivery = await createDeliveryStatic(config, { content, site, renderer, blobs, db: createFakePersistence(), logger }, () => 42);
+  const db = createFakePersistence();
+  const delivery = await createDeliveryStatic(config, { content, site, renderer, blobs, db, logger }, () => 42);
   put("settings", "settings", { title__de: "Example Site", description__de: "A demo site" });
   put("pages", "p1", { slug__de: "home", title__de: "Start", status__de: "published", status__en: "published", seo__de: { description: "Die Startseite" } });
   put("pages", "p2", { slug__de: "kontakt", slug__en: "contact", title__de: "Kontakt", title__en: "Contact", status__de: "published", status__en: "published", seo__en: { title: "Contact us" } });
   put("pages", "p3", { slug__de: "intern", title__de: "Intern", status__de: "published", seo__de: { noindex: true } });
   put("pages", "p4", { slug__de: "entwurf", title__de: "Entwurf", status__de: "draft" });
   for (const id of ["p1", "p2", "p3", "p4"]) expectOk(await delivery.publish("pages", id));
-  return { delivery, blobs, logger, put };
+  return { delivery, blobs, logger, put, db };
 }
 
 describe("delivery/static llms export", () => {
@@ -196,7 +197,7 @@ describe("delivery/static llms export", () => {
   });
 
   it("writes llms-full.txt from the <main> of the stored HTML and removes it once disabled", async () => {
-    const { delivery, blobs, logger } = await setup({ ...base, siteUrl: "https://example.org", llms: { ...llms, full: true } });
+    const { delivery, blobs, logger, db } = await setup({ ...base, siteUrl: "https://example.org", llms: { ...llms, full: true } });
     expect(expectOk(await delivery.exportLlmsFull())).toEqual({ entries: 4 });
     const full = blobs.text("site/llms-full.txt")!;
     expect(full.startsWith("# Example Site\n\n> A demo site\n\n## pages\n\n### Start\n\nSource: https://example.org/\n\nDie Startseite\n\n#### Start\n\nBody of [/](https://example.org/kontakt)\n\n### Start\n\nSource: https://example.org/en\n\n")).toBe(true);
@@ -209,7 +210,7 @@ describe("delivery/static llms export", () => {
     expect(logger.errors).toEqual(["delivery/static: rendered output missing for llms-full.txt"]);
     expect(blobs.text("site/llms-full.txt")).toContain("### Contact us\n\nSource: https://example.org/en/contact\n\n### Kontakt");
 
-    const off = await createDeliveryStatic({ ...base, llms }, { content: fakeContent().content, site, renderer, blobs, db: createFakePersistence(), logger });
+    const off = await createDeliveryStatic({ ...base, llms }, { content: fakeContent().content, site, renderer, blobs, db, logger });
     expectOk(await off.exportIndexes());
     expect(blobs.text("site/llms-full.txt")).toBeUndefined();
     expect(blobs.text("site/llms.txt")).toBe("# Website\n");

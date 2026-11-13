@@ -735,7 +735,10 @@ pages exist but none has a rendered output yet, `sitemap.xml` and `llms.txt` are
 `sitemap.xml`: one `<url>` per page with the absolute `<loc>` (`siteUrl` plus the path, `/` for the
 home page and no trailing slash otherwise), `<lastmod>` from the document's `updatedAt` when the page
 is `live`, and `hreflang` alternates plus `x-default` for a page published in several languages.
-Without `siteUrl` no sitemap is written.
+While no page is listed (every page `noindex`, or nothing published), `sitemap.xml` is removed and
+`robots.txt` has no `Sitemap:` line. With `sitemap: false` or without `siteUrl` no sitemap is
+written, and a `site/sitemap.xml` an earlier export wrote is removed; one the site placed itself is
+left alone.
 
 `robots.txt`: `User-agent: *`, then `Allow: /` or `Disallow: /` from `robots.policy` (without it:
 `allow` when `NODE_ENV` is `production`, otherwise `disallow`, with a warning at boot), then the
@@ -756,13 +759,14 @@ restricted to the `<main>` element and converted to Markdown with turndown (head
 levels deeper, root-relative links and images made absolute with the origin of `siteUrl`, `#`
 anchors lose their link, `script`/`style`/`nav` chrome outside `<main>` is absent; without a
 `<main>`, the whole `<body>`, logged). It is exported after the re-renders, since it reads their
-HTML. If `full` is off, an existing `llms-full.txt` is deleted. If the HTML for a page is missing,
+HTML. If `full` is off, an `llms-full.txt` an earlier export wrote is deleted, and one the site
+placed itself is left alone. If the HTML for a page is missing,
 the page is included without a body and logged.
 
 Config (`delivery-static`, everything optional):
 ```ts
 siteUrl: "https://example.org",       // absolute base, a base path is kept; without it: paths, no sitemap
-sitemap: true,                        // false: no sitemap.xml
+sitemap: true,                        // false: no sitemap.xml, and the one an earlier export wrote is removed
 robots: { policy: "allow", extra: ["Disallow: /preview/"] }, // false: leave robots.txt alone
 llms: {
   full: false,                        // write llms-full.txt

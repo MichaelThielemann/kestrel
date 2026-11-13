@@ -127,15 +127,18 @@ export interface IndexFilesDeps {
   candidates(type: string, visit: (page: IndexCandidate[]) => Promise<Result<void, KestrelError>>): Promise<Result<void, KestrelError>>;
   /** Whether any document of a delivered type is published in any delivered locale. */
   publishedExists(): Promise<Result<boolean, KestrelError>>;
-  /** Whether the `sitemap.xml` under the prefix is one an export wrote, kept across restarts. */
-  sitemapWritten: {
-    read(): Promise<Result<boolean, KestrelError>>;
-    write(written: boolean): Promise<Result<void, KestrelError>>;
+  /** Whether the `sitemap.xml` or `llms-full.txt` under the prefix is one an export wrote, kept across restarts. */
+  written: {
+    read(file: OwnedFile): Promise<Result<boolean, KestrelError>>;
+    write(file: OwnedFile, written: boolean): Promise<Result<void, KestrelError>>;
   };
   stopping(): boolean;
   /** Runs work that came due meanwhile; called before each page an llms-full.txt export reads. */
   interleave(): Promise<void>;
 }
+
+/** An index file that is removed only when an export of this module wrote it. */
+export type OwnedFile = "sitemap" | "llmsFull";
 
 /** How many entries an export wrote; `skipped` when it wrote no list because published documents have no rendered output yet. */
 export interface ExportCount {
@@ -248,47 +251,49 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
     return ok(listed.value.some((entry) => entry.key === key));
   };
 
-  let sitemapOwned: boolean | undefined;
-  const ownSitemap = async (owned: boolean): Promise<Result<void, KestrelError>> => {
-    if (sitemapOwned === owned) return ok();
-    sitemapOwned = undefined;
-    const recorded = await deps.sitemapWritten.write(owned);
+  const owned = new Map<OwnedFile, boolean>();
+  const own = async (file: OwnedFile, written: boolean): Promise<Result<void, KestrelError>> => {
+    if (owned.get(file) === written) return ok();
+    owned.delete(file);
+    const recorded = await deps.written.write(file, written);
     if (isErr(recorded)) return recorded;
-    sitemapOwned = owned;
+    owned.set(file, written);
     return ok();
+  };
+
+  const removeOwned = async (file: OwnedFile, name: string): Promise<Result<void, KestrelError>> => {
+    let mine = owned.get(file);
+    if (mine === undefined) {
+      const read = await deps.written.read(file);
+      if (isErr(read)) return read;
+      mine = read.value;
+      owned.set(file, mine);
+    }
+    if (!mine) return ok();
+    const removed = await removeIfPresent(name);
+    if (isErr(removed)) return removed;
+    return own(file, false);
   };
 
   const writeSitemap = async (entries: readonly IndexEntry[]): Promise<Result<boolean, KestrelError>> => {
     if (entries.length === 0) {
       const removed = await removeIfPresent(SITEMAP_KEY);
       if (isErr(removed)) return removed;
-      const recorded = await ownSitemap(false);
+      const recorded = await own("sitemap", false);
       return isErr(recorded) ? recorded : ok(false);
     }
     const put = await putIfChanged(SITEMAP_KEY, buildSitemapXml(sitemapUrls(entries, deps.defaultLocale)), SITEMAP_CONTENT_TYPE);
     if (isErr(put)) return put;
-    const recorded = await ownSitemap(true);
+    const recorded = await own("sitemap", true);
     return isErr(recorded) ? recorded : ok(true);
   };
 
   const removeTurnedOff = async (): Promise<Result<void, KestrelError>> => {
-    if (config.sitemap && config.siteUrl === undefined) {
-      if (sitemapOwned === undefined) {
-        const read = await deps.sitemapWritten.read();
-        if (isErr(read)) return read;
-        sitemapOwned = read.value;
-      }
-      if (sitemapOwned) {
-        const sitemap = await removeIfPresent(SITEMAP_KEY);
-        if (isErr(sitemap)) return sitemap;
-        const recorded = await ownSitemap(false);
-        if (isErr(recorded)) return recorded;
-      }
+    if (!(config.sitemap && config.siteUrl !== undefined)) {
+      const sitemap = await removeOwned("sitemap", SITEMAP_KEY);
+      if (isErr(sitemap)) return sitemap;
     }
-    if (!config.llms.full) {
-      const full = await removeIfPresent(LLMS_FULL_KEY);
-      if (isErr(full)) return full;
-    }
+    if (!config.llms.full) return removeOwned("llmsFull", LLMS_FULL_KEY);
     return ok();
   };
 
@@ -360,6 +365,8 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
     const sections: LlmsFullSection[] = sectionsOf(entries, (e) => pages.get(e)).map((s) => ({ heading: s.heading, pages: s.items.filter((p): p is LlmsFullPage => p !== undefined) }));
     const full = await putIfChanged(LLMS_FULL_KEY, buildLlmsFullTxt({ ...head.value, sections }), LLMS_CONTENT_TYPE);
     if (isErr(full)) return full;
+    const recorded = await own("llmsFull", true);
+    if (isErr(recorded)) return recorded;
     return ok({ entries: entries.length });
   };
 

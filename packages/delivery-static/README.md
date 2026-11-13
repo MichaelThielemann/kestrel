@@ -85,10 +85,10 @@ without a `Sitemap:` line, and an llms.txt without sections.
 **sitemap.xml** (`application/xml; charset=utf-8`) lists one `<url>` per entry: `<loc>`, `<lastmod>` from the
 document's own `updatedAt` for `live` entries only, and, for a document with more than one listed locale, an
 `<xhtml:link rel="alternate" hreflang="…">` for each of them plus `hreflang="x-default"` for the default
-locale. Values are XML-escaped. With `sitemap: false` no sitemap is written and a `<prefix>sitemap.xml` is left alone,
-like robots.txt with `robots: false`. Without `siteUrl` no sitemap is written either, and one is removed only when an
-export of this module wrote it (recorded in `delivery_state`, so this holds across restarts); a missing `siteUrl` with
-the sitemap on logs one warning at setup. One file holds up to
+locale. Values are XML-escaped. With `sitemap: false` or without `siteUrl` no sitemap is written, and a
+`<prefix>sitemap.xml` is removed only when an export of this module wrote it (recorded in `delivery_state`, so this
+holds across restarts); one of the site's own is left alone. A missing `siteUrl` with the sitemap on logs one warning
+at setup. One file holds up to
 50 000 URLs per the sitemaps.org limit; this module writes no sitemap index.
 
 **robots.txt** (`text/plain; charset=utf-8`) is `User-agent: *` and `Allow: /` or `Disallow: /` from
@@ -114,7 +114,11 @@ it short), converted with turndown: headings shifted three levels, so a page's o
 `####` under its `###` page heading and `##` section heading, and root-relative links and images made
 absolute with the origin of `siteUrl`. Each page's own recorded `html` key is read, falling back to the
 format-name assumption only when that key does not lie under the page's own path. Without `llms.full`,
-`delivery.exportIndexes` removes a stale `llms-full.txt` and `delivery.exportLlmsFull` writes nothing.
+`delivery.exportIndexes` removes a `<prefix>llms-full.txt` only when an export of this module wrote it (recorded in
+`delivery_state`), and `delivery.exportLlmsFull` writes nothing.
+
+The module always writes `<prefix>llms.txt` and overwrites a file of that name it finds there; there is no
+switch to keep one of the site's own.
 
 **Unchanged files** are not written again: each process keeps a hash of what it last wrote per file, so
 the first export after a start always writes. The result gains `_indexes: { entries }` or

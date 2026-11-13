@@ -360,7 +360,7 @@ describe("delivery.exportIndexes", () => {
     expect(expectOk(await h.delivery.readStaleStatus()).exports.indexes).toMatchObject({ entries: 0, error: null, skipped: true });
   });
 
-  it("keeps the Sitemap line while published documents have no rendered output when an earlier sitemap.xml is still there, removes a turned-off llms-full.txt, and with sitemap: false leaves sitemap.xml alone", async () => {
+  it("keeps the Sitemap line while published documents have no rendered output when an earlier sitemap.xml is still there, and with sitemap: false leaves a sitemap.xml and an llms-full.txt it did not write alone", async () => {
     const blobs = memoryBlobs();
     for (const name of ["sitemap.xml", "llms-full.txt"]) blobs.files.set(`site/${name}`, { text: "old", contentType: "text/plain" });
     const h = await harness({ blobs });
@@ -369,7 +369,7 @@ describe("delivery.exportIndexes", () => {
     expectOk(await h.delivery.exportIndexes());
     expect(h.text("robots.txt")).toBe("User-agent: *\nAllow: /\n\nSitemap: https://example.org/sitemap.xml\n");
     expect(h.text("sitemap.xml")).toBe("old");
-    expect(h.text("llms-full.txt")).toBeUndefined();
+    expect(h.text("llms-full.txt")).toBe("old");
     const off = await harness({ blobs, config: { sitemap: false } });
     off.state.down = true;
     await seed(off);
@@ -517,16 +517,51 @@ describe("delivery.exportIndexes", () => {
     expect(h.blobs.puts).toEqual(["site/llms.txt"]);
   });
 
-  it("removes a stale llms-full.txt without llms.full, and exportLlmsFull then writes nothing", async () => {
+  it("without llms.full leaves an llms-full.txt it did not write alone, and exportLlmsFull then writes nothing", async () => {
     const blobs = memoryBlobs();
     blobs.files.set("site/llms-full.txt", { text: "old", contentType: "text/plain" });
     const h = await harness({ blobs });
     await seed(h);
     expectOk(await h.delivery.exportIndexes());
-    expect(h.text("llms-full.txt")).toBeUndefined();
+    expect(h.text("llms-full.txt")).toBe("old");
     h.blobs.puts.length = 0;
     expect(expectOk(await h.delivery.exportLlmsFull())).toEqual({ entries: 0 });
     expect(h.blobs.puts).toEqual([]);
+  });
+
+  it("removes an llms-full.txt an earlier export wrote once llms.full is off, also after a restart, and leaves a later one of the site's own", async () => {
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    const before = await harness({ db, blobs, config: { llms: { full: true } } });
+    await seed(before);
+    expectOk(await before.delivery.exportLlmsFull());
+    expect(before.text("llms-full.txt")).toContain("### Kontakt");
+    await before.delivery.close();
+    const after = await harness({ db, blobs, content: before.content });
+    expectOk(await after.delivery.exportIndexes());
+    expect(after.text("llms-full.txt")).toBeUndefined();
+    blobs.files.set("site/llms-full.txt", { text: "own", contentType: "text/plain" });
+    const later = await harness({ db, blobs, content: before.content });
+    expectOk(await later.delivery.exportIndexes());
+    expect(later.text("llms-full.txt")).toBe("own");
+  });
+
+  it("with sitemap: false removes a sitemap.xml an earlier export wrote, also after a restart, and leaves a later one of the site's own", async () => {
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    const before = await harness({ db, blobs });
+    await seed(before);
+    expectOk(await before.delivery.exportIndexes());
+    expect(before.text("sitemap.xml")).toContain("<urlset");
+    await before.delivery.close();
+    const after = await harness({ db, blobs, content: before.content, config: { sitemap: false } });
+    expectOk(await after.delivery.exportIndexes());
+    expect(after.text("sitemap.xml")).toBeUndefined();
+    expect(after.text("robots.txt")).toBe("User-agent: *\nAllow: /\n");
+    blobs.files.set("site/sitemap.xml", { text: "own", contentType: "application/xml" });
+    const later = await harness({ db, blobs, content: before.content, config: { sitemap: false } });
+    expectOk(await later.delivery.exportIndexes());
+    expect(later.text("sitemap.xml")).toBe("own");
   });
 
   it("records each export's outcome for readStaleStatus, the error of a failed one included", async () => {
