@@ -307,12 +307,16 @@ a warning is logged. A process that never ran `delivery.checkBuild` writes no ma
 
 `delivery.resumeStale` (a recovery net, not the render path) releases expired claims, removes tombstones and
 orphaned sets, re-raises marks that are older than a minute, due and unclaimed, for example after a process
-stopped, and asks for the index exports (see above). Once per database it also removes `index.<ext>` files under
+stopped, and asks for the index exports (see above). Once per database it also removes page outputs under
 `prefix` at paths no status row has, which older versions could leave behind after a failed render followed by a
-slug change; files under `reservedPaths` and every other file are left alone. It waits while an output is marked or
-rendering, or while a published document has no `live` output, and gives up a run during which a page was rendered;
-each removed file is logged, and the completed run is recorded in `delivery_state`, so it never runs again. It
-answers `{ released, swept, dispatched, aged, orphans }`. `delivery.retryStale` gives outputs that failed
+slug change. A page output is an `index.<ext>` file whose extension is one of `formats` or one a status row recorded;
+files under `reservedPaths`, renderer assets this process wrote, and every other file (a media copy such as
+`media/<id>/index.png` among them) are left alone. With an empty `prefix` it never runs, because the listing would
+cover the whole blob store. It waits while an output is marked or rendering, or while a published document has no
+`live` output, and gives up a run during which a page started to render; each removed file is logged, and the
+completed run is recorded in `delivery_state`, so it runs once. A restore that `delivery.checkBuild` detects (see
+above) arms it again, so the files of pages the restored database no longer has are removed once the re-renders
+settle. It answers `{ released, swept, dispatched, aged, orphans }`. `delivery.retryStale` gives outputs that failed
 `maxAttempts` times new attempts. `delivery.readStaleStatus` answers
 `{ stale, failed, rendering, unknown, oldestStaleAt, abandoned, exports }`.
 

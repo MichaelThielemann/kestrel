@@ -766,6 +766,68 @@ describe("the one-time removal of orphaned output files", () => {
     expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(2);
   });
 
+  it("removes only page outputs of the configured formats, never media copies or renderer assets named index.<ext>", async () => {
+    const h = await harness();
+    await seed(h);
+    for (const key of ["site/alt/index.html", "site/assets/index.css", "site/media/abc123/index.png", "site/downloads/index.pdf"]) h.blobs.files.set(key, { text: "x", contentType: "application/octet-stream" });
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(1);
+    expect(h.blobs.files.has("site/alt/index.html")).toBe(false);
+    for (const key of ["site/assets/index.css", "site/media/abc123/index.png", "site/downloads/index.pdf"]) expect(h.blobs.files.has(key), key).toBe(true);
+  });
+
+  it("never runs with an empty prefix, where the whole blob store would be compared", async () => {
+    const h = await harness({ config: { prefix: "" } });
+    await seed(h);
+    for (const key of ["alt/index.html", "media/abc123/index.png"]) h.blobs.files.set(key, { text: "x", contentType: "application/octet-stream" });
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(h.blobs.files.has("alt/index.html")).toBe(true);
+    expect(h.blobs.files.has("media/abc123/index.png")).toBe(true);
+  });
+
+  it("gives up a run during which a page started to render, even one that finished before the files were listed", async () => {
+    const db = createFakePersistence();
+    const content = await createContentDefault(model, db);
+    const h = await harness({ db, content, config: { reservedPaths: ["/media"] } });
+    const ids = await seed(h);
+    h.blobs.files.set("site/alt/index.html", { text: "x", contentType: "text/html" });
+    const list = content.list.bind(content);
+    let armed = true;
+    content.list = async (type, filter, options) => {
+      if (armed) {
+        armed = false;
+        expectOk(await h.delivery.publish("pages", ids.kontakt));
+      }
+      return list(type, filter, options);
+    };
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(h.blobs.files.has("site/alt/index.html")).toBe(true);
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(1);
+  });
+
+  it("runs again after a database restore, removing the pages the restored database no longer has", async () => {
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    const first = await harness({ db, blobs });
+    await seed(first);
+    expectOk(await first.delivery.checkBuild("b1"));
+    expectOk(await first.delivery.publishAll("pages"));
+    expect(expectOk(await first.delivery.resumeStale()).orphans).toBe(0);
+    expect(expectOk(await db.findOne(STATE, { id: "orphans" }))).not.toBeNull();
+    const backup = expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "marker" }))!.value;
+    const later = await first.page({ slug: "spaeter", title: "Später", status: "published" });
+    await first.delivery.close();
+    expect(blobs.files.has("site/spaeter/index.html")).toBe(true);
+
+    expectOk(await first.content.update("pages", later, { status: "draft" }, { locale: "de" }));
+    expectOk(await db.deleteMany(STATUS, { docId: later }));
+    expectOk(await db.updateMany(STATE, { id: "marker" }, { value: backup }));
+    const restored = await harness({ db, blobs, content: first.content });
+    expect(expectOk(await restored.delivery.checkBuild("b1"))).toMatchObject({ restored: true });
+    expectOk(await restored.delivery.publishAll("pages"));
+    expect(expectOk(await restored.delivery.resumeStale()).orphans).toBe(1);
+    expect(blobs.files.has("site/spaeter/index.html")).toBe(false);
+  });
+
   it("waits while outputs are marked for a re-render", async () => {
     const h = await withOrphans();
     expectOk(await h.delivery.markAll("pages"));

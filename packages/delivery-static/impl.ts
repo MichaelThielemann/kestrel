@@ -241,7 +241,7 @@ const MARKER = "marker";
 const ORPHANS = "orphans";
 const INDEXES_OUTCOME = "export:indexes";
 const LLMS_FULL_OUTCOME = "export:llmsFull";
-const INDEX_FILE = /^index\.[A-Za-z0-9]+$/;
+const INDEX_FILE = /^index\.([A-Za-z0-9]+)$/;
 const SEQUENCE = "changes";
 const SEQUENCE_WIDTH = 16;
 const SEQUENCE_TRIES = 100;
@@ -1441,16 +1441,23 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return ok(false);
   };
 
-  const pathOfKey = (key: string): string | null => {
+  const pageFileOf = (key: string): { path: string; extension: string } | null => {
     if (!key.startsWith(config.prefix)) return null;
     const parts = key.slice(config.prefix.length).split("/");
     const file = parts.pop();
-    if (file === undefined || !INDEX_FILE.test(file)) return null;
-    return `/${parts.join("/")}`;
+    const match = file === undefined ? null : INDEX_FILE.exec(file);
+    if (match === null || match[1] === undefined) return null;
+    return { path: `/${parts.join("/")}`, extension: match[1] };
   };
 
   const removeOrphans = async (): Promise<Result<number, DeliveryError>> => {
+    const startedBefore = renderStarts;
     if (orphansDone || stopping) return ok(0);
+    if (config.prefix === "") {
+      logger.info("delivery/static: the one-time removal of orphaned output files does not run with an empty prefix");
+      orphansDone = true;
+      return ok(0);
+    }
     const done = await db.findOne<StateRow>(STATE, { id: ORPHANS });
     if (isErr(done)) return err(dbFailure(done.error));
     if (done.value !== null) {
@@ -1471,14 +1478,18 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     const missing = await publishedWithoutLiveRow();
     if (isErr(missing)) return missing;
     if (missing.value) return skip("a published document has no live output");
-    const startedBefore = renderStarts;
     const listed = await blobs.list(config.prefix);
     if (isErr(listed)) return err(transientOnly(listed.error, "blobstore@1"));
     const owned = new Set<string>();
     const ownedPaths = new Set<string>();
+    const extensions = new Set<string>(config.formats);
     const walked = await pagedRows({}, (rows) => {
       for (const row of rows) {
-        for (const key of Object.values(row.writtenKeys ?? {})) owned.add(key);
+        for (const key of Object.values(row.writtenKeys ?? {})) {
+          owned.add(key);
+          const written = pageFileOf(key);
+          if (written !== null) extensions.add(written.extension);
+        }
         if (row.path === null) continue;
         ownedPaths.add(row.path);
         for (const key of Object.values(legacyKeysFor(row.path))) owned.add(key);
@@ -1488,9 +1499,9 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     if (isErr(walked)) return walked;
     const orphans = new Map<string, string[]>();
     for (const { key } of listed.value) {
-      const path = pathOfKey(key);
-      if (path === null || owned.has(key) || ownedPaths.has(path) || reservedMatch(path, config.reservedPaths) !== undefined) continue;
-      orphans.set(path, [...(orphans.get(path) ?? []), key]);
+      const file = pageFileOf(key);
+      if (file === null || !extensions.has(file.extension) || owned.has(key) || uploadedAssets.has(key) || ownedPaths.has(file.path) || reservedMatch(file.path, config.reservedPaths) !== undefined) continue;
+      orphans.set(file.path, [...(orphans.get(file.path) ?? []), key]);
     }
     if (renderStarts !== startedBefore || rendersInFlight > 0) return skip("a page was published while the files were compared");
     let removed = 0;
@@ -1505,6 +1516,16 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     if (isErr(recordedDone)) return recordedDone;
     orphansDone = true;
     return ok(removed);
+  };
+
+  const rearmOrphans = async (): Promise<void> => {
+    const cleared = await db.deleteMany(STATE, { id: ORPHANS });
+    if (isErr(cleared)) {
+      logger.error("delivery/static: could not arm the removal of orphaned output files after a restore, files of outputs the restored database lacks stay online", { error: cleared.error.message });
+      return;
+    }
+    orphansDone = false;
+    orphansSkipLogged = false;
   };
 
   return {
@@ -1598,7 +1619,10 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         await rotateMarker();
         return ok({ changed: false, restored: false, marked: 0 });
       }
-      if (restored.value) logWarn(logger, "delivery/static: the database is older than the delivered files (restored from a backup), so every output is rendered again");
+      if (restored.value) {
+        logWarn(logger, "delivery/static: the database is older than the delivered files (restored from a backup), so every output is rendered again");
+        await rearmOrphans();
+      }
       let marked = 0;
       for (const type of Object.keys(config.types)) {
         const all = await markAll(type);
