@@ -35,7 +35,10 @@ Net changes since 5.8.1.
   status rows when 6.0 first started, `delivery.resumeStale` (so only with the `*/5` recovery cron)
   removes every `index.<ext>` file under `prefix`, with the extension of a configured format, at a
   path no status row has and outside `reservedPaths`, logging each key (see upgrading.md,
-  "delivery-orphan-removal"). It never runs on a new or empty database or with an empty `prefix`.
+  "delivery-orphan-removal"). The root page and the files of a nested deployment that keeps its
+  marker under `prefix` stay. It runs once per database, and again only on a database restored from
+  a backup taken before the upgrade; never on a new or empty database or with a `prefix` that does
+  not end in `/`. Hand-placed index files that no page owns need their path in `reservedPaths`.
 - **A slug belongs to its locale; a translation without a slug of its own is never served.** `site@1`
   finds a locale only by its own slug there: `site.resolve`, `pathOf`, `resolveLinks`, `_paths`,
   `site.attachPaths`, the moves `site.pathsMoved` reports (and so the automatic redirects built from
@@ -1108,17 +1111,18 @@ Net changes since 5.8.1.
   build: a marker kept in `delivery_state` and in a blob next to `prefix` (`site/` keeps
   `site.delivery-marker`, see `markerKeyFor`) moves ahead in the blob before the first file written
   or removed after the two agreed, and the database takes it on the next recovery pass with no render
-  in flight or at shutdown. When the two differ, every output is marked and the one-time orphan
-  removal runs again; this also follows a process that stopped without shutting down after it changed
-  files. A check that finds them equal writes nothing. A `prefix` not ending in `/`, the default empty
+  in flight or at shutdown. When the two differ, every output is marked; this also follows a process
+  that stopped without shutting down after it changed files. A check that finds them equal writes nothing. A `prefix` not ending in `/`, the default empty
   one included, keeps no marker and detects no restore. A marker that cannot be read is logged and the
   build is still checked. The result gains `restored`.
 - `delivery.resumeStale` removes, once per database that held status rows at setup, page files under
   `prefix` at paths no status row has (left behind by older versions after a failed render and a slug
   change; listed under Breaking), logging each; it waits while outputs are marked or rendering, while
   no output is `live` or a published document has no `live` output, gives up a run during which a
-  page started to render, removes nothing when more paths look orphaned than status rows own, and
-  leaves renderer assets, media copies and `reservedPaths` alone. A failure of this removal is logged
+  page started to render, removes only paths a run at least `claimTtlSeconds` after the first still
+  finds unowned, checking each one again before its removal, removes nothing when more paths look
+  orphaned than status rows own, and leaves the root page, renderer assets, media copies, a nested
+  deployment's files and `reservedPaths` alone. A failure of this removal is logged
   and retried on the next run without failing the recovery pass. The result gains `orphans`.
 - `@michaelthielemann/kestrel/reads`: `observeReads`, `noteRead` and `unobserved`, one read scope per
   async context kept on `globalThis`; `noteRead` keeps a plain JSON copy of what it is given, and only

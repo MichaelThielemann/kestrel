@@ -335,16 +335,23 @@ stopped, and asks for the index exports (see above). Once per database that held
 (one from an older version), it also removes page outputs under `prefix` at paths no status row has, which older
 versions could leave behind after a failed render followed by a slug change. A new or empty database records the
 removal as done at setup, so it never runs there, whatever files the prefix holds. A page output is an `index.<ext>`
-file whose extension is one of `formats` or one a status row recorded; files under `reservedPaths`, renderer assets
-this process wrote, and every other file (a media copy such as `media/<id>/index.png` among them) are left alone. With
-an empty `prefix` it never runs, because the listing would cover the whole blob store. It waits while an output is
-marked or rendering, while no output is `live`, or while a published document has no `live` output, and gives up a
-run during which a page started to render. When more paths look orphaned than status rows own, it removes nothing,
-logs a warning and records the run. Each removed file is logged, and the completed run is recorded in
-`delivery_state`, so it runs once. A restore that `delivery.checkBuild` detects (see above) arms it again when the
-restored database has a `live` output, so the files of pages the restored database no longer has are removed once the
-re-renders settle. A failure of this removal (a file that cannot be deleted, a listing that fails) is logged and
-retried on the next run; the recovery pass still succeeds and answers `orphans: 0`. It answers `{ released, swept, dispatched, aged, orphans }`. `delivery.retryStale` gives outputs that failed
+file whose extension is one of `formats` or one a status row recorded. The root page `<prefix>index.<ext>`, files under
+`reservedPaths`, files below the prefix of another deployment nested in this one (recognized by its
+`<dir>.delivery-marker`, which that deployment writes at its first `delivery.checkBuild`; list its path in
+`reservedPaths` when it runs none), renderer assets this process wrote, and every other file (a media copy such as
+`media/<id>/index.png` among them) are left alone. With a `prefix` that does not end in `/`, the empty one included,
+it never runs, because the listing would reach keys of other deployments or the whole blob store. It waits while an
+output is marked or rendering, while no output is `live`, or while a published document has no `live` output, and
+gives up a run during which a page started to render. The first run that finds such paths removes nothing and
+records them; a run at least `claimTtlSeconds` later removes those it still finds unowned, checks each path for an
+owner again right before removing it, and stops when a page starts to render meanwhile, so a page another process is
+writing keeps its file. When more paths look orphaned than status rows own, it removes nothing, logs a warning and
+records the run. Each removed file is logged, and the completed run is recorded in `delivery_state`, so it runs once.
+A restore that `delivery.checkBuild` detects does not run it again; only a database restored from a backup taken
+before this version first started, which has no such record, runs it. So a hand-placed `index.<ext>` under `prefix`
+that no page owns needs its path in `reservedPaths` for as long as such a backup may be restored. A failure of this
+removal (a file that cannot be deleted, a listing that fails) is logged and retried on the next run; the recovery pass
+still succeeds and answers `orphans: 0`. It answers `{ released, swept, dispatched, aged, orphans }`. `delivery.retryStale` gives outputs that failed
 `maxAttempts` times new attempts. `delivery.readStaleStatus` answers
 `{ stale, failed, rendering, unknown, oldestStaleAt, abandoned, exports }`.
 

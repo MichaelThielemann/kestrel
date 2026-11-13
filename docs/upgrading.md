@@ -660,15 +660,20 @@ Older versions could leave a page's HTML at its old path after a failed render f
 change, still served. On a database that already held status rows when 6.0 first started, once no
 output is marked or rendering, some output is `live` and every published document has a `live` output,
 `delivery.resumeStale` deletes every `index.<ext>` file under `prefix` whose extension is one of
-`formats` (or one a status row recorded) at a path no status row has, outside `reservedPaths`. It runs
-only inside `delivery.resumeStale`, so it needs the `*/5` recovery cron (`resumeStalePages` in the
-`delivery-static` README); a project without that cron never runs it. Each deleted key is logged at info
-level, and the run is recorded in `delivery_state` so it does not repeat; a detected database restore
-arms it once more when the restored database has a `live` output. When more paths look orphaned than
-status rows own, it deletes nothing, logs a warning and records the run. A new or empty database never
-runs it, and it never runs with an empty `prefix`. A failure is logged and tried again on the next
-recovery run. Before upgrading, move any hand-placed `index.html` under `prefix` that no page owns out
-of it, or list its path in `reservedPaths`.
+`formats` (or one a status row recorded) at a path no status row has, outside `reservedPaths`. The root
+page `<prefix>index.<ext>` is never deleted, and neither is anything below the prefix of another
+deployment nested in this one that keeps its `<dir>.delivery-marker` there. It runs only inside
+`delivery.resumeStale`, so it needs the `*/5` recovery cron (`resumeStalePages` in the `delivery-static`
+README); a project without that cron never runs it. The first run only records the paths it found; a
+run at least `claimTtlSeconds` later deletes those still unowned. Each deleted key is logged at info
+level, and the run is recorded in `delivery_state`, so it never repeats on that database, also not
+after a detected restore; only a database restored from a backup taken before the upgrade runs it
+again. When more paths look orphaned than status rows own, it deletes nothing, logs a warning and
+records the run. A new or empty database never runs it, and it never runs with a `prefix` that does not
+end in `/`. A failure is logged and tried again on the next recovery run. List the path of every
+hand-placed `index.html` under `prefix` that no page owns in `reservedPaths`, and keep it there while a
+backup from before the upgrade may still be restored; a nested deployment that runs no
+`delivery.checkBuild` needs its path there too.
 
 #### delivery-index-triggers
 With `dependencies.render: "events"`, boot fails unless a trigger runs `delivery.exportIndexes` on

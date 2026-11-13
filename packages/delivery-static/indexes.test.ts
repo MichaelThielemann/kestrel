@@ -983,6 +983,8 @@ describe("a database restored from a backup", () => {
 });
 
 describe("the one-time removal of orphaned output files", () => {
+  const CLAIM_TTL_MS = 300_000;
+
   async function upgraded(options: Options = {}): Promise<Harness> {
     const first = await harness(options);
     await seed(first);
@@ -997,9 +999,19 @@ describe("the one-time removal of orphaned output files", () => {
     return h;
   }
 
+  async function sweep(h: Harness): Promise<number> {
+    const first = expectOk(await h.delivery.resumeStale()).orphans;
+    h.advance(CLAIM_TTL_MS + 1);
+    return first + expectOk(await h.delivery.resumeStale()).orphans;
+  }
+
+  const placed = (h: Harness, ...keys: string[]): void => {
+    for (const key of keys) h.blobs.files.set(key, { text: "x", contentType: "text/html" });
+  };
+
   it("removes index files at paths no status row has, logs each one, records that it ran and never runs again", async () => {
     const h = await withOrphans();
-    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(2);
+    expect(await sweep(h)).toBe(2);
     expect([...h.blobs.files.keys()].filter((k) => k.endsWith("index.html") || k.endsWith("index.pdf")).sort()).toEqual(["site/en/contact/index.html", "site/en/index.html", "site/index.html", "site/index.pdf", "site/intern/index.html", "site/kontakt/index.html", "site/media/index.html"]);
     expect(h.blobs.files.has("site/alt/photo.jpg")).toBe(true);
     expect(h.logger.infos.filter((i) => i.message === "delivery/static: removed an orphaned output file no status row owns").map((i) => i.data)).toEqual([
@@ -1008,37 +1020,98 @@ describe("the one-time removal of orphaned output files", () => {
     ]);
     expect(expectOk(await h.db.findOne(STATE, { id: "orphans" }))).not.toBeNull();
     h.blobs.files.set("site/later/index.html", { text: "x", contentType: "text/html" });
-    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(await sweep(h)).toBe(0);
     expect(h.blobs.files.has("site/later/index.html")).toBe(true);
+  });
+
+  it("removes nothing on the first pass, and a path only when a pass at least claimTtlSeconds later still finds it unowned", async () => {
+    const h = await withOrphans();
+    placed(h, "site/neu/index.html");
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    for (const key of ["site/alt/index.html", "site/en/old/index.html", "site/neu/index.html"]) expect(h.blobs.files.has(key), key).toBe(true);
+    await h.page({ slug: "neu", title: "Neu", status: "published" });
+    h.advance(CLAIM_TTL_MS - 1000);
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(h.blobs.files.has("site/alt/index.html")).toBe(true);
+    h.advance(2000);
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(2);
+    expect(h.blobs.files.has("site/alt/index.html")).toBe(false);
+    expect(h.blobs.files.get("site/neu/index.html")?.text).toContain("Neu");
+  });
+
+  it("keeps the page a publish puts at an orphaned path while the removal runs", async () => {
+    const h = await withOrphans();
+    placed(h, "site/neu/index.html");
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    h.advance(CLAIM_TTL_MS + 1);
+    const remove = h.blobs.remove.bind(h.blobs);
+    let neu: string | undefined;
+    h.blobs.remove = async (key) => {
+      if (key === "site/alt/index.html" && neu === undefined) neu = await h.page({ slug: "neu", title: "Neu", status: "published" });
+      return remove(key);
+    };
+    expectOk(await h.delivery.resumeStale());
+    expect(h.blobs.files.get("site/neu/index.html")?.text).toContain("Neu");
+    expect(expectOk(await h.db.findOne<StatusRow>(STATUS, { docId: neu!, locale: "de" }))).toMatchObject({ state: "live", path: "/neu", staleToken: null });
+    expectOk(await h.delivery.resumeStale());
+    expect(h.blobs.files.has("site/en/old/index.html")).toBe(false);
+    expect(h.blobs.files.get("site/neu/index.html")?.text).toContain("Neu");
+    expect(expectOk(await h.db.findOne(STATE, { id: "orphans" }))).not.toBeNull();
   });
 
   it("waits while a published document has no live output", async () => {
     const h = await withOrphans();
     h.state.down = true;
     await h.page({ slug: "neu", title: "Neu", status: "published" });
-    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(await sweep(h)).toBe(0);
     expect(h.blobs.files.has("site/alt/index.html")).toBe(true);
     expect(expectOk(await h.db.findOne(STATE, { id: "orphans" }))).toBeNull();
     h.state.down = false;
     const neu = expectOk(await h.db.findOne<StatusRow>(STATUS, { path: null, state: "error" }))!;
     expectOk(await h.delivery.publish("pages", neu.docId));
-    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(2);
+    expect(await sweep(h)).toBe(2);
   });
 
   it("removes only page outputs of the configured formats, never media copies or renderer assets named index.<ext>", async () => {
     const h = await upgraded();
-    for (const key of ["site/alt/index.html", "site/assets/index.css", "site/media/abc123/index.png", "site/downloads/index.pdf"]) h.blobs.files.set(key, { text: "x", contentType: "application/octet-stream" });
-    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(1);
+    placed(h, "site/alt/index.html", "site/assets/index.css", "site/media/abc123/index.png", "site/downloads/index.pdf");
+    expect(await sweep(h)).toBe(1);
     expect(h.blobs.files.has("site/alt/index.html")).toBe(false);
     for (const key of ["site/assets/index.css", "site/media/abc123/index.png", "site/downloads/index.pdf"]) expect(h.blobs.files.has(key), key).toBe(true);
+  });
+
+  it("never removes the page file at the root path, which reservedPaths cannot list", async () => {
+    const h = await upgraded({ config: { types: { pages: { home: "start" } } } });
+    expect(expectOk(await h.db.count(STATUS, { path: "/" }))).toBe(0);
+    placed(h, "site/index.html", "site/alt/index.html");
+    expect(await sweep(h)).toBe(1);
+    expect(h.blobs.files.has("site/index.html")).toBe(true);
+    expect(h.blobs.files.has("site/alt/index.html")).toBe(false);
+  });
+
+  it("leaves the pages of another deployment whose prefix lies below this one's alone", async () => {
+    const h = await upgraded();
+    placed(h, "site/preview.delivery-marker", "site/preview/index.html", "site/preview/about/index.html", "site/alt/index.html");
+    expect(await sweep(h)).toBe(1);
+    expect(h.blobs.files.has("site/preview/index.html")).toBe(true);
+    expect(h.blobs.files.has("site/preview/about/index.html")).toBe(true);
+    expect(h.blobs.files.has("site/alt/index.html")).toBe(false);
   });
 
   it("never runs with an empty prefix, where the whole blob store would be compared", async () => {
     const h = await upgraded({ config: { prefix: "" } });
     for (const key of ["alt/index.html", "media/abc123/index.png"]) h.blobs.files.set(key, { text: "x", contentType: "application/octet-stream" });
-    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(await sweep(h)).toBe(0);
     expect(h.blobs.files.has("alt/index.html")).toBe(true);
     expect(h.blobs.files.has("media/abc123/index.png")).toBe(true);
+  });
+
+  it("never runs with a prefix that does not end in a slash, whose listing also holds a sibling deployment's keys", async () => {
+    const h = await upgraded({ config: { prefix: "site" } });
+    placed(h, "site-preview/about/index.html", "sitealt/index.html");
+    expect(await sweep(h)).toBe(0);
+    expect(h.blobs.files.has("site-preview/about/index.html")).toBe(true);
+    expect(h.blobs.files.has("sitealt/index.html")).toBe(true);
   });
 
   it("gives up a run during which a page started to render, even one that finished before the files were listed", async () => {
@@ -1056,11 +1129,12 @@ describe("the one-time removal of orphaned output files", () => {
       return list(type, filter, options);
     };
     expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(expectOk(await h.db.findOne(STATE, { id: "orphans:candidates" }))).toBeNull();
     expect(h.blobs.files.has("site/alt/index.html")).toBe(true);
-    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(1);
+    expect(await sweep(h)).toBe(1);
   });
 
-  it("runs again after a database restore, removing the pages the restored database no longer has", async () => {
+  it("a restore that checkBuild detects does not run it again, so files the restored database lacks stay", async () => {
     const db = createFakePersistence();
     const blobs = memoryBlobs();
     const first = await harness({ db, blobs });
@@ -1080,8 +1154,31 @@ describe("the one-time removal of orphaned output files", () => {
     const restored = await harness({ db, blobs, content: first.content });
     expect(expectOk(await restored.delivery.checkBuild("b1"))).toMatchObject({ restored: true });
     expectOk(await restored.delivery.publishAll("pages"));
-    expect(expectOk(await restored.delivery.resumeStale()).orphans).toBe(1);
-    expect(blobs.files.has("site/spaeter/index.html")).toBe(false);
+    expect(await sweep(restored)).toBe(0);
+    expect(blobs.files.has("site/spaeter/index.html")).toBe(true);
+  });
+
+  it("does not run after an unclean stop of a process that started on an empty database against a published site", async () => {
+    const blobs = memoryBlobs();
+    const old = await harness({ blobs });
+    await seed(old);
+    expectOk(await old.delivery.checkBuild("b1"));
+    expectOk(await old.delivery.resumeStale());
+    await old.delivery.close();
+    const oldPages = [...blobs.files.keys()].filter((k) => k.endsWith("index.html")).sort();
+
+    const db = createFakePersistence();
+    const fresh = await harness({ blobs, db });
+    expect(expectOk(await fresh.delivery.checkBuild("b1"))).toMatchObject({ restored: true });
+    for (const slug of ["eins", "zwei", "drei", "vier", "fuenf", "sechs"]) await fresh.page({ slug, title: slug, status: "published" });
+    expectOk(await fresh.delivery.resumeStale());
+    await fresh.page({ slug: "sieben", title: "Sieben", status: "published" });
+
+    const after = await harness({ blobs, db, content: fresh.content });
+    expectOk(await after.delivery.checkBuild("b1"));
+    expectOk(await after.delivery.publishAll("pages"));
+    expect(await sweep(after)).toBe(0);
+    for (const key of oldPages) expect(blobs.files.has(key), key).toBe(true);
   });
 
   it("never runs on a database that held no status row when the process started, whatever files the prefix holds", async () => {
@@ -1089,7 +1186,7 @@ describe("the one-time removal of orphaned output files", () => {
     for (const key of ["site/alt/index.html", "site/en/old/index.html"]) blobs.files.set(key, { text: "x", contentType: "text/html" });
     const h = await harness({ blobs });
     await seed(h);
-    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(await sweep(h)).toBe(0);
     expect(blobs.files.has("site/alt/index.html")).toBe(true);
     expect(blobs.files.has("site/en/old/index.html")).toBe(true);
   });
@@ -1108,7 +1205,7 @@ describe("the one-time removal of orphaned output files", () => {
     expect(expectOk(await empty.delivery.checkBuild("b1"))).toMatchObject({ changed: true, restored: true, marked: 0 });
     expect(expectOk(await empty.delivery.resumeStale()).orphans).toBe(0);
     await empty.page({ slug: "neu", title: "Neu", status: "published" });
-    expect(expectOk(await empty.delivery.resumeStale()).orphans).toBe(0);
+    expect(await sweep(empty)).toBe(0);
     for (const key of pages) expect(blobs.files.has(key), key).toBe(true);
   });
 
@@ -1116,7 +1213,7 @@ describe("the one-time removal of orphaned output files", () => {
     const h = await withOrphans();
     for (const row of expectOk(await h.db.findMany<StatusRow>(STATUS, { state: "live" })).items) expectOk(await h.content.update("pages", row.docId, { status: "draft" }, { locale: row.locale }));
     expectOk(await h.db.updateMany(STATUS, { state: "live" }, { state: "error" }));
-    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(await sweep(h)).toBe(0);
     expect(h.blobs.files.has("site/alt/index.html")).toBe(true);
     expect(expectOk(await h.db.findOne(STATE, { id: "orphans" }))).toBeNull();
   });
@@ -1124,7 +1221,7 @@ describe("the one-time removal of orphaned output files", () => {
   it("gives up for good, removing nothing, when more paths look orphaned than status rows own", async () => {
     const h = await upgraded();
     for (const name of ["a", "b", "c", "d", "e", "f"]) h.blobs.files.set(`site/${name}/index.html`, { text: "x", contentType: "text/html" });
-    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(await sweep(h)).toBe(0);
     for (const name of ["a", "b", "c", "d", "e", "f"]) expect(h.blobs.files.has(`site/${name}/index.html`)).toBe(true);
     expect(h.logger.warnings.some((w) => w.includes("6 paths") && w.includes("removes nothing"))).toBe(true);
     expect(expectOk(await h.db.findOne(STATE, { id: "orphans" }))).not.toBeNull();
@@ -1138,6 +1235,8 @@ describe("the one-time removal of orphaned output files", () => {
     expect(failed.orphans).toBe(0);
     expect(h.logger.errors).toContain("delivery/static: the one-time removal of orphaned output files failed, the next recovery pass tries again");
     h.blobs.list = list;
+    expectOk(await h.delivery.resumeStale());
+    h.advance(CLAIM_TTL_MS + 1);
     const remove = h.blobs.remove.bind(h.blobs);
     h.blobs.remove = async (key) => (key === "site/alt/index.html" ? err(failure("TRANSIENT", "object is locked")) : remove(key));
     expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
@@ -1150,7 +1249,8 @@ describe("the one-time removal of orphaned output files", () => {
     const h = await withOrphans();
     expectOk(await h.delivery.markAll("pages"));
     h.emitted.length = 0;
-    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(await sweep(h)).toBe(0);
     expect(h.blobs.files.has("site/alt/index.html")).toBe(true);
   });
 });
+

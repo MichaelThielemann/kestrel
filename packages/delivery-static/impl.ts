@@ -38,7 +38,7 @@ export const LLMS_STALE = "delivery.llmsStale";
  */
 export function markerKeyFor(prefix: string): string | null {
   if (!prefix.endsWith("/")) return null;
-  return `${prefix.replace(/\/+$/, "")}.delivery-marker`;
+  return `${prefix.replace(/\/+$/, "")}${MARKER_SUFFIX}`;
 }
 
 export { normalizeSiteUrl, pageUrl } from "./site-url.ts";
@@ -249,6 +249,8 @@ const INDEXES_COALESCE_KEY = "indexes";
 const BUILD = "build";
 const MARKER = "marker";
 const ORPHANS = "orphans";
+const ORPHAN_CANDIDATES = "orphans:candidates";
+const MARKER_SUFFIX = ".delivery-marker";
 const INDEXES_OUTCOME = "export:indexes";
 const LLMS_FULL_OUTCOME = "export:llmsFull";
 const INDEX_FILE = /^index\.([A-Za-z0-9]+)$/;
@@ -1508,37 +1510,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return { path: `/${parts.join("/")}`, extension: match[1] };
   };
 
-  const removeOrphans = async (): Promise<Result<number, DeliveryError>> => {
-    const startedBefore = renderStarts;
-    if (orphansDone || stopping) return ok(0);
-    if (config.prefix === "") {
-      logger.info("delivery/static: the one-time removal of orphaned output files does not run with an empty prefix");
-      orphansDone = true;
-      return ok(0);
-    }
-    const done = await db.findOne<StateRow>(STATE, { id: ORPHANS });
-    if (isErr(done)) return err(dbFailure(done.error));
-    if (done.value !== null) {
-      orphansDone = true;
-      return ok(0);
-    }
-    const skip = (reason: string): Result<number, DeliveryError> => {
-      if (!orphansSkipLogged) logger.info(`delivery/static: the one-time removal of orphaned output files waits: ${reason}`);
-      orphansSkipLogged = true;
-      return ok(0);
-    };
-    for (const filter of [{ staleToken: { ne: null }, staleAttempts: { lt: dependencies.maxAttempts } }, { claimedBy: { ne: null } }]) {
-      const busy = await db.count(STATUS, filter);
-      if (isErr(busy)) return err(dbFailure(busy.error));
-      if (busy.value > 0) return skip("outputs wait for a re-render");
-    }
-    if (rendersInFlight > 0) return skip("outputs wait for a re-render");
-    const live = await db.count(STATUS, { state: "live" });
-    if (isErr(live)) return err(dbFailure(live.error));
-    if (live.value === 0) return skip("no output is live");
-    const missing = await publishedWithoutLiveRow();
-    if (isErr(missing)) return missing;
-    if (missing.value) return skip("a published document has no live output");
+  const findOrphans = async (): Promise<Result<{ orphans: Map<string, string[]>; ownedPaths: number }, DeliveryError>> => {
     const listed = await blobs.list(config.prefix);
     if (isErr(listed)) return err(transientOnly(listed.error, "blobstore@1"));
     const owned = new Set<string>();
@@ -1558,23 +1530,101 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       return ok();
     });
     if (isErr(walked)) return walked;
+    const nested = listed.value.filter(({ key }) => key.endsWith(MARKER_SUFFIX)).map(({ key }) => `${key.slice(0, -MARKER_SUFFIX.length)}/`);
     const orphans = new Map<string, string[]>();
     for (const { key } of listed.value) {
       const file = pageFileOf(key);
-      if (file === null || !extensions.has(file.extension) || owned.has(key) || uploadedAssets.has(key) || ownedPaths.has(file.path) || reservedMatch(file.path, config.reservedPaths) !== undefined) continue;
+      if (file === null || file.path === "/" || !extensions.has(file.extension) || owned.has(key) || uploadedAssets.has(key) || ownedPaths.has(file.path)) continue;
+      if (reservedMatch(file.path, config.reservedPaths) !== undefined || nested.some((dir) => key.startsWith(dir))) continue;
       orphans.set(file.path, [...(orphans.get(file.path) ?? []), key]);
     }
-    if (renderStarts !== startedBefore || rendersInFlight > 0) return skip("a page was published while the files were compared");
-    if (orphans.size > ownedPaths.size) {
-      logWarn(logger, `delivery/static: the one-time removal of orphaned output files found ${orphans.size} paths no status row has, more than the ${ownedPaths.size} paths status rows own, so it removes nothing; remove files that no page serves by hand`);
-      const gaveUp = await writeState(ORPHANS, JSON.stringify({ at: now(), removed: 0, unowned: orphans.size }));
-      if (isErr(gaveUp)) return gaveUp;
+    return ok({ orphans, ownedPaths: ownedPaths.size });
+  };
+
+  const readCandidates = async (): Promise<Result<{ at: number; paths: Set<string> } | null, DeliveryError>> => {
+    const row = await db.findOne<StateRow>(STATE, { id: ORPHAN_CANDIDATES });
+    if (isErr(row)) return err(dbFailure(row.error));
+    const raw = row.value?.value;
+    if (raw === null || raw === undefined) return ok(null);
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!isRecord(parsed) || typeof parsed.at !== "number" || !Array.isArray(parsed.paths)) return ok(null);
+      return ok({ at: parsed.at, paths: new Set(parsed.paths.filter((p): p is string => typeof p === "string")) });
+    } catch {
+      return ok(null);
+    }
+  };
+
+  const recordOrphansDone = async (value: Record<string, unknown>): Promise<Result<void, DeliveryError>> => {
+    const recorded = await writeState(ORPHANS, JSON.stringify({ at: now(), ...value }));
+    if (isErr(recorded)) return recorded;
+    orphansDone = true;
+    const cleared = await db.deleteMany(STATE, { id: ORPHAN_CANDIDATES });
+    if (isErr(cleared)) logger.error("delivery/static: could not remove the candidates of the finished orphan removal, they are never read again", { error: cleared.error.message });
+    return ok();
+  };
+
+  const removeOrphans = async (): Promise<Result<number, DeliveryError>> => {
+    const startedBefore = renderStarts;
+    if (orphansDone || stopping) return ok(0);
+    if (markerKey === null) {
+      logger.info("delivery/static: the one-time removal of orphaned output files does not run with a prefix that does not end in /");
       orphansDone = true;
       return ok(0);
     }
+    const done = await db.findOne<StateRow>(STATE, { id: ORPHANS });
+    if (isErr(done)) return err(dbFailure(done.error));
+    if (done.value !== null) {
+      orphansDone = true;
+      return ok(0);
+    }
+    const skip = (reason: string): Result<number, DeliveryError> => {
+      if (!orphansSkipLogged) logger.info(`delivery/static: the one-time removal of orphaned output files waits: ${reason}`);
+      orphansSkipLogged = true;
+      return ok(0);
+    };
+    const interrupted = (): boolean => renderStarts !== startedBefore || rendersInFlight > 0;
+    for (const filter of [{ staleToken: { ne: null }, staleAttempts: { lt: dependencies.maxAttempts } }, { claimedBy: { ne: null } }]) {
+      const busy = await db.count(STATUS, filter);
+      if (isErr(busy)) return err(dbFailure(busy.error));
+      if (busy.value > 0) return skip("outputs wait for a re-render");
+    }
+    if (rendersInFlight > 0) return skip("outputs wait for a re-render");
+    const live = await db.count(STATUS, { state: "live" });
+    if (isErr(live)) return err(dbFailure(live.error));
+    if (live.value === 0) return skip("no output is live");
+    const missing = await publishedWithoutLiveRow();
+    if (isErr(missing)) return missing;
+    if (missing.value) return skip("a published document has no live output");
+    const found = await findOrphans();
+    if (isErr(found)) return found;
+    const { orphans, ownedPaths } = found.value;
+    if (interrupted()) return skip("a page was published while the files were compared");
+    if (orphans.size > ownedPaths) {
+      logWarn(logger, `delivery/static: the one-time removal of orphaned output files found ${orphans.size} paths no status row has, more than the ${ownedPaths} paths status rows own, so it removes nothing; remove files that no page serves by hand`);
+      const gaveUp = await recordOrphansDone({ removed: 0, unowned: orphans.size });
+      return isErr(gaveUp) ? gaveUp : ok(0);
+    }
+    if (orphans.size === 0) {
+      const none = await recordOrphansDone({ removed: 0 });
+      return isErr(none) ? none : ok(0);
+    }
+    const candidates = await readCandidates();
+    if (isErr(candidates)) return candidates;
+    if (candidates.value === null) {
+      const noted = await writeState(ORPHAN_CANDIDATES, JSON.stringify({ at: now(), paths: [...orphans.keys()] }));
+      if (isErr(noted)) return noted;
+      logger.info(`delivery/static: the one-time removal of orphaned output files found ${orphans.size} paths no status row has, and removes those a recovery pass at least claimTtlSeconds later still finds unowned`);
+      return ok(0);
+    }
+    if (now() - candidates.value.at < claimTtlMs) return ok(0);
     let removed = 0;
     for (const [path, keys] of orphans) {
-      if (stopping) return ok(removed);
+      if (!candidates.value.paths.has(path)) continue;
+      if (stopping || interrupted()) return ok(removed);
+      const owned = await pathOwned(path);
+      if (isErr(owned)) return owned;
+      if (owned.value) continue;
       const gone = await removeFiles(path, keys);
       if (isErr(gone)) {
         logger.error("delivery/static: could not remove an orphaned output file", { path, keys, error: gone.error.message });
@@ -1583,29 +1633,9 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       for (const key of keys) logger.info("delivery/static: removed an orphaned output file no status row owns", { path, key });
       removed += keys.length;
     }
-    const recordedDone = await writeState(ORPHANS, JSON.stringify({ at: now(), removed }));
-    if (isErr(recordedDone)) return recordedDone;
-    orphansDone = true;
-    return ok(removed);
-  };
-
-  const rearmOrphans = async (): Promise<void> => {
-    const live = await db.count(STATUS, { state: "live" });
-    if (isErr(live)) {
-      logger.error("delivery/static: could not arm the removal of orphaned output files after a restore, files of outputs the restored database lacks stay online", { error: live.error.message });
-      return;
-    }
-    if (live.value === 0) {
-      logger.info("delivery/static: the restored database has no live output, so the removal of orphaned output files is not armed again");
-      return;
-    }
-    const cleared = await db.deleteMany(STATE, { id: ORPHANS });
-    if (isErr(cleared)) {
-      logger.error("delivery/static: could not arm the removal of orphaned output files after a restore, files of outputs the restored database lacks stay online", { error: cleared.error.message });
-      return;
-    }
-    orphansDone = false;
-    orphansSkipLogged = false;
+    if (interrupted()) return ok(removed);
+    const recordedDone = await recordOrphansDone({ removed });
+    return isErr(recordedDone) ? recordedDone : ok(removed);
   };
 
   const unpublishOutputs = async (type: string, id: string): Promise<Result<number, DeliveryError>> => {
@@ -1703,10 +1733,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       const marker = markerArmed ? "same" : await readMarker();
       const restored = marker === "differs";
       const changed = stored.value?.value !== build;
-      if (restored) {
-        logWarn(logger, "delivery/static: the database is older than the delivered files (restored from a backup), so every output is rendered again");
-        await rearmOrphans();
-      }
+      if (restored) logWarn(logger, "delivery/static: the database is older than the delivered files (restored from a backup), so every output is rendered again");
       let marked = 0;
       if (changed || restored) {
         for (const type of Object.keys(config.types)) {
