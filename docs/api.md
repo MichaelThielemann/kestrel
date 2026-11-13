@@ -454,6 +454,7 @@ builds a media URL from an id; it always reads `path` from the response.
 | GET | `/media/:id/:name` | – | the file at its one public URL; `:name` must be the exact name it was uploaded under, else 404; `Cache-Control: public, max-age=31536000, immutable`; anonymous (`media.read`, `identifyUser`), and so open to every signed-in caller as well |
 | GET | `/media/:id/variants/:file` | – | image variant, `:file` = `<size>.<ext>` (e.g. `thumb.webp`), see [Image variants](#image-variants); anonymous, like `/media/:id/:name` |
 | PATCH | `/media/:id` | `{ filename?, folder?, provenance?, locale?, alt?, title?, description? }` | metadata (`media.write`); a metadata-only change: renaming or moving never touches the blob or `path`, 409 on a name clash within the folder (`details.field: "location"`); text fields apply to `locale` (body or query, default `de`), `null` or `""` clears that language's text; `updatedAt` advances on every PATCH |
+| PUT | `/media/:id/framing` | `{ focus?, crops? }` | the media item like `GET /media/:id`, with its new `focus` and `framing`; replaces the item's focus and manual crops, see [Focus and crop](#focus-and-crop) (`media.write`); 400 for an invalid focus or crop, 404 for an unknown or trashed item and for one without variants (not an image, SVG, GIF) |
 | DELETE | `/media/:id` | – | `{ ok: true }`; deletes for good, also a trashed item; removes the public copy (if configured), then the blob, then the row, then sweeps the item's files once more, so a retry after a partial failure completes; a failed blob delete now fails the request instead of only logging it; 409 if a page references it — via a `ref` field (`hero`) or via an internal link in a `json` field (a block tree, e.g. `body`), e.g. `media/<id> is referenced by pages/<id2> (hero)` (`media.delete`); also deletes every image variant of that item |
 
 **POST `/media`.** The body is `multipart/form-data` with a repeatable `file` field (send several
@@ -670,6 +671,26 @@ Embedded hosts (without HTTP) register sizes at boot directly via the pipeline A
 `kestrel.run("registerImageSizesBoot", { trigger: { kind: "event", name: "boot" }, payload: { sizes } })`
 — the pipeline `registerImageSizesBoot` consists only of `images.register` and has no HTTP trigger,
 so it's reachable only via `kestrel.run`.
+
+### Focus and crop
+
+`GET /media/:id` and `GET /media` also return `focus`, a rectangle `{ x, y, w, h }` normalised to
+0..1 on the image as displayed (after its EXIF orientation), or `null`; anonymous callers read it
+too, so a page can set `object-position` from its centre. A signed-in caller also gets
+`framing: { focus, crops, ratios: [{ key, sizes, manual, fits, crop }] }`: the manual crops keyed by
+reduced aspect ratio (`"16:9"`), and per ratio of the `cover` sizes the names of its sizes, whether
+a manual crop is set, whether the focus lies within the cut, and the cut in pixels
+(`{ left, top, width, height }`, `null` for the centre).
+
+`PUT /media/:id/framing` with `{ focus?, crops? }` replaces both; a field left out is empty, so `{}`
+removes the framing. Only `cover` sizes are cut by it, from the manual crop of their ratio, else
+around the focus, else from the centre; the example's default sizes are all `inside`, so with them a
+framing changes no variant. A size whose cut changes renders again at the same path: until then its
+path keeps answering with the old variant, afterwards `variants[].path` ends in `?v=<token>` and the
+pages showing the item are marked for a re-render. Ratio keys are exact, so a size of `1000x562`
+gets a crop of its own, not the one of `"16:9"`. The `images-default` README, "Focus and crop", has
+the rules, and `@michaelthielemann/kestrel-images-default/framing` computes the same cuts in the
+browser.
 
 ## Static delivery (the second traffic light)
 
