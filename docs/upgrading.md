@@ -666,8 +666,8 @@ only inside `delivery.resumeStale`, so it needs the `*/5` recovery cron (`resume
 `delivery-static` README); a project without that cron never runs it. The first run only records the
 paths it found; a run at least `claimTtlSeconds` later deletes those still unowned. Each deleted key is
 logged at info level, and the run is recorded in `delivery_state`, so it never repeats on that
-database. When more paths look orphaned than status rows own, it deletes nothing, logs a warning and
-records the run. A new or empty database never
+database. When more paths look orphaned than status rows own, or an orphaned page lies below another
+orphaned path, it deletes nothing, logs a warning and records the run. A new or empty database never
 runs it, and it never runs with a `prefix` that does not end in `/`. A failure is logged and tried
 again on the next recovery run. List the path of every other site below `prefix` (a nested deployment,
 an uploaded tree of pages) and of every hand-placed `index.html` that no page owns in `reservedPaths`.

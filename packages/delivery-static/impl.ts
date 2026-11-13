@@ -1539,6 +1539,13 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       const gaveUp = await recordOrphansDone({ removed: 0, unowned: orphans.size });
       return isErr(gaveUp) ? gaveUp : ok(0);
     }
+    const paths = [...orphans.keys()];
+    const nested = paths.find((path) => paths.some((above) => path.startsWith(`${above}/`)));
+    if (nested !== undefined) {
+      logWarn(logger, `delivery/static: the one-time removal of orphaned output files found the orphaned page ${nested} below another orphaned path, which looks like another site under this prefix, so it removes nothing; list that site's path in reservedPaths and remove files that no page serves by hand`);
+      const gaveUp = await recordOrphansDone({ removed: 0, nested });
+      return isErr(gaveUp) ? gaveUp : ok(0);
+    }
     if (orphans.size === 0) {
       const none = await recordOrphansDone({ removed: 0 });
       return isErr(none) ? none : ok(0);

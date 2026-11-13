@@ -342,7 +342,9 @@ removal as done at setup, so it never runs there, whatever files the prefix hold
 file whose extension is one of `formats` or one a status row recorded. The root page `<prefix>index.<ext>`, files under
 `reservedPaths`, renderer assets this process wrote, and every other file (a media copy such as `media/<id>/index.png`
 among them) are left alone. Another site below `prefix` (a nested deployment, an uploaded tree of pages) needs its
-path in `reservedPaths`, as it does anyway so that no page of this deployment overwrites its home page. With a `prefix` that does not end in `/`, the empty one included,
+path in `reservedPaths`, as it does anyway so that no page of this deployment overwrites its home page; when an
+orphaned page lies below another orphaned path, the removal takes the two for such a site, removes nothing, logs a
+warning and records the run. With a `prefix` that does not end in `/`, the empty one included,
 it never runs, because the listing would reach keys of other deployments or the whole blob store. It waits while an
 output is marked or rendering, while no output is `live`, or while a published document has no `live` output, and
 gives up a run during which a page started to render. It also waits until `delivery.checkBuild` has run in this process. The first run that finds such paths removes nothing and records them; a run at least
