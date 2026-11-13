@@ -56,7 +56,7 @@ type.
 `narrowListTranslations` implement one rule on top of `content@1` — a locale that fails a filter is
 never a fallback source and never counted in `_translations` — for every module that builds a
 public view of content (`site-default`'s `resolve`/`resolveLinks`, `delivery-static`'s
-`delivery.publish`/`exportLlms`, `content-default`'s own `get`/`list` steps). `satisfiesFilter`
+`delivery.publish` and index exports, `content-default`'s own `get`/`list` steps). `satisfiesFilter`
 decides membership through `content.list` itself, so a `Condition` entry (`{ in: [...] }`,
 `{ ne: ... }`, …) is evaluated with the store's own semantics — never reimplemented, and never
 turns into a false negative or a thrown error at request time — including when `filter` names a

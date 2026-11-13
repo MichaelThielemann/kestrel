@@ -36,7 +36,7 @@ running instance with a login, a content type and a step of your own.
 | `@michaelthielemann/kestrel-blobstore-filesystem` | blobstore@1 on the local filesystem. |
 | `@michaelthielemann/kestrel-blobstore-s3` | blobstore@1 on Amazon S3 or any S3-compatible store. |
 | `@michaelthielemann/kestrel-content-default` | content@1: typed documents from a config-declared model, on top of persistence@1. |
-| `@michaelthielemann/kestrel-delivery-static` | Steps delivery.publish/unpublish/readStatus/publishAll: renders published documents per locale via renderer@1, stores them in blobstore@1 and tracks a publish status. |
+| `@michaelthielemann/kestrel-delivery-static` | Steps delivery.publish/unpublish/readStatus/publishAll: renders published documents per locale via renderer@1, stores them in blobstore@1, tracks a publish status and writes sitemap.xml, robots.txt and llms.txt. |
 | `@michaelthielemann/kestrel-events-direct` | Inline event delivery: subscribes event-trigger pipelines to events@1 and runs them within the emitting request. |
 | `@michaelthielemann/kestrel-events-inmemory` | events@1 in process. The bus only; add events-direct or events-queue to deliver event-trigger pipelines. |
 | `@michaelthielemann/kestrel-events-queue` | Outbox event delivery: emit writes one row per subscribed pipeline and returns, an in-process worker runs them with retry, backoff and dead-letter. |
