@@ -1082,9 +1082,12 @@ Net changes since 5.8.1.
   a file. `delivery.resumeStale` asks for the index files on every run and for llms-full.txt while
   its last export failed.
 - `delivery.checkBuild` also renders everything again after a database restore with an unchanged
-  build: a marker kept in `delivery_state` and in the blob `.delivery-static-marker` is replaced after
-  every check, after a recovery pass that saw an output change, and at shutdown; when the two differ,
-  every output is marked. The result gains `restored`.
+  build: a marker kept in `delivery_state` and in a blob next to `prefix` (`site/` keeps
+  `site.delivery-marker`, see `markerKeyFor`) is replaced after every check, after a recovery pass
+  that saw an output change, and at shutdown; when the two differ, every output is marked and the
+  one-time orphan removal runs again. A `prefix` not ending in `/`, the default empty one included,
+  keeps no marker and detects no restore. A marker that cannot be read is logged and the build is
+  still checked. The result gains `restored`.
 - `delivery.resumeStale` removes, once per database, `index.<ext>` files under `prefix` at paths no
   status row has (left behind by older versions after a failed render and a slug change), logging
   each; it waits while outputs are marked or a published document has no `live` output, and skips

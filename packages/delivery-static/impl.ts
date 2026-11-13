@@ -30,8 +30,15 @@ export const OUTPUT_STALE = "delivery.outputStale";
 export const INDEXES_STALE = "delivery.indexesStale";
 /** Raised through `events@1` with `dependencies.render: "events"` and `llms.full`, by `delivery.requestIndexes` and after a re-render; its data carries `coalesceKey: "llms"`. */
 export const LLMS_STALE = "delivery.llmsStale";
-/** The blob key, outside the configured prefix, of the marker that tells a database restored from a backup apart from the one that wrote the current files. */
-export const MARKER_KEY = ".delivery-static-marker";
+/**
+ * The blob key of the marker that tells a database restored from a backup apart from the one that wrote the current
+ * files: next to `prefix`, outside the files it serves (`site/` keeps `site.delivery-marker`). `null` for a prefix
+ * that does not end in `/`, the empty one included, which keeps no marker, so a restore goes undetected there.
+ */
+export function markerKeyFor(prefix: string): string | null {
+  if (!prefix.endsWith("/")) return null;
+  return `${prefix.replace(/\/+$/, "")}.delivery-marker`;
+}
 
 export { normalizeSiteUrl, pageUrl } from "./indexes.ts";
 
@@ -336,6 +343,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   if (dependencies.render === "events" && deps.events === undefined) throw new Error('delivery/static: dependencies.render "events" needs an events@1 provider');
   const events = deps.events;
   const siteUrl = config.siteUrl === undefined ? undefined : normalizeSiteUrl(config.siteUrl);
+  const markerKey = markerKeyFor(config.prefix);
   if (siteUrl === undefined && config.sitemap) logWarn(logger, "delivery/static: no siteUrl is set, so no sitemap.xml is written and llms.txt lists paths instead of URLs");
   const nodeEnv = "nodeEnv" in deps ? deps.nodeEnv : process.env.NODE_ENV;
   const robotsPolicy: RobotsPolicy = config.robots.policy ?? (nodeEnv === "production" ? "allow" : "disallow");
@@ -1400,16 +1408,20 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return ok({ marked: dispatched.value });
   };
 
-  const detectRestore = async (): Promise<Result<boolean, DeliveryError>> => {
+  const detectRestore = async (): Promise<boolean | null> => {
+    if (markerKey === null) return false;
     const stored = await db.findOne<StateRow>(STATE, { id: MARKER });
-    if (isErr(stored)) return err(dbFailure(stored.error));
-    const blob = await blobs.get(MARKER_KEY);
-    if (isErr(blob)) return err(transientOnly(blob.error, "blobstore@1"));
-    if (blob.value === null) return ok(false);
-    return ok(new TextDecoder().decode(blob.value) !== stored.value?.value);
+    const blob = await blobs.get(markerKey);
+    if (isErr(stored) || isErr(blob)) {
+      logger.error("delivery/static: could not read the restore marker, this build check cannot tell whether the database was restored", { error: isErr(stored) ? stored.error.message : isErr(blob) ? blob.error.message : "" });
+      return null;
+    }
+    if (blob.value === null) return false;
+    return new TextDecoder().decode(blob.value) !== stored.value?.value;
   };
 
   const rotateMarker = async (): Promise<void> => {
+    if (markerKey === null) return;
     markerArmed = true;
     outputsChanged = false;
     const token = randomUUID();
@@ -1418,7 +1430,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       logger.error("delivery/static: could not store the restore marker, a later restore may go unnoticed", { error: stored.error.message });
       return;
     }
-    const written = await blobs.put(MARKER_KEY, new TextEncoder().encode(token), { contentType: "text/plain; charset=utf-8" });
+    const written = await blobs.put(markerKey, new TextEncoder().encode(token), { contentType: "text/plain; charset=utf-8" });
     if (isErr(written)) logger.error("delivery/static: could not write the restore marker, the next build check renders every output again", { error: written.error.message });
   };
 
@@ -1613,13 +1625,12 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       const stored = await db.findOne<StateRow>(STATE, { id: BUILD });
       if (isErr(stored)) return err(dbFailure(stored.error));
       const restored = await detectRestore();
-      if (isErr(restored)) return restored;
       const changed = stored.value?.value !== build;
-      if (!changed && !restored.value) {
-        await rotateMarker();
+      if (!changed && restored !== true) {
+        if (restored === false) await rotateMarker();
         return ok({ changed: false, restored: false, marked: 0 });
       }
-      if (restored.value) {
+      if (restored === true) {
         logWarn(logger, "delivery/static: the database is older than the delivered files (restored from a backup), so every output is rendered again");
         await rearmOrphans();
       }
@@ -1633,8 +1644,8 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         const written = stored.value === null ? await db.createOne<StateRow>(STATE, { id: BUILD, value: build, seq: null, updatedAt: now() }) : await db.updateOne<StateRow>(STATE, BUILD, { value: build, updatedAt: now() });
         if (isErr(written) && written.error.code !== "CONFLICT") return err(dbFailure(written.error));
       }
-      await rotateMarker();
-      return ok({ changed, restored: restored.value, marked });
+      if (restored !== null) await rotateMarker();
+      return ok({ changed, restored: restored === true, marked });
     },
     async republishOutput(target) {
       typeConfig(target.type);

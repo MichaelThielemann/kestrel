@@ -11,7 +11,7 @@ import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/test
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createSiteDefault } from "@michaelthielemann/kestrel-site-default/impl";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
-import { INDEXES_STALE, LLMS_STALE, MARKER_KEY, STATE, STATUS, createDeliveryStatic, type Delivery, type StatusRow } from "./impl.ts";
+import { INDEXES_STALE, LLMS_STALE, STATE, STATUS, createDeliveryStatic, markerKeyFor, type Delivery, type StatusRow } from "./impl.ts";
 import { buildRobotsTxt, buildSitemapXml, dedupeEntries, normalizeSiteUrl, pageUrl, sitemapUrls, type IndexEntry } from "./indexes.ts";
 import { configSchema } from "./module.ts";
 
@@ -697,7 +697,56 @@ describe("index exports in the background loop, on a manual clock", () => {
   });
 });
 
+const MARKER_KEY = "site.delivery-marker";
+
 describe("a database restored from a backup", () => {
+  it("keeps the marker next to the prefix, outside the files it serves, and keeps none with an empty prefix", () => {
+    expect(markerKeyFor("site/")).toBe(MARKER_KEY);
+    expect(markerKeyFor("prod/site/")).toBe("prod/site.delivery-marker");
+    expect(markerKeyFor("")).toBeNull();
+  });
+
+  it("two sites in one blob store under different prefixes never take each other's marker for a restore", async () => {
+    const blobs = memoryBlobs();
+    const prod = await harness({ blobs, config: { prefix: "prod/site/" } });
+    const staging = await harness({ blobs, config: { prefix: "staging/site/" } });
+    expect(expectOk(await prod.delivery.checkBuild("b1"))).toMatchObject({ restored: false });
+    expect(expectOk(await staging.delivery.checkBuild("b1"))).toMatchObject({ restored: false });
+    expect(expectOk(await prod.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
+    expect(expectOk(await staging.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
+    expect([...blobs.files.keys()].filter((k) => k.endsWith(".delivery-marker")).sort()).toEqual(["prod/site.delivery-marker", "staging/site.delivery-marker"]);
+  });
+
+  it("with an empty prefix writes no marker into the served root and still checks the build", async () => {
+    const h = await harness({ config: { prefix: "" } });
+    await h.page({ slug: "kontakt", title: "Kontakt", status: "published" });
+    expect(expectOk(await h.delivery.checkBuild("b1"))).toMatchObject({ changed: true, restored: false });
+    expect(expectOk(await h.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
+    await h.delivery.close();
+    expect([...h.blobs.files.keys()].filter((k) => k.includes("marker"))).toEqual([]);
+  });
+
+  it("still marks and stores a changed build when the marker cannot be read, and leaves the marker as it is", async () => {
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    const first = await harness({ db, blobs });
+    await seed(first);
+    expectOk(await first.delivery.checkBuild("b1"));
+    await first.delivery.close();
+    const marker = blobs.files.get(MARKER_KEY)!.text;
+    const get = blobs.get.bind(blobs);
+    blobs.get = async (key) => (key === MARKER_KEY ? err(failure("TRANSIENT", "store unavailable")) : get(key));
+    const next = await harness({ db, blobs, content: first.content });
+    const checked = expectOk(await next.delivery.checkBuild("b2"));
+    expect(checked).toMatchObject({ changed: true, restored: false });
+    expect(checked.marked).toBeGreaterThan(0);
+    expect(next.logger.errors).toContain("delivery/static: could not read the restore marker, this build check cannot tell whether the database was restored");
+    expect(expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "build" }))!.value).toBe("b2");
+    await next.delivery.close();
+    expect(blobs.files.get(MARKER_KEY)!.text).toBe(marker);
+    expect(expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "marker" }))!.value).toBe(marker);
+  });
+
   it("checkBuild renders every output again when the database is older than the delivered files, even with the same build", async () => {
     const db = createFakePersistence();
     const blobs = memoryBlobs();

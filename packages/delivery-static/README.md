@@ -299,11 +299,15 @@ the next start. Run it after every deploy: every output is then re-rendered, and
 code. It answers `{ changed, restored, marked }`.
 
 **A restored database.** A database restored from a backup holds older status rows than the files in the blob
-store. `delivery.checkBuild` keeps a random marker both in `delivery_state` and in the blob `.delivery-static-marker`
-(at the blob store's root, outside `prefix`) and replaces it in both after every check, on every
-`delivery.resumeStale` run after an output changed, and when the process stops. When the two differ at the next
-check, the database is older than the files: every output is marked as for a new build, `restored` is `true`, and
-a warning is logged. A process that never ran `delivery.checkBuild` writes no marker.
+store. `delivery.checkBuild` keeps a random marker both in `delivery_state` and in a blob next to `prefix`, outside
+the files it serves (`site/` keeps `site.delivery-marker`, `markerKeyFor` from `./impl` names it), and replaces it in
+both after every check, on every `delivery.resumeStale` run after an output changed, and when the process stops.
+When the two differ at the next check, the database is older than the files: every output is marked as for a new
+build, `restored` is `true`, and a warning is logged. A process that never ran `delivery.checkBuild` writes no
+marker. A `prefix` that does not end in `/`, the default empty one included, keeps no marker, because every key
+there could be served; a restore then goes undetected and needs a "Publish all". Sites that share a blob store under
+different prefixes keep apart markers. When the marker cannot be read, the check logs an error, still compares and
+stores the build (marking everything when it changed), and leaves the marker for the next check.
 
 `delivery.resumeStale` (a recovery net, not the render path) releases expired claims, removes tombstones and
 orphaned sets, re-raises marks that are older than a minute, due and unclaimed, for example after a process
