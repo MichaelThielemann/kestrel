@@ -564,6 +564,23 @@ describe("delivery.exportIndexes", () => {
     expect(later.text("sitemap.xml")).toBe("own");
   });
 
+  it("leaves a sitemap.xml and an llms-full.txt of the site's own that replaced an exported one before the next start", async () => {
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    const before = await harness({ db, blobs, config: { llms: { full: true } } });
+    await seed(before);
+    expectOk(await before.delivery.exportIndexes());
+    expectOk(await before.delivery.exportLlmsFull());
+    await before.delivery.close();
+    blobs.files.set("site/sitemap.xml", { text: "own sitemap", contentType: "application/xml" });
+    blobs.files.set("site/llms-full.txt", { text: "own llms", contentType: "text/plain" });
+    const after = await harness({ db, blobs, content: before.content, config: { sitemap: false } });
+    expectOk(await after.delivery.exportIndexes());
+    expect(after.text("sitemap.xml")).toBe("own sitemap");
+    expect(after.text("llms-full.txt")).toBe("own llms");
+    expect(after.text("robots.txt")).toBe("User-agent: *\nAllow: /\n");
+  });
+
   it("records each export's outcome for readStaleStatus, the error of a failed one included", async () => {
     const h = await harness({ config: { llms: { full: true } } });
     await seed(h);

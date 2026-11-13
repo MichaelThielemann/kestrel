@@ -27,10 +27,10 @@ Net changes since 5.8.1.
   run, not at boot by themselves. Without `robots.policy`, robots.txt is `Disallow: /` unless
   `NODE_ENV` is `production`, which Kestrel never sets itself; boot warns, and `kestrel upgrade`'s
   `delivery/robots-policy` reports it without changing the config. `robots: false` keeps a
-  robots.txt of the site's own. With `sitemap: false` or without `siteUrl` only a sitemap.xml an
-  earlier export wrote is removed. `<prefix>llms.txt` is written on every export, whether or not a
+  robots.txt of the site's own. With `sitemap: false` or without `siteUrl` only a sitemap.xml that
+  still holds what an earlier export wrote is removed. `<prefix>llms.txt` is written on every export, whether or not a
   pipeline asked for llms files before, and overwrites a file of the site's own; without
-  `llms.full`, only an llms-full.txt an export of this version wrote is removed.
+  `llms.full`, only an llms-full.txt that still holds what an export of this version wrote is removed.
 - `delivery-static`: **deletes orphaned page files once after the upgrade.** On a database that held
   status rows when 6.0 first started, `delivery.resumeStale` (so only with the `*/5` recovery cron)
   removes every `index.<ext>` file under `prefix`, with the extension of a configured format, at a
@@ -1087,9 +1087,9 @@ Net changes since 5.8.1.
   the sitemaps.org schema needs at least one `<url>`. robots.txt takes `robots.policy` (`allow` or `disallow`;
   unset: `allow` under `NODE_ENV=production`, otherwise `disallow`, with a boot warning),
   `robots.extra` lines and a `Sitemap:` line when a sitemap.xml is written. With `sitemap: false` or
-  without `siteUrl` there is no sitemap, one an earlier export wrote is removed and one of the site's
-  own stays; without `siteUrl` boot warns. Without `llms.full` an llms-full.txt is removed only when
-  an export wrote it. Unchanged files are not written again within a process.
+  without `siteUrl` there is no sitemap, one that still holds what an earlier export wrote is removed
+  and one of the site's own stays; without `siteUrl` boot warns. Without `llms.full` an llms-full.txt
+  is removed only while it holds what an export wrote. Unchanged files are not written again within a process.
   The result gains `_indexes: { entries }` or `_llmsFull: { entries }`, and
   `delivery.readStaleStatus` answers `exports: { indexes, llmsFull }` with each export's last `at`,
   `entries`, `error` and `skipped` (no list written because no output is rendered yet).

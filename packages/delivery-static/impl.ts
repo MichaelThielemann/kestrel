@@ -1027,9 +1027,9 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       written: {
         read: async (file) => {
           const row = await db.findOne<StateRow>(STATE, { id: file });
-          return isErr(row) ? err(dbFailure(row.error)) : ok(row.value?.value === "yes");
+          return isErr(row) ? err(dbFailure(row.error)) : ok(row.value?.value || null);
         },
-        write: (file, written) => writeState(file, written ? "yes" : "no"),
+        write: (file, hash) => writeState(file, hash ?? ""),
       },
       stopping: () => stopping,
       interleave: () => runDueIndexes(),

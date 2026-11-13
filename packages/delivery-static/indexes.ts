@@ -127,17 +127,17 @@ export interface IndexFilesDeps {
   candidates(type: string, visit: (page: IndexCandidate[]) => Promise<Result<void, KestrelError>>): Promise<Result<void, KestrelError>>;
   /** Whether any document of a delivered type is published in any delivered locale. */
   publishedExists(): Promise<Result<boolean, KestrelError>>;
-  /** Whether the `sitemap.xml` or `llms-full.txt` under the prefix is one an export wrote, kept across restarts. */
+  /** The sha256 (hex) of the `sitemap.xml` or `llms-full.txt` an export last wrote under the prefix, kept across restarts; `null` when none. */
   written: {
-    read(file: OwnedFile): Promise<Result<boolean, KestrelError>>;
-    write(file: OwnedFile, written: boolean): Promise<Result<void, KestrelError>>;
+    read(file: OwnedFile): Promise<Result<string | null, KestrelError>>;
+    write(file: OwnedFile, hash: string | null): Promise<Result<void, KestrelError>>;
   };
   stopping(): boolean;
   /** Runs work that came due meanwhile; called before each page an llms-full.txt export reads. */
   interleave(): Promise<void>;
 }
 
-/** An index file that is removed only when an export of this module wrote it. */
+/** An index file that is removed only while it still holds what an export of this module wrote. */
 export type OwnedFile = "sitemap" | "llmsFull";
 
 /** How many entries an export wrote; `skipped` when it wrote no list because published documents have no rendered output yet. */
@@ -152,6 +152,10 @@ export interface IndexFiles {
 }
 
 const REMOVED = "-";
+
+function sha256(body: string | Uint8Array): string {
+  return createHash("sha256").update(body).digest("hex");
+}
 
 function text(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
@@ -168,15 +172,15 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
 
   const stopped = (): KestrelError => failure("TRANSIENT", "delivery/static: the process is stopping, the export runs again after the restart");
 
-  const putIfChanged = async (name: string, body: string, contentType: string): Promise<Result<void, KestrelError>> => {
+  const putIfChanged = async (name: string, body: string, contentType: string): Promise<Result<string, KestrelError>> => {
     const key = `${config.prefix}${name}`;
-    const hash = createHash("sha256").update(body).digest("hex");
-    if (written.get(key) === hash) return ok();
+    const hash = sha256(body);
+    if (written.get(key) === hash) return ok(hash);
     written.delete(key);
     const put = await blobs.put(key, new TextEncoder().encode(body), { contentType });
     if (isErr(put)) return put;
     written.set(key, hash);
-    return ok();
+    return ok(hash);
   };
 
   const removeIfPresent = async (name: string): Promise<Result<void, KestrelError>> => {
@@ -239,7 +243,8 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
   const writeRobots = async (sitemapWritten: boolean): Promise<Result<void, KestrelError>> => {
     if (config.robots === null) return ok();
     const sitemapUrl = sitemapWritten && config.siteUrl !== undefined ? `${config.siteUrl}/${SITEMAP_KEY}` : undefined;
-    return putIfChanged(ROBOTS_KEY, buildRobotsTxt({ policy: config.robots.policy, extra: config.robots.extra, sitemapUrl }), ROBOTS_CONTENT_TYPE);
+    const put = await putIfChanged(ROBOTS_KEY, buildRobotsTxt({ policy: config.robots.policy, extra: config.robots.extra, sitemapUrl }), ROBOTS_CONTENT_TYPE);
+    return isErr(put) ? put : ok();
   };
 
   const sitemapPresent = async (): Promise<Result<boolean, KestrelError>> => {
@@ -251,13 +256,13 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
     return ok(listed.value.some((entry) => entry.key === key));
   };
 
-  const owned = new Map<OwnedFile, boolean>();
-  const own = async (file: OwnedFile, written: boolean): Promise<Result<void, KestrelError>> => {
-    if (owned.get(file) === written) return ok();
+  const owned = new Map<OwnedFile, string | null>();
+  const own = async (file: OwnedFile, hash: string | null): Promise<Result<void, KestrelError>> => {
+    if (owned.get(file) === hash) return ok();
     owned.delete(file);
-    const recorded = await deps.written.write(file, written);
+    const recorded = await deps.written.write(file, hash);
     if (isErr(recorded)) return recorded;
-    owned.set(file, written);
+    owned.set(file, hash);
     return ok();
   };
 
@@ -269,22 +274,26 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
       mine = read.value;
       owned.set(file, mine);
     }
-    if (!mine) return ok();
-    const removed = await removeIfPresent(name);
-    if (isErr(removed)) return removed;
-    return own(file, false);
+    if (mine === null) return ok();
+    const current = await blobs.get(`${config.prefix}${name}`);
+    if (isErr(current)) return current;
+    if (current.value !== null && sha256(current.value) === mine) {
+      const removed = await removeIfPresent(name);
+      if (isErr(removed)) return removed;
+    }
+    return own(file, null);
   };
 
   const writeSitemap = async (entries: readonly IndexEntry[]): Promise<Result<boolean, KestrelError>> => {
     if (entries.length === 0) {
       const removed = await removeIfPresent(SITEMAP_KEY);
       if (isErr(removed)) return removed;
-      const recorded = await own("sitemap", false);
+      const recorded = await own("sitemap", null);
       return isErr(recorded) ? recorded : ok(false);
     }
     const put = await putIfChanged(SITEMAP_KEY, buildSitemapXml(sitemapUrls(entries, deps.defaultLocale)), SITEMAP_CONTENT_TYPE);
     if (isErr(put)) return put;
-    const recorded = await own("sitemap", true);
+    const recorded = await own("sitemap", put.value);
     return isErr(recorded) ? recorded : ok(true);
   };
 
@@ -365,7 +374,7 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
     const sections: LlmsFullSection[] = sectionsOf(entries, (e) => pages.get(e)).map((s) => ({ heading: s.heading, pages: s.items.filter((p): p is LlmsFullPage => p !== undefined) }));
     const full = await putIfChanged(LLMS_FULL_KEY, buildLlmsFullTxt({ ...head.value, sections }), LLMS_CONTENT_TYPE);
     if (isErr(full)) return full;
-    const recorded = await own("llmsFull", true);
+    const recorded = await own("llmsFull", full.value);
     if (isErr(recorded)) return recorded;
     return ok({ entries: entries.length });
   };
