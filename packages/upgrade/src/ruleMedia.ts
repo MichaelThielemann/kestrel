@@ -536,8 +536,9 @@ export const imagesMediaOptionRule: Rule = {
 const IMAGES_RENDER_TIMEOUT_RULE_ID = "modules/images-render-timeout";
 const DEFAULT_STALE_AFTER_MS = 60000;
 const DEFAULT_RENDER_TIMEOUT_MS = 30000;
+const RENDER_TIMEOUT_ONLY_ISSUE = /^invalid config(?: \(with defaults from "[^"]*"\))?: renderTimeoutMs: renderTimeoutMs must be less than staleAfterMs$/;
 
-/** `modules/images-render-timeout`: images-default's config requires `renderTimeoutMs` below `staleAfterMs` from 6.0.0 on, so a render ends before the item lease it renews runs out. */
+/** `modules/images-render-timeout`: images-default's config requires `renderTimeoutMs` below `staleAfterMs` from 6.0.0 on, so a render ends before the item lease it renews runs out. When the boot check's config error for the module names only this issue, the finding carries that module's name and stands in for the error. */
 export const imagesRenderTimeoutRule: Rule = {
   id: IMAGES_RENDER_TIMEOUT_RULE_ID,
   check(ctx) {
@@ -551,7 +552,8 @@ export const imagesRenderTimeoutRule: Rule = {
     const timeoutText = `renderTimeoutMs (${timeout}${config.renderTimeoutMs === undefined ? ", the default" : ""})`;
     const message = `images-default's ${timeoutText} is not below its ${staleText}; from 6.0.0 on its config fails validation with "renderTimeoutMs must be less than staleAfterMs", since a render has to end before the lease on its media item runs out`;
     const suggestion = `raise staleAfterMs above ${timeout} or lower renderTimeoutMs below ${stale}`;
-    const where = { module: images.use, path: config.renderTimeoutMs === undefined ? "staleAfterMs" : "renderTimeoutMs" };
+    const explained = ctx.bootCheck.errors.find((e) => e.code === "invalid-module-config" && e.module !== undefined && RENDER_TIMEOUT_ONLY_ISSUE.test(e.reason));
+    const where = { module: explained?.module ?? images.use, path: config.renderTimeoutMs === undefined ? "staleAfterMs" : "renderTimeoutMs" };
     return [finding(IMAGES_RENDER_TIMEOUT_RULE_ID, IMAGES_RENDER_TIMEOUT_RULE_ID, message, suggestion, where, undefined, upgradingDocs("modules-images-render-timeout"))];
   },
 };

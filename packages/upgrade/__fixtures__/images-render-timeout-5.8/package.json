@@ -1,0 +1,13 @@
+{
+  "name": "upgrade-fixture-images-render-timeout",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@michaelthielemann/kestrel": "^5.8.0",
+    "@michaelthielemann/kestrel-blobstore-s3": "^5.8.0",
+    "@michaelthielemann/kestrel-events-inmemory": "^5.8.0",
+    "@michaelthielemann/kestrel-images-default": "^5.8.0",
+    "@michaelthielemann/kestrel-media-default": "^5.8.0",
+    "@michaelthielemann/kestrel-persistence-sqlite": "^5.8.0"
+  }
+}

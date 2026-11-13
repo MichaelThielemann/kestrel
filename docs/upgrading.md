@@ -384,7 +384,9 @@ its paths, and renews it before each write, so a render has to end before the le
 `renderTimeoutMs` (default 30000) is below `staleAfterMs` (default 60000). Both options exist in 5.8,
 so a project that set `staleAfterMs` to 30000 or less and left `renderTimeoutMs` at its default
 booted there and fails here. The finding names both values, defaults included; raise `staleAfterMs`
-above `renderTimeoutMs` or lower `renderTimeoutMs` below `staleAfterMs` by hand.
+above `renderTimeoutMs` or lower `renderTimeoutMs` below `staleAfterMs` by hand. When the boot tier
+runs and this is the only issue in `images/default`'s config, the finding stands in for that boot
+error, so `boot/invalid-module-config` is not listed for it as well.
 
 #### modules-references-media-target
 A `references-default` target `{ collection: "media_items" }` reads `media-default`'s collection

@@ -748,6 +748,20 @@ describe("modules/images-render-timeout", () => {
   it("leaves values it cannot read as numbers to config validation", async () => {
     expect(await imagesRenderTimeoutRule.check(contextFor(await project([{ use: IMAGES_DEFAULT, config: { staleAfterMs: "20000" } }])))).toEqual([]);
   });
+
+  it("names the module of the boot error it explains, so that error is not listed again", async () => {
+    const reason = "invalid config: renderTimeoutMs: renderTimeoutMs must be less than staleAfterMs";
+    const ctx = { ...contextFor(await project([{ use: IMAGES_DEFAULT, config: { staleAfterMs: 20000 } }])), bootCheck: { ...bootCheck(), errors: [{ code: "invalid-module-config" as const, owner: "images/default", module: "images/default", reason }] } };
+    const findings = await imagesRenderTimeoutRule.check(ctx);
+    expect(findings[0]?.where).toEqual({ module: "images/default", path: "staleAfterMs" });
+  });
+
+  it("leaves a boot error that names another config issue too to the boot tier", async () => {
+    const reason = "invalid config: renderTimeoutMs: renderTimeoutMs must be less than staleAfterMs; chunk: Expected number, received string";
+    const ctx = { ...contextFor(await project([{ use: IMAGES_DEFAULT, config: { staleAfterMs: 20000, chunk: "5" } }])), bootCheck: { ...bootCheck(), errors: [{ code: "invalid-module-config" as const, owner: "images/default", module: "images/default", reason }] } };
+    const findings = await imagesRenderTimeoutRule.check(ctx);
+    expect(findings[0]?.where).toEqual({ module: IMAGES_DEFAULT, path: "staleAfterMs" });
+  });
 });
 
 describe("modules/references-media-target", () => {
