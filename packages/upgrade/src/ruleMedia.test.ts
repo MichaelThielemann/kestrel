@@ -757,7 +757,7 @@ describe("modules/images-render-timeout", () => {
   });
 
   it("leaves a boot error that names another config issue too to the boot tier", async () => {
-    const reason = "invalid config: renderTimeoutMs: renderTimeoutMs must be less than staleAfterMs; chunk: Expected number, received string";
+    const reason = "invalid config: renderTimeoutMs: renderTimeoutMs must be less than staleAfterMs; chunk: Invalid input: expected number, received string";
     const ctx = { ...contextFor(await project([{ use: IMAGES_DEFAULT, config: { staleAfterMs: 20000, chunk: "5" } }])), bootCheck: { ...bootCheck(), errors: [{ code: "invalid-module-config" as const, owner: "images/default", module: "images/default", reason }] } };
     const findings = await imagesRenderTimeoutRule.check(ctx);
     expect(findings[0]?.where).toEqual({ module: IMAGES_DEFAULT, path: "staleAfterMs" });
