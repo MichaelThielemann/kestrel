@@ -189,7 +189,7 @@ export interface Images {
   variantCounts(mediaIds: string[]): Promise<Result<Map<string, VariantCounts>, KestrelError>>;
   read(mediaId: string, file: string): Promise<Result<VariantBlob | null, KestrelError>>;
   exportTo(dir: string): Promise<Result<{ written: number; skipped: number }, KestrelError>>;
-  /** The variant's public URL, `<publicPath>/<id>/variants/<file>`; from the row's second finished render on (`renders` from `2` on, a count a format change keeps), followed by `?v=<token>`, which no other render of that path is given. */
+  /** The variant's public URL, `<publicPath>/<id>/variants/<file>`; from the row's second finished render on (`renders` from `2` on, a count a format change keeps, or raises by one when the new path held bytes before), followed by `?v=<token>`, which no other render of that path is given. */
   publicPath(mediaId: string, variant: Variant): string;
   publicCopyEnabled(): boolean;
   syncPublic(): Promise<Result<PublicSync, KestrelError>>;
@@ -1118,7 +1118,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const fresh = newRow(item, size, decodable, ow, oh, framing);
       const heldBefore = await db.findOne<Retired>(RETIRED, { slot: slotOf(mediaId, fileOf(fresh)) });
       if (isErr(heldBefore)) return heldBefore;
-      const renders = heldBefore.value === null ? (row.renders ?? 0) : Math.max(row.renders ?? 0, 1);
+      const renders = (row.renders ?? 0) + (heldBefore.value === null ? 0 : 1);
       const replanned = await updateAsRead(row, { key: fresh.key, format: fresh.format, spec: fresh.spec, width: fresh.width, height: fresh.height, bytes: 0, state: "planned", error: fresh.error, attempts: 0, updatedAt: now(), crop: fresh.crop, renderedCrop: "", renders, originalWidth: fresh.originalWidth, originalHeight: fresh.originalHeight });
       if (isErr(replanned)) return replanned;
       if (replanned.value === null) {

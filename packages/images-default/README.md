@@ -244,8 +244,10 @@ that a cache filled stays bound to the bytes it got then. The same holds for any
 the path, after a changed size or format, a repair by `images.resume`, or a size registered again
 after a prune, whose path held bytes before. The query appears from a row's second finished render
 on, and a row placed at a path that held bytes before starts its count at one. A format change
-moves the row to another path and keeps its count, so the first render at the new path of a
-variant that rendered before already has a query. Only a row's first render, at a path that never
+moves the row to another path and keeps its count, one more when that path held bytes before (a
+change back to the row's earlier format, for example), so the first render at the new path of a
+variant that rendered before already has a query, and a URL listed while it renders is not one the
+path had before. Only a row's first render, at a path that never
 held other bytes, keeps the plain path. The path itself, the public copy's file name, `images.serve` (whose
 `:file` carries no query) and `images.export:<dir>` stay as they are; a check that compares
 exported URLs with files ignores the query.

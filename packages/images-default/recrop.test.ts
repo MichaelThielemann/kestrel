@@ -531,6 +531,41 @@ describe("images/default ?v= of a re-rendered variant", () => {
     for (const open of [images, changed]) await open.close();
   });
 
+  it("gives a format change back to the row's own earlier path a query that path never had, with no render in between", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    const earlier: string[] = [];
+    for (const framing of [A, B]) {
+      expectOk(await images.setFraming("m1", framing));
+      expectOk(await images.generate("m1"));
+      earlier.push(await squarePath(w, images));
+    }
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", format: "webp", renders: 2 });
+
+    const failing: Renderer = async () => {
+      throw new Error("premature end of input");
+    };
+    const original = await w.open([{ ...SQUARE, format: "original" }], failing);
+    expectOk(await original.plan(["m1"]));
+    await original.generate("m1");
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ format: "jpeg", renders: 2 });
+
+    const back = await w.open([SQUARE]);
+    expectOk(await back.plan(["m1"]));
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ format: "webp" });
+    const pending = await squarePath(w, back);
+    expectOk(await back.generate("m1"));
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", format: "webp" });
+    const final = await squarePath(w, back);
+
+    expect(pending).toMatch(VERSIONED_SQUARE);
+    expect(final).toMatch(VERSIONED_SQUARE);
+    expect(earlier).not.toContain(pending);
+    expect(earlier).not.toContain(final);
+    expect(final).not.toBe(pending);
+    for (const open of [images, original, back]) await open.close();
+  });
+
   it("gives a format change back to a path a pruned size rendered before a query on its first render there", async () => {
     const w = await world();
     const images = await w.open([THUMB, SQUARE]);
