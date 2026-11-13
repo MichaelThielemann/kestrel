@@ -1281,7 +1281,12 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (!isErr(written) && written.value === "lost") return ok(null);
     if (isErr(written)) {
       const recorded = await recordFailure(row, size, attempts, written.error.message);
-      return isErr(recorded) ? recorded : err(written.error);
+      if (isErr(recorded)) return recorded;
+      if (recorded.value === null) {
+        const dropped = await dropStaleRender(item, row, original);
+        if (isErr(dropped) || dropped.value === "gone") return dropped;
+      }
+      return err(written.error);
     }
     const kept = await wroteHeld(lease);
     if (isErr(kept) || !kept.value) return isErr(kept) ? kept : ok(null);

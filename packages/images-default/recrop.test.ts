@@ -2084,6 +2084,44 @@ describe("images/default writes racing a lease-free prune or a request left on a
     }
   });
 
+  it("a re-render whose public copy fails while another process prunes its size leaves no bytes at the private path and the original in the public copy", async () => {
+    const w = await world();
+    const g = gate();
+    let pausePrivate = false;
+    let failCopy = false;
+    const blobs: Blobstore = {
+      ...w.blobs,
+      put: async (key, data, options) => {
+        if (pausePrivate && key === "media-variants/m1/square.webp") {
+          pausePrivate = false;
+          failCopy = true;
+          g.arrive();
+          await g.wait;
+        } else if (failCopy && key === "site/media/m1/variants/square.webp") {
+          failCopy = false;
+          return err(failure("TRANSIENT", "copy store unavailable"));
+        }
+        return w.blobs.put(key, data, options);
+      },
+    };
+    const declaring = await w.open([SQUARE, THUMB], undefined, { blobs });
+    const narrowed = await w.open([THUMB]);
+    expectOk(await declaring.generate("m1"));
+    expectOk(await declaring.setFraming("m1", LEFT));
+    pausePrivate = true;
+    const generating = declaring.generate("m1");
+    await g.reached;
+    expectOk(await narrowed.prune(["square"]));
+    g.open();
+    expectOk(await generating);
+    await whenIdle(declaring);
+
+    const original = expectOk(await w.media.load("m1"))!.data;
+    expect(w.blobs.blobs.has("media-variants/m1/square.webp")).toBe(false);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")?.data).toEqual(original);
+    for (const images of [declaring, narrowed]) await images.close();
+  });
+
   it("images.generate renders the item after one failed read of its lease, and a sync job finishes past it", async () => {
     const w = await world();
     let failing = false;
