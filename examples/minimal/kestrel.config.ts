@@ -26,7 +26,7 @@ export default defineConfig({
         anonymousFields: {
           pages: ["id", "slug", "title", "body", "status", "hero", "seo", "_locale", "_locales", "_translations", "_links", "_paths", "redirect"],
           settings: ["id", "title", "description", "navigation", "_locales", "_translations"],
-          media: ["id", "path", "filename", "contentType", "size", "width", "height", "alt", "title", "description", "provenance", "focus", "variants[].size", "variants[].width", "variants[].height", "variants[].format", "variants[].path"],
+          media: ["id", "path", "filename", "contentType", "size", "width", "height", "alt", "title", "description", "provenance", "focus", "variants[].size", "variants[].width", "variants[].height", "variants[].format", "variants[].path", "variants[].crop"],
           mediaFile: ["headers.cache-control", "headers.x-content-provenance", "headers.x-kestrel-variant"],
           redirectRules: ["from", "pattern", "target", "status"],
         },

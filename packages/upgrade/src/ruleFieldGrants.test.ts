@@ -86,7 +86,7 @@ describe("pipelines/field-step", () => {
     expect(finding?.suggestion).toContain('getMedia → "authz.fields:media?shape=item"');
     expect(finding?.suggestion).toContain('resolvePage → "authz.fields:pages?shape=item"');
     expect(finding?.suggestion).toContain('serveMediaFile → "authz.fields:mediaFile?shape=file"');
-    expect(finding?.suggestion).toContain("media: id, path, filename, contentType, size, width, height, alt, title, description, provenance, focus, variants[].size, variants[].width, variants[].height, variants[].format, variants[].path");
+    expect(finding?.suggestion).toContain("media: id, path, filename, contentType, size, width, height, alt, title, description, provenance, focus, variants[].size, variants[].width, variants[].height, variants[].format, variants[].path, variants[].crop");
     expect(finding?.suggestion).toContain("pages: id, slug, title, _locales, _translations, _locale, _links, redirect");
     expect(finding?.suggestion).toContain("mediaFile: headers.cache-control, headers.x-content-provenance, headers.x-kestrel-variant");
   });

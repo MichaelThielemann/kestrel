@@ -23,7 +23,7 @@ const OTHER_FIELD_PROBLEMS = [
 ];
 
 const MEDIA_FIELDS = ["id", "path", "filename", "contentType", "size", "width", "height", "alt", "title", "description", "provenance"];
-const VARIANT_FIELDS = ["focus", "variants[].size", "variants[].width", "variants[].height", "variants[].format", "variants[].path"];
+const VARIANT_FIELDS = ["focus", "variants[].size", "variants[].width", "variants[].height", "variants[].format", "variants[].path", "variants[].crop"];
 
 function authzLines(ctx: RuleContext): string[] {
   return ctx.bootCheck.errors

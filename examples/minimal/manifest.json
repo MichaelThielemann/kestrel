@@ -1287,7 +1287,8 @@
                 "variants[].width",
                 "variants[].height",
                 "variants[].format",
-                "variants[].path"
+                "variants[].path",
+                "variants[].crop"
               ],
               "mediaFile": [
                 "headers.cache-control",
@@ -18191,7 +18192,8 @@
                   "variants[].width",
                   "variants[].height",
                   "variants[].format",
-                  "variants[].path"
+                  "variants[].path",
+                  "variants[].crop"
                 ]
               }
             }
@@ -20994,7 +20996,8 @@
                   "variants[].width",
                   "variants[].height",
                   "variants[].format",
-                  "variants[].path"
+                  "variants[].path",
+                  "variants[].crop"
                 ]
               }
             }
@@ -29942,7 +29945,8 @@
                   "variants[].width",
                   "variants[].height",
                   "variants[].format",
-                  "variants[].path"
+                  "variants[].path",
+                  "variants[].crop"
                 ]
               }
             }

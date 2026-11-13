@@ -418,6 +418,10 @@ describe("media framing", () => {
       const [publicItem] = boundaryCast<{ items: Array<Record<string, unknown>> }>(anonymous.result, "json").items;
       expect(publicItem?.focus).toEqual(focus);
       expect(publicItem).not.toHaveProperty("framing");
+      const publicVariants = boundaryCast<Array<Record<string, unknown>>>(publicItem?.variants, "json");
+      expect(publicVariants.length).toBeGreaterThan(0);
+      for (const variant of publicVariants) expect(Object.keys(variant).sort()).toEqual(["crop", "format", "height", "path", "size", "width"]);
+      expect(publicVariants.find((variant) => variant.size === "hero")).toMatchObject({ crop: null });
 
       expect((await kestrel.run("trashMedia", { trigger, headers: bearer(admin.token), payload: { ids: [id] } })).status).toBe(200);
       expect((await kestrel.run("setMediaFraming", { trigger, headers: bearer(admin.token), params: { id }, payload: { focus: null } })).status).toBe(404);
