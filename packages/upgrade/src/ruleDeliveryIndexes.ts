@@ -1,4 +1,4 @@
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
 import { createPipelineFile, hoistModuleConfigProperty, insertTriggers, removeNestedModuleConfigProperty, renameStringLiterals } from "./edits.ts";
 import { isRecord } from "./guards.ts";
@@ -93,21 +93,28 @@ const RESTORE_CHECKS: ReadonlyArray<{ token: string; step: string }> = [
   { token: "backup-blobstore", step: "backup.checkRestored" },
 ];
 
-/** `delivery/restore-check`: `delivery.checkBuild` renders everything again after a database restore only when a `checkRestored` step of a restoring module runs before it in the same pipeline. */
+function configuredFile(ctx: RuleContext, token: string): string | undefined {
+  const entry = moduleEntry(ctx, token);
+  return entry !== undefined && isRecord(entry.config) && typeof entry.config.file === "string" ? resolve(ctx.root, entry.config.file) : undefined;
+}
+
+/** `delivery/restore-check`: `delivery.checkBuild` renders everything again after a database restore only when the `checkRestored` step of a module that restores the persistence-sqlite file runs directly before it in the same pipeline. */
 export const restoreCheckRule: Rule = {
   id: "delivery/restore-check",
   check(ctx) {
     if (moduleEntry(ctx, "delivery-static") === undefined) return [];
-    const checks = RESTORE_CHECKS.filter((c) => moduleEntry(ctx, c.token) !== undefined).map((c) => c.step);
+    const database = configuredFile(ctx, "persistence-sqlite");
+    if (database === undefined) return [];
+    const checks = RESTORE_CHECKS.filter((c) => configuredFile(ctx, c.token) === database).map((c) => c.step);
     if (checks.length === 0) return [];
     const findings: Finding[] = [];
     for (const pipeline of ctx.project.input.pipelines) {
       const steps = pipelineSteps(pipeline.steps);
       const at = steps.indexOf("delivery.checkBuild");
-      if (at < 0 || steps.slice(0, at).some((s) => checks.includes(s))) continue;
+      if (at < 0 || checks.includes(steps[at - 1] ?? "")) continue;
       const file = ctx.project.pipelineFiles.find((f) => f.pipelines.includes(pipeline.name))?.file;
-      const message = `${pipeline.name} runs delivery.checkBuild without ${checks.join(" or ")} before it, so a database restore with an unchanged build renders nothing again`;
-      const suggestion = `put ${checks[0]} before delivery.checkBuild in ${pipeline.name}`;
+      const message = `${pipeline.name} runs delivery.checkBuild without ${checks.join(" or ")} directly before it, so a database restore with an unchanged build renders nothing again`;
+      const suggestion = `put ${checks[0]} directly before delivery.checkBuild in ${pipeline.name}; a step in between that writes result drops the member it adds`;
       findings.push(infoFinding(`delivery/restore-check:${pipeline.name}`, "delivery/restore-check", message, suggestion, file === undefined ? { pipeline: pipeline.name } : { file, pipeline: pipeline.name }, upgradingDocs("delivery-restore-check")));
     }
     return findings;
