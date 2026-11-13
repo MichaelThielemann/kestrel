@@ -77,6 +77,28 @@ describe("deps/zod-range", () => {
     expect(await zodRangeRule.check(context())).toEqual([]);
   });
 
+  it("raises zod 3 in a workspace package that the source rules rewrite, and leaves node_modules alone", async () => {
+    await write("package.json", JSON.stringify({ name: "monorepo", private: true, dependencies: { "@michaelthielemann/kestrel": "^6.0.0" } }));
+    await write("pnpm-workspace.yaml", "packages:\n  - packages/*\n");
+    const mailerPkg = `${JSON.stringify({ name: "mailer", dependencies: { zod: "^3.23.8" } }, null, 2)}\n`;
+    const mailerFile = await write("packages/mailer/package.json", mailerPkg);
+    await write("packages/mailer/module.ts", 'import { z } from "zod";\nexport const configSchema = z.object({ limits: z.object({ perMinute: z.number().default(60) }).strict().default({}) });\n');
+    await write("node_modules/old-dep/package.json", JSON.stringify({ name: "old-dep", dependencies: { zod: "^3.0.0" } }));
+    const findings = await zodRangeRule.check(context());
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.where).toEqual({ file: mailerFile, module: "zod" });
+    expect(findings[0]?.message).toContain(join("packages", "mailer", "package.json"));
+    expect(dependencies(applied(findings[0], mailerPkg), "dependencies")).toEqual({ zod: "^4.6.6" });
+    expect((await zodObjectDefaultRule.check(context())).map((f) => f.where.file)).toEqual([join(dir, "packages", "mailer", "module.ts")]);
+  });
+
+  it("gives the findings of the root and of a workspace package distinct ids", async () => {
+    await write("package.json", JSON.stringify({ name: "monorepo", dependencies: { zod: "^3.23.8" } }));
+    await write("apps/site/package.json", JSON.stringify({ name: "site", dependencies: { zod: "^3.23.8" } }));
+    const ids = (await zodRangeRule.check(context())).map((f) => f.id);
+    expect(ids).toEqual(["deps/zod-range:dependencies", `deps/zod-range:${join("apps", "site", "package.json")}:dependencies`]);
+  });
+
   it("fires for a union whose lower branch is zod 3", async () => {
     await write("package.json", JSON.stringify({ name: "app", dependencies: { zod: "^3.23.8 || ^4.6.6" } }));
     expect(await zodRangeRule.check(context())).toHaveLength(1);

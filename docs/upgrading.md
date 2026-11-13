@@ -806,10 +806,13 @@ cannot be read that way, so a project that declares its own modules needs zod 4.
 `^4.6.6` the install resolves one copy for the project and kestrel. A module whose `configSchema`
 is still a zod 3 schema, for example from a package that depends on zod 3 itself, fails boot with
 `invalid-config-schema`, naming that module. The rule reads `zod` in `dependencies`, `devDependencies` and
-`peerDependencies` of `package.json` and sets every range whose lowest release is below 4.6.6, or
-on another major, to `^4.6.6`. A range it cannot read as a version (`latest`, `catalog:`,
-`workspace:*`, an `npm:` alias) is left alone. Like `deps/kestrel-range`, it reads `package.json`
-alone and runs even when the project could not load.
+`peerDependencies` of the project's `package.json` and of every other `package.json` in the
+project outside `node_modules` and `dist`, such as the packages of a workspace, and sets every range
+whose lowest release is below 4.6.6, or on another major, to `^4.6.6`; the zod source rules below
+rewrite the schemas of the same packages. A range it cannot read as a version (`latest`,
+`catalog:`, `workspace:*`, an `npm:` alias) is left alone; with a pnpm catalog, raise `zod` in the
+catalog by hand. Like `deps/kestrel-range`, it reads only `package.json` files and runs even when
+the project could not load.
 
 #### zod-record-key
 zod 4's `z.record` takes the key schema as its first argument. The rule finds a `z.record(value)`

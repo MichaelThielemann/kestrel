@@ -1,10 +1,11 @@
+import { relative, resolve } from "node:path";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { findAll, isAstNode, parseTs, span, type AstNode } from "./ast.ts";
 import { isRecord } from "./guards.ts";
 import { setDependencyRange } from "./packageJson.ts";
 import type { SourceRule, SourceRuleContext } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
-import { projectSourceFiles } from "./ruleContractHelpers.ts";
+import { projectPackageJsonFiles, projectSourceFiles } from "./ruleContractHelpers.ts";
 import { finding, packageJsonPath, upgradingDocs } from "./ruleHelpers.ts";
 
 const ZOD_RANGE = "^4.6.6";
@@ -37,41 +38,47 @@ export function admitsUnfixedZod(range: string): boolean | undefined {
   return bounds.some((bound) => bound !== undefined && (bound[0] !== FIXED[0] || compare(bound, FIXED) < 0));
 }
 
-/** `deps/zod-range`: a `zod` dependency range that admits a release below 4.6.6 or another major; kestrel 6 reads module config schemas built with zod 4. */
+/** `deps/zod-range`: a `zod` dependency range that admits a release below 4.6.6 or another major, in the project's `package.json` and in every other `package.json` of the project outside `node_modules`; kestrel 6 reads module config schemas built with zod 4. */
 export const zodRangeRule: SourceRule = {
   id: "deps/zod-range",
   needs: "source",
   check(ctx) {
-    const pkgFile = packageJsonPath(ctx);
-    const source = ctx.readFile(pkgFile);
-    if (source === undefined) return [];
-    let pkg: unknown;
-    try {
-      pkg = boundaryCast<unknown>(JSON.parse(source), "json");
-    } catch {
-      return [];
-    }
-    if (!isRecord(pkg)) return [];
-    const findings: Finding[] = [];
-    for (const map of DEPENDENCY_MAPS) {
-      const deps = pkg[map];
-      const range = isRecord(deps) ? deps.zod : undefined;
-      if (typeof range !== "string" || admitsUnfixedZod(range) !== true) continue;
-      findings.push(
-        finding(
-          `deps/zod-range:${map}`,
-          "deps/zod-range",
-          `zod is at ${range} in ${map}; kestrel 6 reads module config schemas built with zod 4.6.6 or later`,
-          `set zod to "${ZOD_RANGE}" in ${map}`,
-          { file: pkgFile, module: "zod" },
-          [setDependencyRange(pkgFile, source, map, "zod", ZOD_RANGE)],
-          upgradingDocs("deps-zod-range"),
-        ),
-      );
-    }
-    return findings;
+    const rootFile = packageJsonPath(ctx);
+    const files = [rootFile, ...projectPackageJsonFiles(ctx.scratch).filter((file) => resolve(file) !== resolve(rootFile))];
+    return files.flatMap((file) => zodRangeFindings(ctx, file, file === rootFile ? undefined : relative(ctx.scratch, file)));
   },
 };
+
+function zodRangeFindings(ctx: SourceRuleContext, pkgFile: string, label: string | undefined): Finding[] {
+  const source = ctx.readFile(pkgFile);
+  if (source === undefined) return [];
+  let pkg: unknown;
+  try {
+    pkg = boundaryCast<unknown>(JSON.parse(source), "json");
+  } catch {
+    return [];
+  }
+  if (!isRecord(pkg)) return [];
+  const findings: Finding[] = [];
+  for (const map of DEPENDENCY_MAPS) {
+    const deps = pkg[map];
+    const range = isRecord(deps) ? deps.zod : undefined;
+    if (typeof range !== "string" || admitsUnfixedZod(range) !== true) continue;
+    const where = label === undefined ? map : `${map} of ${label}`;
+    findings.push(
+      finding(
+        label === undefined ? `deps/zod-range:${map}` : `deps/zod-range:${label}:${map}`,
+        "deps/zod-range",
+        `zod is at ${range} in ${where}; kestrel 6 reads module config schemas built with zod 4.6.6 or later`,
+        `set zod to "${ZOD_RANGE}" in ${where}`,
+        { file: pkgFile, module: "zod" },
+        [setDependencyRange(pkgFile, source, map, "zod", ZOD_RANGE)],
+        upgradingDocs("deps-zod-range"),
+      ),
+    );
+  }
+  return findings;
+}
 
 function importedName(specifier: AstNode): string | undefined {
   const imported = specifier.imported;

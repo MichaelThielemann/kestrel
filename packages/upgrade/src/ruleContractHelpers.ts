@@ -33,6 +33,14 @@ const SOURCE_EXTENSIONS = [".ts", ".mts", ".js", ".mjs", ".vue"];
 const EXCLUDED_DIRS = new Set(["node_modules", "dist"]);
 
 export function projectSourceFiles(root: string): string[] {
+  return projectFiles(root, (name) => SOURCE_EXTENSIONS.some((ext) => name.endsWith(ext)));
+}
+
+export function projectPackageJsonFiles(root: string): string[] {
+  return projectFiles(root, (name) => name === "package.json");
+}
+
+function projectFiles(root: string, accept: (name: string) => boolean): string[] {
   const out: string[] = [];
   const walkDir = (dir: string): void => {
     let entries;
@@ -48,7 +56,7 @@ export function projectSourceFiles(root: string): string[] {
         walkDir(path);
         continue;
       }
-      if (entry.isFile() && SOURCE_EXTENSIONS.some((ext) => entry.name.endsWith(ext))) out.push(path);
+      if (entry.isFile() && accept(entry.name)) out.push(path);
     }
   };
   walkDir(root);
