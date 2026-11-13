@@ -8,7 +8,7 @@ import { err } from "@michaelthielemann/kestrel/result";
 import type { RunResult, Runner } from "@michaelthielemann/kestrel/runner";
 import { createEventsQueue, DISCOVERY_INTERVAL_MS, QUEUE, QueueWriteError, retryTarget, type Config, type QueueRow } from "./impl.ts";
 
-const CONFIG: Config = { pollMs: 5, batch: 2, maxAttempts: 3, backoffSeconds: [10, 100], lockTtlSeconds: 60, retentionDays: 1, relayMs: 5000, relayPipelines: "all", lanes: {} };
+const CONFIG: Config = { pollMs: 5, batch: 2, maxAttempts: 3, backoffSeconds: [10, 100], lockTtlSeconds: 60, retentionDays: 1, relayMs: 5000, relayPipelines: "all", lanes: {}, delayMs: {} };
 
 async function make(overrides: Partial<Config> = {}) {
   const db = createFakePersistence();
@@ -1401,5 +1401,97 @@ describe("events/queue lanes: stopWorker awaits every loop", () => {
     release?.();
     await stopping;
     expect(stopped).toBe(true);
+  });
+});
+
+describe("events/queue delayMs: a fixed window per pipeline", () => {
+  it("a delayed row comes due delayMs after the first event; a same-key event inside the window joins it without moving it, and the first payload wins", async () => {
+    const { queue, clock, rows } = await make({ delayMs: { refresh: 1000 } });
+    const t0 = clock.t;
+    const seen: unknown[] = [];
+    queue.setDelivery([{ event: "x", pipeline: "refresh" }], async (_pipeline, input) => {
+      seen.push(input.payload);
+      return OK;
+    });
+    await queue.enqueue("x", { coalesceKey: "k", n: 1 });
+    expect(await rows()).toMatchObject([{ pipeline: "refresh", state: "pending", availableAt: t0 + 1000, coalesceKey: "refresh:k" }]);
+
+    clock.t = t0 + 600;
+    await queue.enqueue("x", { coalesceKey: "k", n: 2 });
+    expect(await rows()).toMatchObject([{ availableAt: t0 + 1000, payload: { n: 1 } }]);
+
+    clock.t = t0 + 999;
+    expect(await queue.tick()).toBe(0);
+    clock.t = t0 + 1000;
+    expect(await queue.tick()).toBe(1);
+    expect(seen).toEqual([{ coalesceKey: "k", n: 1 }]);
+
+    await queue.enqueue("x", { coalesceKey: "k", n: 3 });
+    const stored = await rows();
+    expect(stored).toHaveLength(2);
+    expect(stored[1]).toMatchObject({ state: "pending", availableAt: t0 + 2000, payload: { n: 3 } });
+  });
+
+  it("delays only the named pipeline; another pipeline of the same event is due at once", async () => {
+    const { queue, clock, rows } = await make({ delayMs: { refresh: 1000 } });
+    queue.setDelivery([{ event: "x", pipeline: "refresh" }, { event: "x", pipeline: "other" }], async () => OK);
+    await queue.enqueue("x", {});
+    const stored = await rows();
+    expect(stored.find((r) => r.pipeline === "refresh")).toMatchObject({ availableAt: clock.t + 1000 });
+    expect(stored.find((r) => r.pipeline === "other")).toMatchObject({ availableAt: clock.t });
+  });
+
+  it("a delayed pipeline is never relayed: the relay reports it queued and the row stays pending until its window ends", async () => {
+    const { queue, clock, rows } = await make({ relayMs: 5000, delayMs: { refresh: 1000 } });
+    const order: string[] = [];
+    queue.setDelivery([{ event: "x", pipeline: "refresh" }, { event: "x", pipeline: "publish" }], async (pipeline) => {
+      order.push(pipeline);
+      return OK;
+    });
+    await queue.enqueue("x", { runId: "run-1" });
+    expect((await rows()).find((r) => r.pipeline === "refresh")).toMatchObject({ availableAt: clock.t + 1000 });
+
+    const report = await queue.relay("run-1");
+    expect(order).toEqual(["publish"]);
+    expect(report.pipelines).toContainEqual({ event: "x", pipeline: "refresh", status: "queued", attempts: 0, dead: false, error: null });
+    expect((await rows()).find((r) => r.pipeline === "refresh")).toMatchObject({ state: "pending" });
+
+    clock.t += 1000;
+    expect(await queue.tick()).toBe(1);
+    expect(order).toEqual(["publish", "refresh"]);
+  });
+
+  it("a delay of 0 behaves as no entry: the row keeps its relay head start and the relay delivers it", async () => {
+    const { queue, clock, rows } = await make({ relayMs: 5000, delayMs: { p1: 0 } });
+    let calls = 0;
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      calls++;
+      return OK;
+    });
+    await queue.enqueue("x", { runId: "run-1" });
+    expect((await rows())[0]).toMatchObject({ availableAt: clock.t + 5000 });
+    expect((await queue.relay("run-1")).status).toBe("done");
+    expect(calls).toBe(1);
+  });
+
+  it("fanOutUnfanned sets the delay from the moment of the fan-out", async () => {
+    const { queue, clock, rows } = await make({ delayMs: { refresh: 1000 } });
+    await queue.enqueue("x", { coalesceKey: "k" });
+    clock.t += 5000;
+    queue.setDelivery([{ event: "x", pipeline: "refresh" }], async () => OK);
+    expect(await queue.fanOutUnfanned()).toBe(1);
+    expect(await rows()).toMatchObject([{ pipeline: "refresh", availableAt: clock.t + 1000, coalesceKey: "refresh:k" }]);
+    expect(await queue.tick()).toBe(0);
+    clock.t += 1000;
+    expect(await queue.tick()).toBe(1);
+  });
+
+  it("a delayed pipeline in a lane is claimed by that lane only once its window ends", async () => {
+    const { queue, clock } = await make({ lanes: { indexes: ["refresh"] }, delayMs: { refresh: 1000 } });
+    queue.setDelivery([{ event: "x", pipeline: "refresh" }], async () => OK);
+    await queue.enqueue("x", { coalesceKey: "k" });
+    expect(await queue.tickLane("indexes")).toBe(0);
+    clock.t += 1000;
+    expect(await queue.tickLane("indexes")).toBe(1);
   });
 });

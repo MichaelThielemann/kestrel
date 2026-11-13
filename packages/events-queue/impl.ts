@@ -48,6 +48,8 @@ export interface Config {
   relayPipelines: string[] | "all";
   /** Named worker loops: each lane claims and runs only the pipelines it names, one row at a time, never waiting for another lane or the main loop. Every pipeline not listed here runs in the implicit `"main"` lane. */
   lanes: Record<string, string[]>;
+  /** Milliseconds a pipeline's row waits before it comes due, per pipeline: a fixed window counted from the event that wrote the row; a same-key event inside it joins that row. A pipeline with a delay above 0 is never relayed. */
+  delayMs: Record<string, number>;
 }
 
 export interface LaneStatus {
@@ -204,8 +206,14 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
   const laneTicking = new Map<string, Promise<number>>();
   const laneContested = new Set<string>();
 
+  function delayOf(pipeline: string | null): number {
+    if (pipeline === null) return 0;
+    return config.delayMs[pipeline] ?? 0;
+  }
+
   function relayEligible(pipeline: string | null): boolean {
     if (pipeline !== null && laneOf(pipeline) !== MAIN_LANE) return false;
+    if (delayOf(pipeline) > 0) return false;
     if (config.relayPipelines === "all") return true;
     return pipeline !== null && config.relayPipelines.includes(pipeline);
   }
@@ -261,7 +269,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       let allPresent = true;
       for (const pipeline of pipelines) {
         const coalesceKey = typeof row.payload.coalesceKey === "string" ? `${pipeline}:${row.payload.coalesceKey}` : null;
-        const created = await db.createOne<QueueRow>(QUEUE, { id: `${row.id}:${pipeline}`, name: row.name, payload: row.payload, pipeline, state: "pending", attempts: 0, createdAt: row.createdAt, availableAt: now(), lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: row.runId, coalesceKey, lane: laneOf(pipeline) });
+        const created = await db.createOne<QueueRow>(QUEUE, { id: `${row.id}:${pipeline}`, name: row.name, payload: row.payload, pipeline, state: "pending", attempts: 0, createdAt: row.createdAt, availableAt: now() + delayOf(pipeline), lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: row.runId, coalesceKey, lane: laneOf(pipeline) });
         if (isErr(created) && created.error.code !== "CONFLICT") {
           allPresent = false;
           logger.error("events/queue: cannot fan out a stored event, leaving the original for the next tick", { id: row.id, event: row.name, pipeline, error: created.error.message });
@@ -484,7 +492,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       const queued: RelayEntry[] = [];
       for (const pipeline of targets) {
         const eligible = runId !== null && relayEligible(pipeline);
-        const availableAt = eligible ? at + config.relayMs : at;
+        const availableAt = eligible ? at + config.relayMs : at + delayOf(pipeline);
         const coalesceKey = pipeline !== null && coalesce !== null ? `${pipeline}:${coalesce}` : null;
         const data0 = { name, payload: { ...data }, pipeline, state: "pending" as const, attempts: 0, createdAt: at, availableAt, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId, coalesceKey, lane: laneOf(pipeline) };
         let created = await db.createOne<QueueRow>(QUEUE, data0);

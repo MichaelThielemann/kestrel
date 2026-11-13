@@ -1006,6 +1006,13 @@ Net changes since 5.8.1.
   retried dead row of one) never strands its rows.
   `events.readQueueStatus` reports every lane this process currently knows of — configured, or
   found holding a row — with `pending`, `running` and `oldestPendingAt` under `lanes`.
+- `events-queue` delays a pipeline's rows: `delayMs: { "<pipeline>": <ms> }` writes the rows of that
+  pipeline, at `enqueue` and at fan-out, with `availableAt` that many milliseconds later. With
+  `coalesceKey` this is a fixed window: an event with the same key joins the pending row without
+  moving it, and the row runs once when the window ends. A delayed pipeline is never relayed and is
+  reported `queued`. `attach()` rejects an entry naming an unknown pipeline or one no event trigger
+  runs, and a delayed pipeline that an array `relayPipelines` also names. The README states that
+  coalescing keeps the first event's payload.
 - **Published outputs are refreshed when what they show changes.** `delivery-static` records, per
   output and locale, what its render read — the paths `site.resolveLinks` answered, and every read
   the renderer made through this instance in the same process — and `delivery.markDependents:<type>`

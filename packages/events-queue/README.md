@@ -35,7 +35,7 @@ away (`start()` never gets the chance to), so `events.emit` drops the event inst
 nothing could ever fan out, and the worker never starts.
 Config (all optional): `pollMs` 500, `batch` 20, `maxAttempts` 5, `backoffSeconds`
 `[5, 30, 120, 600]`, `lockTtlSeconds` 300, `retentionDays` 7, `relayMs` 5000, `relayPipelines`
-`"all"`, `lanes` `{}`.
+`"all"`, `lanes` `{}`, `delayMs` `{}`.
 Steps: `events.emit:<name>`, `events.readQueueStatus`, `events.listDead` (`?limit`, max 500;
 each item names its `pipeline` and `runId`), `events.retryDead:all` / `events.retryDead:one`
 (`params.id`, retries one pipeline's copy), `events.purgeDone` (cron), `events.relay`.
@@ -45,7 +45,8 @@ module does not provide `events@1`).
 
 Every row carries the `runId` of the run whose `events.emit` wrote it (`null` for a row raised
 through `events@1` outside a pipeline). A row belonging to a run is written with `availableAt =
-createdAt + relayMs` instead of being immediately due, so `events.relay` — placed after a
+createdAt + relayMs` instead of being immediately due (except for a pipeline with a delay in
+`delayMs`, which the relay never claims; see below), so `events.relay` — placed after a
 pipeline's last `events.emit:` — gets a head start: it claims its own run's rows by id regardless
 of `availableAt`, runs each one through the same attempt/backoff/dead-letter machinery as the
 worker, and reports the outcome as `_events: { status, pipelines: [{ event, pipeline, status,
@@ -85,6 +86,22 @@ example a row a pre-6.0 process claimed without knowing the column), `enqueue` c
 writes the row instead of silently doing nothing. An event with no `coalesceKey` is never
 coalesced, and a `CONFLICT` on any other column still fails `emit` as before. `coalesceKey` is a
 plain string on the event's data; this module attaches no meaning to it beyond the key.
+**Coalescing keeps the first event's payload**: a later event that joins a pending row is dropped
+with its data, so a listener pipeline must read the current state rather than rely on the payload
+of the event it was started with.
+
+`delayMs` (default `{}`) holds a pipeline's rows back: `{ "<pipeline>": <milliseconds> }`, whole
+non-negative numbers checked in the config schema. A row of a pipeline with a delay is written, and
+fanned out from an unfanned row, with `availableAt` set that many milliseconds after the moment it
+is written. Together with `coalesceKey` this is a fixed window, not a debounce: the first event
+opens the window, every event with the same key that arrives while the row is still pending joins
+that row without moving its `availableAt`, and the row runs once when the window ends. An event
+after the claim opens the next window. A delayed pipeline is never relayed — its rows get no head
+start, the relay never claims them, and `_events.pipelines` names them with `status: "queued"` —
+whatever `relayPipelines` says. A delay of `0`, like a pipeline left out, changes nothing. A
+delayed pipeline may also be in a lane; its lane claims the row once the window ends. `attach()`
+rejects a `delayMs` entry naming a pipeline the booted manifest does not know or one no event
+trigger runs, and a pipeline with a delay above `0` that an array `relayPipelines` also names.
 
 `lanes` (default `{}`) gives named pipelines their own worker loop: `{ "<lane>": ["<pipeline>",
 …] }`. A lane name matches `^[a-z][a-z0-9-]*$` (checked in the config schema; `main` is reserved
@@ -130,6 +147,7 @@ them a head start the other processes' lanes never would.
 | `relayMs` | integer | no | `5000` |
 | `relayPipelines` | union | no | `"all"` |
 | `lanes` | record | no | `{}` |
+| `delayMs` | record | no | `{}` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|

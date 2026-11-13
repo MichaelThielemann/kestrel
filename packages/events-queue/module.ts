@@ -24,6 +24,7 @@ export const configSchema = z
     relayMs: z.number().int().nonnegative().default(5000),
     relayPipelines: z.union([z.literal("all"), z.array(z.string())]).default("all"),
     lanes: z.record(z.string().regex(/^[a-z][a-z0-9-]*$/), z.array(z.string())).default({}),
+    delayMs: z.record(z.string(), z.number().int().nonnegative()).default({}),
   })
   .strict()
   .superRefine((config, ctx) => {
@@ -61,7 +62,7 @@ const DEFAULT_DEAD_LIMIT = 50;
 const MAX_DEAD_LIMIT = 500;
 const NO_SUBSCRIBER_RUN: Runner = () => Promise.reject(new Error("events/queue: no pipeline is subscribed to any event"));
 
-type Instance = EventsQueue & { offs: Unsubscribe[]; logger: Logger; relayPipelines: string[] | "all"; lanes: Record<string, string[]> };
+type Instance = EventsQueue & { offs: Unsubscribe[]; logger: Logger; relayPipelines: string[] | "all"; lanes: Record<string, string[]>; delayMs: Record<string, number> };
 
 export default defineModule({
   name: "events/queue",
@@ -79,7 +80,7 @@ export default defineModule({
         await queue.enqueue(event, withEventIdentity(event, data));
       }),
     );
-    return { ...queue, offs, logger: deps.logger, relayPipelines: config.relayPipelines, lanes: config.lanes };
+    return { ...queue, offs, logger: deps.logger, relayPipelines: config.relayPipelines, lanes: config.lanes, delayMs: config.delayMs };
   },
 
   triggers: {
@@ -112,6 +113,15 @@ export default defineModule({
           throw new Error(`events/queue: pipeline "${pipeline}" is in lane "${lane}" and in relayPipelines`);
         }
       }
+    }
+    const delayed = Object.keys(instance.delayMs);
+    const unknownDelayed = delayed.filter((name) => !known.has(name));
+    if (unknownDelayed.length > 0) throw new Error(`events/queue: delayMs names unknown pipeline(s): ${unknownDelayed.join(", ")}`);
+    const untriggeredDelayed = delayed.filter((name) => !eventRun.has(name));
+    if (untriggeredDelayed.length > 0) throw new Error(`events/queue: delayMs names pipeline(s) no event trigger runs, so the queue never delivers to them: ${untriggeredDelayed.join(", ")}`);
+    if (instance.relayPipelines !== "all") {
+      const relayedAndDelayed = instance.relayPipelines.filter((name) => (instance.delayMs[name] ?? 0) > 0);
+      if (relayedAndDelayed.length > 0) throw new Error(`events/queue: pipeline(s) ${relayedAndDelayed.map((name) => `"${name}"`).join(", ")} have a delay in delayMs and are named in relayPipelines; a delayed pipeline is never relayed`);
     }
   },
 

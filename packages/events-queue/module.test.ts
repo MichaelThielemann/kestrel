@@ -24,7 +24,7 @@ function jsonCopy(value: unknown): EventData {
 
 async function eventDeliveryFixture(): Promise<EventDeliveryFixture> {
   const db = createFakePersistence();
-  const queue = await createEventsQueue({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5], lockTtlSeconds: 300, retentionDays: 7, relayMs: 5000, relayPipelines: "all", lanes: {} }, { db, logger: silentLogger });
+  const queue = await createEventsQueue({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5], lockTtlSeconds: 300, retentionDays: 7, relayMs: 5000, relayPipelines: "all", lanes: {}, delayMs: {} }, { db, logger: silentLogger });
   const deliveryEntries = [{ event: "x.happened", pipeline: "onX1" }, { event: "x.happened", pipeline: "onX2" }];
   queue.setDelivery(deliveryEntries, async () => ({ runId: "r", status: 200 }));
   const pipelineCountOf = (name: string) => deliveryEntries.filter((entry) => entry.event === name).length;
@@ -103,8 +103,15 @@ describe("events/queue module shape", () => {
 
 describe("events/queue module steps via runPipeline", () => {
   it("parses an empty config with defaults and rejects unknown keys", () => {
-    expect(configSchema.parse({})).toEqual({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5, 30, 120, 600], lockTtlSeconds: 300, retentionDays: 7, relayMs: 5000, relayPipelines: "all", lanes: {} });
+    expect(configSchema.parse({})).toEqual({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5, 30, 120, 600], lockTtlSeconds: 300, retentionDays: 7, relayMs: 5000, relayPipelines: "all", lanes: {}, delayMs: {} });
     expect(configSchema.safeParse({ extra: 1 }).success).toBe(false);
+  });
+
+  it("accepts delayMs as whole non-negative milliseconds per pipeline and rejects anything else", () => {
+    expect(configSchema.safeParse({ delayMs: { refresh: 1000, other: 0 } }).success).toBe(true);
+    expect(configSchema.safeParse({ delayMs: { refresh: -1 } }).success).toBe(false);
+    expect(configSchema.safeParse({ delayMs: { refresh: 1.5 } }).success).toBe(false);
+    expect(configSchema.safeParse({ delayMs: { refresh: "1000" } }).success).toBe(false);
   });
 
   it("rejects a malformed lane name and the reserved name \"main\"", () => {
@@ -630,7 +637,7 @@ describe("events/queue in a booted instance", () => {
   });
 });
 
-describe("events/queue lanes: attach guards", () => {
+describe("events/queue lanes and delays: attach guards", () => {
   const persistenceFakeForLanes = defineModule({
     name: "persistence/fake",
     provides: [PERSISTENCE],
@@ -661,13 +668,13 @@ describe("events/queue lanes: attach guards", () => {
     describe: () => ({ render: { summary: "r", reads: [], writes: [] }, plan: { summary: "p", reads: [], writes: [] } }),
   });
 
-  function bootWithLanes(lanes: Record<string, string[]>, relayPipelines?: string[] | "all") {
+  function bootWithLanes(lanes: Record<string, string[]>, relayPipelines?: string[] | "all", delayMs?: Record<string, number>) {
     return boot({
       config: {
         modules: [
           { use: "./persistence.ts", config: {} },
           { use: "./events.ts", config: {} },
-          { use: "@michaelthielemann/kestrel-events-queue", config: { lanes, ...(relayPipelines === undefined ? {} : { relayPipelines }) } },
+          { use: "@michaelthielemann/kestrel-events-queue", config: { lanes, ...(relayPipelines === undefined ? {} : { relayPipelines }), ...(delayMs === undefined ? {} : { delayMs }) } },
           { use: "./probe.ts", config: {} },
         ],
         triggers: [{ event: "render.due", pipeline: "onRender" }, { event: "plan.due", pipeline: "onPlan" }],
@@ -747,6 +754,41 @@ describe("events/queue lanes: attach guards", () => {
 
   it("boots fine with a lane pipeline and the default relayPipelines (\"all\")", async () => {
     const kestrel = await bootWithLanes({ pages: ["onRender"] });
+    await kestrel.stop();
+  });
+
+  it("refuses delayMs naming an unknown pipeline", async () => {
+    const caught = await bootError(bootWithLanes({}, undefined, { notAPipeline: 1000 }));
+    expect(caught).toMatchObject({ code: "attach-failed", module: "events/queue" });
+    expect(String(caught)).toContain("delayMs");
+    expect(String(caught)).toContain("notAPipeline");
+    expect(String(caught)).toContain("unknown");
+  });
+
+  it("refuses delayMs naming a pipeline no event trigger runs, saying so", async () => {
+    const caught = await bootError(bootWithLanes({}, undefined, { onRender: 1000, renderNow: 1000 }));
+    expect(caught).toMatchObject({ code: "attach-failed", module: "events/queue" });
+    expect(String(caught)).toContain("delayMs");
+    expect(String(caught)).toContain("renderNow");
+    expect(String(caught)).not.toContain("onRender");
+    expect(String(caught)).toContain("no event trigger");
+  });
+
+  it("refuses a delayed pipeline that is also named in relayPipelines", async () => {
+    const caught = await bootError(bootWithLanes({}, ["onRender"], { onRender: 1000 }));
+    expect(caught).toMatchObject({ code: "attach-failed", module: "events/queue" });
+    expect(String(caught)).toContain("onRender");
+    expect(String(caught)).toContain("delayMs");
+    expect(String(caught)).toContain("relayPipelines");
+  });
+
+  it("boots with a delayed pipeline, in a lane or not, and the default relayPipelines (\"all\")", async () => {
+    const kestrel = await bootWithLanes({ indexes: ["onRender"] }, undefined, { onRender: 1000, onPlan: 3000 });
+    await kestrel.stop();
+  });
+
+  it("boots with a zero delay on a pipeline named in relayPipelines, since a zero delay changes nothing", async () => {
+    const kestrel = await bootWithLanes({}, ["onRender"], { onRender: 0 });
     await kestrel.stop();
   });
 });
