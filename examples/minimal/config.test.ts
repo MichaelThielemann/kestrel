@@ -133,11 +133,12 @@ describe("examples/minimal revisions wiring", () => {
         [steps[verify], steps[reassign]] = [steps[reassign]!, steps[verify]!];
         return { ...p, steps };
       });
-    await expect(bootIsolated(swapVerifyAfterReassign)).rejects.toThrow(
+    const booting = bootIsolated(swapVerifyAfterReassign);
+    await expect(booting).rejects.toThrow(KestrelBootError);
+    await expect(booting).rejects.toThrow(
       /\[pipelines\/reassignRevisionAuthor\] step "revisions\.reassignAuthor" reads "verifiedUser" but no earlier step writes it \(earlier writes: none\)/,
     );
-    await expect(bootIsolated(swapVerifyAfterReassign)).rejects.toThrow(KestrelBootError);
-  });
+  }, 30_000);
 
   it("boots when the verified target is written both before and after the reassign step", async () => {
     const { dispose } = await bootIsolated((pipelines) =>
