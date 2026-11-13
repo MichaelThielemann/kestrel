@@ -264,9 +264,9 @@ longer than `staleAfterMs` stops before its next write once another process has 
 It changes a variant row only while the row is still as it read it, so it never re-plans a row,
 records a failed attempt or marks a row `done` over what the new holder wrote. A single write of a
 path that stalls that long can still land after the new holder's; the stalled holder notices when
-it finishes, whether the write succeeded or failed, puts nothing back, marks the item, and every
-rendered size of the item renders again. Until then that path answers the stalled bytes, and a
-cache that fetched it meanwhile keeps them under the same `?v=`.
+it has finished its writes (after a failed public copy, once it put the earlier bytes back), marks
+the item, and every rendered size of the item renders again. Until then that path answers the
+stalled bytes, and a cache that fetched it meanwhile keeps them under the same `?v=`.
 
 `images.attach` adds `focus` (the rectangle or `null`), meant for anonymous readers, and
 `framing: { focus, crops, width, height, ratios }`, meant for an editor. `width` and `height` are the

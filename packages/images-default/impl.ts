@@ -1250,8 +1250,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (config.publicCopy === undefined) return ok("written");
     const copied = await putCopy(lease.mediaId, fileOf(row), rendered.data, publicTypeOf(rendered.contentType));
     if (!isErr(copied)) return ok("written");
-    const held = await wroteHeld(lease);
-    if (!isErr(held) && !held.value) return ok("lost");
     const restored = previous.value === null ? await blobs.remove(row.key) : await blobs.put(row.key, previous.value, { contentType: contentTypeOf(row.format) });
     const recopied = previous.value === null ? await putCopy(lease.mediaId, fileOf(row), original.data, original.publishedType) : await putCopy(lease.mediaId, fileOf(row), previous.value, publicTypeOf(contentTypeOf(row.format)));
     const unrestored = isErr(restored) ? restored : isErr(recopied) ? recopied : null;
@@ -1293,9 +1291,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (!isErr(written) && written.value === "lost") return ok(null);
     if (isErr(written)) {
       const recorded = await recordFailure(row, size, attempts, written.error.message);
-      if (isErr(recorded)) return recorded;
-      if (recorded.value !== null) return err(written.error);
-      return dropStaleRender(item, row, original);
+      return isErr(recorded) ? recorded : err(written.error);
     }
     const kept = await wroteHeld(lease);
     if (isErr(kept) || !kept.value) return isErr(kept) ? kept : ok(null);
