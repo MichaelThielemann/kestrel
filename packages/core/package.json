@@ -106,7 +106,7 @@
     "build": "tsc -b tsconfig.json"
   },
   "dependencies": {
-    "zod": "^3.23.8"
+    "zod": "^4.6.6"
   },
   "repository": {
     "type": "git",

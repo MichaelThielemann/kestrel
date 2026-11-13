@@ -41,7 +41,7 @@
   },
   "dependencies": {
     "turndown": "^7.2.4",
-    "zod": "^3.23.8"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@michaelthielemann/kestrel": "workspace:*",
