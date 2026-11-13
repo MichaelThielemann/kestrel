@@ -772,7 +772,7 @@ describe("info rules", () => {
 
   it("types/breaking-signatures names what focus and crop changed", async () => {
     const findings = await typeSignaturesRule.check(contextFor(await project({})));
-    for (const part of ["Images gained setFraming and framingsOf", "Variant gained crop, renderedCrop, originalWidth and originalHeight", "Planned gained crop, and a Renderer passed as deps.render must cut planned.crop from the oriented original before it resizes"]) expect(findings[0]?.message).toContain(part);
+    for (const part of ["Images gained setFraming and framingsOf", "Variant gained crop, renderedCrop, renders, originalWidth and originalHeight", "Planned gained crop, and a Renderer passed as deps.render must cut planned.crop from the oriented original before it resizes"]) expect(findings[0]?.message).toContain(part);
   });
 
   it("responses/breaking-step-shapes names the not-ready 404 and the sync job's eligible total", async () => {
@@ -788,7 +788,7 @@ describe("info rules", () => {
   it("responses/breaking-step-shapes names the versioned variant path, focus and framing of images.attach", async () => {
     const p = await project({ pipelines: [{ name: "getMedia", steps: ["media.get", "images.attach"] }] });
     const message = (await breakingStepShapesRule.check(contextFor(p))).find((f) => f.where.step === "images.attach")?.message;
-    for (const part of ["?v=<token>", "changes after a re-crop", "width/height follow the crop", "gains focus and framing"]) expect(message).toContain(part);
+    for (const part of ["?v=<token>", "gets a new token with every such render", "width/height follow the crop", "gains focus and framing"]) expect(message).toContain(part);
     expect(message).not.toContain("final width/height and path");
   });
 
