@@ -615,7 +615,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     }
     if (!eligible(media.value.contentType)) return ok(undefined);
     if (lease.redo) {
-      const requeued = await db.updateMany<Variant>(VARIANTS, { mediaId, state: { in: ["done", "error", "failed"] }, size: { in: effective.map((size) => size.name) } }, { state: "pending", attempts: 0, error: null, updatedAt: now() });
+      const stored = await rowsOfItem(mediaId);
+      if (isErr(stored)) return stored;
+      const written = [...stored.value.values()].filter((row) => row.error !== UNDECODABLE).map((row) => row.id);
+      const requeued = written.length === 0 ? ok(0) : await db.updateMany<Variant>(VARIANTS, { id: { in: written }, state: { in: ["done", "error", "failed"] }, size: { in: effective.map((size) => size.name) } }, { state: "pending", attempts: 0, error: null, updatedAt: now() });
       if (isErr(requeued)) return requeued;
     }
     const placed = await planItem(mediaId, lease);

@@ -4,7 +4,8 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
-import { createFakeMedia } from "@michaelthielemann/kestrel-contracts/testing/fakeMedia";
+import type { Events } from "@michaelthielemann/kestrel-contracts/events";
+import { createFakeMedia, type FakeMedia } from "@michaelthielemann/kestrel-contracts/testing/fakeMedia";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -14,7 +15,7 @@ import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import { validateSchema } from "@michaelthielemann/kestrel/schema";
 import module from "./module.ts";
-import { DEFAULT_RENDER_TIMEOUT_MS, VARIANTS, createImages, whenIdle, type Config, type Images, type Variant } from "./impl.ts";
+import { DEFAULT_RENDER_TIMEOUT_MS, ITEMS, VARIANTS, createImages, whenIdle, type Config, type Images, type ItemLease, type Variant } from "./impl.ts";
 import type { PixelCrop } from "./framing.ts";
 import { render, type Renderer } from "./generate.ts";
 import type { Size } from "./sizes.ts";
@@ -30,6 +31,15 @@ function memoryBlobs(): MemoryBlobs {
     async remove(key) { blobs.delete(key); return ok(); },
     async move(from, to) { const b = blobs.get(from); if (!b) return err(failure("NOT_FOUND", `${from} not found`)); blobs.set(to, b); blobs.delete(from); return ok(); },
     async list(prefix) { return ok([...blobs].filter(([k]) => k.startsWith(prefix)).map(([key, b]) => ({ key, size: b.data.byteLength }))); },
+  };
+}
+
+function recordingEvents(): Events & { emitted: Array<{ name: string; ids: unknown }> } {
+  const emitted: Array<{ name: string; ids: unknown }> = [];
+  return {
+    emitted,
+    async emit(name, data) { emitted.push({ name, ids: data.ids }); },
+    on() { return () => {}; },
   };
 }
 
@@ -65,6 +75,8 @@ interface AttachedVariant {
 interface World {
   blobs: MemoryBlobs;
   db: FakePersistence;
+  media: FakeMedia;
+  events: Events & { emitted: Array<{ name: string; ids: unknown }> };
   open(sizes?: Size[], renderer?: Renderer, deps?: { blobs?: Blobstore; now?: () => number }): Promise<Images>;
 }
 
@@ -75,10 +87,13 @@ async function world(): Promise<World> {
   const red = await sharp({ create: { width: 400, height: 600, channels: 3, background: "#ff0000" } }).png().toBuffer();
   const original = new Uint8Array(await sharp({ create: { width: 1000, height: 600, channels: 3, background: "#0000ff" } }).composite([{ input: red, left: 0, top: 0 }]).jpeg().toBuffer());
   media.add({ id: "m1", contentType: "image/jpeg", data: original, filename: "photo.jpg", createdAt: 1000 });
+  const events = recordingEvents();
   return {
     blobs,
     db,
-    open: (sizes = SIZES, renderer = render, deps = {}) => createImages({ ...CONFIG, sizes }, { blobs: deps.blobs ?? blobs, db, media, logger: quiet, render: renderer }, deps.now ?? (() => 1000)),
+    media,
+    events,
+    open: (sizes = SIZES, renderer = render, deps = {}) => createImages({ ...CONFIG, sizes }, { blobs: deps.blobs ?? blobs, db, media, logger: quiet, render: renderer, events }, deps.now ?? (() => 1000)),
   };
 }
 
@@ -387,6 +402,21 @@ describe("images/default variants[].crop in images.attach", () => {
     expect((await attached(images)).get("square")).toEqual({ ...errored, state: "failed" });
     expect(await leftEdgeIsBlue(images, "square.webp")).toBe(false);
     for (const open of [first, images]) await open.close();
+  });
+
+  it("leaves the sizes of an image that cannot be decoded failed with cannot decode when a write of the item landed late", async () => {
+    const w = await world();
+    w.media.add({ id: "m2", contentType: "image/jpeg", data: new Uint8Array([1, 2, 3]), filename: "broken.jpg", createdAt: 1000, width: 100, height: 50 });
+    const images = await w.open([THUMB, SQUARE]);
+    expectOk(await images.plan(["m2"]));
+    const rowsOf = async (): Promise<Array<[string, string | null, number]>> => (expectOk(await images.variantsOf(["m2"])).get("m2") ?? []).map((row) => [row.state, row.error, row.attempts]);
+    expect(await rowsOf()).toEqual([["failed", "cannot decode", 0], ["failed", "cannot decode", 0]]);
+
+    expectOk(await w.db.updateMany<ItemLease>(ITEMS, { mediaId: "m2" }, { request: "late-write", redo: true }));
+    await images.generate("m2");
+    await whenIdle(images);
+    expect(await rowsOf()).toEqual([["failed", "cannot decode", 0], ["failed", "cannot decode", 0]]);
+    await images.close();
   });
 
   it("changes crop from null to the cut at the first render of a cover size added to the configuration, at the same plain path", async () => {
