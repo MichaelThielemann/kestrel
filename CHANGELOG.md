@@ -689,6 +689,10 @@ Net changes since 5.8.1.
   `trashIds`, `selectTrash` and `purge`, and `Images` gains `hide`, `show` and `hidden`, which a
   hand-built implementation or test double must add. `kestrel upgrade`'s `types/breaking-signatures`
   names them.
+- Focus and crop change exported types of `images-default` (`/impl`): `Images` gains `setFraming`
+  and `framingsOf`, and `Variant` gains `crop` and `renderedCrop` (`""` or `null` for the centre),
+  which a hand-built implementation, test double or variant row must add. `kestrel upgrade`'s
+  `types/breaking-signatures` names them.
 
 ### Added
 
@@ -1308,6 +1312,28 @@ Net changes since 5.8.1.
   `POST /media/trash/folders/*path`, `POST /media/trash/restore`, `POST /media/trash/purge`,
   `POST /media/trash/empty` and a nightly `purgeExpiredMedia`; `media.trashed` and `media.restored`
   mark the pages that show a medium. `DELETE /media/:id` stays a final delete.
+- `images/default`: **focus and crop.** New step `images.setFraming` (`params.id`, payload
+  `{ focus?, crops? }`) replaces an item's framing: one focus rectangle and optional manual crops
+  keyed by reduced aspect ratio (`"16:9"`), normalised to 0..1 on the original after its EXIF
+  orientation, stored in the new collection `images_framing`. It answers `VALIDATION` for an invalid
+  framing and `NOT_FOUND` for an item that is unknown, not ready, without variants or hidden. Only
+  `cover` sizes are cut by it: from the manual crop of their ratio, else the largest rectangle of the
+  ratio centred on the focus, else from the centre as without a framing; `inside` sizes never render
+  again because of it. A size whose cut changes is planned again at the same path with its new
+  dimensions (never enlarged), and the old variant is served until the new render is there; then the
+  item raises `images.variantsChanged`. A render that started before the framing changed never
+  marks its row `done`, and `variantCounts` counts a row rendered with another crop as `pending`.
+  `images.attach` adds `focus` and `framing: { focus, crops, ratios: [{ key, sizes, manual, fits,
+  crop }] }` to each item. Ratio keys are exact, so sizes with nearly the same ratio get separate
+  keys. A framing survives trash and restore and is deleted with the item's variants;
+  `images_variants` gains `crop` and `renderedCrop`. The new subpath
+  `@michaelthielemann/kestrel-images-default/framing` imports nothing and exports the crop rules this
+  module renders with (`ratioKey`, `centredCrop`, `cropForRatio`, `effectiveCrop`, `focusFits`,
+  `parseFraming`, `formatCrop`, `parseCrop`, `cropToken`), so an editor in the browser previews
+  exactly the server's cut.
+- `examples/minimal` wires `PUT /media/:id/framing` to `setMediaFraming` (`images.setFraming`, then
+  `images.generate`, answering the item as `GET /media/:id` does, behind `media.write`) and grants
+  `focus` to anonymous media reads.
 
 ### Changed
 
@@ -1412,6 +1438,11 @@ Net changes since 5.8.1.
   loop, and a login for an unknown or deactivated username derives a key against a throwaway hash of
   the same parameters, so it takes as long as one with a wrong password. Both packages export
   `verifyPasswordAsync`; `verifyPassword` is unchanged.
+- `images-default`: `variants[].path` of a variant whose bytes were rendered with a crop ends in
+  `?v=<token>`, a short hash of that crop, which changes only once a render with a new crop is at the
+  path; a variant cut from the centre has no query. The path, its public copy, `images.serve` and
+  `images.export:<dir>` are unchanged, so a check that matches exported URLs to files strips the
+  query.
 
 ### Fixed
 
