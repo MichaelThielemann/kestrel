@@ -596,3 +596,46 @@ describe("the root of a transformed config schema", () => {
     expect(out.variables.find((v) => v.path === "outer")).toMatchObject({ secret: true, redacted: true });
   });
 });
+
+describe("fields made required by .required() or .nonoptional()", () => {
+  const base = z.object({ host: z.string().min(1).describe("Mail host").optional(), stripe: z.string().describe("secret").optional(), port: z.number().int().optional() });
+  const raw = { host: "smtp.example.org", stripe: "required-field-secret", port: 25 };
+
+  it("reads the schema inside the nonoptional wrapper, keeps the secret mark and lists every key as required", () => {
+    for (const required of [base.required(), base.required().strict(), base.partial().required()]) {
+      const out = toJsonSchema(required);
+      expect(out.required).toEqual(["host", "stripe", "port"]);
+      expect(out.properties).toEqual({ host: { type: "string", minLength: 1, description: "Mail host" }, stripe: { type: "string", writeOnly: true }, port: { type: "integer" } });
+    }
+  });
+
+  it("reports the rows with their types, required, and the secret redacted", () => {
+    const required = base.required({ stripe: true });
+    const out = describeConfig(required, raw, required.parse(raw));
+    expect(JSON.stringify(out)).not.toContain("required-field-secret");
+    expect(out.variables.map((v) => [v.path, v.type, v.required, v.secret, v.value])).toEqual([
+      ["host", "string", false, false, "smtp.example.org"],
+      ["stripe", "string", true, true, null],
+      ["port", "integer", false, false, 25],
+    ]);
+  });
+
+  it("keeps a default below the wrapper out of the schema and the rows, since an absent key fails", () => {
+    const required = z.object({ retries: z.number().int().default(3) }).required();
+    expect(required.safeParse({}).success).toBe(false);
+    expect(toJsonSchema(required)).toEqual({ type: "object", properties: { retries: { type: "integer" } }, required: ["retries"] });
+    expect(describeConfig(required, {}).variables).toEqual([{ path: "retries", type: "integer", required: true, secret: false, set: false, status: "missing", value: null, redacted: false }]);
+  });
+
+  it("stays optional when .optional() wraps the nonoptional field again", () => {
+    const schema = z.object({ host: z.string().optional().nonoptional().optional() });
+    expect(toJsonSchema(schema)).toEqual({ type: "object", properties: { host: { type: "string" } } });
+  });
+
+  it("names the expected type of a missing required key and only the code of a missing secret", () => {
+    const required = base.required();
+    const result = required.safeParse({ host: "smtp.example.org" });
+    const lines = result.success ? [] : result.error.issues.map((issue) => describeConfigIssue(required, issue));
+    expect(lines).toEqual(["stripe: invalid_type", "port: Invalid input: expected number, received undefined"]);
+  });
+});

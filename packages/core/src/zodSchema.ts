@@ -84,19 +84,23 @@ function catchallOf(d: core.$ZodObjectDef): Schema | undefined {
 function unwrap(schema: Schema): Unwrapped {
   const out: Unwrapped = { inner: schema, optional: false, nullable: false, reshapes: false };
   let current = schema;
+  let required = false;
   for (;;) {
     const description = descriptionOf(current);
     if (description !== undefined && out.description === undefined) out.description = description;
     const d = def(current);
     if (d.type === "optional") {
-      out.optional = true;
+      if (!required) out.optional = true;
       current = d.innerType;
     } else if (d.type === "default" || d.type === "prefault") {
-      out.optional = true;
-      if (out.defaultValue === undefined) {
+      if (!required) out.optional = true;
+      if (!required && out.defaultValue === undefined) {
         out.defaultValue = () => d.defaultValue;
         out.defaultKind = d.type;
       }
+      current = d.innerType;
+    } else if (d.type === "nonoptional") {
+      required = true;
       current = d.innerType;
     } else if (d.type === "nullable") {
       out.nullable = true;
@@ -263,6 +267,7 @@ function containsSecret(schema: Schema, depth: number): boolean {
     case "optional":
     case "default":
     case "prefault":
+    case "nonoptional":
     case "nullable":
     case "catch":
     case "readonly":
@@ -365,10 +370,21 @@ function isSecretPath(schema: Schema, path: readonly PropertyKey[]): boolean {
   return node !== undefined && isSecretNode(node);
 }
 
-function isEnumAt(schema: Schema, path: readonly PropertyKey[]): boolean {
+function nodeAt(schema: Schema, path: readonly PropertyKey[]): Schema | undefined {
   let node: Schema | undefined = schema;
   for (const key of path) node = node === undefined ? undefined : childAt(node, key);
+  return node;
+}
+
+function isEnumAt(schema: Schema, path: readonly PropertyKey[]): boolean {
+  const node = nodeAt(schema, path);
   return node !== undefined && kind(unwrap(node).inner) === "enum";
+}
+
+function missingRequiredMessage(schema: Schema, issue: core.$ZodIssue): string | undefined {
+  if (issue.code !== "invalid_type" || issue.expected !== "nonoptional") return undefined;
+  const node = nodeAt(schema, issue.path);
+  return node === undefined ? undefined : `Invalid input: expected ${kind(unwrap(node).inner)}, received undefined`;
 }
 
 /**
@@ -376,12 +392,13 @@ function isEnumAt(schema: Schema, path: readonly PropertyKey[]): boolean {
  * or a path through a union or intersection) reports only the issue code and an enum mismatch only
  * what it expected; any other message is kept as its check wrote it, with credential URLs redacted.
  * An invalid record key or element reports the message of the key or element schema's own issue.
+ * A missing key that `.required()` or `.nonoptional()` demands names the type the key expects.
  */
 export function describeConfigIssue(schema: Schema, issue: core.$ZodIssue): string {
   const where = issue.path.map(String).join(".") || "(root)";
   if (isSecretPath(schema, issue.path)) return `${where}: ${issue.code}`;
   if (issue.code === "invalid_value" && isEnumAt(schema, issue.path)) return `${where}: Invalid enum value. Expected ${issue.values.map((o) => `'${String(o)}'`).join(" | ")}`;
-  return `${where}: ${redactCredentialUrls(innermostMessage(issue))}`;
+  return `${where}: ${redactCredentialUrls(missingRequiredMessage(schema, issue) ?? innermostMessage(issue))}`;
 }
 
 function innermostMessage(issue: core.$ZodIssue | core.$ZodRawIssue): string {
