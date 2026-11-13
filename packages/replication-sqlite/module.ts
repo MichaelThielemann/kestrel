@@ -7,7 +7,7 @@ import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { applyPendingRestore, createReplicationSqlite, restoreFromBlobs, type Replication } from "./impl.ts";
-import { checkSkippedRestore, markRestoredThisBoot, restoredThisBoot } from "./restoreFreshness.ts";
+import { checkSkippedRestore, markRestoredThisBoot, preparedRestoreAt } from "./restoreFreshness.ts";
 
 export const configSchema = z
   .object({
@@ -23,7 +23,7 @@ export const configSchema = z
 
 const POINT = { type: "object", properties: { generation: { type: "string" }, at: { type: "number" }, kind: { type: "string", enum: ["snapshot", "wal"] }, key: { type: "string" } }, required: ["generation", "at", "kind", "key"] };
 
-type ReplicationInstance = Replication & { logger: Logger; restoredThisBoot: () => boolean };
+type ReplicationInstance = Replication & { logger: Logger; preparedRestoreAt: () => number | null };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -40,7 +40,7 @@ export default defineModule({
     const blobs = deps.get(BLOBSTORE);
     const bootStartedAt = deps.bootStartedAt ?? Date.now();
     const restoredFromMarker = applyPendingRestore(config.file);
-    if (restoredFromMarker) markRestoredThisBoot(config.file, bootStartedAt);
+    if (restoredFromMarker) markRestoredThisBoot(config.file, bootStartedAt, true);
     if (config.restoreOnStart) {
       if (!existsSync(config.file)) {
         const restored = await restoreFromBlobs(blobs, config.prefix, {}, config.file);
@@ -50,7 +50,7 @@ export default defineModule({
         await checkSkippedRestore(config, blobs, deps.logger, bootStartedAt);
       }
     }
-    return { ...createReplicationSqlite(config, blobs), logger: deps.logger, restoredThisBoot: () => restoredThisBoot(config.file, bootStartedAt) };
+    return { ...createReplicationSqlite(config, blobs), logger: deps.logger, preparedRestoreAt: () => preparedRestoreAt(config.file) };
   },
 
   health: (r) => r.health(),
@@ -68,7 +68,7 @@ export default defineModule({
   steps: (replication) => ({
     checkRestored: async (ctx: Context) => {
       const previous = isRecord(ctx.result) ? ctx.result : {};
-      return ok({ ...ctx, result: { ...previous, _databaseRestored: replication.restoredThisBoot() } });
+      return ok({ ...ctx, result: { ...previous, _databaseRestoredAt: replication.preparedRestoreAt() } });
     },
     sync: async (ctx: Context) => {
       const result = await replication.sync();
@@ -107,10 +107,10 @@ export default defineModule({
 
   describe: () => ({
     checkRestored: {
-      summary: "Whether this module or another one restored the database file in this boot (adds `_databaseRestored` to the result)",
+      summary: "When the latest prepared restore of the database file was applied, by this module or another one (adds `_databaseRestoredAt`, the start of that boot or null, to the result)",
       reads: [],
-      writes: ["result._databaseRestored"],
-      extendsOutput: { type: "object", properties: { _databaseRestored: { type: "boolean" } }, required: ["_databaseRestored"] },
+      writes: ["result._databaseRestoredAt"],
+      extendsOutput: { type: "object", properties: { _databaseRestoredAt: { type: ["number", "null"] } }, required: ["_databaseRestoredAt"] },
     },
     sync: { summary: "Ship new WAL frames, checkpoint, snapshot and prune when due", reads: [], writes: ["result"], output: { type: "object", properties: { generation: { type: "string" }, shippedBytes: { type: "number" }, frames: { type: "number" }, checkpointed: { type: "boolean" }, pruned: { type: "number" } }, required: ["generation", "shippedBytes", "frames", "checkpointed", "pruned"] } },
     snapshot: { summary: "Start a new generation with a full snapshot", reads: [], writes: ["result"], output: { type: "object", properties: { generation: { type: "string" }, bytes: { type: "number" } }, required: ["generation", "bytes"] } },

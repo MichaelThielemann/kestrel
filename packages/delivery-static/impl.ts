@@ -128,8 +128,8 @@ export interface Delivery {
   markMoved(moves: readonly MovedPath[]): Promise<Result<{ marked: number }, DeliveryError>>;
   /** Marks every output of a delivered type, creating a marked `draft` row for each document and locale without one. */
   markAll(type: string): Promise<Result<{ marked: number }, DeliveryError>>;
-  /** Marks every output of every delivered type when `build` differs from the stored one or `databaseRestored` says this boot restored the database, then stores it. */
-  checkBuild(build: string, databaseRestored?: boolean): Promise<Result<{ changed: boolean; restored: boolean; marked: number }, DeliveryError>>;
+  /** Marks every output of every delivered type when `build` differs from the stored one or `databaseRestoredAt` names a restore not handled yet, then stores both. */
+  checkBuild(build: string, databaseRestoredAt?: number | null): Promise<Result<{ changed: boolean; restored: boolean; marked: number }, DeliveryError>>;
   /** Renders one marked output under a claim; a failed render answers `Err` after recording the attempt on the row. */
   republishOutput(target: OutputTarget): Promise<Result<{ rendered: boolean; state: State | null }, DeliveryError>>;
   /** Asks for an index export and, with `llms.full`, an llms-full.txt export, without running either here. */
@@ -238,6 +238,7 @@ const LLMS_COALESCE_KEY = "llms";
 const INDEXES_COALESCE_KEY = "indexes";
 const BUILD = "build";
 const ORPHANS = "orphans";
+const RESTORE = "restore";
 const ORPHAN_CANDIDATES = "orphans:candidates";
 const INDEXES_OUTCOME = "export:indexes";
 const LLMS_FULL_OUTCOME = "export:llmsFull";
@@ -394,7 +395,6 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   let renderStarts = 0;
   let rendersInFlight = 0;
   let buildChecked = false;
-  let restoreHandled = false;
   let orphansDone = false;
   let orphansSkipLogged = false;
   let loop: BackgroundLoop | undefined;
@@ -1678,17 +1678,18 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     markDependents,
     markMoved,
     markAll,
-    async checkBuild(build, databaseRestored = false) {
+    async checkBuild(build, databaseRestoredAt = null) {
       const stored = await db.findOne<StateRow>(STATE, { id: BUILD });
       if (isErr(stored)) return err(dbFailure(stored.error));
       const changed = stored.value?.value !== build;
-      const restored = databaseRestored && !restoreHandled;
+      const restore = databaseRestoredAt === null ? null : String(databaseRestoredAt);
+      const handled = restore === null ? ok(null) : await db.findOne<StateRow>(STATE, { id: RESTORE });
+      if (isErr(handled)) return err(dbFailure(handled.error));
+      const restored = restore !== null && handled.value?.value !== restore;
       if (restored) {
         const recorded = await db.createOne<StateRow>(STATE, { id: ORPHANS, value: JSON.stringify({ at: now(), removed: 0, restored: true }), seq: null, updatedAt: now() });
         if (isErr(recorded) && recorded.error.code !== "CONFLICT") return err(dbFailure(recorded.error));
         orphansDone = true;
-        const forgotten = await db.deleteMany(STATE, { id: BUILD });
-        if (isErr(forgotten)) return err(dbFailure(forgotten.error));
       }
       let marked = 0;
       if (changed || restored) {
@@ -1697,11 +1698,14 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
           if (isErr(all)) return all;
           marked += all.value.marked;
         }
-        const written = stored.value === null || restored ? await db.createOne<StateRow>(STATE, { id: BUILD, value: build, seq: null, updatedAt: now() }) : await db.updateOne<StateRow>(STATE, BUILD, { value: build, updatedAt: now() });
-        if (isErr(written) && written.error.code !== "CONFLICT") return err(dbFailure(written.error));
+        const written = await writeState(BUILD, build);
+        if (isErr(written)) return written;
       }
-      if (restored) logWarn(logger, "delivery/static: this boot restored the database from a backup, so every output is rendered again");
-      restoreHandled ||= databaseRestored;
+      if (restored) {
+        const noted = await writeState(RESTORE, restore);
+        if (isErr(noted)) return noted;
+        logWarn(logger, "delivery/static: the database was restored from a backup, so every output is rendered again");
+      }
       buildChecked = true;
       return ok({ changed, restored, marked });
     },

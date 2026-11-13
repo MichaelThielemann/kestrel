@@ -17,6 +17,7 @@ function readFileTimes(file: string): FileTimes {
 
 interface RestoreSidecarContent {
   restoredAtBootStartedAt: number;
+  prepared?: true;
 }
 
 /**
@@ -47,30 +48,40 @@ async function hasBackup(blobs: Blobstore, key: string): Promise<boolean> {
 
 /**
  * The sidecar a restoring module leaves next to the file, naming the boot that restored it:
- * `{ "restoredAtBootStartedAt": <epoch ms> }`. Read by any module configured on the same file
- * (`backup-blobstore`, `replication-sqlite`) to recognize a file the other one already restored in
- * this boot, without either module naming the other. One fixed name, always overwritten; a sidecar
- * from a different boot is simply ignored.
+ * `{ "restoredAtBootStartedAt": <epoch ms>, "prepared"?: true }`, with `prepared` for a prepared
+ * restore applied at setup. Read by any module configured on the same file (`backup-blobstore`, `replication-sqlite`) to
+ * recognize a file the other one already restored in this boot, and by `preparedRestoreAt`, without
+ * either module naming the other. One fixed name, overwritten by every restore.
  */
 export function restoreSidecar(file: string): string {
   return `${file}.restored-at`;
 }
 
-export function markRestoredThisBoot(file: string, bootStartedAt: number): void {
-  writeFileSync(restoreSidecar(file), JSON.stringify({ restoredAtBootStartedAt: bootStartedAt }));
+/** Writes the `restoreSidecar`; `prepared` when the file is a prepared restore applied at setup rather than a rebuild of a missing file. */
+export function markRestoredThisBoot(file: string, bootStartedAt: number, prepared = false): void {
+  const content: RestoreSidecarContent = prepared ? { restoredAtBootStartedAt: bootStartedAt, prepared } : { restoredAtBootStartedAt: bootStartedAt };
+  writeFileSync(restoreSidecar(file), JSON.stringify(content));
 }
 
-/** Whether the `restoreSidecar` of `file` names the boot that started at `bootStartedAt`. */
-export function restoredThisBoot(file: string, bootStartedAt: number): boolean {
+function readSidecar(file: string): Partial<RestoreSidecarContent> {
   const sidecar = restoreSidecar(file);
-  if (!existsSync(sidecar)) return false;
+  if (!existsSync(sidecar)) return {};
   try {
     const parsed: unknown = JSON.parse(readFileSync(sidecar, "utf8"));
-    const record = boundaryCast<Partial<RestoreSidecarContent>>(parsed, "host");
-    return record.restoredAtBootStartedAt === bootStartedAt;
+    return boundaryCast<Partial<RestoreSidecarContent>>(parsed, "host");
   } catch {
-    return false;
+    return {};
   }
+}
+
+function restoredThisBoot(file: string, bootStartedAt: number): boolean {
+  return readSidecar(file).restoredAtBootStartedAt === bootStartedAt;
+}
+
+/** The start (epoch ms) of the boot that applied the latest prepared restore of `file`, as its `restoreSidecar` records it; `null` when the sidecar records none. */
+export function preparedRestoreAt(file: string): number | null {
+  const record = readSidecar(file);
+  return record.prepared === true && typeof record.restoredAtBootStartedAt === "number" ? record.restoredAtBootStartedAt : null;
 }
 
 function freshRestoreError(file: string): string {

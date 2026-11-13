@@ -381,16 +381,16 @@ describe("delivery/static dependency steps via runPipeline", () => {
     await instance.close();
   });
 
-  it("checkBuild takes a restore from result._databaseRestored that an earlier step wrote, and none without it", async () => {
+  it("checkBuild takes a restore from result._databaseRestoredAt that an earlier step wrote, and none without it", async () => {
     const { instance, put } = await boot();
     put("p1", { slug__de: "kontakt", title__de: "Kontakt", status__de: "published" });
     const build = definePipeline({ name: "checkBuild", steps: ["delivery.checkBuild"] });
     expect((await runPipeline(build, { payload: { build: "b1" } }, { modules: [{ module, instance }] })).result).toMatchObject({ changed: true, restored: false });
     const restoredBoot = definePipeline({ name: "restoredBoot", steps: ["test.checkRestored", "delivery.checkBuild"] });
-    const signal = (restored: boolean): Step => async (ctx) => okStep({ ...ctx, result: { _databaseRestored: restored } });
-    const quiet = await runPipeline(restoredBoot, { payload: { build: "b1" } }, { modules: [{ module, instance }], steps: { "test.checkRestored": signal(false) }, writes: { "test.checkRestored": ["result._databaseRestored"] } });
+    const signal = (restoredAt: number | null): Step => async (ctx) => okStep({ ...ctx, result: { _databaseRestoredAt: restoredAt } });
+    const quiet = await runPipeline(restoredBoot, { payload: { build: "b1" } }, { modules: [{ module, instance }], steps: { "test.checkRestored": signal(null) }, writes: { "test.checkRestored": ["result._databaseRestoredAt"] } });
     expect(quiet.result).toEqual({ changed: false, restored: false, marked: 0 });
-    const restored = await runPipeline(restoredBoot, { payload: { build: "b1" } }, { modules: [{ module, instance }], steps: { "test.checkRestored": signal(true) }, writes: { "test.checkRestored": ["result._databaseRestored"] } });
+    const restored = await runPipeline(restoredBoot, { payload: { build: "b1" } }, { modules: [{ module, instance }], steps: { "test.checkRestored": signal(1_000) }, writes: { "test.checkRestored": ["result._databaseRestoredAt"] } });
     expect(restored.result).toMatchObject({ changed: false, restored: true });
     expect(boundaryCast<{ marked: number }>(restored.result, "host").marked).toBeGreaterThan(0);
     await instance.close();

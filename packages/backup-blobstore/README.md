@@ -14,20 +14,24 @@ volume does not, so move it by hand there: a stale file left over from an earlie
 failure predates this boot, so this check stays quiet about it and the file still has to be moved
 aside as instructed above. The pending restore's staged file and marker are left untouched either
 way. When either this module or `replication-sqlite` restores the file, it writes
-`<file>.restored-at` (the epoch ms this boot started) next to it; the other module, if configured
-on the same file, recognizes a matching value as "this boot already restored the file" and skips
-its own check — neither module has to know the other exists. A sidecar from an earlier boot is
-ignored and simply overwritten on the next restore.
+`<file>.restored-at` next to it: `{ "restoredAtBootStartedAt": <epoch ms this boot started> }`, plus
+`"prepared": true` when the file is a prepared restore applied at setup rather than a restore of a
+missing file. The other module, if configured on the same file, recognizes a matching boot as "this
+boot already restored the file" and skips its own check — neither module has to know the other
+exists. The next restore overwrites the sidecar.
 
-`backup.checkRestored` tells the rest of a pipeline whether the file was restored in this boot: it adds
-`_databaseRestored` to the result, `true` when the sidecar names this boot (whichever of the two modules
-restored the file) and `false` otherwise. The member is a shared
-convention: `replication.checkRestored` writes the same one, and a step that keeps output derived from the
-database reads it, as `delivery.checkBuild` of delivery-static does to render every page again after a
-restore. Put the step first in the pipeline that runs that check at boot, for example
-`["backup.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`, and only when `file` is the
-database. Only a restore one of the two modules performs is signalled; a file copied into place by hand is
-not.
+`backup.checkRestored` tells the rest of a pipeline about the latest prepared restore of the file: it
+adds `_databaseRestoredAt` to the result, the start of the boot that applied it (whichever of the two
+modules prepared it, with `backup.restore` or `replication.prepareRestore`), or `null` when the sidecar
+records none. The value stays the same in every later boot until the next restore, so a step that keeps
+output derived from the database stores the last value it acted on and treats any other one as a
+restore; a boot that stops before acting on it leaves it to the next one. The member is a shared
+convention: `replication.checkRestored` writes the same one, and `delivery.checkBuild` of delivery-static
+reads it to render every page again after a restore. Put the step first in the pipeline that runs that
+check at boot, for example `["backup.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`,
+and only when `file` is the database. A restore of a missing file under `restoreOnStart` is not
+reported, since on an ephemeral disk it happens at every start; a file copied into place by hand is not
+reported either, so restore through `backup.restore` instead.
 
 `versions` (default 24) keeps timestamped copies `<key>.<iso-time>` next to the latest one and
 prunes older ones; `backup.restore` takes an optional `key` from the payload to restore a specific
@@ -49,7 +53,7 @@ filesystem failure – a boot error, not a request.
 
 | Step | reads | writes | errors |
 |---|---|---|---|
-| `backup.checkRestored` | – | `result._databaseRestored` | – |
+| `backup.checkRestored` | – | `result._databaseRestoredAt` | – |
 | `backup.run` | – | `result` | `TRANSIENT` |
 | `backup.restore` | – | `result` | `VALIDATION`, `NOT_FOUND`, `TRANSIENT` |
 | `backup.listVersions` | – | `result` | `TRANSIENT` |
@@ -72,7 +76,7 @@ Not included: continuous replication (see `replication-sqlite`), restore without
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `backup.checkRestored` | Whether this module or another one restored the file in this boot (adds `_databaseRestored` to the result) | – | `result._databaseRestored` | – | { _databaseRestored: boolean, … } | – | – | no |
+| `backup.checkRestored` | When the latest prepared restore of the file was applied, by this module or another one (adds `_databaseRestoredAt`, the start of that boot or null, to the result) | – | `result._databaseRestoredAt` | – | { _databaseRestoredAt: number \| null, … } | – | – | no |
 | `backup.run` | Back up the file | – | `result` | – | { key: string, size: number, versions: string[], … } | – | – | no |
 | `backup.restore` | Stage the latest or a chosen version next to the file; applied on the next start | – | `result` | { key?: string } | { key: string, size: number, file: string, pending: true, appliedOnRestart: true, … } | 400 unknown version; 404 no backup | – | no |
 | `backup.listVersions` | List backup versions | – | `result` | – | { versions: string[], … } | – | – | no |

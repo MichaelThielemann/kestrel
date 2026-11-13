@@ -881,13 +881,13 @@ describe("index exports in the background loop, on a manual clock", () => {
   });
 });
 
-const RESTORE_WARNING = "delivery/static: this boot restored the database from a backup, so every output is rendered again";
+const RESTORE_WARNING = "delivery/static: the database was restored from a backup, so every output is rendered again";
 
 describe("a database restored from a backup", () => {
   const markedRows = async (db: Persistence): Promise<number> => expectOk(await db.count(STATUS, { staleToken: { ne: null } }));
   const servingRows = async (db: Persistence): Promise<number> => expectOk(await db.count(STATUS, { state: { in: ["live", "error"] } }));
 
-  it("checkBuild renders every output again in the boot that restored the database, even with the same build, and once per process", async () => {
+  it("checkBuild renders every output again once for each prepared restore it is told of, even with the same build", async () => {
     const db = createFakePersistence();
     const blobs = memoryBlobs();
     const first = await harness({ db, blobs });
@@ -896,14 +896,33 @@ describe("a database restored from a backup", () => {
     await first.delivery.close();
 
     const restored = await harness({ db, blobs, content: first.content });
-    const checked = expectOk(await restored.delivery.checkBuild("b1", true));
+    const checked = expectOk(await restored.delivery.checkBuild("b1", 1_000));
     expect(checked).toMatchObject({ changed: false, restored: true });
     expect(checked.marked).toBeGreaterThanOrEqual(await servingRows(db));
     expect(expectOk(await db.count(STATUS, { state: { in: ["live", "error"] }, staleToken: null }))).toBe(0);
     expect(restored.emitted.filter((e) => e.name === "delivery.outputStale")).toHaveLength(checked.marked);
     expect(restored.logger.warnings).toContain(RESTORE_WARNING);
-    expect(expectOk(await restored.delivery.checkBuild("b1", true))).toEqual({ changed: false, restored: false, marked: 0 });
+    expect(expectOk(await restored.delivery.checkBuild("b1", 1_000))).toEqual({ changed: false, restored: false, marked: 0 });
     expect(restored.logger.warnings.filter((w) => w === RESTORE_WARNING)).toHaveLength(1);
+    await restored.delivery.close();
+
+    const later = await harness({ db, blobs, content: first.content });
+    expect(expectOk(await later.delivery.checkBuild("b1", 1_000))).toEqual({ changed: false, restored: false, marked: 0 });
+    expect(expectOk(await later.delivery.checkBuild("b1", 2_000))).toMatchObject({ changed: false, restored: true });
+  });
+
+  it("a restore reported in a boot whose build check never ran is handled by the next boot that reports it", async () => {
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    const first = await harness({ db, blobs });
+    await seed(first);
+    expectOk(await first.delivery.checkBuild("b1"));
+    await first.delivery.close();
+    const crashed = await harness({ db, blobs, content: first.content });
+    await crashed.delivery.close();
+    const next = await harness({ db, blobs, content: first.content });
+    expect(expectOk(await next.delivery.checkBuild("b1", 1_000))).toMatchObject({ changed: false, restored: true });
+    expect(expectOk(await db.findOne(STATE, { id: "orphans" }))).not.toBeNull();
   });
 
   it("an unclean stop during a re-render backlog, a second process on the same database and a clean restart are no restore", async () => {
@@ -924,7 +943,7 @@ describe("a database restored from a backup", () => {
     for (const h of [second, restarted]) expect(h.logger.warnings).not.toContain(RESTORE_WARNING);
   });
 
-  it("a restore whose marking failed is marked again by the next build check, which no longer has the restore signal", async () => {
+  it("a restore whose marking failed is handled again by the next build check that reports it", async () => {
     const db = createFakePersistence();
     const blobs = memoryBlobs();
     const first = await harness({ db, blobs });
@@ -944,11 +963,11 @@ describe("a database restored from a backup", () => {
       },
     };
     const restored = await harness({ db, blobs, content: flaky });
-    expectErr(await restored.delivery.checkBuild("b1", true), "TRANSIENT");
+    expectErr(await restored.delivery.checkBuild("b1", 1_000), "TRANSIENT");
     await restored.delivery.close();
     const next = await harness({ db, blobs, content });
-    const checked = expectOk(await next.delivery.checkBuild("b1"));
-    expect(checked).toMatchObject({ changed: true, restored: false });
+    const checked = expectOk(await next.delivery.checkBuild("b1", 1_000));
+    expect(checked).toMatchObject({ changed: false, restored: true });
     expect(checked.marked).toBeGreaterThanOrEqual(await servingRows(db));
   });
 });
@@ -1143,7 +1162,7 @@ describe("the one-time removal of orphaned output files", () => {
     expectOk(await h.content.update("pages", later, { status: "draft" }, { locale: "de" }));
     expectOk(await h.db.deleteMany(STATUS, { docId: later }));
     const restored = await harness({ db: h.db, blobs: h.blobs, content: h.content });
-    expect(expectOk(await restored.delivery.checkBuild("b1", true))).toMatchObject({ restored: true });
+    expect(expectOk(await restored.delivery.checkBuild("b1", 1_000))).toMatchObject({ restored: true });
     expect(expectOk(await h.db.findOne(STATE, { id: "orphans" }))).not.toBeNull();
     expectOk(await restored.delivery.publishAll("pages"));
     expect(await sweep(restored)).toBe(0);
@@ -1157,7 +1176,7 @@ describe("the one-time removal of orphaned output files", () => {
     expect(expectOk(await h.db.findOne(STATE, { id: "orphans:candidates" }))).not.toBeNull();
     await h.delivery.close();
     const restored = await harness({ db: h.db, blobs: h.blobs, content: h.content });
-    expectOk(await restored.delivery.checkBuild("b1", true));
+    expectOk(await restored.delivery.checkBuild("b1", 1_000));
     expectOk(await restored.delivery.publishAll("pages"));
     restored.advance(CLAIM_TTL_MS + 1);
     expect(await sweep(restored)).toBe(0);

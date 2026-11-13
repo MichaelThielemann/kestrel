@@ -50,7 +50,7 @@ published. Only wiring bugs throw (unknown type, unconfigured type, an asset pat
 | `delivery.markDependents:<type>` | `payload.id`, `payload.ids` | `result._dependents` | TRANSIENT |
 | `delivery.markMoved` | `payload.moves` | `result._moved` | VALIDATION, TRANSIENT |
 | `delivery.markAll:<type>` | – | `result.marked` | TRANSIENT |
-| `delivery.checkBuild` | `payload.build`, `result._databaseRestored` | `result` | VALIDATION, TRANSIENT |
+| `delivery.checkBuild` | `payload.build`, `result._databaseRestoredAt` | `result` | VALIDATION, TRANSIENT |
 | `delivery.republishOutput` | `payload.type`, `payload.docId`, `payload.locale` | `result` | VALIDATION, TRANSIENT |
 | `delivery.requestIndexes` | – | – | TRANSIENT |
 | `delivery.resumeStale` | – | `result` | TRANSIENT |
@@ -313,22 +313,25 @@ the next start. Run it after every deploy: every output is then re-rendered, and
 code. It answers `{ changed, restored, marked }`.
 
 **A restored database.** A database restored from a backup holds older status rows than the files under `prefix`.
-`delivery.checkBuild` learns of a restore from `result._databaseRestored`, the member that `replication.checkRestored`
-(replication-sqlite) and `backup.checkRestored` (backup-blobstore) set to `true` in the boot in which that module
-restored the database file; a missing member means no restore. Put one of them before `delivery.checkBuild` in the
-pipeline that runs it at boot:
+`delivery.checkBuild` learns of a restore from `result._databaseRestoredAt`, the member that
+`replication.checkRestored` (replication-sqlite) and `backup.checkRestored` (backup-blobstore) set to the start of
+the boot that applied the latest prepared restore of the database file (`replication.prepareRestore`,
+`backup.restore`), or to `null`; a missing member means no restore. Put one of them before `delivery.checkBuild` in
+the pipeline that runs it at boot:
 
 ```ts
 definePipeline({ name: "deliveryBuildCheck", steps: ["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"] });
 ```
 
-When the member is `true`, `delivery.checkBuild` records the one-time removal of orphaned page outputs (see below) as
-done, forgets the stored build, marks every output as for a new build, stores the build again, logs a warning and
-answers `restored: true`; when the marking fails, the next start marks everything again because the build is gone. A
-later check in the same process answers `restored: false`. Nothing else counts as a restore: an unclean stop, a crash
-during a re-render backlog, a restart and a second process on the same database leave the stored build as it is. A
-restore those modules did not perform, such as a database file copied into place by hand, is not detected; run
-`delivery.markAll` for every delivered type after one. After a restore every output the restored rows know is
+The check stores the last value it handled in `delivery_state`, which the restored database cannot hold for its own
+restore. A value that differs from it is a restore: `delivery.checkBuild` records the one-time removal of orphaned
+page outputs (see below) as done, marks every output as for a new build, stores the build, then stores the value,
+logs a warning and answers `restored: true`. When one of these steps fails, or the boot stops before the check runs,
+the next check told the same value handles the restore again. Nothing else counts as a restore: an unclean stop, a
+crash during a re-render backlog, a restart, a second process on the same database and a rebuild of a missing
+database file under `restoreOnStart` (on an ephemeral disk, every start) leave the stored build as it is. A database
+file copied into place by hand is not detected; restore through one of the two modules, or run `delivery.markAll`
+for every delivered type after such a copy. After a restore every output the restored rows know is
 rendered again, but the files of pages created or moved after the backup stay under `prefix`, no status row owns
 them, and they are absent from `sitemap.xml` and `llms.txt`. Remove them by hand: they are the `index.<ext>` keys
 under `prefix` at paths that no `delivery.readStatus` row reports. Every export rebuilds the index files from the
@@ -409,7 +412,7 @@ Not included: CDN invalidation, a sitemap index for more than 50 000 URLs.
 | `delivery.markDependents:<arg>` | Mark every published output whose last render read the changed <arg> (payload id and ids) for a re-render, and start it outside the request (adds `_dependents: { marked }` to the result) | `payload` | `result._dependents` | object | { _dependents: object, … } | 503 the marks or their jobs could not be written | – | no |
 | `delivery.markMoved` | Mark the own outputs of every document in payload.moves (site.pathsMoved) and every output linking to one of them for a re-render at its new path, and start it outside the request (adds `_moved: { marked }` to the result) | `payload` | `result._moved` | { moves: object[], … } | { _moved: object, … } | 400 payload.moves is missing or malformed; 503 the marks or their jobs could not be written | – | no |
 | `delivery.markAll:<arg>` | Mark every <arg> output for a re-render in the background, including documents that were never delivered (adds `marked` to the result) | – | `result` | – | { marked: integer, … } | 503 the marks or their jobs could not be written | – | no |
-| `delivery.checkBuild` | Mark every delivered output for a re-render when payload.build differs from the stored build or an earlier step set result._databaseRestored because this boot restored the database, then store it | `payload`, `result._databaseRestored?` | `result` | { build: string, … } | { changed: boolean, restored: boolean, marked: integer, … } | 400 payload.build is missing; 503 the marks could not be written; the build is not stored | – | no |
+| `delivery.checkBuild` | Mark every delivered output for a re-render when payload.build differs from the stored build or result._databaseRestoredAt, set by an earlier step, names a database restore not handled yet, then store both | `payload`, `result._databaseRestoredAt?` | `result` | { build: string, … } | { changed: boolean, restored: boolean, marked: integer, … } | 400 payload.build is missing; 503 the marks could not be written; the build is not stored | – | no |
 | `delivery.republishOutput` | Render one marked output (payload type, docId, locale) under a claim; a failed render is recorded on the output and answered as an error so the event delivery retries it | `payload` | `result` | { type: string, docId: string, locale: string, … } | { rendered: boolean, state: "live" \| "error" \| "draft" \| null, … } | 400 payload needs type, docId and locale; 503 the render failed or another render holds the output | – | no |
 | `delivery.requestIndexes` | Ask for a sitemap.xml, robots.txt and llms.txt export (and an llms-full.txt export with `llms.full`) without running it here | – | – | – | – | 503 with dependencies.render "events": the export request could not be queued | – | no |
 | `delivery.resumeStale` | Release expired render claims, remove old tombstones and orphaned dependency sets, start the re-renders a stopped process or a lost job left marked, and ask for an index export | – | `result` | – | { released: integer, swept: integer, dispatched: integer, aged: integer, orphans: integer, … } | – | – | no |

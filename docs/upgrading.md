@@ -678,10 +678,14 @@ an uploaded tree of pages) and of every hand-placed `index.html` that no page ow
 only when it is told about the restore: put `replication.checkRestored` (or `backup.checkRestored`,
 when that module backs up the database) before it in the pipeline that runs it at boot, for example
 `["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`. The step sets
-`result._databaseRestored` in the boot in which the module restored the database file. Such a restore
-also records the orphan removal above as done, so it never runs on a restored database. A database
-file copied into place by hand is not detected; run `delivery.markAll` for every delivered type after
-one. The files of pages created or moved after the backup stay under `prefix`: no status row owns
+`result._databaseRestoredAt` to the start of the boot that applied the latest prepared restore
+(`replication.prepareRestore`, `backup.restore`) of the database file, and keeps that value in later
+boots; `delivery.checkBuild` handles each value once, also when the restoring boot stopped before the
+check. Such a restore also records the orphan removal above as done, so it never runs on a restored
+database. A rebuild of a missing database file under `restoreOnStart`, which on an ephemeral disk
+happens at every start, is no restore here. A database file copied into place by hand is not detected;
+restore through one of those steps, or run `delivery.markAll` for every delivered type after such a
+copy. The files of pages created or moved after the backup stay under `prefix`: no status row owns
 them, so they are absent from `sitemap.xml` and `llms.txt` and cannot be unpublished. Remove them by
 hand; they are the `index.<ext>` keys under `prefix` at paths that no `delivery.readStatus` row
 reports.

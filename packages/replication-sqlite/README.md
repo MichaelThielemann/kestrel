@@ -67,7 +67,7 @@ unknown `generation`, is `Err(NOT_FOUND)`; an unparsable `at` in the payload is 
 
 | Step | reads | writes | errors |
 |---|---|---|---|
-| `replication.checkRestored` | – | `result._databaseRestored` | – |
+| `replication.checkRestored` | – | `result._databaseRestoredAt` | – |
 | `replication.sync` | – | `result` | `TRANSIENT` |
 | `replication.snapshot` | – | `result` | `TRANSIENT` |
 | `replication.listPoints` | – | `result` | `TRANSIENT` |
@@ -76,19 +76,26 @@ unknown `generation`, is `Err(NOT_FOUND)`; an unparsable `at` in the payload is 
 
 `backup/blobstore` follows the same pattern with its own file names (`<file>.restore-pending` plus
 `<file>.restore-marker`), so both modules can point at the same database without clashing. When
-either module restores the file, it writes `<file>.restored-at` (the epoch ms this boot started)
-next to it; the other module, if configured on the same file, recognizes a matching value as "this
-boot already restored the file" and skips its own check — neither module has to know the other
-exists. A sidecar from an earlier boot is ignored and simply overwritten on the next restore.
+either module restores the file, it writes `<file>.restored-at` next to it:
+`{ "restoredAtBootStartedAt": <epoch ms this boot started> }`, plus `"prepared": true` when the file
+is a prepared restore applied at setup rather than a rebuild of a missing file. The other module, if
+configured on the same file, recognizes a matching boot as "this boot already restored the file" and
+skips its own check — neither module has to know the other exists. The next restore overwrites the
+sidecar.
 
-`replication.checkRestored` tells the rest of a pipeline whether the database file was restored in this
-boot: it adds `_databaseRestored` to the result, `true` when the sidecar names this boot (whichever of the
-two modules restored the file) and `false` otherwise. The member is
-a shared convention: `backup.checkRestored` writes the same one, and a step that keeps output derived from
-the database reads it, as `delivery.checkBuild` of delivery-static does to render every page again after a
-restore. Put the step first in the pipeline that runs that check at boot, for example
-`["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`. Only a restore one of
-the two modules performs is signalled; a database file copied into place by hand is not.
+`replication.checkRestored` tells the rest of a pipeline about the latest prepared restore of the
+database file: it adds `_databaseRestoredAt` to the result, the start of the boot that applied it
+(whichever of the two modules prepared it, with `replication.prepareRestore` or `backup.restore`), or
+`null` when the sidecar records none. The value stays the same in every later boot until the next
+restore, so a step that keeps output derived from the database stores the last value it acted on and
+treats any other one as a restore; a boot that stops before acting on it leaves it to the next one.
+The member is a shared convention: `backup.checkRestored` writes the same one, and `delivery.checkBuild`
+of delivery-static reads it to render every page again after a restore. Put the step first in the
+pipeline that runs that check at boot, for example
+`["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`. A rebuild of a
+missing file under `restoreOnStart` is not reported: it brings back the latest state of the replica,
+and on an ephemeral disk it happens at every start. A database file copied into place by hand is not
+reported either; restore through `replication.prepareRestore` instead.
 Not included: multi-process setups, encryption, restore without restart.
 
 <!-- kestrel-docs:start -->
@@ -107,7 +114,7 @@ Not included: multi-process setups, encryption, restore without restart.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `replication.checkRestored` | Whether this module or another one restored the database file in this boot (adds `_databaseRestored` to the result) | – | `result._databaseRestored` | – | { _databaseRestored: boolean, … } | – | – | no |
+| `replication.checkRestored` | When the latest prepared restore of the database file was applied, by this module or another one (adds `_databaseRestoredAt`, the start of that boot or null, to the result) | – | `result._databaseRestoredAt` | – | { _databaseRestoredAt: number \| null, … } | – | – | no |
 | `replication.sync` | Ship new WAL frames, checkpoint, snapshot and prune when due | – | `result` | – | { generation: string, shippedBytes: number, frames: number, checkpointed: boolean, pruned: number, … } | – | – | no |
 | `replication.snapshot` | Start a new generation with a full snapshot | – | `result` | – | { generation: string, bytes: number, … } | – | – | no |
 | `replication.listPoints` | Restore points (snapshots and WAL segments) | – | `result` | – | object[] | – | – | no |

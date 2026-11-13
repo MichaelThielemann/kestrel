@@ -122,33 +122,35 @@ function writeResult(result: unknown): Step {
 }
 
 describe("backup/blobstore checkRestored", () => {
-  async function restored(instance: Backup): Promise<unknown> {
+  async function restoredAt(instance: Backup): Promise<unknown> {
     const run = await runPipeline(definePipeline({ name: "checkRestored", steps: ["backup.checkRestored"] }), {}, { modules: [{ module, instance }] });
     expect(run.status).toBe(200);
-    return boundaryCast<Record<string, unknown>>(run.result, "host")._databaseRestored;
+    return boundaryCast<Record<string, unknown>>(run.result, "host")._databaseRestoredAt;
   }
 
-  it("answers true in the boot that restored the file, and false in every later boot and in a second process on the same file", async () => {
+  it("answers the start of the boot that applied a prepared restore, in that boot and every later one, and null for a restore of a missing file", async () => {
     const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "kestrel-backup-restored-"));
     dirs.push(dir);
     const file = join(dir, "kestrel.db");
     const blobs = fakeBlobstore();
     blobs.blobs.set("backups/db", { data: new TextEncoder().encode("hello"), contentType: "application/octet-stream" });
     const config = configSchema.parse({ file, key: "backups/db" });
-    const start = async (): Promise<Backup> => {
+    const start = async (): Promise<{ instance: Backup; bootStartedAt: number }> => {
       await new Promise((resolve) => setTimeout(resolve, 5));
-      return boundaryCast<Backup>(await module.setup(config, moduleDeps(blobs, dir, Date.now())), "host");
+      const bootStartedAt = Date.now();
+      return { instance: boundaryCast<Backup>(await module.setup(config, moduleDeps(blobs, dir, bootStartedAt)), "host"), bootStartedAt };
     };
+    const missing = await start();
+    expect(await restoredAt(missing.instance)).toBeNull();
+    expect((await missing.instance.prepareRestore()).ok).toBe(true);
     const restoring = await start();
-    expect(await restored(restoring)).toBe(true);
-    expect(await restored(restoring)).toBe(true);
-    expect(await restored(await start())).toBe(false);
-    expect(await restored(await start())).toBe(false);
+    expect(await restoredAt(restoring.instance)).toBe(restoring.bootStartedAt);
+    expect(await restoredAt((await start()).instance)).toBe(restoring.bootStartedAt);
   });
 
   it("keeps the other members of the result", async () => {
     const instance = await boot();
     const run = await runPipeline(definePipeline({ name: "checkRestored", steps: ["test.earlier", "backup.checkRestored"] }), {}, { modules: [{ module, instance }], steps: { "test.earlier": writeResult({ kept: 1 }) }, writes: { "test.earlier": ["result"] } });
-    expect(run.result).toEqual({ kept: 1, _databaseRestored: false });
+    expect(run.result).toEqual({ kept: 1, _databaseRestoredAt: null });
   });
 });

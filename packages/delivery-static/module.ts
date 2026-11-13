@@ -239,7 +239,8 @@ export default defineModule({
     checkBuild: async (ctx: Context) => {
       const build = ctx.payload.build;
       if (typeof build !== "string" || build === "") return ctx.fail("VALIDATION", "delivery.checkBuild: payload.build must be a non-empty string");
-      const checked = await delivery.checkBuild(build, isRecord(ctx.result) && ctx.result._databaseRestored === true);
+      const restoredAt = isRecord(ctx.result) ? ctx.result._databaseRestoredAt : undefined;
+      const checked = await delivery.checkBuild(build, typeof restoredAt === "number" ? restoredAt : null);
       if (isErr(checked)) return ctx.fail(checked.error);
       return ok({ ...ctx, result: checked.value });
     },
@@ -333,8 +334,8 @@ export default defineModule({
       errors: { 503: "the marks or their jobs could not be written" },
     }),
     checkBuild: {
-      summary: "Mark every delivered output for a re-render when payload.build differs from the stored build or an earlier step set result._databaseRestored because this boot restored the database, then store it",
-      reads: ["payload", "result._databaseRestored?"],
+      summary: "Mark every delivered output for a re-render when payload.build differs from the stored build or result._databaseRestoredAt, set by an earlier step, names a database restore not handled yet, then store both",
+      reads: ["payload", "result._databaseRestoredAt?"],
       writes: ["result"],
       input: { type: "object", properties: { build: { type: "string", minLength: 1 } }, required: ["build"], additionalProperties: true },
       output: { type: "object", properties: { changed: { type: "boolean" }, restored: { type: "boolean" }, marked: { type: "integer" } }, required: ["changed", "restored", "marked"] },

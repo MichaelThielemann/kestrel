@@ -147,18 +147,20 @@ function writeResult(result: unknown): Step {
 }
 
 describe("replication/sqlite checkRestored", () => {
-  async function start(file: string, dir: string, blobs: Blobstore): Promise<Replication> {
+  async function start(file: string, dir: string, blobs: Blobstore): Promise<{ instance: Replication; bootStartedAt: number }> {
     await new Promise((resolve) => setTimeout(resolve, 5));
-    return boundaryCast<Replication>(await module.setup(configSchema.parse({ file, restoreOnStart: true }), moduleDeps(blobs, dir, Date.now())), "host");
+    const bootStartedAt = Date.now();
+    const instance = boundaryCast<Replication>(await module.setup(configSchema.parse({ file, restoreOnStart: true }), moduleDeps(blobs, dir, bootStartedAt)), "host");
+    return { instance, bootStartedAt };
   }
 
-  async function restored(instance: Replication): Promise<unknown> {
+  async function restoredAt(instance: Replication): Promise<unknown> {
     const run = await runPipeline(definePipeline({ name: "checkRestored", steps: ["replication.checkRestored"] }), {}, { modules: [{ module, instance }] });
     expect(run.status).toBe(200);
-    return boundaryCast<Record<string, unknown>>(run.result, "host")._databaseRestored;
+    return boundaryCast<Record<string, unknown>>(run.result, "host")._databaseRestoredAt;
   }
 
-  it("answers true in the boot that restored the database file, and false in every later boot and in a second process on the same file", async () => {
+  it("answers the start of the boot that applied a prepared restore, in that boot and every later one, and null for a rebuild of a missing file", async () => {
     const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-restored-"));
     dirs.push(dir);
     const file = join(dir, "live.db");
@@ -167,26 +169,27 @@ describe("replication/sqlite checkRestored", () => {
     app.close();
     const blobs = fakeBlobs();
     const first = await start(file, dir, blobs);
-    expect(await restored(first)).toBe(false);
-    expect((await first.snapshot()).ok).toBe(true);
-    first.close();
-    for (const suffix of ["", "-wal", "-shm"]) rmSync(`${file}${suffix}`, { force: true });
+    expect(await restoredAt(first.instance)).toBeNull();
+    expect((await first.instance.snapshot()).ok).toBe(true);
+    expect((await first.instance.prepareRestore({})).ok).toBe(true);
+    first.instance.close();
 
     const restoring = await start(file, dir, blobs);
-    expect(await restored(restoring)).toBe(true);
-    expect(await restored(restoring)).toBe(true);
-    const second = await start(file, dir, blobs);
-    expect(await restored(second)).toBe(false);
-    restoring.close();
-    second.close();
-    const restarted = await start(file, dir, blobs);
-    expect(await restored(restarted)).toBe(false);
-    restarted.close();
+    expect(await restoredAt(restoring.instance)).toBe(restoring.bootStartedAt);
+    restoring.instance.close();
+    const later = await start(file, dir, blobs);
+    expect(await restoredAt(later.instance)).toBe(restoring.bootStartedAt);
+    later.instance.close();
+
+    for (const suffix of ["", "-wal", "-shm"]) rmSync(`${file}${suffix}`, { force: true });
+    const rebuilt = await start(file, dir, blobs);
+    expect(await restoredAt(rebuilt.instance)).toBeNull();
+    rebuilt.instance.close();
   });
 
   it("keeps the other members of the result", async () => {
     const { instance } = await boot();
     const run = await runPipeline(definePipeline({ name: "checkRestored", steps: ["test.earlier", "replication.checkRestored"] }), {}, { modules: [{ module, instance }], steps: { "test.earlier": writeResult({ kept: 1 }) }, writes: { "test.earlier": ["result"] } });
-    expect(run.result).toEqual({ kept: 1, _databaseRestored: false });
+    expect(run.result).toEqual({ kept: 1, _databaseRestoredAt: null });
   });
 });

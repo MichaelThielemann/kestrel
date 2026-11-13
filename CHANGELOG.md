@@ -36,7 +36,7 @@ Net changes since 5.8.1.
   removes every `index.<ext>` file under `prefix`, with the extension of a configured format, at a
   path no status row has and outside `reservedPaths`, logging each key (see upgrading.md,
   "delivery-orphan-removal"). The root page stays. It runs once per database and waits for the build
-  check of the process; a restore that `delivery.checkBuild` learns of through `_databaseRestored`
+  check of the process; a restore that `delivery.checkBuild` learns of through `_databaseRestoredAt`
   records it as done. It never runs on a new or empty database or with a `prefix` that does not end in
   `/`. Another site below `prefix` and hand-placed index files that no page owns need their path in
   `reservedPaths`; an orphaned page below another orphaned path makes it remove nothing.
@@ -1109,13 +1109,14 @@ Net changes since 5.8.1.
   a file. `delivery.resumeStale` asks for the index files on every run and for llms-full.txt while
   its last export failed.
 - `delivery.checkBuild` also renders everything again after a database restore with an unchanged
-  build, when `result._databaseRestored` is `true`. The new steps `replication.checkRestored`
-  (replication-sqlite) and `backup.checkRestored` (backup-blobstore) add that member, `true` in the boot
-  in which either module restored the database file (read from the `<file>.restored-at` sidecar) and
-  `false` otherwise; put one before `delivery.checkBuild` in the
-  boot pipeline. The check then forgets the stored build before it marks, so a failed marking is
-  repeated at the next start, and logs a warning. A database file copied into place by hand is not
-  detected. The result gains `restored`.
+  build. The new steps `replication.checkRestored` (replication-sqlite) and `backup.checkRestored`
+  (backup-blobstore) add `result._databaseRestoredAt`: the start of the boot that applied the latest
+  prepared restore (`replication.prepareRestore`, `backup.restore`) of the file, read from the
+  `<file>.restored-at` sidecar, which gains `"prepared": true` for such a restore, or `null`; put one
+  before `delivery.checkBuild` in the boot pipeline. The check handles each value once and stores it
+  in `delivery_state` last, so a restore whose boot stopped before the check or whose marking failed
+  is handled by the next start, and logs a warning. A rebuild of a missing file under `restoreOnStart`
+  and a database file copied into place by hand are no restore here. The result gains `restored`.
 - `delivery.resumeStale` removes, once per database that held status rows at setup, page files under
   `prefix` at paths no status row has (left behind by older versions after a failed render and a slug
   change; listed under Breaking), logging each; it waits while outputs are marked or rendering, while
