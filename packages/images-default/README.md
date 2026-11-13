@@ -226,9 +226,16 @@ the bytes at the path were rendered with (`cropToken`), and `images.variantsChan
 the item, so pages that show it render again with the new URL. The path itself, the public copy's
 file name, `images.serve` (whose `:file` carries no query) and `images.export:<dir>` stay as they
 are; a check that compares exported URLs with files ignores the query. Back at the centre, the path
-has no query again. A render that started before the framing changed never marks its row `done`:
-its row's crop no longer matches, so the result is dropped and the row waits for the next render,
-in this process or another.
+has no query again.
+
+A render reads its row again right before it writes the path. When the row's crop changed while it
+ran, it writes nothing, so the path keeps the bytes its `?v=` names, and the row waits for the next
+render, in this process or another. When the crop changes after that read, before the render marks
+its row `done`, its bytes stay at the path and the row records their crop as rendered: `?v=` names
+them, `images.variantsChanged` is raised, and the row stays `pending` for the new crop. A render
+that writes the path and then fails before it marks the row `done` (the public copy cannot be
+written, or the process stops) leaves the new bytes under the old `?v=` until a render of the row
+succeeds; the version only ever changes after the bytes it names are at the path.
 
 `images.attach` adds `focus` (the rectangle or `null`), meant for anonymous readers, and
 `framing: { focus, crops, ratios }`, meant for an editor. `ratios` has one entry per ratio key of the

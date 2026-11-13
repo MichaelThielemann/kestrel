@@ -962,6 +962,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     };
     if (isErr(attempt)) return recordFailure(attempt.error.message);
 
+    const fresh = await db.findOne<Variant>(VARIANTS, { id: row.id });
+    if (isErr(fresh)) return fresh;
+    if (fresh.value === null || fresh.value.key !== row.key || fresh.value.spec !== row.spec || cropOf(fresh.value) !== cropOf(row)) return ok(fresh.value);
+
     touch();
     const rendered = attempt.value;
     const file = fileOf(row);
@@ -990,7 +994,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const current = await db.findOne<Variant>(VARIANTS, { id: row.id });
     if (isErr(current)) return current;
     if (current.value !== null && current.value.key === row.key) {
-      if (current.value.spec !== row.spec || cropOf(current.value) !== cropOf(row)) return ok(current.value);
+      if (current.value.spec !== row.spec || cropOf(current.value) !== cropOf(row)) return recordBytesAtPath(current.value, cropOf(row), recrop);
       const recopied = await writeCopy();
       if (isErr(recopied)) return recopied;
       const again = await db.updateMany<Variant>(VARIANTS, { id: row.id, key: row.key, spec: row.spec, crop: current.value.crop }, donePatch);
@@ -1005,6 +1009,17 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const latest = await db.findOne<Variant>(VARIANTS, { id: row.id });
     if (isErr(latest)) return latest;
     return ok(latest.value);
+  }
+
+  async function recordBytesAtPath(current: Variant, written: string, recrop: () => void): Promise<Result<Variant | null, KestrelError>> {
+    if (renderedCropOf(current) !== written) {
+      const rerender: Partial<Variant> = current.state === "done" ? { state: "pending", attempts: 0, error: null } : {};
+      const recorded = await db.updateMany<Variant>(VARIANTS, { id: current.id, key: current.key, spec: current.spec, crop: current.crop, state: current.state, renderedCrop: current.renderedCrop }, { ...rerender, renderedCrop: written, updatedAt: now() });
+      if (isErr(recorded)) return recorded;
+      if (recorded.value === 1) recrop();
+    }
+    const latest = await db.findOne<Variant>(VARIANTS, { id: current.id });
+    return isErr(latest) ? latest : ok(latest.value);
   }
 
   async function dropStaleRender(item: MediaFile, row: Variant, original: Original): Promise<Result<void, KestrelError>> {
