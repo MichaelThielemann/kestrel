@@ -1212,6 +1212,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         if ([...byName.values()].some((stored) => stored.state === "planned")) schedulePlacement(mediaId);
         return rendered;
       }
+      if (rendered.value === "gone") continue;
       if (rendered.value === null) {
         results.push(row);
         stopped = true;
@@ -1260,7 +1261,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return copied;
   }
 
-  async function dropStaleRender(item: MediaFile, row: Variant, original: Original): Promise<Result<null, KestrelError>> {
+  async function dropStaleRender(item: MediaFile, row: Variant, original: Original): Promise<Result<null | "gone", KestrelError>> {
     const file = fileOf(row);
     const owner = await ownerOf(item.id, file);
     if (isErr(owner)) return owner;
@@ -1270,16 +1271,16 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     }
     const droppedBlob = await blobs.remove(row.key);
     if (isErr(droppedBlob)) return droppedBlob;
-    if (config.publicCopy === undefined) return ok(null);
+    if (config.publicCopy === undefined) return ok("gone");
     if (owner.value.retired !== null) {
       const put = await putCopy(item.id, file, original.data, original.publishedType);
-      return isErr(put) ? put : ok(null);
+      return isErr(put) ? put : ok("gone");
     }
     const droppedCopy = await blobs.remove(copyKey(item.id, file));
-    return isErr(droppedCopy) ? droppedCopy : ok(null);
+    return isErr(droppedCopy) ? droppedCopy : ok("gone");
   }
 
-  async function renderVariant(lease: Lease, item: MediaFile, size: Size, row: Variant, original: Original, signals: RenderSignals): Promise<Result<Variant | null, KestrelError>> {
+  async function renderVariant(lease: Lease, item: MediaFile, size: Size, row: Variant, original: Original, signals: RenderSignals): Promise<Result<Variant | null | "gone", KestrelError>> {
     const attempt = await renderWithin(original.data, item.contentType, size, { width: row.width, height: row.height, format: row.format, crop: parseCrop(row.crop) });
     const attempts = row.attempts + 1;
     if (isErr(attempt)) return recordFailure(row, size, attempts, attempt.error.message);

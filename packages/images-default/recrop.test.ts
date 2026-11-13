@@ -1971,4 +1971,32 @@ describe("images/default work a call leaves unfinished", () => {
     expect(expectOk(await w.db.count(VARIANTS, {}))).toBe(0);
     await images.close();
   });
+
+  it("a render whose size another process pruned meanwhile goes on with the item's other sizes and leaves the pruned one out of its answer", async () => {
+    const w = await world();
+    const g = gate();
+    let holding = true;
+    const render: Renderer = async (_d, s, p) => {
+      if (holding && s.name === "square") {
+        holding = false;
+        g.arrive();
+        await g.wait;
+      }
+      return { data: bytesFor(s.name, p.crop ?? null, 0), width: p.width, height: p.height, format: p.format, ext: p.format, contentType: `image/${p.format}` };
+    };
+    const declaring = await w.open([SQUARE, THUMB], render);
+    const narrowed = await w.open([THUMB]);
+    expectOk(await declaring.plan(["m1"]));
+    const generating = declaring.generate("m1");
+    await g.reached;
+    expectOk(await narrowed.prune(["square"]));
+    g.open();
+
+    const answered = expectOk(await generating);
+    expect(answered.map((row) => [row.size, row.state])).toEqual([["thumb", "done"]]);
+    expect([...(await rowsBySize(w)).values()].map((row) => [row.size, row.state])).toEqual([["thumb", "done"]]);
+    const original = expectOk(await w.media.load("m1"))!.data;
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")?.data).toEqual(original);
+    for (const images of [declaring, narrowed]) await images.close();
+  });
 });
