@@ -690,8 +690,9 @@ Net changes since 5.8.1.
   hand-built implementation or test double must add. `kestrel upgrade`'s `types/breaking-signatures`
   names them.
 - Focus and crop change exported types of `images-default` (`/impl`): `Images` gains `setFraming`
-  and `framingsOf`, and `Variant` gains `crop` and `renderedCrop` (`""` or `null` for the centre),
-  which a hand-built implementation, test double or variant row must add. `kestrel upgrade`'s
+  and `framingsOf`, and `Variant` gains `crop`, `renderedCrop`, `originalWidth` and `originalHeight`
+  (`""` or `null` for the centre, `0` or `null` for unknown dimensions), which a hand-built
+  implementation, test double or variant row must add. `kestrel upgrade`'s
   `types/breaking-signatures` names them.
 
 ### Added
@@ -1322,7 +1323,9 @@ Net changes since 5.8.1.
   again because of it. A size whose cut changes is planned again at the same path with its new
   dimensions (never enlarged), and the old variant is served until the new render is there; then the
   item raises `images.variantsChanged`, as it does at once when the focus changes. A render that started before the framing changed never
-  marks its row `done`, and `variantCounts` counts a row rendered with another crop as `pending`.
+  marks its row `done` and renders the item again, in the background, until its rows have the stored
+  crop; a failed `images.setFraming` plans and renders the item in the background. `variantCounts`
+  counts a row rendered with another crop as `pending`.
   `images.attach` adds `focus` and `framing: { focus, crops, width, height, ratios: [{ key, sizes,
   manual, fits, crop }] }` to each item, `width` and `height` being the original's oriented
   dimensions. Ratio keys are exact, so sizes with nearly the same ratio get separate
@@ -1445,6 +1448,10 @@ Net changes since 5.8.1.
   path; a variant cut from the centre has no query. The path, its public copy, `images.serve` and
   `images.export:<dir>` are unchanged, so a check that matches exported URLs to files strips the
   query.
+- `images-default`: a request to generate an item while a render of it runs waits for that render and
+  renders once more, instead of sharing the running render, which may have read the rows before the
+  request. `images.resume` also renders items with a row left `pending` for longer than
+  `staleAfterMs`.
 
 ### Fixed
 
