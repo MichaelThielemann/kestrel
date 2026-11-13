@@ -523,8 +523,8 @@ exhaustive `switch` over it needs the case; `MediaItem` gains `trashedAt` and `t
 needs a check; `Media` gains `trash`, `trashFolder`, `restore`, `listTrash`, `trashIds`,
 `selectTrash` and `purge`, and `Images` gains `hide`, `show` and `hidden`, which a hand-built test
 double of either must add. Focus and crop add `setFraming` and `framingsOf` to `Images` and the
-fields `crop` and `renderedCrop` to `Variant`, which a hand-built variant row must set (`""` or
-`null` for the centre).
+fields `crop`, `renderedCrop`, `originalWidth` and `originalHeight` to `Variant`, which a hand-built
+variant row must set (`""` or `null` for the centre, `0` or `null` for unknown dimensions).
 
 #### responses-breaking-step-shapes
 A pipeline runs a step whose 6.0.0 response or manifest shape differs from 5.8's — `redirects.lookup`,

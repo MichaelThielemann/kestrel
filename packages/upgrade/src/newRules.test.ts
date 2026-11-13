@@ -772,7 +772,7 @@ describe("info rules", () => {
 
   it("types/breaking-signatures names what focus and crop changed", async () => {
     const findings = await typeSignaturesRule.check(contextFor(await project({})));
-    for (const part of ["Images gained setFraming and framingsOf", "Variant gained crop and renderedCrop"]) expect(findings[0]?.message).toContain(part);
+    for (const part of ["Images gained setFraming and framingsOf", "Variant gained crop, renderedCrop, originalWidth and originalHeight"]) expect(findings[0]?.message).toContain(part);
   });
 
   it("responses/breaking-step-shapes names the not-ready 404 and the sync job's eligible total", async () => {
