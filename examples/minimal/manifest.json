@@ -1282,6 +1282,7 @@
                 "title",
                 "description",
                 "provenance",
+                "focus",
                 "variants[].size",
                 "variants[].width",
                 "variants[].height",
@@ -18010,6 +18011,7 @@
                   "title",
                   "description",
                   "provenance",
+                  "focus",
                   "variants[].size",
                   "variants[].width",
                   "variants[].height",
@@ -20762,6 +20764,7 @@
                   "title",
                   "description",
                   "provenance",
+                  "focus",
                   "variants[].size",
                   "variants[].width",
                   "variants[].height",
@@ -28685,6 +28688,955 @@
       ]
     },
     {
+      "name": "setMediaFraming",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:media.write",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission media.write",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission media.write"
+            }
+          }
+        },
+        {
+          "spec": "images.setFraming",
+          "name": "images.setFraming",
+          "module": "images/default",
+          "description": {
+            "summary": "Replace the framing of one media item (params.id): a focus rectangle and manual crops keyed by reduced ratio, normalised to 0..1 on the oriented original; an empty one removes it. Re-plans the item, so each cover size whose crop changes renders again at its path while the old variant keeps being served",
+            "reads": [
+              "params.id"
+            ],
+            "writes": [
+              "result"
+            ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "focus": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "y": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "w": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "h": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y",
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "crops": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "y": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "w": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "h": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y",
+                      "w",
+                      "h"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "manual crops keyed by reduced ratio, e.g. \"16:9\""
+                }
+              },
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "framing": {
+                  "type": "object",
+                  "properties": {
+                    "focus": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "y": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "w": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "h": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y",
+                            "w",
+                            "h"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "crops": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "y": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "w": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "h": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "w",
+                          "h"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "manual crops keyed by reduced ratio, e.g. \"16:9\""
+                    }
+                  },
+                  "required": [
+                    "focus",
+                    "crops"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "framing"
+              ]
+            },
+            "errors": {
+              "400": "missing id, or an invalid focus or crop",
+              "404": "media item not found, not ready, hidden or without variants"
+            }
+          }
+        },
+        {
+          "spec": "images.generate",
+          "name": "images.generate",
+          "module": "images/default",
+          "description": {
+            "summary": "Generate variants for one media item (id from params.id or payload.id), or for each id in payload.ids (unknown ids are skipped)",
+            "reads": [],
+            "writes": [
+              "result"
+            ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": true,
+              "description": "reached either directly (id/ids) or as the media.uploaded / images.planned event envelope, which carries further fields this step ignores"
+            },
+            "output": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "variants": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "mediaId": {
+                            "type": "string"
+                          },
+                          "size": {
+                            "type": "string"
+                          },
+                          "slot": {
+                            "type": "string"
+                          },
+                          "spec": {
+                            "type": "string"
+                          },
+                          "width": {
+                            "type": "number"
+                          },
+                          "height": {
+                            "type": "number"
+                          },
+                          "format": {
+                            "type": "string"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "bytes": {
+                            "type": "number"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "planned",
+                              "pending",
+                              "done",
+                              "error",
+                              "failed"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "number"
+                          },
+                          "updatedAt": {
+                            "type": "number"
+                          },
+                          "crop": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "renderedCrop": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "mediaId",
+                          "size",
+                          "slot",
+                          "spec",
+                          "width",
+                          "height",
+                          "format",
+                          "key",
+                          "bytes",
+                          "state",
+                          "error",
+                          "attempts",
+                          "updatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "variants"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "variants": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "mediaId": {
+                                  "type": "string"
+                                },
+                                "size": {
+                                  "type": "string"
+                                },
+                                "slot": {
+                                  "type": "string"
+                                },
+                                "spec": {
+                                  "type": "string"
+                                },
+                                "width": {
+                                  "type": "number"
+                                },
+                                "height": {
+                                  "type": "number"
+                                },
+                                "format": {
+                                  "type": "string"
+                                },
+                                "key": {
+                                  "type": "string"
+                                },
+                                "bytes": {
+                                  "type": "number"
+                                },
+                                "state": {
+                                  "type": "string",
+                                  "enum": [
+                                    "planned",
+                                    "pending",
+                                    "done",
+                                    "error",
+                                    "failed"
+                                  ]
+                                },
+                                "error": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "attempts": {
+                                  "type": "number"
+                                },
+                                "updatedAt": {
+                                  "type": "number"
+                                },
+                                "crop": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "renderedCrop": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "mediaId",
+                                "size",
+                                "slot",
+                                "spec",
+                                "width",
+                                "height",
+                                "format",
+                                "key",
+                                "bytes",
+                                "state",
+                                "error",
+                                "attempts",
+                                "updatedAt"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "variants"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              ]
+            },
+            "errors": {
+              "400": "missing media id",
+              "404": "media item not found or not ready"
+            }
+          }
+        },
+        {
+          "spec": "media.get",
+          "name": "media.get",
+          "module": "media/default",
+          "description": {
+            "summary": "Media metadata",
+            "reads": [
+              "params.id"
+            ],
+            "writes": [
+              "result"
+            ],
+            "query": {
+              "locale": {
+                "type": "string"
+              }
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string",
+                  "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                },
+                "filename": {
+                  "type": "string"
+                },
+                "folder": {
+                  "type": "string"
+                },
+                "contentType": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "number"
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "updatedAt": {
+                  "type": "number"
+                },
+                "provenance": {
+                  "type": "object",
+                  "properties": {
+                    "origin": {
+                      "type": "string",
+                      "enum": [
+                        "human",
+                        "ai",
+                        "mixed",
+                        "unknown"
+                      ]
+                    },
+                    "tool": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "at": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "origin"
+                  ],
+                  "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
+                },
+                "width": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "height": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "alt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "path",
+                "filename",
+                "folder",
+                "contentType",
+                "size",
+                "createdAt",
+                "updatedAt",
+                "provenance",
+                "width",
+                "height",
+                "alt",
+                "title",
+                "description"
+              ],
+              "additionalProperties": false
+            },
+            "errors": {
+              "400": "unknown locale",
+              "404": "not found"
+            }
+          }
+        },
+        {
+          "spec": "images.attach",
+          "name": "images.attach",
+          "module": "images/default",
+          "description": {
+            "summary": "Add available, variants[], variantCounts, focus and framing to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, a hidden item lists no variants and is not available, and framing.ratios has one entry per ratio of the cover sizes",
+            "reads": [
+              "result"
+            ],
+            "writes": [
+              "result.available?",
+              "result.variants?",
+              "result.variantCounts?",
+              "result.focus?",
+              "result.framing?"
+            ],
+            "extendsItems": {
+              "type": "object",
+              "properties": {
+                "available": {
+                  "type": "boolean"
+                },
+                "variants": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "size": {
+                        "type": "string"
+                      },
+                      "width": {
+                        "type": "number"
+                      },
+                      "height": {
+                        "type": "number"
+                      },
+                      "format": {
+                        "type": "string"
+                      },
+                      "bytes": {
+                        "type": "number"
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "pending",
+                          "done",
+                          "error",
+                          "failed"
+                        ]
+                      },
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "size",
+                      "width",
+                      "height",
+                      "format",
+                      "bytes",
+                      "state",
+                      "path"
+                    ]
+                  }
+                },
+                "variantCounts": {
+                  "type": "object",
+                  "properties": {
+                    "done": {
+                      "type": "number"
+                    },
+                    "pending": {
+                      "type": "number"
+                    },
+                    "error": {
+                      "type": "number"
+                    },
+                    "failed": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "done",
+                    "pending",
+                    "error",
+                    "failed"
+                  ]
+                },
+                "focus": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "y": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "w": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "h": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y",
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "framing": {
+                  "type": "object",
+                  "properties": {
+                    "focus": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "y": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "w": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "h": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y",
+                            "w",
+                            "h"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "crops": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "y": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "w": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "h": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "w",
+                          "h"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "manual crops keyed by reduced ratio, e.g. \"16:9\""
+                    },
+                    "ratios": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "sizes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "manual": {
+                            "type": "boolean"
+                          },
+                          "fits": {
+                            "type": "boolean"
+                          },
+                          "crop": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "left": {
+                                    "type": "number"
+                                  },
+                                  "top": {
+                                    "type": "number"
+                                  },
+                                  "width": {
+                                    "type": "number"
+                                  },
+                                  "height": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "left",
+                                  "top",
+                                  "width",
+                                  "height"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "sizes",
+                          "manual",
+                          "fits",
+                          "crop"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "focus",
+                    "crops",
+                    "ratios"
+                  ]
+                }
+              },
+              "required": [
+                "available",
+                "variants",
+                "variantCounts",
+                "focus",
+                "framing"
+              ]
+            }
+          }
+        },
+        {
+          "spec": "authz.fields:media?shape=item",
+          "name": "authz.fields",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
+            "reads": [
+              "identity?",
+              "result?"
+            ],
+            "writes": [
+              "result?"
+            ],
+            "errors": {
+              "403": "no field grant on media for a caller without an identity or a configured role"
+            },
+            "narrows": {
+              "shape": "item",
+              "answers": {
+                "anonymous": [
+                  "id",
+                  "path",
+                  "filename",
+                  "contentType",
+                  "size",
+                  "width",
+                  "height",
+                  "alt",
+                  "title",
+                  "description",
+                  "provenance",
+                  "focus",
+                  "variants[].size",
+                  "variants[].width",
+                  "variants[].height",
+                  "variants[].format",
+                  "variants[].path"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "setPassword",
       "steps": [
         {
@@ -32212,6 +33164,11 @@
         "method": "PATCH",
         "path": "/media/:id",
         "pipeline": "updateMedia"
+      },
+      {
+        "method": "PUT",
+        "path": "/media/:id/framing",
+        "pipeline": "setMediaFraming"
       },
       {
         "method": "POST",

@@ -26,7 +26,7 @@ export default defineConfig({
         anonymousFields: {
           pages: ["id", "slug", "title", "body", "status", "hero", "seo", "_locale", "_locales", "_translations", "_links", "_paths", "redirect"],
           settings: ["id", "title", "description", "navigation", "_locales", "_translations"],
-          media: ["id", "path", "filename", "contentType", "size", "width", "height", "alt", "title", "description", "provenance", "variants[].size", "variants[].width", "variants[].height", "variants[].format", "variants[].path"],
+          media: ["id", "path", "filename", "contentType", "size", "width", "height", "alt", "title", "description", "provenance", "focus", "variants[].size", "variants[].width", "variants[].height", "variants[].format", "variants[].path"],
           mediaFile: ["headers.cache-control", "headers.x-content-provenance", "headers.x-kestrel-variant"],
           redirectRules: ["from", "pattern", "target", "status"],
         },
@@ -164,6 +164,7 @@ export default defineConfig({
     { http: "GET /media/:id/variants/:file", pipeline: "serveImageVariant" },
     { http: "GET /media/:id/:name", pipeline: "serveMediaFile" },
     { http: "PATCH /media/:id", pipeline: "updateMedia" },
+    { http: "PUT /media/:id/framing", pipeline: "setMediaFraming" },
     { http: "POST /admin/media/export", pipeline: "exportMedia" },
     { http: "POST /admin/media/repair-public", pipeline: "repairPublicMedia" },
     { http: "DELETE /media/:id", pipeline: "deleteMedia" },

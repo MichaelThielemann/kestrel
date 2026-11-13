@@ -102,6 +102,6 @@ Not included: ownership/resource checks (the `resource` argument is ignored), ro
 | `authz.fields:<arg>` | Keep only the <arg> fields the caller may see: anonymousFields.<arg> without an identity or a configured role; otherwise everything when one of its roles has no field grant for <arg>, else the union of its roles' grants and the anonymous one | `identity?`, `result?` | `result?` | – | – | 403 no field grant on <arg> for a caller without an identity or a configured role | – | no |
 | `authz.validateRoles:<arg>` | Validate the role names at payload.<arg> against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept | `payload.<arg>` | – | object | – | 400 the value is not an array of known role names | – | no |
 
-Used by 81 of 109 pipelines in `examples/minimal`.
+Used by 82 of 110 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

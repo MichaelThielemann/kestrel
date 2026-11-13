@@ -343,6 +343,13 @@ describe("image variants wiring", () => {
     expect(pipelines.get("generateImageVariants")).toEqual(["images.generate"]);
     expect(pipelines.get("resumeImages")).toEqual(["images.resume"]);
   });
+  it("sets a media item's framing over PUT /media/:id/framing and answers the item with its variants", async () => {
+    const config = await loadConfig(join(root, "kestrel.config.ts"));
+    const routes = config.triggers.filter((t) => "http" in t).map((t) => [(t as { http: string }).http, t.pipeline]);
+    expect(routes).toEqual(expect.arrayContaining([["PUT /media/:id/framing", "setMediaFraming"]]));
+    const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
+    expect(pipelines.get("setMediaFraming")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:media.write", "images.setFraming", "images.generate", "media.get", "images.attach", "authz.fields:media?shape=item"]);
+  });
   it("keeps the embedded registration pipeline off the http surface", async () => {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
     expect(config.triggers.filter((t) => t.pipeline === "registerImageSizesBoot")).toEqual([]);
@@ -377,6 +384,45 @@ describe("media list reports variant progress", () => {
       expect(listed.status).toBe(200);
       const body = boundaryCast<{ items: { id: string; variantCounts: { done: number; pending: number; error: number; failed: number } }[] }>(listed.result, "json");
       expect(body.items[0]?.variantCounts).toEqual({ done: 5, pending: 0, error: 0, failed: 0 });
+    } finally {
+      await dispose();
+    }
+  });
+});
+
+describe("media framing", () => {
+  it("stores a focus that every reader of the item sees, refuses an invalid one and keeps it through the trash", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const registered = await kestrel.run("registerImageSizes", { trigger, headers: bearer(admin.token), payload: { sizes: [{ name: "hero", width: 1600, height: 900, fit: "cover" }] } });
+      expect(registered.status).toBe(200);
+      const uploaded = await kestrel.run("uploadMedia", { trigger, headers: bearer(admin.token), files: [{ field: "file", filename: "a.jpg", contentType: "image/jpeg", data: TEST_JPEG }] });
+      expect(uploaded.status).toBe(200);
+      const { id } = boundaryCast<{ id: string }>(uploaded.result, "json");
+      const focus = { x: 0.25, y: 0.25, w: 0.5, h: 0.5 };
+
+      expect((await kestrel.run("setMediaFraming", { trigger, params: { id }, payload: { focus } })).status).toBe(401);
+      expect((await kestrel.run("setMediaFraming", { trigger, headers: bearer(admin.token), params: { id }, payload: { focus: { x: 2, y: 0, w: 0, h: 0 } } })).status).toBe(400);
+      expect((await kestrel.run("setMediaFraming", { trigger, headers: bearer(admin.token), params: { id: "missing" }, payload: { focus } })).status).toBe(404);
+
+      const framed = await kestrel.run("setMediaFraming", { trigger, headers: bearer(admin.token), params: { id }, payload: { focus } });
+      expect(framed.status).toBe(200);
+      const item = boundaryCast<{ id: string; available: boolean; focus: unknown; framing: { focus: unknown; crops: unknown; ratios: unknown[] } }>(framed.result, "json");
+      expect(item).toMatchObject({ id, available: true, focus });
+      expect(item.framing).toEqual({ focus, crops: {}, ratios: [{ key: "16:9", sizes: ["hero"], manual: false, fits: true, crop: null }] });
+
+      const anonymous = await kestrel.run("listMedia", { trigger, payload: { ids: id } });
+      expect(anonymous.status).toBe(200);
+      const [publicItem] = boundaryCast<{ items: Array<Record<string, unknown>> }>(anonymous.result, "json").items;
+      expect(publicItem?.focus).toEqual(focus);
+      expect(publicItem).not.toHaveProperty("framing");
+
+      expect((await kestrel.run("trashMedia", { trigger, headers: bearer(admin.token), payload: { ids: [id] } })).status).toBe(200);
+      expect((await kestrel.run("setMediaFraming", { trigger, headers: bearer(admin.token), params: { id }, payload: { focus: null } })).status).toBe(404);
+      expect((await kestrel.run("restoreMedia", { trigger, headers: bearer(admin.token), payload: { ids: [id] } })).status).toBe(200);
+      const restored = await kestrel.run("getMedia", { trigger, headers: bearer(admin.token), params: { id } });
+      expect(boundaryCast<{ focus: unknown }>(restored.result, "json").focus).toEqual(focus);
     } finally {
       await dispose();
     }

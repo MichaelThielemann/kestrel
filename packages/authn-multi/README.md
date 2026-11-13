@@ -125,6 +125,6 @@ concerns), an e-mail field.
 | `authn.requireRecentAuth:<arg>` | Require that the session's password was checked within the last <arg> seconds, at login or through authn.confirmPassword; otherwise 403 REAUTH_REQUIRED | `token` | – | – | – | 401 not authenticated; 403 the last password check is older than the window (`REAUTH_REQUIRED`) | beside | no |
 | `authn.confirmPassword` | Confirm the caller's password; marks the session as freshly authenticated for authn.requireRecentAuth | `token` | `result` | { password: string } | { ok: boolean, … } | 400 the password is missing or wrong; 401 not authenticated | beside | no |
 
-Used by 85 of 109 pipelines in `examples/minimal`.
+Used by 86 of 110 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->
