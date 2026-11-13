@@ -27,6 +27,7 @@ const budgetSchema = z
 export const configSchema = z
   .object({
     buckets: z.record(
+      z.string(),
       z
         .object({
           limit: z.number().int().positive(),

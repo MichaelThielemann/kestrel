@@ -14,11 +14,11 @@ const fieldGrants = z.record(
 
 export const configSchema = z
   .object({
-    roles: z.record(z.array(z.string().regex(/^(\*|[a-z0-9_-]+(\.[a-z0-9_-]+)*(\.\*)?)$/))),
+    roles: z.record(z.string(), z.array(z.string().regex(/^(\*|[a-z0-9_-]+(\.[a-z0-9_-]+)*(\.\*)?)$/))),
     roleClaim: z.string().min(1).default("roles"),
     anonymous: z.array(z.string()).default([]),
     anonymousFields: fieldGrants.default({}),
-    fields: z.record(fieldGrants).default({}),
+    fields: z.record(z.string(), fieldGrants).default({}),
     rolelessPipelines: z.array(z.string().min(1)).default([...DEFAULT_ROLELESS_PIPELINES]).describe("Pipelines that need a signed-in caller but serve an account without a configured role; every other such pipeline must run authz.requireRole"),
   })
   .strict()

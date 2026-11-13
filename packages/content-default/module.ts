@@ -19,7 +19,7 @@ const field = z.union([
 
 export const configSchema = z
   .object({
-    types: z.record(z.object({ kind: z.enum(["single", "multi"]), fields: z.record(field), completeWhen: z.object({ field: z.string().min(1), equals: z.string().min(1) }).strict().optional() }).strict()),
+    types: z.record(z.string(), z.object({ kind: z.enum(["single", "multi"]), fields: z.record(z.string(), field), completeWhen: z.object({ field: z.string().min(1), equals: z.string().min(1) }).strict().optional() }).strict()),
     locales: z.array(z.string().min(1)).optional(),
     defaultLocale: z.string().min(1).optional(),
     maxLimit: z.number().int().min(1).default(200),

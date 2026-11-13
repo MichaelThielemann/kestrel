@@ -8,7 +8,7 @@ import { createValidator, type Validator } from "./impl.ts";
 
 export const configSchema = z
   .object({
-    schemas: z.record(z.union([z.string().min(1), z.record(z.unknown())])),
+    schemas: z.record(z.string(), z.union([z.string().min(1), z.record(z.string(), z.unknown())])),
     maxDepth: z.number().int().positive().default(32),
     maxNodes: z.number().int().positive().default(20_000),
     watch: z.boolean().default(false),

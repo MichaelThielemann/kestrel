@@ -36,6 +36,7 @@ const siteUrlSchema = z.string().superRefine((value, ctx) => {
 export const configSchema = z
   .object({
     types: z.record(
+      z.string(),
       z.object({ slugField: z.string().default("slug"), statusField: z.string().default("status"), publishedValue: z.string().default("published"), home: z.string().optional() }).strict(),
     ),
     formats: z.array(z.string().min(1)).min(1).default(["html"]),
@@ -62,7 +63,7 @@ export const configSchema = z
         settings: z.object({ type: z.string().default("settings"), titleField: z.string().default("title"), descriptionField: z.string().default("description") }).strict().prefault({}),
         titleField: z.string().default("title"),
         seoField: z.string().default("seo"),
-        headings: z.record(z.string()).default({}),
+        headings: z.record(z.string(), z.string()).default({}),
       })
       .strict()
       .prefault({}),

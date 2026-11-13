@@ -11,8 +11,8 @@ import { createReferencesDefault, readSchemaFile, type References, type Referrer
 
 export const configSchema = z
   .object({
-    targets: z.record(z.union([z.object({ content: z.string().min(1) }).strict(), z.object({ media: z.literal(true) }).strict(), z.object({ collection: z.string().min(1) }).strict()])),
-    schemas: z.record(z.union([z.string().min(1), z.record(z.unknown())])).optional(),
+    targets: z.record(z.string(), z.union([z.object({ content: z.string().min(1) }).strict(), z.object({ media: z.literal(true) }).strict(), z.object({ collection: z.string().min(1) }).strict()])),
+    schemas: z.record(z.string(), z.union([z.string().min(1), z.record(z.string(), z.unknown())])).optional(),
     watch: z.boolean().default(false),
   })
   .strict();

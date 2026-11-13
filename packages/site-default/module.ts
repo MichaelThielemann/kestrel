@@ -19,7 +19,7 @@ const routeSchema = z
   .object({
     slugField: z.string().min(1).default("slug"),
     home: z.string().min(1).optional(),
-    liveWhen: z.record(z.unknown()).default({}),
+    liveWhen: z.record(z.string(), z.unknown()).default({}),
     labelField: z.string().min(1).default("title"),
     parentField: z.string().min(1).optional(),
     mount: z.literal(true).optional(),
@@ -28,7 +28,7 @@ const routeSchema = z
 
 export const configSchema = z
   .object({
-    routes: z.record(routeSchema).default({}),
+    routes: z.record(z.string(), routeSchema).default({}),
     prefixPrimary: z.boolean().default(false),
     reservedPaths: z.array(z.string().regex(/^(\/[A-Za-z0-9._-]+)+$/)).default([]),
     mounts: z.object({ type: z.string().min(1), field: z.string().min(1) }).strict().optional(),
