@@ -587,7 +587,11 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const mediaId = lease.mediaId;
     const media = await readMedia(mediaId);
     if (isErr(media)) return media;
-    if (media.value === null || !eligible(media.value.contentType)) return ok(undefined);
+    if (media.value === null) {
+      const removed = await removeVariants(mediaId);
+      return isErr(removed) ? removed : ok(undefined);
+    }
+    if (!eligible(media.value.contentType)) return ok(undefined);
     if (lease.redo) {
       const requeued = await db.updateMany<Variant>(VARIANTS, { mediaId, state: "done", size: { in: effective.map((size) => size.name) } }, { state: "pending", attempts: 0, error: null, updatedAt: now() });
       if (isErr(requeued)) return requeued;

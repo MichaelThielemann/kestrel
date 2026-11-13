@@ -370,7 +370,9 @@ created in the last 24 hours with no rows at all (a generation that never starte
 from each of these in turn, at most 200 items per pass, so no group keeps it from the others. It
 considers only rows of sizes that are still declared, and moves the rows and requests of the items it
 tried but could not advance behind the others, so a few items it cannot place or render never keep it
-from the rest; items left out of a pass keep their place. An item it cannot place or render — for
+from the rest; items left out of a pass keep their place. An item among these that `media@1` no
+longer reports as ready (an `images.remove` that failed after `media.remove`) has its rows, private
+variants and public copies removed. An item it cannot place or render — for
 instance one its provider reports as ready but whose bytes it has lost, which `images.plan` and
 `images.generate` report as `INTERNAL` (`the stored bytes of media/<id> are missing`) — is logged and
 skipped, and the stalled job is resumed regardless. The sync job skips such an item the same way and

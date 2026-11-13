@@ -2266,4 +2266,22 @@ describe("images/default writes racing a lease-free prune or a request left on a
     expect(copyOf(w, "square.webp")).toContain("square|");
     for (const images of [first, changing]) await images.close();
   });
+
+  it("images.resume removes the variants and public copies of an item media@1 no longer has when it serves a request left on it", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.generate("m1"));
+    expect(copyOf(w, "square.webp")).not.toBeNull();
+    w.media.remove("m1");
+    expectOk(await w.db.updateMany<ItemLease>(ITEMS, { mediaId: "m1" }, { request: "left behind", updatedAt: 1000 }));
+
+    const later = await w.open([SQUARE], undefined, { now: () => LATER });
+    expectOk(await later.resume());
+    await whenIdle(later);
+
+    expect(expectOk(await w.db.count(VARIANTS, { mediaId: "m1" }))).toBe(0);
+    expect(expectOk(await w.db.count(ITEMS, { mediaId: "m1" }))).toBe(0);
+    expect([...w.blobs.blobs.keys()].filter((key) => key.includes("/m1/"))).toEqual([]);
+    for (const opened of [images, later]) await opened.close();
+  });
 });
