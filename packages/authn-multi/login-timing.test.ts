@@ -6,7 +6,7 @@ import { createAuthnMulti } from "./impl.ts";
 
 vi.mock("node:crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof crypto>();
-  return { ...actual, scrypt: vi.fn(actual.scrypt), scryptSync: vi.fn(actual.scryptSync) };
+  return { ...actual, scrypt: vi.fn(actual.scrypt), scryptSync: vi.fn(actual.scryptSync), timingSafeEqual: vi.fn(actual.timingSafeEqual) };
 });
 
 const config = { identifier: "username" as const, minPasswordLength: 8, sessionTtlSeconds: 60, adminPermission: "users.manage" };
@@ -24,10 +24,19 @@ function median(values: number[]): number {
   return sorted[Math.floor(sorted.length / 2)] ?? 0;
 }
 
-async function timed(fn: () => Promise<unknown>): Promise<number> {
-  const start = performance.now();
-  await fn();
-  return performance.now() - start;
+interface KeyWork {
+  derivations: { password: unknown; saltBytes: number; keyBytes: unknown; options: unknown }[];
+  comparisons: [number, number][];
+}
+
+async function keyWorkOf(login: () => Promise<unknown>): Promise<KeyWork> {
+  vi.mocked(crypto.scrypt).mockClear();
+  vi.mocked(crypto.timingSafeEqual).mockClear();
+  await login();
+  return {
+    derivations: vi.mocked(crypto.scrypt).mock.calls.map(([password, salt, keyBytes, options]) => ({ password, saltBytes: typeof salt === "string" ? Buffer.byteLength(salt) : salt.byteLength, keyBytes, options: typeof options === "function" ? undefined : options })),
+    comparisons: vi.mocked(crypto.timingSafeEqual).mock.calls.map(([a, b]) => [a.byteLength, b.byteLength]),
+  };
 }
 
 describe("authn/multi password checks", () => {
@@ -55,15 +64,13 @@ describe("authn/multi password checks", () => {
     }
   });
 
-  it("takes as long for an unknown user as for a known one with a wrong password", async () => {
+  it("derives and compares a key of the same cost for an unknown user as for a known one with a wrong password", async () => {
     const authn = await setup();
-    const unknown: number[] = [];
-    const known: number[] = [];
-    for (let i = 0; i < 21; i++) {
-      unknown.push(await timed(() => authn.login({ username: "nobody", password: "wrong-password" })));
-      known.push(await timed(() => authn.login({ username: "bob", password: "wrong-password" })));
-    }
-    expect(Math.abs(median(unknown.map((ms, i) => ms - (known[i] ?? 0))))).toBeLessThan(5);
+    const unknown = await keyWorkOf(() => authn.login({ username: "nobody", password: "wrong-password" }));
+    const known = await keyWorkOf(() => authn.login({ username: "bob", password: "wrong-password" }));
+    expect(known.derivations).toHaveLength(1);
+    expect(known.comparisons).toEqual([[64, 64]]);
+    expect(unknown).toEqual(known);
   });
 
   it("keeps the event loop free while a password is checked", async () => {
