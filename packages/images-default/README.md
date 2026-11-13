@@ -375,7 +375,10 @@ a request left open for longer than `staleAfterMs` (one whose last placement or 
 whose holder stopped before it served the request), any row that already had a render at its path and
 was left `pending` for longer than `staleAfterMs` (a re-render that never finished), any row left
 `planned` for longer than `staleAfterMs` (a placement that never finished), any row left in `error`
-for longer than `staleAfterMs` (a failed attempt below `maxAttempts`), and any media item
+for longer than `staleAfterMs` (a failed attempt below `maxAttempts`), any row of a declared size
+planned with another width, height, fit, format or quality than the size now has and untouched for
+longer than `staleAfterMs` while no sync job is running (an item a sync job had passed when the size
+changed again), and any media item
 created in the last 24 hours with no rows at all (a generation that never started). It takes one item
 from each of these in turn, at most 200 items per pass, so no group keeps it from the others. It
 considers only rows of sizes that are still declared, and moves the rows and requests of the items it

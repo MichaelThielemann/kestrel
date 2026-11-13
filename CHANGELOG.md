@@ -1474,8 +1474,10 @@ Net changes since 5.8.1.
   request. `images.resume` also places and renders items whose lease ran out, items with a request
   left open, items with a row of a declared size that already had a render at its path and was left
   `pending` for longer than `staleAfterMs`, items with a row left `planned` for longer than
-  `staleAfterMs`, items with a row left in `error` for longer than `staleAfterMs`, and items created
-  in the last 24 hours without rows, taking one item from each of these in turn up to 200 per pass,
+  `staleAfterMs`, items with a row left in `error` for longer than `staleAfterMs`, items with a row
+  of a declared size planned with another spec than the size now has and untouched for longer than
+  `staleAfterMs` while no sync job runs (a size changed again while a sync job ran past the item),
+  and items created in the last 24 hours without rows, taking one item from each of these in turn up to 200 per pass,
   and moves the rows it tried behind the others. A row that never had a render is left to the render
   queued for it; once that render has run and left a row in `error`, or ran out of time before the
   item's later sizes, `images.resume` renders the item again. A render that runs out of time on a

@@ -2544,3 +2544,37 @@ describe("images/default writes racing a lease-free prune or a request left on a
     for (const opened of [images, removing, later]) await opened.close();
   });
 });
+
+describe("images/default rows a sync job left on an earlier spec", () => {
+  const WIDER: Size = { ...SQUARE, width: 120, height: 120 };
+
+  it("images.resume renders an item whose row of a declared size was planned with another spec, once no sync job runs", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.generate("m1"));
+    expectOk(await w.db.createOne<Job>(JOBS, { state: "done", total: 1, done: 1, failed: 0, cursor: "m1", startedAt: 1000, updatedAt: 1000, finishedAt: 1000, error: null }));
+
+    const later = await w.open([WIDER], undefined, { now: () => LATER });
+    expectOk(await later.resume());
+    await whenIdle(later);
+
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", width: 120, height: 120 });
+    expect(copyOf(w, "square.webp")).toContain("square|");
+    expect(expectOk(await later.variantCounts(["m1"])).get("m1")).toEqual({ done: 1, pending: 0, error: 0, failed: 0 });
+    for (const opened of [images, later]) await opened.close();
+  });
+
+  it("images.resume leaves such rows to a sync job that is still running", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.generate("m1"));
+    expectOk(await w.db.createOne<Job>(JOBS, { state: "running", total: 1, done: 0, failed: 0, cursor: "zzz", startedAt: LATER, updatedAt: LATER, finishedAt: null, error: null }));
+
+    const later = await w.open([WIDER], undefined, { now: () => LATER });
+    expectOk(await later.resume());
+    await whenIdle(later);
+
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", width: 100, height: 100 });
+    for (const opened of [images, later]) await opened.close();
+  });
+});
