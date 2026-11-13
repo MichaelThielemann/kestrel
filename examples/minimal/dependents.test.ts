@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -221,6 +221,12 @@ function page(example: Example, path: string): string | null {
   return existsSync(file) ? readFileSync(file, "utf8") : null;
 }
 
+function exportedPages(example: Example): string[] {
+  return readdirSync(example.site, { recursive: true, encoding: "utf8" })
+    .filter((file) => file.endsWith("index.html"))
+    .map((file) => readFileSync(join(example.site, file), "utf8"));
+}
+
 function mtime(example: Example, path: string): number | null {
   const file = join(example.site, path === "/" ? "" : path.slice(1), "index.html");
   return existsSync(file) ? statSync(file).mtimeMs : null;
@@ -325,7 +331,7 @@ for (const mode of ["direct", "queue"] as const) {
       }
     }, 30_000);
 
-    it("a settings change re-renders every published page outside the request, then writes llms-full.txt once", async () => {
+    it("a settings change re-renders every published page outside the request, then writes llms-full.txt once, and no page keeps the old title", async () => {
       const example = await bootExample({ mode, pollMs: 50 });
       try {
         const ids = await seed(example);
@@ -334,20 +340,24 @@ for (const mode of ["direct", "queue"] as const) {
         const putAt = Date.now();
         const held = mode === "direct" ? example.reading.hold("/programm") : undefined;
         const before = { programm: mtime(example, "/programm"), info: mtime(example, "/info") };
-        const response = await call(example, "setSettings", { token: ids.token, body: { title: "Festival 2027", locale: "de" } });
+        const response = await call(example, "setSettings", { token: ids.token, body: { title: "Festival & Co 2027", locale: "de" } });
         expect(response._llms).toBeUndefined();
         if (mode === "queue") {
           expect(example.reading.calls.length).toBe(callsBefore);
           expect({ programm: mtime(example, "/programm"), info: mtime(example, "/info") }).toEqual(before);
         } else {
           await held!.reached;
-          expect(page(example, "/programm")).not.toContain("Festival 2027");
+          expect(page(example, "/programm")).not.toContain("Festival & Co 2027");
           held!.release();
         }
-        await pollUntil(() => ["/programm", "/info"].every((p) => (page(example, p) ?? "").includes('<p class="site">Festival 2027</p>')));
+        await pollUntil(() => ["/programm", "/info"].every((p) => (page(example, p) ?? "").includes('<p class="site">Festival & Co 2027</p>')));
         await settled(example);
+        const exported = exportedPages(example);
+        expect(exported.length).toBeGreaterThanOrEqual(3);
+        expect(exported.filter((html) => html.includes('<p class="site">Festival</p>'))).toEqual([]);
         const text = (file: string): string => (existsSync(join(example.site, file)) ? readFileSync(join(example.site, file), "utf8") : "");
-        await pollUntil(() => text("llms.txt").includes("# Festival 2027") && text("llms-full.txt").includes("# Festival 2027"));
+        await pollUntil(() => text("llms.txt").includes("# Festival & Co 2027") && text("llms-full.txt").includes("# Festival & Co 2027"));
+        for (const file of ["llms.txt", "llms-full.txt"]) expect(text(file), file).not.toMatch(/^# Festival$/m);
         expect(page(example, "/entwurf")).toBeNull();
         if (mode === "queue") {
           await pollUntil(() => example.runs.some((r) => r.at >= putAt && r.pipeline === "refreshLlms" && r.phase === "end"));
