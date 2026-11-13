@@ -233,12 +233,18 @@ placed with the item's framing. When re-planning fails after the framing was sto
 `images.setFraming` answers the error and plans and renders the item again in the background.
 
 Until the new render is at the path, the origin and the public copy serve the old variant, never the
-original's bytes. Once it is there, `variants[].path` gains `?v=<token>`, a short hash of the crop
-the bytes at the path were rendered with (`cropToken`), and `images.variantsChanged` is raised for
-the item, so pages that show it render again with the new URL. The path itself, the public copy's
-file name, `images.serve` (whose `:file` carries no query) and `images.export:<dir>` stay as they
-are; a check that compares exported URLs with files ignores the query. Back at the centre, the path
-has no query again.
+original's bytes. Once it is there, `variants[].path` ends in a new `?v=<token>`, and
+`images.variantsChanged` is raised for the item, so pages that show it render again with the new
+URL. The token is a short hash of the variant's row and the number of its finished renders
+(`renders`), which a render raises in the same conditional update that marks the row `done`. So the
+query changes only once new bytes are at the path, and it never comes back for that path: a crop
+set back to an earlier one, or a framing reset to the centre, gets a URL of its own, and a URL
+that a cache filled stays bound to the bytes it got then. The same holds for any later render at
+the path, after a changed size or format, a repair by `images.resume`, or a size registered again
+after a prune, whose path held bytes before. Only a variant whose first render is the only one at
+its path keeps the plain path. The path itself, the public copy's file name, `images.serve` (whose
+`:file` carries no query) and `images.export:<dir>` stay as they are; a check that compares
+exported URLs with files ignores the query.
 
 Placing, rendering and writing the public copies of one item happen under a lease on the item, a row
 per media id in `images_items` that one process holds at a time for `staleAfterMs` and renews before
@@ -268,18 +274,14 @@ records a failed attempt or marks a row `done` over what the new holder wrote. A
 path that stalls that long can still land after the new holder's; the stalled holder notices when
 it has finished its writes (after a failed public copy, once it put the earlier bytes back), marks
 the item, and every rendered size of the item renders again. Until then that path answers the
-stalled bytes, and a cache that fetched it meanwhile keeps them under the same `?v=`.
+stalled bytes, and a cache that fetched it meanwhile keeps them under the current `?v=`; the render
+after it gives the path a new `?v=` and raises `images.variantsChanged`.
 
-`?v=` is derived from the crop alone, and the centre has no query, so a URL does not name one set of
-bytes for good. A page published before a re-crop goes on asking for its URL (the bare path or the
-earlier `?v=`) until it is published again after `images.variantsChanged`, while the path already
-answers the new render; a cache that fetches that URL meanwhile stores the new bytes under it. When
-the crop is later set back to one the item had before, or the framing is reset to the centre, that
-URL comes back, and such a cache goes on answering the bytes it stored. The same holds for bytes a
-cache fetched during a stalled write or while a render with a new crop was at the path before its
-row was marked `done`. So keep variant URLs, with or without `?v=`, in a cache no longer than it
-takes to publish the pages that show them again, or purge an item's variant URLs when
-`images.variantsChanged` names it.
+A page published before a re-render goes on asking for its URL (the plain path or an earlier `?v=`)
+until it is published again after `images.variantsChanged`, while the path already answers the new
+render, so a cache that fetches that URL meanwhile stores the new bytes under it. No later render
+at the path is given that URL again, so a page published afterwards never meets other bytes under
+it, also when a crop is set back or the framing is reset.
 
 `images.attach` adds `focus` (the rectangle or `null`), meant for anonymous readers, and
 `framing: { focus, crops, width, height, ratios }`, meant for an editor. `width` and `height` are the
@@ -296,12 +298,12 @@ and a render of a hidden item writes no public copy. `images.remove`, `images.re
 start's sweep of items `media@1` no longer has delete it with the variants. The framing is stored in
 `images_framing`, one row per media id; `images_variants` keeps the crop of each row and the crop of
 its last finished render as `"left,top,width,height"`, where an empty or missing value is the
-centre.
+centre, and the number of its finished renders in `renders`.
 
 The crop rules live in `@michaelthielemann/kestrel-images-default/framing`, a subpath that imports
 nothing, so an editor that runs in the browser can preview exactly what this module renders:
 `ratioKey`, `centredCrop`, `cropForRatio`, `effectiveCrop`, `focusFits`, `parseFraming`,
-`formatCrop`, `parseCrop` and `cropToken`, with the types `Rect`, `Framing`, `PixelCrop`,
+`formatCrop` and `parseCrop`, with the types `Rect`, `Framing`, `PixelCrop`,
 `FramingSize` and `FramingParse` and the constants `EMPTY_FRAMING`, `CROP_RATIO_TOLERANCE` and
 `MAX_CROPS`. This module uses the same functions. They take the oriented dimensions of the original,
 which `framing.width` and `framing.height` carry; `media@1`'s stored `width`/`height` are not
@@ -313,8 +315,8 @@ oriented and give a wrong cut for a rotated photo.
 params: {} }`, at most 200 ids per event) through the optional `events@1` contract — declared in
 `emits`, never required — whenever it changes what a page would need to re-render for: an item it
 placed (made `available`), the items a size-set change or `images.prune` touched, an item whose
-focus `images.setFraming` changed, and an item once a render with a changed crop is at its path (see
-"Focus and crop"). It never raises
+focus `images.setFraming` changed, and an item once a render with a changed crop, or any render that
+changed a variant's `?v=`, is at its path (see "Focus and crop"). It never raises
 `media.updated`, which belongs to the pipeline that edits a medium; a pipeline that marks the pages
 showing a medium (`delivery.markDependents:media`) subscribes to both. A rejected emit (no
 subscriber, or a subscriber that throws) is logged with the affected ids and does not undo the

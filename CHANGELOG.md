@@ -691,8 +691,9 @@ Net changes since 5.8.1.
   hand-built implementation or test double must add. `kestrel upgrade`'s `types/breaking-signatures`
   names them.
 - Focus and crop change exported types of `images-default` (`/impl`): `Images` gains `setFraming`
-  and `framingsOf`, and `Variant` gains `crop`, `renderedCrop`, `originalWidth` and `originalHeight`
-  (`""` or `null` for the centre, `0` or `null` for unknown dimensions), which a hand-built
+  and `framingsOf`, and `Variant` gains `crop`, `renderedCrop`, `renders`, `originalWidth` and
+  `originalHeight` (`""` or `null` for the centre, `0` or `null` for no render yet or unknown
+  dimensions), which a hand-built
   implementation, test double or variant row must add. `Planned` gains `crop`: a `Renderer` passed
   to `createImages` as `deps.render` must cut `planned.crop` from the original after its EXIF
   orientation before it resizes, or a framed size records a crop its bytes do not have. `kestrel
@@ -1334,7 +1335,7 @@ Net changes since 5.8.1.
   collection `images_items`, held by one process at a time: a call that finds the item held by
   another process stores what it was asked to (a framing, for instance), leaves a request and
   returns, and the holder places and renders the item again before it lets go, so the rows end on
-  the stored framing and `?v=` names the bytes at the path. A request left after the holder let go
+  the stored framing and `?v=` changes only once new bytes are at the path. A request left after the holder let go
   is served by `images.resume` once `staleAfterMs` has passed, except that `images.showMany` takes
   the item itself then and writes its public copies. An `images.setFraming` that fails after it
   stored the framing, also because it could not leave its request, places and renders the item in
@@ -1345,10 +1346,10 @@ Net changes since 5.8.1.
   manual, fits, crop }] }` to each item, `width` and `height` being the original's oriented
   dimensions. Ratio keys are exact, so sizes with nearly the same ratio get separate
   keys. A framing survives trash and restore and is deleted with the item's variants;
-  `images_variants` gains `crop`, `renderedCrop`, `originalWidth` and `originalHeight`. The new subpath
+  `images_variants` gains `crop`, `renderedCrop`, `renders`, `originalWidth` and `originalHeight`. The new subpath
   `@michaelthielemann/kestrel-images-default/framing` imports nothing and exports the crop rules this
   module renders with (`ratioKey`, `centredCrop`, `cropForRatio`, `effectiveCrop`, `focusFits`,
-  `parseFraming`, `formatCrop`, `parseCrop`, `cropToken`), so an editor in the browser previews
+  `parseFraming`, `formatCrop`, `parseCrop`), so an editor in the browser previews
   exactly the server's cut.
 - `examples/minimal` wires `PUT /media/:id/framing` to `setMediaFraming` (`images.setFraming`, then
   `images.generate`, answering the item as `GET /media/:id` does, behind `media.write`) and grants
@@ -1458,14 +1459,16 @@ Net changes since 5.8.1.
   loop, and a login for an unknown or deactivated username derives a key against a throwaway hash of
   the same parameters, so it takes as long as one with a wrong password. Both packages export
   `verifyPasswordAsync`; `verifyPassword` is unchanged.
-- `images-default`: `variants[].path` of a variant whose bytes were rendered with a crop ends in
-  `?v=<token>`, a short hash of that crop, which changes only once a render with a new crop is at the
-  path; a variant cut from the centre has no query. The path, its public copy, `images.serve` and
-  `images.export:<dir>` are unchanged, so a check that matches exported URLs to files strips the
-  query. The token depends on the crop alone, so setting a crop back or resetting the framing to the
-  centre brings an earlier URL back, which a cache may have filled with other bytes while pages
-  still asked for it; keep variant URLs cached no longer than it takes to publish the pages that
-  show them again.
+- `images-default`: `variants[].path` of a variant rendered again at a path that held bytes before
+  (after a re-crop, a reset to the centre, a changed size or format, a repair by `images.resume`, or
+  a size registered again after a prune) ends in `?v=<token>`. The token is a short hash of the row
+  and the number of its finished renders, raised when a render is marked `done` after its bytes are
+  at the path, so it changes only then and never comes back for that path, also when a crop is set
+  back to an earlier one or the framing is reset. A variant whose first render is the only one at
+  its path keeps the plain path. Such a render raises `images.variantsChanged` for the item, so
+  the pages that show it are published again with the new URL. The path, its public copy,
+  `images.serve` and `images.export:<dir>` are unchanged, so a check that matches exported URLs to
+  files strips the query.
 - `images-default`: a request to generate an item while a render of it runs waits for that render and
   renders once more, instead of sharing the running render, which may have read the rows before the
   request. `images.resume` also places and renders items whose lease ran out, items with a request
@@ -1478,7 +1481,7 @@ Net changes since 5.8.1.
   item's later sizes, `images.resume` renders the item again. A render that runs out of time on a
   size's last attempt goes on with the item's later sizes. A render whose public copy cannot be written, or
   whose check after writing it fails, puts the earlier bytes back at the private path and the public
-  copy, so both paths keep the bytes `?v=` names. `close()` waits for an `images.resume` or a sync
+  copy, so both paths keep the bytes they had under the row's current `?v=`. `close()` waits for an `images.resume` or a sync
   start under way, and neither starts the sync job again once it has begun; `images.resume` then
   answers `CONFLICT`.
 

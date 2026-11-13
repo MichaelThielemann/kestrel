@@ -598,8 +598,9 @@ dimensions and format are decided from the original
 right after upload — before any variant is actually rendered — so the first render needs no
 republish: until it lands, the path answers with the original's own bytes and type instead of the
 resized image. Apart from a format change, which moves the size to a new path and retires the old
-one, only a re-crop changes `variants[].path` (its `?v=`), and it marks the pages that show the item
-for a re-render (see [Focus and crop](#focus-and-crop)). `available` on the media item (`false` while any size still lacks its path, `true` once every
+one, `variants[].path` changes only in its `?v=`, once a later render replaces bytes the path
+already had (a re-crop, a changed size, a repair), and that marks the pages that show the item for
+a re-render (see [Focus and crop](#focus-and-crop)). `available` on the media item (`false` while any size still lacks its path, `true` once every
 size has one) is what an editor UI should gate insertion on; a page or an admin view can otherwise
 link every `variants[]` entry from the very first read. Generation is caught up by a resumable sync
 job if needed, and the item's variants are deleted only on request. The original is never modified.
@@ -640,8 +641,9 @@ error, failed } }], job, orphaned: { sizes: [name], variants: n }, registrySeen,
 
 `GET /media/:id` and `GET /media` additionally return `available` and
 `variants: [{ size, width, height, format, bytes, state, path }]`; `path` is the public path
-`/media/<id>/variants/<size>.<ext>`, followed by `?v=<token>` once a render with a crop is at it (the
-file name never carries the query), and `width`/`height` are the planned dimensions, present in
+`/media/<id>/variants/<size>.<ext>`, followed by `?v=<token>` once a later render replaced bytes the
+path already had, with a token that path is never given again (the file name never carries the
+query), and `width`/`height` are the planned dimensions, present in
 every state, not only once the render is `done`. `variants[]` never lists a size whose path has no
 object at all yet (still `planned`, internal to `images-default`) — every listed path always answers.
 `available` is `false` for an eligible image with at least one such size still unplaced, `true`
@@ -693,9 +695,8 @@ around the focus, else from the centre; the example's default sizes are all `ins
 framing changes no variant. A size whose cut changes renders again at the same path: until then its
 path keeps answering with the old variant, afterwards `variants[].path` ends in `?v=<token>` and the
 pages showing the item are marked for a re-render. A changed focus marks them at once, also when no
-variant renders again. The token depends on the crop alone, so a crop set back, or a framing reset
-to the centre, brings an earlier URL back; cache variant URLs no longer than it takes to publish the
-pages that show them again. Ratio keys are exact, so a size of `1000x562`
+variant renders again. The token counts the renders at the path, so a crop set back, or a framing
+reset to the centre, gets a new URL, not an earlier one. Ratio keys are exact, so a size of `1000x562`
 gets a crop of its own, not the one of `"16:9"`. The `images-default` README, "Focus and crop", has
 the rules, and `@michaelthielemann/kestrel-images-default/framing` computes the same cuts in the
 browser.

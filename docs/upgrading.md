@@ -386,7 +386,7 @@ owns is read through that module's contract.
 
 #### events-images-variants-changed
 `images-default` announces that an item's variants changed — it placed the item, a size was added or
-changed, a size was pruned, a re-crop was rendered or the focus changed — as its own event `images.variantsChanged` (`{ id: null, ids,
+changed, a size was pruned, a re-crop or another render that changed a variant's `?v=` is at its path, or the focus changed — as its own event `images.variantsChanged` (`{ id: null, ids,
 identity: null, params: {} }`), never as `media.updated`, which belongs to the pipeline that edits a
 medium. A pipeline triggered by `media.updated` that should also follow variant changes, such as one
 running `delivery.markDependents:media`, needs a second trigger on `images.variantsChanged`; the info
@@ -523,8 +523,9 @@ exhaustive `switch` over it needs the case; `MediaItem` gains `trashedAt` and `t
 needs a check; `Media` gains `trash`, `trashFolder`, `restore`, `listTrash`, `trashIds`,
 `selectTrash` and `purge`, and `Images` gains `hide`, `show` and `hidden`, which a hand-built test
 double of either must add. Focus and crop add `setFraming` and `framingsOf` to `Images` and the
-fields `crop`, `renderedCrop`, `originalWidth` and `originalHeight` to `Variant`, which a hand-built
-variant row must set (`""` or `null` for the centre, `0` or `null` for unknown dimensions). `Planned`
+fields `crop`, `renderedCrop`, `renders`, `originalWidth` and `originalHeight` to `Variant`, which a
+hand-built variant row must set (`""` or `null` for the centre, `0` or `null` for no render yet or
+unknown dimensions). `Planned`
 gains `crop`: a `Renderer` passed to `createImages` as `deps.render` must cut `planned.crop` from the
 original after its EXIF orientation before it resizes, or a framed size records a crop its bytes do
 not have.
