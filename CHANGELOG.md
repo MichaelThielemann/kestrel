@@ -1401,6 +1401,18 @@ Net changes since 5.8.1.
   `images.generate`, answering the item as `GET /media/:id` does, behind `media.write`) and grants
   `focus` to anonymous media reads; `kestrel upgrade` proposes `focus` in the anonymous media grant
   when `images.attach` runs.
+- `images/default`: every entry of `variants[]` that `images.attach` lists carries `crop`, the part
+  of the oriented original that the bytes at its `path` show, as `{ left, top, width, height }` in
+  the form of `framing.ratios[].crop`, or `null` for the whole image (an `inside` size) or the
+  centred cut of the size's ratio. It is the crop of the last finished render at the path: while a
+  size renders again after a framing change it keeps the old crop together with the old `?v=`, and
+  both change once the new render is done. A variant that has not finished a render yet, and a row
+  without a readable rendered crop (one rendered by 5.x, which cut only from the centre), report
+  `null`. Two listed variants in state `done` with
+  the same aspect ratio and an equal `crop` show the same picture, so a `srcset` can combine exactly
+  those.
+  `examples/minimal` grants `variants[].crop` to anonymous media reads, and `kestrel upgrade`
+  proposes it in the anonymous media grant when `images.attach` runs.
 
 ### Changed
 

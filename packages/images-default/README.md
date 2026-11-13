@@ -97,7 +97,9 @@ row of a declared size planned with another spec than the size now has and untou
 has no variants; retires rather than deletes the path), `images.readStatus`, `images.remove`
 (`VALIDATION` without an id), `images.removeMany` (after `media.listFolderItems` or
 `media.removeFolder`, reads `result.ids`), `images.setFraming` (see "Focus and crop"),
-`images.attach` (adds `available`, `variants[]`, `variantCounts`, `focus` and `framing` to `result`), `images.serve` (binary; `VALIDATION` without id/file, `NOT_FOUND`
+`images.attach` (adds `available`, `variants[]`, `variantCounts`, `focus` and `framing` to `result`;
+each `variants[]` entry is `{ size, width, height, format, bytes, state, path, crop }`, where `crop`
+names the part of the original its bytes show, see "Focus and crop"), `images.serve` (binary; `VALIDATION` without id/file, `NOT_FOUND`
 otherwise), `images.syncPublic` (reconciles the public copy tree), `images.export:<dir>` (nests its
 counts under their own key in `result`, so running it after `media.export` in one pipeline keeps
 that step's counts). Every step passes a persistence or blobstore failure through unchanged, so a
@@ -299,6 +301,25 @@ manual crop is stored for it, whether the focus lies within its cut (`true` with
 pixel crop it renders with on the oriented original, `{ left, top, width, height }` or `null` for the
 centre. An item without variants gets `focus: null` and an empty framing with `width` and `height`
 `null` and no ratios.
+
+Each entry of `variants[]` carries `crop`: the part of the oriented original that the bytes at its
+`path` show, `{ left, top, width, height }` in the form of `framing.ratios[].crop`, or `null` when
+they show the whole image (an `inside` size) or the centred cut of their ratio. It is the crop of
+the last finished render at the path, not the one planned: while a size renders again after a
+framing change, its entry keeps the old crop together with the old `?v=`, since the path still
+answers the old variant, and both change with the render that marks it `done`. A variant that has
+not finished a render yet reports `null`, as does a row whose rendered crop is missing or does not
+parse, such as one rendered by 5.x, which cut only from the centre. For a `cover` size whose ratio
+equals the original's, the centred cut is the whole image, so its variants report `null` like the
+`inside` variants of that ratio, unless a manual crop for its key applies.
+
+Two listed variants in state `done` with the same aspect ratio (`width`/`height`) and an equal
+`crop` show the same picture at different resolutions. A `srcset` should combine only such
+variants: one that mixes crops shows a different picture depending on the viewport and pixel
+density, and one that leaves out an interchangeable variant renders blurry on high-density screens.
+This holds for `done` entries only: a `pending` entry may still answer the previous render
+with dimensions planned for the next one, and an entry whose path has not had a render yet answers
+the original's bytes.
 
 A framing outlives the trash: the item is hidden, not gone, so trash and restore keep it unchanged,
 and a render of a hidden item writes no public copy. `images.remove`, `images.removeMany` and the

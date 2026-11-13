@@ -640,11 +640,17 @@ error, failed } }], job, orphaned: { sizes: [name], variants: n }, registrySeen,
   their last error text.
 
 `GET /media/:id` and `GET /media` additionally return `available` and
-`variants: [{ size, width, height, format, bytes, state, path }]`; `path` is the public path
+`variants: [{ size, width, height, format, bytes, state, path, crop }]`; `path` is the public path
 `/media/<id>/variants/<size>.<ext>`, followed by `?v=<token>` once a later render replaced bytes the
 path already had, or after a format change of a variant that rendered before, with a token that path is never given again (the file name never carries the
 query), and `width`/`height` are the planned dimensions, present in
-every state, not only once the render is `done`. `variants[]` never lists a size whose path has no
+every state, not only once the render is `done`. `crop` is the part of the original, after its EXIF
+orientation, that the bytes of the last finished render at `path` show, `{ left, top, width, height }`
+in pixels, or `null` for the whole image (an `inside` size), the centred cut of the size's ratio, or a
+variant with no finished render yet. It changes only with the render that marks the variant `done`,
+the same render that gives a path which held bytes before its new `?v=`. Two `done`
+variants with the same aspect ratio and an equal `crop` show the same picture, so a `srcset` combines
+only such variants (see [Focus and crop](../packages/images-default/README.md#focus-and-crop)). `variants[]` never lists a size whose path has no
 object at all yet (still `planned`, internal to `images-default`) — every listed path always answers.
 `available` is `false` for an eligible image with at least one such size still unplaced, `true`
 otherwise (including for a non-image, an SVG or a GIF, which have no variants at all). A broken
