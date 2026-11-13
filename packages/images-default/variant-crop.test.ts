@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -307,6 +307,10 @@ describe("images/default variants[].crop in images.attach", () => {
     try {
       expect(expectOk(await images.exportTo(dir)).written).toBe(1);
       expect(await readdir(dir, { recursive: true })).toEqual(["photo.jpg.square.webp"]);
+      const exported = new Uint8Array(await readFile(join(dir, "photo.jpg.square.webp")));
+      expect(exported).toEqual(new Uint8Array(rendered));
+      const { data } = await sharp(exported).raw().toBuffer({ resolveWithObject: true });
+      expect(data[2]! > 200 && data[0]! < 60).toBe(true);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
