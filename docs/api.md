@@ -677,8 +677,9 @@ so it's reachable only via `kestrel.run`.
 `GET /media/:id` and `GET /media` also return `focus`, a rectangle `{ x, y, w, h }` normalised to
 0..1 on the image as displayed (after its EXIF orientation), or `null`; anonymous callers read it
 too, so a page can set `object-position` from its centre. A signed-in caller also gets
-`framing: { focus, crops, ratios: [{ key, sizes, manual, fits, crop }] }`: the manual crops keyed by
-reduced aspect ratio (`"16:9"`), and per ratio of the `cover` sizes the names of its sizes, whether
+`framing: { focus, crops, width, height, ratios: [{ key, sizes, manual, fits, crop }] }`: the manual
+crops keyed by reduced aspect ratio (`"16:9"`), the original's width and height after its EXIF
+orientation, which the rectangles and pixel cuts refer to (`null` until the item is planned), and per ratio of the `cover` sizes the names of its sizes, whether
 a manual crop is set, whether the focus lies within the cut, and the cut in pixels
 (`{ left, top, width, height }`, `null` for the centre).
 

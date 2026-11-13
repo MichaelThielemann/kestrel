@@ -131,7 +131,21 @@ describe("images/default images.setFraming", () => {
     expect(framed).toEqual({ id: "m1", framing: { focus: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 }, crops: { "1:1": { x: 0.2, y: 0, w: 0.6, h: 1 } } } });
     const views = expectOk(await images.framingsOf(["m1", "unknown"]));
     expect(views.get("m1")).toMatchObject({ focus: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 }, crops: { "1:1": { x: 0.2, y: 0, w: 0.6, h: 1 } } });
-    expect(views.get("unknown")).toEqual({ focus: null, crops: {}, ratios: [{ key: "16:9", sizes: ["wide-small", "wide-large"], manual: false, fits: true, crop: null }, { key: "1:1", sizes: ["square"], manual: false, fits: true, crop: null }] });
+    expect(views.get("m1")).toMatchObject({ width: 1000, height: 600 });
+    expect(views.get("unknown")).toEqual({ focus: null, crops: {}, width: null, height: null, ratios: [{ key: "16:9", sizes: ["wide-small", "wide-large"], manual: false, fits: true, crop: null }, { key: "1:1", sizes: ["square"], manual: false, fits: true, crop: null }] });
+    await images.close();
+  });
+
+  it("gives an unframed item the oriented dimensions of its original once it is planned, swapped for an EXIF-rotated photo", async () => {
+    const w = await world();
+    const stored = new Uint8Array(await sharp({ create: { width: 1000, height: 600, channels: 3, background: "#557799" } }).withMetadata({ orientation: 6 }).jpeg().toBuffer());
+    w.media.add({ id: "upright", contentType: "image/jpeg", data: stored, filename: "upright.jpg", createdAt: 1000 });
+    const images = await w.open();
+    expect(expectOk(await images.framingsOf(["m1"])).get("m1")).toMatchObject({ width: null, height: null });
+    expectOk(await images.plan(["m1", "upright"]));
+    const views = expectOk(await images.framingsOf(["m1", "upright"]));
+    expect(views.get("m1")).toMatchObject({ focus: null, width: 1000, height: 600 });
+    expect(views.get("upright")).toMatchObject({ focus: null, width: 600, height: 1000 });
     await images.close();
   });
 

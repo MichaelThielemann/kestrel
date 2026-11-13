@@ -17,6 +17,10 @@ export interface FramingRatio {
 
 /** A media item's framing together with one entry per ratio of the effective `cover` sizes. */
 export interface FramingView extends Framing {
+  /** The width of the original after its EXIF orientation, the width every rectangle and pixel crop refers to; `null` when it is not known. */
+  width: number | null;
+  /** The height of the original after its EXIF orientation; `null` when it is not known. */
+  height: number | null;
   ratios: FramingRatio[];
 }
 
@@ -42,5 +46,5 @@ export function framingView(framing: Framing, sizes: readonly Size[], ow: number
     fits: known ? focusFits(framing, key, ow, oh) : true,
     crop: known ? cropForRatio(framing, key, ow, oh) : null,
   }));
-  return { focus: framing.focus, crops: framing.crops, ratios };
+  return { focus: framing.focus, crops: framing.crops, width: known ? ow : null, height: known ? oh : null, ratios };
 }

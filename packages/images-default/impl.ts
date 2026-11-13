@@ -66,6 +66,10 @@ export interface Variant extends Document {
   crop: string | null;
   /** The crop of the bytes the last finished render left at the path, in the form of `crop`; `""` or `null` for the centre or no render yet. */
   renderedCrop: string | null;
+  /** The width of the original after its EXIF orientation, as the row was planned; `0` or `null` when it is not known. */
+  originalWidth: number | null;
+  /** The height of the original after its EXIF orientation, as the row was planned; `0` or `null` when it is not known. */
+  originalHeight: number | null;
 }
 
 export interface Retired extends Document {
@@ -185,7 +189,7 @@ export interface Images {
   close(): Promise<void>;
 }
 
-type NewVariant = Pick<Variant, "mediaId" | "size" | "slot" | "spec" | "width" | "height" | "format" | "key" | "bytes" | "state" | "error" | "attempts" | "updatedAt" | "crop" | "renderedCrop">;
+type NewVariant = Pick<Variant, "mediaId" | "size" | "slot" | "spec" | "width" | "height" | "format" | "key" | "bytes" | "state" | "error" | "attempts" | "updatedAt" | "crop" | "renderedCrop" | "originalWidth" | "originalHeight">;
 
 interface Content {
   data: Uint8Array;
@@ -282,7 +286,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
 
   const collections: Array<[string, Schema]> = [
     [SIZES, { name: "string", width: "number", height: "number", fit: "string", format: "string", quality: "number", source: "string", updatedAt: "number" }],
-    [VARIANTS, { mediaId: "string", size: "string", slot: { type: "string", unique: true }, spec: "string", width: "number", height: "number", format: "string", key: "string", bytes: "number", state: "string", error: "json", attempts: "number", updatedAt: "number", crop: "string", renderedCrop: "string" }],
+    [VARIANTS, { mediaId: "string", size: "string", slot: { type: "string", unique: true }, spec: "string", width: "number", height: "number", format: "string", key: "string", bytes: "number", state: "string", error: "json", attempts: "number", updatedAt: "number", crop: "string", renderedCrop: "string", originalWidth: "number", originalHeight: "number" }],
     [JOBS, { state: "string", total: "number", done: "number", failed: "number", cursor: "string", startedAt: "number", updatedAt: "number", finishedAt: "json", error: "json" }],
     [RETIRED, { mediaId: "string", file: "string", slot: { type: "string", unique: true }, retiredAt: "number" }],
     [HIDDEN, { mediaId: { type: "string", unique: true }, hidden: "boolean", version: "number", updatedAt: "number" }],
@@ -489,10 +493,17 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (isErr(page)) return page;
       for (const row of page.value.items) stored.set(row.mediaId, row);
     }
+    const planned = await variantsOf(mediaIds.filter((id) => !stored.has(id)));
+    if (isErr(planned)) return planned;
     const views = new Map<string, FramingView>();
     for (const id of mediaIds) {
       const row = stored.get(id);
-      views.set(id, row === undefined ? framingView(EMPTY_FRAMING, effective, 0, 0) : framingView(storedFraming(row), effective, row.width, row.height));
+      if (row !== undefined) {
+        views.set(id, framingView(storedFraming(row), effective, row.width, row.height));
+        continue;
+      }
+      const sized = (planned.value.get(id) ?? []).find((variant) => (variant.originalWidth ?? 0) > 0 && (variant.originalHeight ?? 0) > 0);
+      views.set(id, framingView(EMPTY_FRAMING, effective, sized?.originalWidth ?? 0, sized?.originalHeight ?? 0));
     }
     return ok(views);
   }
@@ -707,6 +718,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       updatedAt: now(),
       crop: formatCrop(crop),
       renderedCrop: "",
+      originalWidth: decodable ? ow : 0,
+      originalHeight: decodable ? oh : 0,
     };
   }
 
@@ -785,7 +798,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const dropped = await blobs.remove(row.key);
       if (isErr(dropped)) return dropped;
       const fresh = newRow(item, size, decodable, ow, oh, framing);
-      const replanned = await db.updateOne<Variant>(VARIANTS, row.id, { key: fresh.key, format: fresh.format, spec: fresh.spec, width: fresh.width, height: fresh.height, bytes: 0, state: "planned", error: fresh.error, attempts: 0, updatedAt: now(), crop: fresh.crop, renderedCrop: "" });
+      const replanned = await db.updateOne<Variant>(VARIANTS, row.id, { key: fresh.key, format: fresh.format, spec: fresh.spec, width: fresh.width, height: fresh.height, bytes: 0, state: "planned", error: fresh.error, attempts: 0, updatedAt: now(), crop: fresh.crop, renderedCrop: "", originalWidth: fresh.originalWidth, originalHeight: fresh.originalHeight });
       if (isErr(replanned)) return replanned;
       const current = await db.deleteMany(RETIRED, { slot: slotOf(mediaId, fileOf(replanned.value)) });
       if (isErr(current)) return current;
@@ -795,7 +808,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     for (const { size, row } of [...respec, ...recrop]) {
       touch();
       const fresh = newRow(item, size, decodable, ow, oh, framing);
-      const dimsPatch = { spec: fresh.spec, width: fresh.width, height: fresh.height, crop: fresh.crop, updatedAt: now() };
+      const dimsPatch = { spec: fresh.spec, width: fresh.width, height: fresh.height, crop: fresh.crop, originalWidth: fresh.originalWidth, originalHeight: fresh.originalHeight, updatedAt: now() };
       const patch: Partial<Variant> = row.state === "planned" ? dimsPatch : decodable ? { ...dimsPatch, state: "pending", attempts: 0, error: null } : { ...dimsPatch, state: "failed", error: UNDECODABLE };
       const updated = await db.updateMany<Variant>(VARIANTS, { id: row.id, key: row.key, spec: row.spec, state: row.state, crop: row.crop }, patch);
       if (isErr(updated)) return updated;

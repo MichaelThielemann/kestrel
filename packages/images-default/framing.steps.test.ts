@@ -134,6 +134,8 @@ describe("images/default setFraming and attach steps", () => {
     expect(item.framing).toEqual({
       focus: { x: 0, y: 0, w: 0.5, h: 0.2 },
       crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } },
+      width: 1000,
+      height: 600,
       ratios: [
         { key: "16:9", sizes: ["wide-small", "wide-large"], manual: false, fits: true, crop: { left: 0, top: 0, width: 1000, height: 563 } },
         { key: "1:1", sizes: ["square"], manual: true, fits: false, crop: { left: 400, top: 0, width: 600, height: 600 } },
@@ -146,7 +148,7 @@ describe("images/default setFraming and attach steps", () => {
     const list = expectOk(await steps.attach(ctx({ result: { items: [{ id: "m1", contentType: "image/jpeg" }, { id: "doc", contentType: "application/pdf" }] } })));
     const items = boundaryCast<{ items: Array<Record<string, unknown>> }>(list.result, "host").items;
     expect(items[0]).toMatchObject({ focus: { x: 0, y: 0, w: 0.5, h: 0.2 } });
-    expect(items[1]).toMatchObject({ focus: null, framing: { focus: null, crops: {}, ratios: [] } });
+    expect(items[1]).toMatchObject({ focus: null, framing: { focus: null, crops: {}, width: null, height: null, ratios: [] } });
     for (const entry of items) expect(validateSchema(description.extendsItems, entry)).toEqual([]);
     await images.close();
   });

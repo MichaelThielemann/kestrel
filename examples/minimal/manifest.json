@@ -6853,6 +6853,18 @@
                           "string",
                           "null"
                         ]
+                      },
+                      "originalWidth": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "originalHeight": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
                       }
                     },
                     "required": [
@@ -6956,6 +6968,18 @@
                             "renderedCrop": {
                               "type": [
                                 "string",
+                                "null"
+                              ]
+                            },
+                            "originalWidth": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "originalHeight": {
+                              "type": [
+                                "number",
                                 "null"
                               ]
                             }
@@ -7997,6 +8021,22 @@
                   },
                   "description": "manual crops keyed by reduced ratio, e.g. \"16:9\""
                 },
+                "width": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1,
+                  "description": "width of the original after its EXIF orientation, which the rectangles and pixel crops refer to"
+                },
+                "height": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1,
+                  "description": "height of the original after its EXIF orientation"
+                },
                 "ratios": {
                   "type": "array",
                   "items": {
@@ -8061,6 +8101,8 @@
               "required": [
                 "focus",
                 "crops",
+                "width",
+                "height",
                 "ratios"
               ]
             }
@@ -17387,6 +17429,18 @@
                               "string",
                               "null"
                             ]
+                          },
+                          "originalWidth": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "originalHeight": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
@@ -17490,6 +17544,18 @@
                                 "renderedCrop": {
                                   "type": [
                                     "string",
+                                    "null"
+                                  ]
+                                },
+                                "originalWidth": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                },
+                                "originalHeight": {
+                                  "type": [
+                                    "number",
                                     "null"
                                   ]
                                 }
@@ -17902,6 +17968,22 @@
                       },
                       "description": "manual crops keyed by reduced ratio, e.g. \"16:9\""
                     },
+                    "width": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 1,
+                      "description": "width of the original after its EXIF orientation, which the rectangles and pixel crops refer to"
+                    },
+                    "height": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 1,
+                      "description": "height of the original after its EXIF orientation"
+                    },
                     "ratios": {
                       "type": "array",
                       "items": {
@@ -17966,6 +18048,8 @@
                   "required": [
                     "focus",
                     "crops",
+                    "width",
+                    "height",
                     "ratios"
                   ]
                 }
@@ -20655,6 +20739,22 @@
                       },
                       "description": "manual crops keyed by reduced ratio, e.g. \"16:9\""
                     },
+                    "width": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 1,
+                      "description": "width of the original after its EXIF orientation, which the rectangles and pixel crops refer to"
+                    },
+                    "height": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 1,
+                      "description": "height of the original after its EXIF orientation"
+                    },
                     "ratios": {
                       "type": "array",
                       "items": {
@@ -20719,6 +20819,8 @@
                   "required": [
                     "focus",
                     "crops",
+                    "width",
+                    "height",
                     "ratios"
                   ]
                 }
@@ -29036,6 +29138,18 @@
                               "string",
                               "null"
                             ]
+                          },
+                          "originalWidth": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "originalHeight": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
@@ -29139,6 +29253,18 @@
                                 "renderedCrop": {
                                   "type": [
                                     "string",
+                                    "null"
+                                  ]
+                                },
+                                "originalWidth": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                },
+                                "originalHeight": {
+                                  "type": [
+                                    "number",
                                     "null"
                                   ]
                                 }
@@ -29514,6 +29640,22 @@
                       },
                       "description": "manual crops keyed by reduced ratio, e.g. \"16:9\""
                     },
+                    "width": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 1,
+                      "description": "width of the original after its EXIF orientation, which the rectangles and pixel crops refer to"
+                    },
+                    "height": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 1,
+                      "description": "height of the original after its EXIF orientation"
+                    },
                     "ratios": {
                       "type": "array",
                       "items": {
@@ -29578,6 +29720,8 @@
                   "required": [
                     "focus",
                     "crops",
+                    "width",
+                    "height",
                     "ratios"
                   ]
                 }

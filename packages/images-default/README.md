@@ -244,11 +244,14 @@ written, or the process stops) leaves the new bytes under the old `?v=` until a 
 succeeds; the version only ever changes after the bytes it names are at the path.
 
 `images.attach` adds `focus` (the rectangle or `null`), meant for anonymous readers, and
-`framing: { focus, crops, ratios }`, meant for an editor. `ratios` has one entry per ratio key of the
+`framing: { focus, crops, width, height, ratios }`, meant for an editor. `width` and `height` are the
+original's dimensions after its EXIF orientation, which every rectangle and pixel crop refers to, or
+`null` while the item is not planned yet or cannot be decoded. `ratios` has one entry per ratio key of the
 effective `cover` sizes: `{ key, sizes, manual, fits, crop }`, with the names of its sizes, whether a
 manual crop is stored for it, whether the focus lies within its cut (`true` without a focus), and the
 pixel crop it renders with on the oriented original, `{ left, top, width, height }` or `null` for the
-centre. An item without variants gets `focus: null` and an empty framing without ratios.
+centre. An item without variants gets `focus: null` and an empty framing with `width` and `height`
+`null` and no ratios.
 
 A framing outlives the trash: the item is hidden, not gone, so trash and restore keep it unchanged,
 and a render of a hidden item writes no public copy. `images.remove`, `images.removeMany` and the
@@ -262,8 +265,9 @@ nothing, so an editor that runs in the browser can preview exactly what this mod
 `ratioKey`, `centredCrop`, `cropForRatio`, `effectiveCrop`, `focusFits`, `parseFraming`,
 `formatCrop`, `parseCrop` and `cropToken`, with the types `Rect`, `Framing`, `PixelCrop`,
 `FramingSize` and `FramingParse` and the constants `EMPTY_FRAMING`, `CROP_RATIO_TOLERANCE` and
-`MAX_CROPS`. This module uses the same functions. They take the oriented dimensions of the original;
-`media@1`'s stored `width`/`height` are not oriented and give a wrong cut for a rotated photo.
+`MAX_CROPS`. This module uses the same functions. They take the oriented dimensions of the original,
+which `framing.width` and `framing.height` carry; `media@1`'s stored `width`/`height` are not
+oriented and give a wrong cut for a rotated photo.
 
 ## `images.variantsChanged`
 

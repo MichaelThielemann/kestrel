@@ -410,7 +410,7 @@ describe("media framing", () => {
       expect(framed.status).toBe(200);
       const item = boundaryCast<{ id: string; available: boolean; focus: unknown; framing: { focus: unknown; crops: unknown; ratios: unknown[] } }>(framed.result, "json");
       expect(item).toMatchObject({ id, available: true, focus });
-      expect(item.framing).toEqual({ focus, crops: {}, ratios: [{ key: "16:9", sizes: ["hero"], manual: false, fits: true, crop: null }] });
+      expect(item.framing).toEqual({ focus, crops: {}, width: 1, height: 1, ratios: [{ key: "16:9", sizes: ["hero"], manual: false, fits: true, crop: null }] });
 
       const anonymous = await kestrel.run("listMedia", { trigger, payload: { ids: id } });
       expect(anonymous.status).toBe(200);

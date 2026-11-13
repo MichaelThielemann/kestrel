@@ -1323,10 +1323,11 @@ Net changes since 5.8.1.
   dimensions (never enlarged), and the old variant is served until the new render is there; then the
   item raises `images.variantsChanged`, as it does at once when the focus changes. A render that started before the framing changed never
   marks its row `done`, and `variantCounts` counts a row rendered with another crop as `pending`.
-  `images.attach` adds `focus` and `framing: { focus, crops, ratios: [{ key, sizes, manual, fits,
-  crop }] }` to each item. Ratio keys are exact, so sizes with nearly the same ratio get separate
+  `images.attach` adds `focus` and `framing: { focus, crops, width, height, ratios: [{ key, sizes,
+  manual, fits, crop }] }` to each item, `width` and `height` being the original's oriented
+  dimensions. Ratio keys are exact, so sizes with nearly the same ratio get separate
   keys. A framing survives trash and restore and is deleted with the item's variants;
-  `images_variants` gains `crop` and `renderedCrop`. The new subpath
+  `images_variants` gains `crop`, `renderedCrop`, `originalWidth` and `originalHeight`. The new subpath
   `@michaelthielemann/kestrel-images-default/framing` imports nothing and exports the crop rules this
   module renders with (`ratioKey`, `centredCrop`, `cropForRatio`, `effectiveCrop`, `focusFits`,
   `parseFraming`, `formatCrop`, `parseCrop`, `cropToken`), so an editor in the browser previews
