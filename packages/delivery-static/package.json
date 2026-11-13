@@ -50,7 +50,7 @@
     "@michaelthielemann/kestrel-persistence-sqlite": "workspace:*",
     "@michaelthielemann/kestrel-site-default": "workspace:*",
     "@types/turndown": "^5.0.6",
-    "vitest": "^3.2.0"
+    "vitest": "^4.1.12"
   },
   "repository": {
     "type": "git",

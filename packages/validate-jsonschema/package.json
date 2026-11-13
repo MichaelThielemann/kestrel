@@ -43,7 +43,7 @@
   "devDependencies": {
     "@michaelthielemann/kestrel": "workspace:*",
     "@michaelthielemann/kestrel-contracts": "workspace:*",
-    "vitest": "^3.2.0",
+    "vitest": "^4.1.12",
     "@types/sanitize-html": "^2.16.0"
   },
   "repository": {

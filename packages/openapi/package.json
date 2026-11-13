@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@michaelthielemann/kestrel": "workspace:*",
-    "vitest": "^3.2.0",
+    "vitest": "^4.1.12",
     "zod": "^3.23.8"
   },
   "repository": {

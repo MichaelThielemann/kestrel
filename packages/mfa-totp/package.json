@@ -44,7 +44,7 @@
     "@michaelthielemann/kestrel-contracts": "workspace:*",
     "@michaelthielemann/kestrel-persistence-sqlite": "workspace:*",
     "@michaelthielemann/kestrel-ratelimit-memory": "workspace:*",
-    "vitest": "^3.2.0"
+    "vitest": "^4.1.12"
   },
   "repository": {
     "type": "git",

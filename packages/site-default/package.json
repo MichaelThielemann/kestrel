@@ -44,7 +44,7 @@
     "@michaelthielemann/kestrel-events-direct": "workspace:*",
     "@michaelthielemann/kestrel-events-inmemory": "workspace:*",
     "@michaelthielemann/kestrel-persistence-sqlite": "workspace:*",
-    "vitest": "^3.2.0"
+    "vitest": "^4.1.12"
   },
   "repository": {
     "type": "git",

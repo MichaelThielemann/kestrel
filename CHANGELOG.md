@@ -1499,6 +1499,8 @@ Net changes since 5.8.1.
 - `sanitize-svg` and `validate-jsonschema` require `sanitize-html` ^2.18.1 (was ^2.17.0), which fixes
   published advisories in its sanitizing. It declares Node.js >=22.12.0 and no longer depends on
   `deepmerge`.
+- `kestrel-contracts` declares the optional peer `vitest` as `>=4` (was `>=3`); the shipped
+  `*.contract.test.ts` files are exercised against vitest 4 only.
 
 ### Fixed
 

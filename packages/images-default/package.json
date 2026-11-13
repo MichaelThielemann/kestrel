@@ -47,7 +47,7 @@
     "@michaelthielemann/kestrel": "workspace:*",
     "@michaelthielemann/kestrel-contracts": "workspace:*",
     "@michaelthielemann/kestrel-media-default": "workspace:*",
-    "vitest": "^3.2.0"
+    "vitest": "^4.1.12"
   },
   "repository": {
     "type": "git",

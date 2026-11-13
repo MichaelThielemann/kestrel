@@ -1,13 +1,16 @@
-// @vitest-environment jsdom
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import mermaid from "mermaid";
+import { JSDOM } from "jsdom";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Manifest } from "@michaelthielemann/kestrel";
 import { loadConfig, loadPipelines } from "@michaelthielemann/kestrel/load";
 import { buildGraph } from "../src/inspect/graph.ts";
 import { renderMermaid } from "../src/inspect/mermaid.ts";
 import { FIXTURES, MINIMAL, runCli } from "./harness.ts";
+
+const dom = new JSDOM("");
+Object.assign(globalThis, { window: dom.window, document: dom.window.document });
+const { default: mermaid } = await import("mermaid");
 
 async function manifestOf(root: string, extra: readonly string[] = []): Promise<Manifest> {
   const result = await runCli(["manifest", "--json", "--root", root, ...extra]);

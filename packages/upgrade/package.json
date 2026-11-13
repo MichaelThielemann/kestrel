@@ -80,7 +80,7 @@
     "@michaelthielemann/kestrel-renderer-plain": "workspace:*",
     "@michaelthielemann/kestrel-replication-sqlite": "workspace:*",
     "@michaelthielemann/kestrel-site-default": "workspace:*",
-    "vitest": "^3.2.0"
+    "vitest": "^4.1.12"
   },
   "repository": {
     "type": "git",
