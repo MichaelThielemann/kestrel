@@ -146,7 +146,7 @@ async function bootExample(options: Options): Promise<Example> {
         },
       };
     }
-    if (queue && m.use === "@michaelthielemann/kestrel-events-direct") return { use: "@michaelthielemann/kestrel-events-queue", config: { pollMs: options.pollMs ?? 10, maxAttempts: 3, backoffSeconds: [1], relayMs: 5000, relayPipelines: ["publishPage", "unpublishPage"], lanes: options.lanes ?? { pages: ["republishOutput", "refreshLlms"], variants: ["generateImageVariants"] } } };
+    if (queue && m.use === "@michaelthielemann/kestrel-events-direct") return { use: "@michaelthielemann/kestrel-events-queue", config: { pollMs: options.pollMs ?? 10, maxAttempts: 3, backoffSeconds: [1], relayMs: 5000, relayPipelines: ["publishPage", "unpublishPage"], delayMs: { refreshIndexes: 1000, refreshLlms: 3000 }, lanes: options.lanes ?? { pages: ["republishOutput", "refreshLlms"], indexes: ["refreshIndexes"], variants: ["generateImageVariants"] } } };
     return m;
   });
   const reading: ReadingRenderer = { calls: [], delayMs: 0, hold: () => ({ reached: Promise.resolve(), release() {} }) };
@@ -165,6 +165,7 @@ async function bootExample(options: Options): Promise<Example> {
     definePipeline({ name: "speakerDependents", steps: ["delivery.markDependents:speakers"] }),
     definePipeline({ name: "lineupDependents", steps: ["delivery.markDependents:lineups"] }),
     definePipeline({ name: "staleStatus", steps: ["delivery.readStaleStatus"] }),
+    definePipeline({ name: "buildCheck", steps: ["delivery.checkBuild"] }),
   );
   let triggers = [...configInput.triggers];
   triggers.push(
@@ -175,11 +176,12 @@ async function bootExample(options: Options): Promise<Example> {
   );
   if (queue) {
     triggers = triggers.filter((t) => !("event" in t && t.event === "media.uploaded"));
-    triggers.push({ event: "media.uploaded", pipeline: "planImageVariants" }, { event: "images.planned", pipeline: "generateImageVariants" }, { event: "delivery.outputStale", pipeline: "republishOutput" }, { event: "delivery.llmsStale", pipeline: "refreshLlms" });
+    triggers.push({ event: "media.uploaded", pipeline: "planImageVariants" }, { event: "images.planned", pipeline: "generateImageVariants" }, { event: "delivery.outputStale", pipeline: "republishOutput" }, { event: "delivery.indexesStale", pipeline: "refreshIndexes" }, { event: "delivery.llmsStale", pipeline: "refreshLlms" });
     pipelines.push(
       definePipeline({ name: "planImageVariants", steps: ["images.plan", "events.emit:images.planned"] }),
       definePipeline({ name: "republishOutput", steps: ["delivery.republishOutput"] }),
-      definePipeline({ name: "refreshLlms", steps: ["delivery.exportLlms"] }),
+      definePipeline({ name: "refreshIndexes", steps: ["delivery.exportIndexes"] }),
+      definePipeline({ name: "refreshLlms", steps: ["delivery.exportLlmsFull"] }),
       definePipeline({ name: "queueStatus", steps: ["events.readQueueStatus"] }),
     );
   }
@@ -323,7 +325,7 @@ for (const mode of ["direct", "queue"] as const) {
       }
     }, 30_000);
 
-    it("a settings change re-renders every published page outside the request, then writes llms.txt once", async () => {
+    it("a settings change re-renders every published page outside the request, then writes llms-full.txt once", async () => {
       const example = await bootExample({ mode, pollMs: 50 });
       try {
         const ids = await seed(example);
@@ -344,9 +346,11 @@ for (const mode of ["direct", "queue"] as const) {
         }
         await pollUntil(() => ["/programm", "/info"].every((p) => (page(example, p) ?? "").includes('<p class="site">Festival 2027</p>')));
         await settled(example);
-        await pollUntil(() => readFileSync(join(example.site, "llms.txt"), "utf8").includes("# Festival 2027"));
+        const text = (file: string): string => (existsSync(join(example.site, file)) ? readFileSync(join(example.site, file), "utf8") : "");
+        await pollUntil(() => text("llms.txt").includes("# Festival 2027") && text("llms-full.txt").includes("# Festival 2027"));
         expect(page(example, "/entwurf")).toBeNull();
         if (mode === "queue") {
+          await pollUntil(() => example.runs.some((r) => r.at >= putAt && r.pipeline === "refreshLlms" && r.phase === "end"));
           const since = example.runs.filter((r) => r.at >= putAt);
           const refreshes = since.filter((r) => r.pipeline === "refreshLlms" && r.phase === "start");
           const renders = since.filter((r) => r.pipeline === "republishOutput" && r.phase === "end");
@@ -359,6 +363,38 @@ for (const mode of ["direct", "queue"] as const) {
         await example.dispose();
       }
     }, 30_000);
+  });
+}
+
+for (const mode of ["queue", "direct"] as const) {
+  describe(`examples/minimal index files (${mode === "direct" ? "events-direct, background loop" : "events-queue, own lane"})`, () => {
+    it("a page saved during the re-render backlog of a new build is in sitemap.xml and llms.txt within ten seconds, before the backlog drains", async () => {
+      const example = await bootExample({ mode });
+      try {
+        const token = boundaryCast<{ token: string }>(await call(example, "login", { body: { username: "admin", password: "kestrel-demo" } }), "json").token;
+        await call(example, "setSettings", { token, body: { title: "Festival", locale: "de" } });
+        for (let i = 0; i < 30; i++) await call(example, "createPage", { token, body: { slug: `seite-${i}`, title: `Seite ${i}`, status: "published" } });
+        await settled(example);
+        const sitemap = (): string => (existsSync(join(example.site, "sitemap.xml")) ? readFileSync(join(example.site, "sitemap.xml"), "utf8") : "");
+        await pollUntil(() => sitemap().includes("<loc>http://127.0.0.1:4000/seite-29</loc>"));
+        expect(readFileSync(join(example.site, "robots.txt"), "utf8")).toBe("User-agent: *\nDisallow: /\n\nSitemap: http://127.0.0.1:4000/sitemap.xml\n");
+
+        example.reading.delayMs = 200;
+        expect(await call(example, "buildCheck", { body: { build: "next" } })).toMatchObject({ changed: true });
+        await pollUntil(async () => (await stale(example)).stale >= 25);
+        const savedAt = Date.now();
+        await call(example, "createPage", { token, body: { slug: "neu", title: "Neu", status: "published" } });
+        await pollUntil(() => sitemap().includes("<loc>http://127.0.0.1:4000/neu</loc>"), 10_000, 10);
+        const elapsed = Date.now() - savedAt;
+        expect((await stale(example)).stale).toBeGreaterThan(0);
+        expect(elapsed).toBeLessThanOrEqual(10_000);
+        expect(readFileSync(join(example.site, "llms.txt"), "utf8")).toContain("[Neu](http://127.0.0.1:4000/neu)");
+        example.reading.delayMs = 0;
+        await settled(example);
+      } finally {
+        await example.dispose();
+      }
+    }, 60_000);
   });
 }
 

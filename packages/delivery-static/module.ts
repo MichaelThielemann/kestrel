@@ -9,7 +9,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule, type Introspection } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { createDeliveryStatic, LLMS_STALE, OUTPUT_STALE, type Delivery, type MovedPath } from "./impl.ts";
+import { createDeliveryStatic, INDEXES_STALE, LLMS_STALE, normalizeSiteUrl, OUTPUT_STALE, type Delivery, type MovedPath } from "./impl.ts";
 
 const dependenciesSchema = z
   .object({
@@ -21,8 +21,17 @@ const dependenciesSchema = z
     backoffSeconds: z.array(z.number().int().nonnegative()).min(1).default([60, 300, 900, 3600]),
     claimTtlSeconds: z.number().int().positive().default(300),
     maxAgeSeconds: z.number().int().positive().nullable().default(null),
+    indexesDelayMs: z.number().int().nonnegative().default(1000),
   })
   .strict();
+
+const siteUrlSchema = z.string().superRefine((value, ctx) => {
+  try {
+    normalizeSiteUrl(value);
+  } catch (error) {
+    ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : String(error) });
+  }
+});
 
 export const configSchema = z
   .object({
@@ -34,9 +43,17 @@ export const configSchema = z
     prefixPrimary: z.boolean().default(false),
     fallback: z.boolean().default(true),
     reservedPaths: z.array(z.string().regex(/^(\/[A-Za-z0-9._-]+)+$/)).default([]),
+    siteUrl: siteUrlSchema.optional(),
+    sitemap: z.boolean().default(true),
+    robots: z
+      .object({
+        policy: z.enum(["allow", "disallow"]).optional(),
+        extra: z.array(z.string().regex(/^[^\r\n]*$/, "a robots.txt line must not contain a line break")).default([]),
+      })
+      .strict()
+      .default({}),
     llms: z
       .object({
-        siteUrl: z.string().url().optional(),
         full: z.boolean().default(false),
         settings: z.object({ type: z.string().default("settings"), titleField: z.string().default("title"), descriptionField: z.string().default("description") }).strict().default({}),
         titleField: z.string().default("title"),
@@ -80,14 +97,18 @@ function previousResult(ctx: Context): Record<string, unknown> {
   return isRecord(ctx.result) ? ctx.result : {};
 }
 
-type Instance = Delivery & { render: "events" | "background" };
+type Instance = Delivery & { render: "events" | "background"; llmsFull: boolean };
 
-function checkEventsWiring(kestrel: Introspection): void {
+function checkEventsWiring(kestrel: Introspection, llmsFull: boolean): void {
   const manifest = kestrel.describe();
   const stepsOf = new Map(manifest.pipelines.map((p) => [p.name, p.steps.map((s) => s.name)]));
   const subscribed = (event: string, step: string): boolean => manifest.triggers.events.some((t) => t.event === event && (stepsOf.get(t.pipeline) ?? []).includes(step));
-  if (!subscribed(OUTPUT_STALE, "delivery.republishOutput")) throw new Error(`delivery/static: dependencies.render "events" needs a trigger that runs a pipeline with delivery.republishOutput on "${OUTPUT_STALE}"`);
-  if (!subscribed(LLMS_STALE, "delivery.exportLlms")) throw new Error(`delivery/static: dependencies.render "events" needs a trigger that runs a pipeline with delivery.exportLlms on "${LLMS_STALE}"`);
+  const required: Array<[string, string]> = [
+    [OUTPUT_STALE, "delivery.republishOutput"],
+    [INDEXES_STALE, "delivery.exportIndexes"],
+    ...(llmsFull ? [[LLMS_STALE, "delivery.exportLlmsFull"] satisfies [string, string]] : []),
+  ];
+  for (const [event, step] of required) if (!subscribed(event, step)) throw new Error(`delivery/static: dependencies.render "events" needs a trigger that runs a pipeline with ${step} on "${event}"`);
   const hook = manifest.modules.find((m) => m.eventHook);
   if (hook?.name === "events/direct") throw new Error('delivery/static: dependencies.render "events" would run every re-render inside the request that marked it under events/direct; use "background" or the queue');
 }
@@ -119,27 +140,39 @@ const STATUS_SCHEMA = {
 
 const MARKED = { type: "object", properties: { marked: { type: "integer" } }, required: ["marked"] };
 
+const EXPORT_OUTCOME = { type: ["object", "null"], properties: { at: { type: "number" }, entries: { type: "integer" }, error: NULLABLE_STRING }, required: ["at", "entries", "error"] };
+
 const STALE_STATUS_SCHEMA = {
   type: "object",
-  properties: { stale: { type: "integer" }, failed: { type: "integer" }, rendering: { type: "integer" }, unknown: { type: "integer" }, oldestStaleAt: NULLABLE_NUMBER, abandoned: { type: "integer" } },
-  required: ["stale", "failed", "rendering", "unknown", "oldestStaleAt", "abandoned"],
+  properties: {
+    stale: { type: "integer" },
+    failed: { type: "integer" },
+    rendering: { type: "integer" },
+    unknown: { type: "integer" },
+    oldestStaleAt: NULLABLE_NUMBER,
+    abandoned: { type: "integer" },
+    exports: { type: "object", properties: { indexes: EXPORT_OUTCOME, llmsFull: EXPORT_OUTCOME }, required: ["indexes", "llmsFull"] },
+  },
+  required: ["stale", "failed", "rendering", "unknown", "oldestStaleAt", "abandoned", "exports"],
 };
+
+const ENTRIES = { type: "object", properties: { entries: { type: "integer" } }, required: ["entries"] };
 
 export default defineModule({
   name: "delivery/static",
   provides: [],
   requires: [CONTENT, RENDERER, BLOBSTORE, PERSISTENCE, SITE],
   optional: [EVENTS],
-  emits: [OUTPUT_STALE, LLMS_STALE],
+  emits: [OUTPUT_STALE, INDEXES_STALE, LLMS_STALE],
   configSchema,
 
   async setup(config, deps): Promise<Instance> {
     const delivery = await createDeliveryStatic(config, { content: deps.get(CONTENT), site: deps.get(SITE), renderer: deps.get(RENDERER), blobs: deps.get(BLOBSTORE), db: deps.get(PERSISTENCE), logger: deps.logger, events: deps.find(EVENTS) });
-    return { ...delivery, render: config.dependencies.render };
+    return { ...delivery, render: config.dependencies.render, llmsFull: config.llms.full };
   },
 
   attach: (instance, kestrel) => {
-    if (instance.render === "events") checkEventsWiring(kestrel);
+    if (instance.render === "events") checkEventsWiring(kestrel, instance.llmsFull);
   },
 
   teardown: async (instance) => {
@@ -172,10 +205,15 @@ export default defineModule({
       if (isErr(summary)) return ctx.fail(summary.error);
       return ok({ ...ctx, result: summary.value });
     }),
-    exportLlms: async (ctx: Context) => {
-      const exported = await delivery.exportLlms();
-      if (isErr(exported)) return ctx.fail("TRANSIENT", `delivery.exportLlms: llms.txt was not written – try again (${exported.error.message})`);
-      return ok({ ...ctx, result: { ...previousResult(ctx), _llms: exported.value } });
+    exportIndexes: async (ctx: Context) => {
+      const exported = await delivery.exportIndexes();
+      if (isErr(exported)) return ctx.fail("TRANSIENT", `delivery.exportIndexes: sitemap.xml, robots.txt and llms.txt were not written – try again (${exported.error.message})`);
+      return ok({ ...ctx, result: { ...previousResult(ctx), _indexes: exported.value } });
+    },
+    exportLlmsFull: async (ctx: Context) => {
+      const exported = await delivery.exportLlmsFull();
+      if (isErr(exported)) return ctx.fail("TRANSIENT", `delivery.exportLlmsFull: llms-full.txt was not written – try again (${exported.error.message})`);
+      return ok({ ...ctx, result: { ...previousResult(ctx), _llmsFull: exported.value } });
     },
     markDependents: stepFactory((type: string) => async (ctx: Context) => {
       const marked = await delivery.markDependents(type, changedIds(ctx.payload));
@@ -208,8 +246,8 @@ export default defineModule({
       if (isErr(rendered)) return ctx.fail(rendered.error);
       return ok({ ...ctx, result: { ...previousResult(ctx), ...rendered.value } });
     },
-    requestLlms: async (ctx: Context) => {
-      const requested = await delivery.requestLlms();
+    requestIndexes: async (ctx: Context) => {
+      const requested = await delivery.requestIndexes();
       if (isErr(requested)) return ctx.fail(requested.error);
       return ok(ctx);
     },
@@ -253,11 +291,19 @@ export default defineModule({
       writes: ["result"],
       output: { type: "object", properties: { documents: { type: "number" }, live: { type: "number" }, errors: { type: "number" } }, required: ["documents", "live", "errors"] },
     }),
-    exportLlms: {
-      summary: "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
+    exportIndexes: {
+      summary: "Write sitemap.xml, robots.txt and llms.txt from the outputs that serve a file (live or error) of every delivered type, skipping noindex pages (adds `_indexes: { entries }` to the result)",
       reads: [],
-      writes: ["result._llms"],
-      extendsOutput: { type: "object", properties: { _llms: { type: "object", properties: { entries: { type: "integer" }, full: { type: "boolean" } }, required: ["entries", "full"] } }, required: ["_llms"] },
+      writes: ["result._indexes"],
+      extendsOutput: { type: "object", properties: { _indexes: ENTRIES }, required: ["_indexes"] },
+      errors: { 503: "a file could not be written or a dependency failed" },
+    },
+    exportLlmsFull: {
+      summary: "Write llms-full.txt from the stored HTML of the same entries when `llms.full` is set (adds `_llmsFull: { entries }` to the result)",
+      reads: [],
+      writes: ["result._llmsFull"],
+      extendsOutput: { type: "object", properties: { _llmsFull: ENTRIES }, required: ["_llmsFull"] },
+      errors: { 503: "the file could not be written or a dependency failed" },
     },
     markDependents: (type: string) => ({
       summary: `Mark every published output whose last render read the changed ${type} (payload id and ids) for a re-render, and start it outside the request (adds \`_dependents: { marked }\` to the result)`,
@@ -283,11 +329,11 @@ export default defineModule({
       errors: { 503: "the marks or their jobs could not be written" },
     }),
     checkBuild: {
-      summary: "Mark every delivered output for a re-render when payload.build differs from the stored build, then store it",
+      summary: "Mark every delivered output for a re-render when payload.build differs from the stored build or the database was restored from a backup, then store it",
       reads: ["payload"],
       writes: ["result"],
       input: { type: "object", properties: { build: { type: "string", minLength: 1 } }, required: ["build"], additionalProperties: true },
-      output: { type: "object", properties: { changed: { type: "boolean" }, marked: { type: "integer" } }, required: ["changed", "marked"] },
+      output: { type: "object", properties: { changed: { type: "boolean" }, restored: { type: "boolean" }, marked: { type: "integer" } }, required: ["changed", "restored", "marked"] },
       errors: { 400: "payload.build is missing", 503: "the marks could not be written; the build is not stored" },
     },
     republishOutput: {
@@ -298,17 +344,17 @@ export default defineModule({
       extendsOutput: { type: "object", properties: { rendered: { type: "boolean" }, state: { type: ["string", "null"], enum: ["live", "error", "draft", null] } }, required: ["rendered", "state"] },
       errors: { 400: "payload needs type, docId and locale", 503: "the render failed or another render holds the output" },
     },
-    requestLlms: {
-      summary: "Ask for an llms.txt export after the pending re-renders, without running it here",
+    requestIndexes: {
+      summary: "Ask for a sitemap.xml, robots.txt and llms.txt export (and an llms-full.txt export with `llms.full`) without running it here",
       reads: [],
       writes: [],
       errors: { 503: "the request could not be queued" },
     },
     resumeStale: {
-      summary: "Release expired render claims, remove old tombstones and orphaned dependency sets, and start the re-renders a stopped process or a lost job left marked",
+      summary: "Release expired render claims, remove old tombstones and orphaned dependency sets, start the re-renders a stopped process or a lost job left marked, and ask for an index export",
       reads: [],
       writes: ["result"],
-      output: { type: "object", properties: { released: { type: "integer" }, swept: { type: "integer" }, dispatched: { type: "integer" }, aged: { type: "integer" } }, required: ["released", "swept", "dispatched", "aged"] },
+      output: { type: "object", properties: { released: { type: "integer" }, swept: { type: "integer" }, dispatched: { type: "integer" }, aged: { type: "integer" }, orphans: { type: "integer" } }, required: ["released", "swept", "dispatched", "aged", "orphans"] },
     },
     retryStale: {
       summary: "Reset the attempts of every output whose re-render failed maxAttempts times and start it again (adds `retried` to the result)",
@@ -317,7 +363,7 @@ export default defineModule({
       extendsOutput: { type: "object", properties: { retried: { type: "integer" } }, required: ["retried"] },
     },
     readStaleStatus: {
-      summary: "How many outputs wait for a re-render, failed it, are rendering or have unknown dependencies, the oldest mark, and the renders this process abandoned at the timeout",
+      summary: "How many outputs wait for a re-render, failed it, are rendering or have unknown dependencies, the oldest mark, the renders this process abandoned at the timeout, and the last index and llms-full.txt exports",
       reads: [],
       writes: ["result"],
       output: STALE_STATUS_SCHEMA,

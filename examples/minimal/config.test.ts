@@ -70,7 +70,7 @@ describe("examples/minimal redirects wiring", () => {
     expect(resolve.indexOf("redirects.lookup")).toBeGreaterThan(-1);
     expect(resolve.indexOf("redirects.lookup")).toBeLessThan(resolve.findIndex((s) => s.startsWith("site.resolve:pages")));
     expect(pipelines.get("setRedirects")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:redirects.write", "validate.check:redirects.rules", "redirects.validate", "content.set:redirects", "redirects.export"]);
-    expect(pipelines.get("publishAllPages")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:pages.manage", "delivery.publishAll:pages", "redirects.export", "delivery.exportLlms"]);
+    expect(pipelines.get("publishAllPages")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:pages.manage", "delivery.publishAll:pages", "redirects.export", "delivery.requestIndexes"]);
     expect(pipelines.get("renderRedirects")).toEqual(["redirects.render", "authz.fields:redirectRules?shape=array"]);
   });
 });
@@ -147,7 +147,7 @@ describe("examples/minimal revisions wiring", () => {
   });
 });
 
-describe("examples/minimal llms.txt wiring", () => {
+describe("examples/minimal index file wiring", () => {
   it("enables llms-full.txt and adds a settings description", async () => {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
     const delivery = boundaryCast<{ llms?: { full: boolean } }>(config.modules.find((m) => m.use === "@michaelthielemann/kestrel-delivery-static")!.config, "json");
@@ -156,29 +156,33 @@ describe("examples/minimal llms.txt wiring", () => {
     expect(content.types.settings!.fields.description).toEqual({ type: "text", localized: true });
     expect(content.types.pages!.fields.seo).toEqual({ type: "json", localized: true });
   });
-  it("asks for an llms.txt export after every publish, unpublish and settings change, and exports it after publish-all", async () => {
+  it("asks for an index export after every publish, unpublish, settings change and publish-all, and never exports inline", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
     for (const [name, after] of [["publishPage", "delivery.publish:pages"], ["unpublishPage", "delivery.unpublish:pages"], ["settingsDependents", "delivery.markDependents:settings"]] as const) {
       const steps = pipelines.get(name)!;
-      expect(steps.indexOf("delivery.requestLlms"), name).toBe(steps.indexOf(after) + 1);
-      expect(steps, name).not.toContain("delivery.exportLlms");
+      expect(steps.indexOf("delivery.requestIndexes"), name).toBe(steps.indexOf(after) + 1);
+      expect(steps, name).not.toContain("delivery.exportIndexes");
     }
-    expect(pipelines.get("setSettings")).not.toContain("delivery.exportLlms");
+    expect(pipelines.get("setSettings")).not.toContain("delivery.exportIndexes");
     const publishAll = pipelines.get("publishAllPages")!;
-    expect(publishAll.indexOf("delivery.exportLlms")).toBe(publishAll.indexOf("redirects.export") + 1);
+    expect(publishAll.indexOf("delivery.requestIndexes")).toBe(publishAll.indexOf("redirects.export") + 1);
+    for (const [name, steps] of pipelines) {
+      expect(steps, name).not.toContain("delivery.exportIndexes");
+      expect(steps, name).not.toContain("delivery.exportLlmsFull");
+    }
   });
 });
 
 describe("examples/minimal delivery event pipelines", () => {
   it("moves publish and unpublish out of the write pipelines and into two event pipelines", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("publishPage")).toEqual(["delivery.publish:pages", "delivery.requestLlms"]);
-    expect(pipelines.get("unpublishPage")).toEqual(["delivery.unpublish:pages", "delivery.requestLlms"]);
+    expect(pipelines.get("publishPage")).toEqual(["delivery.publish:pages", "delivery.requestIndexes"]);
+    expect(pipelines.get("unpublishPage")).toEqual(["delivery.unpublish:pages", "delivery.requestIndexes"]);
     for (const name of ["createPage", "updatePage", "deletePage", "deletePageTranslation", "restorePageRevision"]) {
       const steps = pipelines.get(name)!;
       expect(steps, name).not.toContain("delivery.publish:pages");
       expect(steps, name).not.toContain("delivery.unpublish:pages");
-      expect(steps, name).not.toContain("delivery.exportLlms");
+      expect(steps, name).not.toContain("delivery.exportIndexes");
       expect(steps[steps.length - 1], name).toBe("events.relay");
     }
   });

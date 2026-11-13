@@ -2,5 +2,5 @@ import { definePipeline } from "../modules.ts";
 
 export default definePipeline({
   name: "unpublishPage",
-  steps: ["delivery.unpublish:pages", "delivery.requestLlms"],
+  steps: ["delivery.unpublish:pages", "delivery.requestIndexes"],
 });

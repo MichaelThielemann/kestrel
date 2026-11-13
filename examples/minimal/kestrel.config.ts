@@ -63,7 +63,7 @@ export default defineConfig({
     { use: "@michaelthielemann/kestrel-validate-jsonschema", config: { schemas: { "pages.body": "./schemas/blocks.json", "redirects.rules": "./schemas/redirects.rules.json", "settings.navigation": "./schemas/settings.navigation.json" } } },
     { use: "@michaelthielemann/kestrel-migrations-default", config: { migrations: [exampleMigration], mode: "apply" } },
     { use: "@michaelthielemann/kestrel-renderer-plain", config: { siteName: "Kestrel example" } },
-    { use: "@michaelthielemann/kestrel-delivery-static", config: { types: { pages: {} }, prefix: "site/", reservedPaths: ["/media"], llms: { full: true, headings: { pages: "Pages" } }, dependencies: { render: "background" } } },
+    { use: "@michaelthielemann/kestrel-delivery-static", config: { types: { pages: {} }, prefix: "site/", reservedPaths: ["/media"], siteUrl: "http://127.0.0.1:4000", robots: { policy: "disallow" }, llms: { full: true, headings: { pages: "Pages" } }, dependencies: { render: "background" } } },
     { use: "@michaelthielemann/kestrel-redirects-default", config: { prefix: "site/" } },
     { use: "@michaelthielemann/kestrel-audit-persistence", config: { retentionDays: 365 } },
     { use: "@michaelthielemann/kestrel-events-inmemory", config: {} },

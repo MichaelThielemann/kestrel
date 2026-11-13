@@ -5353,7 +5353,7 @@
     "/admin/publish-all/pages": {
       "post": {
         "operationId": "publishAllPages",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission pages.manage → Re-render every pages → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission pages.manage → Re-render every pages → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result) → Ask for a sitemap.xml, robots.txt and llms.txt export (and an llms-full.txt export with `llms.full`) without running it here",
         "tags": [
           "admin"
         ],
@@ -5364,7 +5364,7 @@
           "authz.require:pages.manage",
           "delivery.publishAll:pages",
           "redirects.export",
-          "delivery.exportLlms"
+          "delivery.requestIndexes"
         ],
         "parameters": [],
         "responses": {
@@ -5401,25 +5401,9 @@
                         "rules",
                         "skipped"
                       ]
-                    },
-                    "_llms": {
-                      "type": "object",
-                      "properties": {
-                        "entries": {
-                          "type": "integer"
-                        },
-                        "full": {
-                          "type": "boolean"
-                        }
-                      },
-                      "required": [
-                        "entries",
-                        "full"
-                      ]
                     }
                   },
                   "required": [
-                    "_llms",
                     "documents",
                     "errors",
                     "live",
@@ -5470,7 +5454,7 @@
             }
           },
           "503": {
-            "description": "temporarily unavailable; retry after the Retry-After header",
+            "description": "the request could not be queued",
             "headers": {
               "Retry-After": {
                 "description": "seconds until the client may retry",

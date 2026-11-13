@@ -13,7 +13,7 @@ import { createSiteDefault } from "@michaelthielemann/kestrel-site-default/impl"
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { observeReads } from "@michaelthielemann/kestrel/reads";
-import { CHANGES, DEPENDENCIES, DEPENDENCY_SETS, LLMS_STALE, OUTPUT_STALE, STATE, STATUS, createDeliveryStatic, keyFor, type Delivery, type StatusRow } from "./impl.ts";
+import { CHANGES, DEPENDENCIES, DEPENDENCY_SETS, INDEXES_STALE, LLMS_STALE, OUTPUT_STALE, STATE, STATUS, createDeliveryStatic, keyFor, type Delivery, type StatusRow } from "./impl.ts";
 import { configSchema } from "./module.ts";
 
 const model: ContentModel = {
@@ -223,7 +223,7 @@ async function harness(options: HarnessOptions = {}) {
   const logger = recordingLogger();
   let offset = 0;
   const now = () => Date.now() + offset;
-  const config = configSchema.parse({ types: { pages: {} }, prefix: "site/", ...(options.formats ? { formats: options.formats } : {}), dependencies: { render: options.render ?? "events", rendererReadsDocument: true, ...options.dependencies } });
+  const config = configSchema.parse({ types: { pages: {} }, prefix: "site/", siteUrl: "https://example.org", robots: { policy: "allow" }, ...(options.formats ? { formats: options.formats } : {}), dependencies: { render: options.render ?? "events", rendererReadsDocument: true, ...options.dependencies } });
   const delivery = await createDeliveryStatic(config, { content, site, renderer: options.renderer ?? reading.renderer, blobs, db, logger, events }, now);
   instances.push(delivery);
 
@@ -404,7 +404,7 @@ describe("delivery/static dependencies: cycles and repeated build checks", () =>
     expectOk(await h.delivery.republishOutput({ type: "pages", docId: b, locale: "de" }));
     expect(h.reading.calls.slice(calls)).toEqual([`${b}/de`]);
     expect(h.html("/b")).toContain("A2");
-    expect(h.emitted.filter((e) => e.name !== LLMS_STALE).map((e) => e.name)).toEqual([OUTPUT_STALE]);
+    expect(h.emitted.map((e) => e.name)).toEqual([OUTPUT_STALE]);
     expect(await h.marked()).toEqual([]);
   });
 
@@ -421,7 +421,7 @@ describe("delivery/static dependencies: cycles and repeated build checks", () =>
     await one.settle();
     await two.settle();
     expect(expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "build" }))?.value).toBe("build-9");
-    expect(expectOk(await one.delivery.checkBuild("build-9"))).toEqual({ changed: false, marked: 0 });
+    expect(expectOk(await one.delivery.checkBuild("build-9"))).toEqual({ changed: false, restored: false, marked: 0 });
     expect(one.html("/programm")).toContain("Programm");
     expect(one.html("/entwurf")).toBeNull();
     expect((await one.row(ids.programm))?.depSet).not.toBeNull();
@@ -492,7 +492,7 @@ describe("delivery/static dependencies: marks and renders", () => {
     expect(expectOk(await h.delivery.republishOutput({ type: "pages", docId: ids.programm, locale: "de" }))).toEqual({ rendered: true, state: "live" });
     expect(h.html("/programm")).toContain("Ada,Grace H.");
     expect(await h.marked()).toEqual([`${ids.programm}/en`]);
-    expect(h.emitted.filter((e) => e.name === LLMS_STALE).map((e) => e.data)).toEqual([{ coalesceKey: "llms" }]);
+    expect(h.emitted.filter((e) => e.name === LLMS_STALE || e.name === INDEXES_STALE)).toEqual([]);
   });
 
   it("a mark made during the render survives it", async () => {
@@ -989,7 +989,7 @@ describe("delivery/static dependencies: the background loop", () => {
     expect(expectOk(await h.delivery.readStaleStatus())).toMatchObject({ failed: 2, stale: 0 });
     expect(expectOk(await h.delivery.status("pages", ids.programm))[0]).toMatchObject({ stale: true, staleFailed: true, state: "error" });
     await new Promise((r) => setTimeout(r, 1200));
-    expectOk(await h.delivery.requestLlms());
+    expectOk(await h.delivery.requestIndexes());
     await new Promise((r) => setTimeout(r, 100));
     expect(calls() - initial).toBe(2);
   }, 10_000);
@@ -1029,7 +1029,7 @@ describe("delivery/static dependencies: the background loop", () => {
     await one.settle();
     rendered.clear();
     expectOk(await one.delivery.markDependents("settings", []));
-    expectOk(await two.delivery.requestLlms());
+    expectOk(await two.delivery.requestIndexes());
     await one.settle();
     await two.settle();
     expect(rendered.size).toBe(12);
@@ -1058,15 +1058,15 @@ describe("delivery/static dependencies: the background loop", () => {
     expect(h.reading.calls.length).toBe(calls);
   });
 
-  it("exports llms.txt once when the backlog drains, not once per render", async () => {
+  it("exports llms.txt once for one request, however many renders the backlog holds", async () => {
     const blobs = countingBlobs();
-    const h = await harness({ render: "background", blobs });
+    const h = await harness({ render: "background", blobs, dependencies: { indexesDelayMs: 0 } });
     await seed(h);
     await h.settle();
     const before = blobs.llmsWrites();
     expectOk(await h.content.set("settings", { title: "Festival 2027" }, { locale: "de" }));
     expectOk(await h.delivery.markDependents("settings", []));
-    expectOk(await h.delivery.requestLlms());
+    expectOk(await h.delivery.requestIndexes());
     await h.settle();
     const deadline = Date.now() + 2000;
     while (blobs.llmsWrites() === before && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
@@ -1077,12 +1077,13 @@ describe("delivery/static dependencies: the background loop", () => {
 });
 
 describe("delivery/static dependencies: jobs through events@1", () => {
-  it("requestLlms raises one coalesced llmsStale and exports nothing itself", async () => {
+  it("requestIndexes raises one coalesced indexesStale, no llmsStale without llms.full, and exports nothing itself", async () => {
     const blobs = countingBlobs();
     const h = await harness({ blobs });
     await seed(h);
-    expectOk(await h.delivery.requestLlms());
-    expect(h.emitted.filter((e) => e.name === LLMS_STALE).map((e) => e.data)).toEqual([{ coalesceKey: "llms" }]);
+    h.emitted.length = 0;
+    expectOk(await h.delivery.requestIndexes());
+    expect(h.emitted).toEqual([{ name: INDEXES_STALE, data: { coalesceKey: "indexes" } }]);
     expect(blobs.llmsWrites()).toBe(0);
   });
 
@@ -1159,7 +1160,7 @@ describe("delivery/static dependencies: markAll, checkBuild and the recovery pas
     expect(first.changed).toBe(true);
     expect(first.marked).toBeGreaterThanOrEqual(8);
     expect(expectOk(await fake.findOne<{ id: string; value: string }>(STATE, { id: "build" }))?.value).toBe("build-2");
-    expect(expectOk(await h.delivery.checkBuild("build-2"))).toEqual({ changed: false, marked: 0 });
+    expect(expectOk(await h.delivery.checkBuild("build-2"))).toEqual({ changed: false, restored: false, marked: 0 });
     expect(expectOk(await h.delivery.checkBuild("build-3")).changed).toBe(true);
   });
 
@@ -1210,7 +1211,7 @@ describe("delivery/static dependencies: markAll, checkBuild and the recovery pas
   it("readStaleStatus counts waiting, failed, rendering and unknown outputs and the oldest mark", async () => {
     const h = await harness();
     const ids = await seed(h);
-    expect(expectOk(await h.delivery.readStaleStatus())).toEqual({ stale: 0, failed: 0, rendering: 0, unknown: 0, oldestStaleAt: null, abandoned: 0 });
+    expect(expectOk(await h.delivery.readStaleStatus())).toEqual({ stale: 0, failed: 0, rendering: 0, unknown: 0, oldestStaleAt: null, abandoned: 0, exports: { indexes: null, llmsFull: null } });
     const kontakt = (await h.row(ids.kontakt))!;
     expectOk(await h.db.updateMany<StatusRow>(STATUS, { id: kontakt.id }, { depSet: null }));
     const before = Date.now();

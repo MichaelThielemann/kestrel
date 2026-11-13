@@ -13,7 +13,8 @@ import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import { observeReads, type ObservedRead } from "@michaelthielemann/kestrel/reads";
 import { canonicalJson, normalizeReads, type DependencySpec } from "./dependencies.ts";
 import { dependencyPrefix, dependencyRowId, scan, setIdOf, statusIdOf, type DependencyKind, type OutputRef } from "./keys.ts";
-import { exportLlms, validateLlmsConfig, type LlmsSource } from "./llms.ts";
+import { createIndexFiles, normalizeSiteUrl, type IndexCandidate, type RobotsPolicy } from "./indexes.ts";
+import { validateLlmsConfig } from "./llms.ts";
 import { createBackgroundLoop, type BackgroundLoop, type PassOutcome } from "./loop.ts";
 import type { configSchema } from "./module.ts";
 
@@ -25,8 +26,14 @@ export const CHANGES = "delivery_changes";
 
 /** Raised through `events@1` for every marked output with `dependencies.render: "events"`; its data carries `coalesceKey`. */
 export const OUTPUT_STALE = "delivery.outputStale";
-/** Raised through `events@1` by `delivery.requestLlms` with `dependencies.render: "events"`; its data carries `coalesceKey: "llms"`. */
+/** Raised through `events@1` by `delivery.requestIndexes` and `delivery.resumeStale` with `dependencies.render: "events"`; its data carries `coalesceKey: "indexes"`. */
+export const INDEXES_STALE = "delivery.indexesStale";
+/** Raised through `events@1` with `dependencies.render: "events"` and `llms.full`, by `delivery.requestIndexes` and after a re-render; its data carries `coalesceKey: "llms"`. */
 export const LLMS_STALE = "delivery.llmsStale";
+/** The blob key, outside the configured prefix, of the marker that tells a database restored from a backup apart from the one that wrote the current files. */
+export const MARKER_KEY = ".delivery-static-marker";
+
+export { normalizeSiteUrl, pageUrl } from "./indexes.ts";
 
 export type Config = z.output<typeof configSchema>;
 export type TypeConfig = Config["types"][string];
@@ -82,6 +89,13 @@ export interface PublishStatus {
   dependencies: number | null;
 }
 
+/** The last run of one export: when it ended, how many entries it wrote, and its error or `null`. */
+export interface ExportOutcome {
+  at: number;
+  entries: number;
+  error: string | null;
+}
+
 export interface StaleStatus {
   stale: number;
   failed: number;
@@ -89,6 +103,8 @@ export interface StaleStatus {
   unknown: number;
   oldestStaleAt: number | null;
   abandoned: number;
+  /** The last index export (sitemap.xml, robots.txt, llms.txt) and the last llms-full.txt export; `null` before the first run. */
+  exports: { indexes: ExportOutcome | null; llmsFull: ExportOutcome | null };
 }
 
 export interface OutputTarget {
@@ -102,19 +118,24 @@ export interface Delivery {
   unpublish(type: string, id: string): Promise<Result<number, DeliveryError>>;
   status(type: string, id: string): Promise<Result<PublishStatus[], DeliveryError>>;
   publishAll(type: string): Promise<Result<{ documents: number; live: number; errors: number }, DeliveryError>>;
-  exportLlms(): Promise<Result<{ entries: number; full: boolean }, DeliveryError>>;
+  /** Writes sitemap.xml, robots.txt and llms.txt from the status rows and the published documents, and records the outcome. */
+  exportIndexes(): Promise<Result<{ entries: number }, DeliveryError>>;
+  /** Writes llms-full.txt from the stored HTML when `llms.full` is set, and records the outcome. */
+  exportLlmsFull(): Promise<Result<{ entries: number }, DeliveryError>>;
   /** Marks every `live` or `error` output whose last render read one of `ids` of `type`, a list `type`'s store now puts one of them in, a link whose path changed, or nothing known. */
   markDependents(type: string, ids: readonly string[]): Promise<Result<{ marked: number }, DeliveryError>>;
   /** Marks the own outputs of every moved document, then every output whose last render linked to one of them at a path that changed. */
   markMoved(moves: readonly MovedPath[]): Promise<Result<{ marked: number }, DeliveryError>>;
   /** Marks every output of a delivered type, creating a marked `draft` row for each document and locale without one. */
   markAll(type: string): Promise<Result<{ marked: number }, DeliveryError>>;
-  /** Marks every output of every delivered type when `build` differs from the stored one, then stores it. */
-  checkBuild(build: string): Promise<Result<{ changed: boolean; marked: number }, DeliveryError>>;
+  /** Marks every output of every delivered type when `build` differs from the stored one or the database was restored from a backup, then stores it. */
+  checkBuild(build: string): Promise<Result<{ changed: boolean; restored: boolean; marked: number }, DeliveryError>>;
   /** Renders one marked output under a claim; a failed render answers `Err` after recording the attempt on the row. */
   republishOutput(target: OutputTarget): Promise<Result<{ rendered: boolean; state: State | null }, DeliveryError>>;
-  requestLlms(): Promise<Result<void, DeliveryError>>;
-  resumeStale(): Promise<Result<{ released: number; swept: number; dispatched: number; aged: number }, DeliveryError>>;
+  /** Asks for an index export and, with `llms.full`, an llms-full.txt export, without running either here. */
+  requestIndexes(): Promise<Result<void, DeliveryError>>;
+  /** The recovery pass; it also asks for an index export every time, and for llms-full.txt while its last export failed. */
+  resumeStale(): Promise<Result<{ released: number; swept: number; dispatched: number; aged: number; orphans: number }, DeliveryError>>;
   retryStale(): Promise<Result<{ retried: number }, DeliveryError>>;
   readStaleStatus(): Promise<Result<StaleStatus, DeliveryError>>;
   /** Stops the background loop and waits for the render in progress. */
@@ -139,6 +160,8 @@ export interface DeliveryDeps {
   logger: Logger;
   /** Required with `dependencies.render: "events"`. */
   events?: Events | undefined;
+  /** Picks the robots.txt policy when `robots.policy` is not set: `allow` for `production`, otherwise `disallow`. Defaults to `process.env.NODE_ENV`. */
+  nodeEnv?: string | undefined;
 }
 
 interface DependencyRow extends Document {
@@ -212,6 +235,13 @@ const LOOP_BATCH = 5;
 const RESUME_MIN_AGE_MS = 60_000;
 const UNPUBLISH_TRIES = 5;
 const LLMS_COALESCE_KEY = "llms";
+const INDEXES_COALESCE_KEY = "indexes";
+const BUILD = "build";
+const MARKER = "marker";
+const ORPHANS = "orphans";
+const INDEXES_OUTCOME = "export:indexes";
+const LLMS_FULL_OUTCOME = "export:llmsFull";
+const INDEX_FILE = /^index\.[A-Za-z0-9]+$/;
 const SEQUENCE = "changes";
 const SEQUENCE_WIDTH = 16;
 const SEQUENCE_TRIES = 100;
@@ -305,6 +335,11 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   validateLlmsConfig(config.llms, model, config.formats);
   if (dependencies.render === "events" && deps.events === undefined) throw new Error('delivery/static: dependencies.render "events" needs an events@1 provider');
   const events = deps.events;
+  const siteUrl = config.siteUrl === undefined ? undefined : normalizeSiteUrl(config.siteUrl);
+  if (siteUrl === undefined && config.sitemap) logWarn(logger, "delivery/static: no siteUrl is set, so no sitemap.xml is written and llms.txt lists paths instead of URLs");
+  const nodeEnv = "nodeEnv" in deps ? deps.nodeEnv : process.env.NODE_ENV;
+  const robotsPolicy: RobotsPolicy = config.robots.policy ?? (nodeEnv === "production" ? "allow" : "disallow");
+  if (config.robots.policy === undefined) logWarn(logger, `delivery/static: robots.policy is not set, robots.txt uses "${robotsPolicy}" because NODE_ENV is ${nodeEnv === undefined ? "not set" : JSON.stringify(nodeEnv)}`);
 
   const prepared = [
     await db.ensureCollection(STATUS, {
@@ -341,8 +376,18 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   const warnedUnread = new Set<string>();
   const claimTtlMs = dependencies.claimTtlSeconds * 1000;
   let abandoned = 0;
-  let llmsRequested = false;
   let stopping = false;
+  let indexesDueAt: number | null = null;
+  let indexesFailures = 0;
+  let llmsFullRequested = false;
+  let llmsFullRetryAt: number | null = null;
+  let llmsFullFailures = 0;
+  let renderStarts = 0;
+  let rendersInFlight = 0;
+  let markerArmed = false;
+  let outputsChanged = false;
+  let orphansDone = false;
+  let orphansSkipLogged = false;
   let loop: BackgroundLoop | undefined;
   const deliveredTypes = Object.keys(config.types);
   const deliveredLocales = locales.length > 0 ? [...locales] : [""];
@@ -713,6 +758,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     }
 
     if (won) {
+      outputsChanged = true;
       const ownId = before?.id ?? statusIdOf(output.type, output.docId, output.locale);
       const oldPath = before === null ? null : before.path;
       if (before !== null && oldPath !== null && oldPath !== target.path) {
@@ -836,9 +882,15 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   };
 
   const publishLocale = async (type: string, id: string, locale: string | undefined): Promise<Result<RenderOutcome, DeliveryError>> => {
-    const flight = await startFlight();
-    if (isErr(flight)) return flight;
-    return renderLocale(flight.value, type, id, locale);
+    renderStarts += 1;
+    rendersInFlight += 1;
+    try {
+      const flight = await startFlight();
+      if (isErr(flight)) return flight;
+      return await renderLocale(flight.value, type, id, locale);
+    } finally {
+      rendersInFlight -= 1;
+    }
   };
 
   const renderLocale = async (flight: Flight, type: string, id: string, locale: string | undefined): Promise<Result<RenderOutcome, DeliveryError>> => {
@@ -910,41 +962,100 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return ok(out);
   };
 
-  const exportLlmsNow: Delivery["exportLlms"] = async () => {
-    const filterFor = (type: string): Filter => {
-      const tc = typeConfig(type);
-      return { [tc.statusField]: tc.publishedValue };
-    };
-    const liveSources = async (type: string): Promise<Result<LlmsSource[], DeliveryError>> => {
-      const out: LlmsSource[] = [];
-      for (let offset = 0; ; offset += ROW_PAGE) {
-        const page = await db.findMany<StatusRow>(STATUS, { type, state: "live" }, { sort: { path: "asc" }, limit: ROW_PAGE, offset });
-        if (isErr(page)) return err(dbFailure(page.error));
-        for (const row of page.value.items) {
-          if (row.path === null) continue;
-          const path = row.path;
-          out.push({
-            type,
-            path,
-            locale: row.locale,
-            docId: row.docId,
-            html: async () => {
-              const recordedHtml = row.writtenKeys?.html;
-              const key = recordedHtml !== undefined && underPath(recordedHtml, path) ? recordedHtml : keyFor(config.prefix, path, "html");
-              const blob = await blobs.get(key);
-              if (isErr(blob)) return err(transientOnly(blob.error, "blobstore@1"));
-              return ok(blob.value ? new TextDecoder().decode(blob.value) : null);
-            },
-          });
-        }
-        if (page.value.items.length < ROW_PAGE) break;
-      }
-      return ok(out);
-    };
-    const exported = await exportLlms(config.llms, { content, blobs, logger, prefix: config.prefix, fallback: config.fallback, defaultLocale: model.defaultLocale, hasLocales: locales.length > 0, types: Object.keys(config.types), filterFor, sources: liveSources });
-    if (isErr(exported)) return err(transientOnly(exported.error, "llms export"));
-    return ok(exported.value);
+  const filterFor = (type: string): Filter => {
+    const tc = typeConfig(type);
+    return { [tc.statusField]: tc.publishedValue };
   };
+
+  const candidateOf = (row: StatusRow, path: string, state: "live" | "error"): IndexCandidate => ({
+    rowId: row.id,
+    type: row.type,
+    docId: row.docId,
+    locale: row.locale,
+    path,
+    state,
+    html: async () => {
+      const recordedHtml = row.writtenKeys?.html;
+      const key = recordedHtml !== undefined && underPath(recordedHtml, path) ? recordedHtml : keyFor(config.prefix, path, "html");
+      const blob = await blobs.get(key);
+      if (isErr(blob)) return err(transientOnly(blob.error, "blobstore@1"));
+      return ok(blob.value ? new TextDecoder().decode(blob.value) : null);
+    },
+  });
+
+  const publishedExists = async (): Promise<Result<boolean, DeliveryError>> => {
+    for (const type of deliveredTypes) {
+      for (const locale of locales.length > 0 ? locales : [undefined]) {
+        const page = await content.list(type, filterFor(type), { ...(locale === undefined ? {} : { locale }), limit: 1 });
+        if (isErr(page)) return err(transientOnly(page.error, "content@1"));
+        if (page.value.items.length > 0) return ok(true);
+      }
+    }
+    return ok(false);
+  };
+
+  const indexFiles = createIndexFiles(
+    { siteUrl, sitemap: config.sitemap, robots: { policy: robotsPolicy, extra: config.robots.extra }, llms: config.llms, prefix: config.prefix },
+    {
+      content,
+      blobs,
+      logger,
+      fallback: config.fallback,
+      defaultLocale: model.defaultLocale,
+      hasLocales: locales.length > 0,
+      types: deliveredTypes,
+      filterFor,
+      candidates: (type, visit) =>
+        pagedRows({ type, state: { in: MARKABLE }, path: { ne: null }, locale: { in: deliveredLocales } }, async (rows) => {
+          const page: IndexCandidate[] = [];
+          for (const row of rows) if (row.path !== null && (row.state === "live" || row.state === "error")) page.push(candidateOf(row, row.path, row.state));
+          const visited = await visit(page);
+          if (isErr(visited)) return err(transientOnly(visited.error, "index export"));
+          return ok();
+        }),
+      publishedExists,
+      stopping: () => stopping,
+    },
+  );
+
+  const isOutcome = (value: unknown): value is ExportOutcome => isRecord(value) && typeof value.at === "number" && typeof value.entries === "number" && (value.error === null || typeof value.error === "string");
+
+  const readOutcome = async (id: string): Promise<Result<ExportOutcome | null, DeliveryError>> => {
+    const row = await db.findOne<StateRow>(STATE, { id });
+    if (isErr(row)) return err(dbFailure(row.error));
+    const raw = row.value?.value;
+    if (raw === null || raw === undefined) return ok(null);
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return ok(isOutcome(parsed) ? parsed : null);
+    } catch {
+      return ok(null);
+    }
+  };
+
+  const writeState = async (id: string, value: string): Promise<Result<void, DeliveryError>> => {
+    const at = now();
+    for (let tries = 0; tries < 2; tries++) {
+      const updated = await db.updateMany<StateRow>(STATE, { id }, { value, updatedAt: at });
+      if (isErr(updated)) return err(dbFailure(updated.error));
+      if (updated.value > 0) return ok();
+      const created = await db.createOne<StateRow>(STATE, { id, value, seq: null, updatedAt: at });
+      if (!isErr(created)) return ok();
+      if (created.error.code !== "CONFLICT") return err(dbFailure(created.error));
+    }
+    return err(transient(`delivery/static: the state row ${id} kept changing – try again`));
+  };
+
+  const recorded = (id: string) => async (outcome: Result<{ entries: number }, KestrelError>): Promise<Result<{ entries: number }, DeliveryError>> => {
+    if (isErr(outcome) && stopping) return err(transientOnly(outcome.error, "index export"));
+    const entry: ExportOutcome = isErr(outcome) ? { at: now(), entries: 0, error: outcome.error.message } : { at: now(), entries: outcome.value.entries, error: null };
+    logged("could not record the outcome of an export", { id })(await writeState(id, JSON.stringify(entry)));
+    if (isErr(outcome)) return err(transientOnly(outcome.error, "index export"));
+    return ok(outcome.value);
+  };
+
+  const exportIndexesNow: Delivery["exportIndexes"] = async () => recorded(INDEXES_OUTCOME)(await indexFiles.exportIndexes());
+  const exportLlmsFullNow: Delivery["exportLlmsFull"] = async () => recorded(LLMS_FULL_OUTCOME)(await indexFiles.exportLlmsFull());
 
   const claim = async (rowId: string): Promise<Result<string | null, DeliveryError>> => {
     const at = now();
@@ -981,18 +1092,47 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return outcome;
   };
 
-  const requestLlmsNow = async (): Promise<Result<void, DeliveryError>> => {
+  const raise = async (event: string, coalesceKey: string, what: string): Promise<Result<void, DeliveryError>> => {
+    try {
+      await events?.emit(event, { coalesceKey });
+    } catch (error) {
+      return err(transient(`delivery/static: could not queue the ${what} export (${errorText(error)})`));
+    }
+    return ok();
+  };
+
+  const requestIndexFiles = async (): Promise<Result<void, DeliveryError>> => {
     if (dependencies.render === "background") {
-      llmsRequested = true;
+      indexesDueAt ??= now() + dependencies.indexesDelayMs;
       loop?.wake();
       return ok();
     }
-    try {
-      await events?.emit(LLMS_STALE, { coalesceKey: LLMS_COALESCE_KEY });
-    } catch (error) {
-      return err(transient(`delivery/static: could not queue the llms.txt export (${errorText(error)})`));
+    return raise(INDEXES_STALE, INDEXES_COALESCE_KEY, "index");
+  };
+
+  const requestLlmsFull = async (): Promise<Result<void, DeliveryError>> => {
+    if (!config.llms.full) return ok();
+    if (dependencies.render === "background") {
+      llmsFullRequested = true;
+      loop?.wake();
+      return ok();
     }
-    return ok();
+    return raise(LLMS_STALE, LLMS_COALESCE_KEY, "llms-full.txt");
+  };
+
+  const requestIndexesNow: Delivery["requestIndexes"] = async () => {
+    const indexes = await requestIndexFiles();
+    if (isErr(indexes)) return indexes;
+    return requestLlmsFull();
+  };
+
+  const entryPath = (row: Pick<StatusRow, "state" | "path"> | null): string | null => (row !== null && (row.state === "live" || row.state === "error") ? row.path : null);
+
+  const requestAfterRender = async (before: StatusRow): Promise<void> => {
+    logged("could not request an llms-full.txt export after a re-render", { id: before.id })(await requestLlmsFull());
+    const after = await db.findOne<StatusRow>(STATUS, { id: before.id });
+    if (!isErr(after) && entryPath(after.value) === entryPath(before)) return;
+    logged("could not request an index export after a re-render", { id: before.id })(await requestIndexFiles());
   };
 
   const releaseExpiredClaims = async (): Promise<Result<number, DeliveryError>> => {
@@ -1006,8 +1146,48 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return result.value;
   };
 
+  const exportBackoffMs = (failures: number): number => Math.max(1000, backoffMs(failures));
+
+  const attempt = async (run: () => Promise<Result<{ entries: number }, DeliveryError>>): Promise<string | null> => {
+    try {
+      const exported = await run();
+      return isErr(exported) ? exported.error.message : null;
+    } catch (error) {
+      return errorText(error);
+    }
+  };
+
+  const runIndexesWindow = async (): Promise<void> => {
+    indexesDueAt = null;
+    const failed = await attempt(exportIndexesNow);
+    if (failed === null) {
+      indexesFailures = 0;
+      return;
+    }
+    if (stopping) return;
+    indexesFailures += 1;
+    indexesDueAt = now() + exportBackoffMs(indexesFailures);
+    logger.error("delivery/static: the index export failed, the re-renders go on and the export is retried", { error: failed, attempts: indexesFailures, retryAt: indexesDueAt });
+  };
+
+  const runLlmsFull = async (): Promise<void> => {
+    llmsFullRequested = false;
+    llmsFullRetryAt = null;
+    const failed = await attempt(exportLlmsFullNow);
+    if (failed === null) {
+      llmsFullFailures = 0;
+      return;
+    }
+    if (stopping) return;
+    llmsFullFailures += 1;
+    llmsFullRequested = true;
+    llmsFullRetryAt = now() + exportBackoffMs(llmsFullFailures);
+    logger.error("delivery/static: the llms-full.txt export failed and is retried", { error: failed, attempts: llmsFullFailures, retryAt: llmsFullRetryAt });
+  };
+
   const pass = async (): Promise<PassOutcome> => {
     unwrap(await releaseExpiredClaims());
+    if (!stopping && indexesDueAt !== null && now() >= indexesDueAt) await runIndexesWindow();
     const at = now();
     const due = await db.findMany<StatusRow>(STATUS, { staleRetryAt: { lte: at }, claimedBy: null, staleAttempts: { lt: dependencies.maxAttempts }, type: { in: deliveredTypes } }, { sort: { staleRetryAt: "asc" }, limit: LOOP_BATCH });
     if (isErr(due)) throw new Error(due.error.message);
@@ -1023,7 +1203,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
             const renewed = await db.updateMany<StatusRow>(STATUS, { id: row.id, claimedBy: token }, { claimedAt: now() });
             if (isErr(renewed) || renewed.value !== 1) continue;
             await renderMarked(row);
-            llmsRequested = true;
+            await requestAfterRender(row);
           }
         } finally {
           await release(row.id, token);
@@ -1031,19 +1211,15 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       }
       return { busy: true, sleepMs: null };
     }
-    if (llmsRequested) {
-      llmsRequested = false;
-      const exported = await exportLlmsNow();
-      if (isErr(exported)) {
-        llmsRequested = true;
-        throw new Error(`llms.txt export failed: ${exported.error.message}`);
-      }
+    if (!stopping && llmsFullRequested && (llmsFullRetryAt === null || now() >= llmsFullRetryAt)) {
+      await runLlmsFull();
       return { busy: true, sleepMs: null };
     }
     const next = await db.findMany<StatusRow>(STATUS, { staleRetryAt: { gt: at }, staleAttempts: { lt: dependencies.maxAttempts } }, { sort: { staleRetryAt: "asc" }, limit: 1 });
     if (isErr(next)) throw new Error(next.error.message);
-    const retryAt = next.value.items[0]?.staleRetryAt;
-    return { busy: false, sleepMs: retryAt === undefined || retryAt === null ? null : Math.max(0, retryAt - now()) };
+    const wakeAts = [next.value.items[0]?.staleRetryAt ?? null, indexesDueAt, llmsFullRequested ? llmsFullRetryAt : null].filter((v): v is number => v !== null);
+    if (wakeAts.length === 0) return { busy: false, sleepMs: null };
+    return { busy: false, sleepMs: Math.max(0, Math.min(...wakeAts) - now()) };
   };
 
   if (dependencies.render === "background") loop = createBackgroundLoop(pass, logger, "delivery/static");
@@ -1211,10 +1387,118 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return ok({ marked: dispatched.value });
   };
 
+  const detectRestore = async (): Promise<Result<boolean, DeliveryError>> => {
+    const stored = await db.findOne<StateRow>(STATE, { id: MARKER });
+    if (isErr(stored)) return err(dbFailure(stored.error));
+    const blob = await blobs.get(MARKER_KEY);
+    if (isErr(blob)) return err(transientOnly(blob.error, "blobstore@1"));
+    if (blob.value === null) return ok(false);
+    return ok(new TextDecoder().decode(blob.value) !== stored.value?.value);
+  };
+
+  const rotateMarker = async (): Promise<void> => {
+    markerArmed = true;
+    outputsChanged = false;
+    const token = randomUUID();
+    const stored = await writeState(MARKER, token);
+    if (isErr(stored)) {
+      logger.error("delivery/static: could not store the restore marker, a later restore may go unnoticed", { error: stored.error.message });
+      return;
+    }
+    const written = await blobs.put(MARKER_KEY, new TextEncoder().encode(token), { contentType: "text/plain; charset=utf-8" });
+    if (isErr(written)) logger.error("delivery/static: could not write the restore marker, the next build check renders every output again", { error: written.error.message });
+  };
+
+  const publishedWithoutLiveRow = async (): Promise<Result<boolean, DeliveryError>> => {
+    for (const type of deliveredTypes) {
+      for (const locale of deliveredLocales) {
+        for (let offset = 0; ; offset += PAGE) {
+          const page = await content.list(type, filterFor(type), { ...(locale === "" ? {} : { locale }), limit: PAGE, offset });
+          if (isErr(page)) return err(transientOnly(page.error, "content@1"));
+          const ids = page.value.items.map((d) => d.id);
+          if (ids.length > 0) {
+            const live = await db.count(STATUS, { type, locale, docId: { in: ids }, state: "live" });
+            if (isErr(live)) return err(dbFailure(live.error));
+            if (live.value < ids.length) return ok(true);
+          }
+          if (page.value.items.length < PAGE) break;
+        }
+      }
+    }
+    return ok(false);
+  };
+
+  const pathOfKey = (key: string): string | null => {
+    if (!key.startsWith(config.prefix)) return null;
+    const parts = key.slice(config.prefix.length).split("/");
+    const file = parts.pop();
+    if (file === undefined || !INDEX_FILE.test(file)) return null;
+    return `/${parts.join("/")}`;
+  };
+
+  const removeOrphans = async (): Promise<Result<number, DeliveryError>> => {
+    if (orphansDone || stopping) return ok(0);
+    const done = await db.findOne<StateRow>(STATE, { id: ORPHANS });
+    if (isErr(done)) return err(dbFailure(done.error));
+    if (done.value !== null) {
+      orphansDone = true;
+      return ok(0);
+    }
+    const skip = (reason: string): Result<number, DeliveryError> => {
+      if (!orphansSkipLogged) logger.info(`delivery/static: the one-time removal of orphaned output files waits: ${reason}`);
+      orphansSkipLogged = true;
+      return ok(0);
+    };
+    for (const filter of [{ staleToken: { ne: null }, staleAttempts: { lt: dependencies.maxAttempts } }, { claimedBy: { ne: null } }]) {
+      const busy = await db.count(STATUS, filter);
+      if (isErr(busy)) return err(dbFailure(busy.error));
+      if (busy.value > 0) return skip("outputs wait for a re-render");
+    }
+    if (rendersInFlight > 0) return skip("outputs wait for a re-render");
+    const missing = await publishedWithoutLiveRow();
+    if (isErr(missing)) return missing;
+    if (missing.value) return skip("a published document has no live output");
+    const startedBefore = renderStarts;
+    const listed = await blobs.list(config.prefix);
+    if (isErr(listed)) return err(transientOnly(listed.error, "blobstore@1"));
+    const owned = new Set<string>();
+    const ownedPaths = new Set<string>();
+    const walked = await pagedRows({}, (rows) => {
+      for (const row of rows) {
+        for (const key of Object.values(row.writtenKeys ?? {})) owned.add(key);
+        if (row.path === null) continue;
+        ownedPaths.add(row.path);
+        for (const key of Object.values(legacyKeysFor(row.path))) owned.add(key);
+      }
+      return ok();
+    });
+    if (isErr(walked)) return walked;
+    const orphans = new Map<string, string[]>();
+    for (const { key } of listed.value) {
+      const path = pathOfKey(key);
+      if (path === null || owned.has(key) || ownedPaths.has(path) || reservedMatch(path, config.reservedPaths) !== undefined) continue;
+      orphans.set(path, [...(orphans.get(path) ?? []), key]);
+    }
+    if (renderStarts !== startedBefore || rendersInFlight > 0) return skip("a page was published while the files were compared");
+    let removed = 0;
+    for (const [path, keys] of orphans) {
+      if (stopping) return ok(removed);
+      const gone = await removeFiles(path, keys);
+      if (isErr(gone)) return gone;
+      for (const key of keys) logger.info("delivery/static: removed an orphaned output file no status row owns", { path, key });
+      removed += keys.length;
+    }
+    const recordedDone = await writeState(ORPHANS, JSON.stringify({ at: now(), removed }));
+    if (isErr(recordedDone)) return recordedDone;
+    orphansDone = true;
+    return ok(removed);
+  };
+
   return {
     publish,
     async unpublish(type, id) {
       typeConfig(type);
+      outputsChanged = true;
       const rows = await db.findMany<StatusRow>(STATUS, { type, docId: id }, { sort: { locale: "asc" } });
       if (isErr(rows)) return err(dbFailure(rows.error));
       const pending = [...rows.value.items];
@@ -1286,23 +1570,34 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       }
       return ok({ documents, live, errors });
     },
-    exportLlms: exportLlmsNow,
+    exportIndexes: exportIndexesNow,
+    exportLlmsFull: exportLlmsFullNow,
     markDependents,
     markMoved,
     markAll,
     async checkBuild(build) {
-      const stored = await db.findOne<StateRow>(STATE, { id: "build" });
+      const stored = await db.findOne<StateRow>(STATE, { id: BUILD });
       if (isErr(stored)) return err(dbFailure(stored.error));
-      if (stored.value?.value === build) return ok({ changed: false, marked: 0 });
+      const restored = await detectRestore();
+      if (isErr(restored)) return restored;
+      const changed = stored.value?.value !== build;
+      if (!changed && !restored.value) {
+        await rotateMarker();
+        return ok({ changed: false, restored: false, marked: 0 });
+      }
+      if (restored.value) logWarn(logger, "delivery/static: the database is older than the delivered files (restored from a backup), so every output is rendered again");
       let marked = 0;
       for (const type of Object.keys(config.types)) {
         const all = await markAll(type);
         if (isErr(all)) return all;
         marked += all.value.marked;
       }
-      const written = stored.value === null ? await db.createOne<StateRow>(STATE, { id: "build", value: build, seq: null, updatedAt: now() }) : await db.updateOne<StateRow>(STATE, "build", { value: build, updatedAt: now() });
-      if (isErr(written) && written.error.code !== "CONFLICT") return err(dbFailure(written.error));
-      return ok({ changed: true, marked });
+      if (changed) {
+        const written = stored.value === null ? await db.createOne<StateRow>(STATE, { id: BUILD, value: build, seq: null, updatedAt: now() }) : await db.updateOne<StateRow>(STATE, BUILD, { value: build, updatedAt: now() });
+        if (isErr(written) && written.error.code !== "CONFLICT") return err(dbFailure(written.error));
+      }
+      await rotateMarker();
+      return ok({ changed, restored: restored.value, marked });
     },
     async republishOutput(target) {
       typeConfig(target.type);
@@ -1324,13 +1619,10 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         return ok({ rendered: true, state: outcome.value.status?.state ?? null });
       } finally {
         await release(found.value.id, token.value);
-        if (rendered) {
-          const requested = await requestLlmsNow();
-          if (isErr(requested)) logger.error("delivery/static: could not request an llms.txt export after a re-render", { error: requested.error.message });
-        }
+        if (rendered) await requestAfterRender(found.value);
       }
     },
-    requestLlms: requestLlmsNow,
+    requestIndexes: requestIndexesNow,
     async resumeStale() {
       const released = await releaseExpiredClaims();
       if (isErr(released)) return released;
@@ -1377,7 +1669,14 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         return dispatch(rows);
       });
       if (isErr(due)) return due;
-      return ok({ released: released.value, swept, dispatched, aged });
+      logged("could not request an index export from the recovery pass", {})(await requestIndexFiles());
+      const llmsFull = config.llms.full ? await readOutcome(LLMS_FULL_OUTCOME) : ok(null);
+      if (isErr(llmsFull)) logger.error("delivery/static: could not read the outcome of the last llms-full.txt export", { error: llmsFull.error.message });
+      else if (llmsFull.value?.error !== null && llmsFull.value?.error !== undefined) logged("could not request an llms-full.txt export from the recovery pass", {})(await requestLlmsFull());
+      if (markerArmed && outputsChanged) await rotateMarker();
+      const orphans = await removeOrphans();
+      if (isErr(orphans)) return orphans;
+      return ok({ released: released.value, swept, dispatched, aged, orphans: orphans.value });
     },
     async retryStale() {
       const failed: string[] = [];
@@ -1405,11 +1704,16 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       const oldest = await db.findMany<StatusRow>(STATUS, { staleToken: { ne: null } }, { sort: { staleAt: "asc" }, limit: 1 });
       if (isErr(oldest)) return err(dbFailure(oldest.error));
       const [stale = 0, failedCount = 0, rendering = 0, unknown = 0] = values;
-      return ok({ stale, failed: failedCount, rendering, unknown, oldestStaleAt: oldest.value.items[0]?.staleAt ?? null, abandoned });
+      const indexes = await readOutcome(INDEXES_OUTCOME);
+      if (isErr(indexes)) return indexes;
+      const llmsFull = await readOutcome(LLMS_FULL_OUTCOME);
+      if (isErr(llmsFull)) return llmsFull;
+      return ok({ stale, failed: failedCount, rendering, unknown, oldestStaleAt: oldest.value.items[0]?.staleAt ?? null, abandoned, exports: { indexes: indexes.value, llmsFull: llmsFull.value } });
     },
     async close() {
       stopping = true;
       await loop?.stop();
+      if (markerArmed) await rotateMarker();
     },
   };
 }

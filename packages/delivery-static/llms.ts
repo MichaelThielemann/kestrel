@@ -1,11 +1,6 @@
 import TurndownService from "turndown";
-import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
-import type { Content, ContentDocument, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
-import { publishedLocale } from "@michaelthielemann/kestrel-contracts/helpers/content-locale";
-import { isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
-import type { Filter } from "@michaelthielemann/kestrel-contracts/query";
+import type { ContentModel } from "@michaelthielemann/kestrel-contracts/content";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import type { Logger } from "@michaelthielemann/kestrel/logger";
 
 export interface LlmsSettingsConfig {
   type: string;
@@ -14,7 +9,6 @@ export interface LlmsSettingsConfig {
 }
 
 export interface LlmsConfig {
-  siteUrl?: string | undefined;
   full: boolean;
   settings: LlmsSettingsConfig;
   titleField: string;
@@ -46,7 +40,7 @@ export const LLMS_KEY = "llms.txt";
 export const LLMS_FULL_KEY = "llms-full.txt";
 export const LLMS_CONTENT_TYPE = "text/plain; charset=utf-8";
 
-const BODY_HEADING_OFFSET = 3;
+export const BODY_HEADING_OFFSET = 3;
 
 function oneLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -92,7 +86,7 @@ export function extractMain(html: string): string | null {
   return null;
 }
 
-function bodyOf(html: string): string {
+export function bodyOf(html: string): string {
   return /<body\b[^>]*>([\s\S]*)<\/body>/i.exec(html)?.[1] ?? html;
 }
 
@@ -140,101 +134,10 @@ export function htmlToMarkdown(html: string, options: { siteUrl?: string; headin
   return td.turndown(html).replace(/\n{3,}/g, "\n\n").trim();
 }
 
-export interface LlmsSource {
-  type: string;
-  path: string;
-  locale: string;
-  docId: string;
-  html(): Promise<Result<string | null, KestrelError>>;
-}
-
-export interface LlmsDeps {
-  content: Content;
-  blobs: Blobstore;
-  logger: Logger;
-  prefix: string;
-  fallback: boolean;
-  defaultLocale: string | undefined;
-  hasLocales: boolean;
-  types: string[];
-  filterFor(type: string): Filter;
-  sources(type: string): Promise<Result<LlmsSource[], KestrelError>>;
-}
-
 export function validateLlmsConfig(config: LlmsConfig, model: ContentModel, formats: string[]): void {
   const settings = model.types[config.settings.type];
   if (!settings) return;
   if (settings.kind !== "single") throw new Error(`delivery/static: llms.settings.type "${config.settings.type}" must be a single type`);
   if (!(config.settings.titleField in settings.fields)) throw new Error(`delivery/static: field "${config.settings.titleField}" does not exist on "${config.settings.type}"`);
   if (config.full && !formats.includes("html")) throw new Error('delivery/static: llms.full needs "html" in formats');
-}
-
-function text(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
-function isNonNullObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-export async function exportLlms(config: LlmsConfig, deps: LlmsDeps): Promise<Result<{ entries: number; full: boolean }, KestrelError>> {
-  const siteUrl = config.siteUrl?.replace(/\/+$/, "");
-  let settingsDoc: ContentDocument | null = null;
-  if (config.settings.type in deps.content.model().types) {
-    const read = await deps.content.get(config.settings.type, undefined, deps.hasLocales && deps.defaultLocale !== undefined ? { locale: deps.defaultLocale, fallback: deps.fallback } : {});
-    if (isErr(read)) return read;
-    settingsDoc = read.value;
-  }
-  const siteName = text(settingsDoc?.[config.settings.titleField]) ?? (siteUrl ? new URL(siteUrl).host : "Website");
-  const siteDescription = text(settingsDoc?.[config.settings.descriptionField]);
-
-  const sections: LlmsSection[] = [];
-  const fullSections: LlmsFullSection[] = [];
-  let entries = 0;
-  let missingMain = false;
-  for (const type of deps.types) {
-    const heading = config.headings[type] ?? type;
-    const pages: LlmsFullPage[] = [];
-    const sources = await deps.sources(type);
-    if (isErr(sources)) return sources;
-    for (const source of sources.value) {
-      const read = await publishedLocale(deps.content, type, source.docId, source.locale === "" ? undefined : source.locale, deps.filterFor(type), { fallback: deps.fallback, translations: false });
-      if (isErr(read)) return read;
-      const doc = read.value;
-      if (!doc) continue;
-      const seo = doc[config.seoField];
-      const meta = isNonNullObject(seo) ? seo : {};
-      if (meta.noindex === true) continue;
-      const description = text(meta.description);
-      const entry: LlmsEntry = { title: text(meta.title) ?? text(doc[config.titleField]) ?? source.path, url: `${siteUrl ?? ""}${source.path}`, ...(description === undefined ? {} : { description }) };
-      let body = "";
-      if (config.full) {
-        const stored = await source.html();
-        if (isErr(stored)) return stored;
-        const html = stored.value;
-        if (html === null) {
-          deps.logger.error("delivery/static: rendered output missing for llms-full.txt", { type, id: source.docId, locale: source.locale, path: source.path });
-        } else {
-          const main = extractMain(html);
-          if (main === null) missingMain = true;
-          body = htmlToMarkdown(main ?? bodyOf(html), { ...(siteUrl === undefined ? {} : { siteUrl }), headingOffset: BODY_HEADING_OFFSET });
-        }
-      }
-      pages.push({ ...entry, body });
-    }
-    pages.sort((a, b) => a.url.localeCompare(b.url));
-    entries += pages.length;
-    sections.push({ heading, entries: pages.map((p) => ({ title: p.title, url: p.url, ...(p.description === undefined ? {} : { description: p.description }) })) });
-    fullSections.push({ heading, pages });
-  }
-  if (missingMain) deps.logger.info("delivery/static: rendered output without <main>, llms-full.txt uses the whole body");
-
-  const header = { siteName, ...(siteDescription === undefined ? {} : { siteDescription }) };
-  const written = await deps.blobs.put(`${deps.prefix}${LLMS_KEY}`, new TextEncoder().encode(buildLlmsTxt({ ...header, sections })), { contentType: LLMS_CONTENT_TYPE });
-  if (isErr(written)) return written;
-  const fullFile = config.full
-    ? await deps.blobs.put(`${deps.prefix}${LLMS_FULL_KEY}`, new TextEncoder().encode(buildLlmsFullTxt({ ...header, sections: fullSections })), { contentType: LLMS_CONTENT_TYPE })
-    : await deps.blobs.remove(`${deps.prefix}${LLMS_FULL_KEY}`);
-  if (isErr(fullFile)) return fullFile;
-  return ok({ entries, full: config.full });
 }

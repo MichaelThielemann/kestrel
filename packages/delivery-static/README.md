@@ -33,23 +33,6 @@ unchanged, in whatever spelling the renderer produced.
 owns. A page whose path equals or lies under one of them is not written; its status becomes
 `error` with `path <path> is reserved (<reserved>)`, and the previous live output (if any) stays. A
 renderer asset under a reserved path fails the same way, naming the asset's own path.
-`delivery.exportLlms` (always on; `llms` defaults to paths instead of URLs and no full file) (no argument; run it
-after `delivery.publishAll`, or let `delivery.requestLlms` ask for it after a publish, an unpublish or a settings
-change, see below) writes `<prefix>llms.txt` per [llmstxt.org](https://llmstxt.org) from the `live` status rows
-of every delivered type, re-checking each source locale's own current values at read time — a
-`live` row only names where to look, not what to trust, so a document saved as a draft after its
-last successful publish is skipped even if its row has not caught up yet: `# <settings title>`,
-`> <settings description>`, one `## <headings[type] ?? type>` section with
-`- [<seo.title || title>](<siteUrl><path>): <seo.description>` per page; `seo.noindex === true` excludes a page.
-An empty `seo`/title field is filled from the default locale only when the default locale's own
-values equal `publishedValue` too, the same rule `delivery.publish` applies. `full: true`
-also writes `<prefix>llms-full.txt` – the stored HTML of every page, restricted to `<main>` (matched
-greedily up to the last `</main>` tag, so a nested `<main>` does not cut it short), converted with turndown
-(headings shifted three levels, so a page's own top-level heading becomes `####` under its `###` page
-heading and `##` section heading; root-relative links and images made absolute with `siteUrl`) – and
-needs `"html"` in `formats`; `full: false` removes a stale `llms-full.txt`. Titles and descriptions are
-escaped so that editor-authored text cannot introduce a stray line break or start with a heading marker
-in the generated file. The result gains `_llms: { entries, full }`.
 Every `Delivery` method returns a `Result`; a failure is an `Err(KestrelError)`, never an exception.
 A render failure (`RENDER_FAILED` or `TRANSIENT` from `renderer@1`) is not a step failure: it is
 recorded on the status row as `state: "error"` with the message and the remaining locales are still
@@ -62,13 +45,14 @@ published. Only wiring bugs throw (unknown type, unconfigured type, an asset pat
 | `delivery.unpublish:<type>` | `params.id` | – | VALIDATION (missing id), TRANSIENT |
 | `delivery.readStatus:<type>` | `params.id` | `result` | VALIDATION (missing id), TRANSIENT |
 | `delivery.publishAll:<type>` | – | `result` | TRANSIENT |
-| `delivery.exportLlms` | – | `result._llms` | TRANSIENT |
+| `delivery.exportIndexes` | – | `result._indexes` | TRANSIENT |
+| `delivery.exportLlmsFull` | – | `result._llmsFull` | TRANSIENT |
 | `delivery.markDependents:<type>` | `payload.id`, `payload.ids` | `result._dependents` | TRANSIENT |
 | `delivery.markMoved` | `payload.moves` | `result._moved` | VALIDATION, TRANSIENT |
 | `delivery.markAll:<type>` | – | `result.marked` | TRANSIENT |
 | `delivery.checkBuild` | `payload.build` | `result` | VALIDATION, TRANSIENT |
 | `delivery.republishOutput` | `payload.type`, `payload.docId`, `payload.locale` | `result` | VALIDATION, TRANSIENT |
-| `delivery.requestLlms` | – | – | TRANSIENT |
+| `delivery.requestIndexes` | – | – | TRANSIENT |
 | `delivery.resumeStale` | – | `result` | TRANSIENT |
 | `delivery.retryStale` | – | `result.retried` | TRANSIENT |
 | `delivery.readStaleStatus` | – | `result` | TRANSIENT |
@@ -76,6 +60,65 @@ published. Only wiring bugs throw (unknown type, unconfigured type, an asset pat
 Status rows (`readStatus`, `_delivery`) also carry `stale` (marked for a re-render), `staleSince`, `staleFailed`
 (the re-render failed `dependencies.maxAttempts` times), `staleError` and `dependencies` (how many dependencies the
 last render recorded, `null` when they are unknown).
+
+## Index files
+
+`delivery.exportIndexes` writes `<prefix>sitemap.xml`, `<prefix>robots.txt` and `<prefix>llms.txt`;
+`delivery.exportLlmsFull` writes `<prefix>llms-full.txt`. Neither runs inside an editor's request:
+`delivery.requestIndexes` asks for both (see "Index exports" below), and a failed export never fails a
+save or a render.
+
+**Entries.** Both read the status rows of every delivered type page by page in id order and take every
+row that serves a file: it has a path and is `live` or `error` (a failed render keeps serving its previous
+output, so it stays listed). Each row's document is read again in that locale with the same published
+check `delivery.publish` applies, so a row that has not caught up with a later draft save is skipped, and a
+page whose merged `seo.noindex` is `true` is left out. URLs are `siteUrl` plus the path; two rows with the
+same URL give one entry, the `live` one first, then the lower row id. Entries are sorted by URL.
+
+**Guard.** When published documents exist but no row serves a file yet (before the first render, or after
+every first render failed), sitemap.xml and llms.txt are left as they are and a warning is logged; robots.txt
+is still written. A site whose every page is `noindex` gets an empty `<urlset>` and an llms.txt without
+sections.
+
+**sitemap.xml** (`application/xml; charset=utf-8`) lists one `<url>` per entry: `<loc>`, `<lastmod>` from the
+document's own `updatedAt` for `live` entries only, and, for a document with more than one listed locale, an
+`<xhtml:link rel="alternate" hreflang="…">` for each of them plus `hreflang="x-default"` for the default
+locale. Values are XML-escaped. Without `siteUrl`, or with `sitemap: false`, no sitemap is written and a
+stale one is removed; a missing `siteUrl` with the sitemap on logs one warning at setup. One file holds up to
+50 000 URLs per the sitemaps.org limit; this module writes no sitemap index.
+
+**robots.txt** (`text/plain; charset=utf-8`) is `User-agent: *` and `Allow: /` or `Disallow: /` from
+`robots.policy`, then the lines of `robots.extra`, then `Sitemap: <siteUrl>/sitemap.xml` when a sitemap is
+written. Without `robots.policy` the policy is `allow` when `NODE_ENV` is `production` and `disallow`
+otherwise, and setup logs a warning that names the choice.
+
+**llms.txt** follows [llmstxt.org](https://llmstxt.org): `# <settings title>` (default language; empty → the
+host of `siteUrl`, otherwise `Website`), `> <settings description>`, one `## <headings[type] ?? type>`
+section per delivered type with `- [<seo.title || title>](<url>): <seo.description>` per entry. An empty
+`seo`/title field is filled from the default locale only when the default locale's own values are published
+too, the same rule `delivery.publish` applies. Titles and descriptions are escaped so that editor-authored
+text cannot introduce a stray line break or start with a heading marker.
+
+**llms-full.txt** (with `llms.full: true`, which needs `"html"` in `formats`) holds the stored HTML of every
+entry, restricted to `<main>` (matched greedily up to the last `</main>` tag, so a nested `<main>` does not cut
+it short), converted with turndown: headings shifted three levels, so a page's own top-level heading becomes
+`####` under its `###` page heading and `##` section heading, and root-relative links and images made
+absolute with the origin of `siteUrl`. Each page's own recorded `html` key is read, falling back to the
+format-name assumption only when that key does not lie under the page's own path. Without `llms.full`,
+`delivery.exportIndexes` removes a stale `llms-full.txt` and `delivery.exportLlmsFull` writes nothing.
+
+**Unchanged files** are not written again: each process keeps a hash of what it last wrote per file, so
+the first export after a start always writes. The result gains `_indexes: { entries }` or
+`_llmsFull: { entries }`; the outcome of each export (`at`, `entries`, `error`) is stored in `delivery_state`
+and answered by `delivery.readStaleStatus` as `exports: { indexes, llmsFull }`. Both exports answer
+`TRANSIENT` once the process is stopping.
+
+**siteUrl** must be an absolute `http` or `https` URL without credentials, query or fragment. It is
+normalized by lower-casing the host, dropping a default port and stripping trailing slashes; a base path
+stays (`https://example.org/de/` → `https://example.org/de`), so the home page's URL is `https://example.org/de/`
+and every other page's has no trailing slash. `normalizeSiteUrl` and `pageUrl` from
+`@michaelthielemann/kestrel-delivery-static/impl` give that same form, for a canonical link that has to
+equal the sitemap's `<loc>`.
 
 ## Dependent outputs
 
@@ -120,19 +163,23 @@ definePipeline({ name: "pathsMovedDelivery", steps: ["delivery.markMoved"] });
 **Rendering, never inside the request.** `dependencies.render` chooses who renders a marked output:
 
 - `"background"` (default): the process that marked it, in a background loop of its own that starts with the first
-  mark and renders one output at a time. The loop is detached from the request: the request never waits for it. It
-  exports `llms.txt` once nothing is due, when a render or `delivery.requestLlms` asked for it. Other processes'
-  loops never render a row claimed here.
+  mark and renders one output at a time. The loop is detached from the request: the request never waits for it.
+  Other processes' loops never render a row claimed here.
 - `"events"`: every mark raises `delivery.outputStale` (`{ type, docId, locale, coalesceKey }`) through `events@1`,
-  and a pipeline with `delivery.republishOutput` subscribed to it renders the output; `delivery.requestLlms` raises
-  `delivery.llmsStale` (`coalesceKey: "llms"`) for a pipeline with `delivery.exportLlms`. With `events-queue`, at
-  most one job per output is pending at a time, and both pipelines belong in a lane of their own, so re-renders and
-  the export never delay other queued work:
+  and a pipeline with `delivery.republishOutput` subscribed to it renders the output. With `events-queue`, at
+  most one job per output is pending at a time, and the pipelines belong in lanes of their own, so re-renders and
+  the exports never delay other queued work and the index files never wait for a re-render backlog:
 
 ```ts
 modules: [
-  { use: "@michaelthielemann/kestrel-events-queue", config: { lanes: { pages: ["republishOutput", "refreshLlms"] } } },
-  { use: "@michaelthielemann/kestrel-delivery-static", config: { types: { pages: {} }, dependencies: { render: "events", rendererReadsDocument: true } } },
+  {
+    use: "@michaelthielemann/kestrel-events-queue",
+    config: { lanes: { pages: ["republishOutput", "refreshLlms"], indexes: ["refreshIndexes"] }, delayMs: { refreshIndexes: 1000, refreshLlms: 3000 } },
+  },
+  {
+    use: "@michaelthielemann/kestrel-delivery-static",
+    config: { types: { pages: {} }, siteUrl: "https://example.org", robots: { policy: "allow" }, llms: { full: true }, dependencies: { render: "events", rendererReadsDocument: true } },
+  },
 ],
 triggers: [
   { event: "page.updated", pipeline: "pageDependents" },
@@ -143,6 +190,7 @@ triggers: [
   { event: "media.restored", pipeline: "mediaDependents" },
   { event: "images.variantsChanged", pipeline: "mediaDependents" },
   { event: "delivery.outputStale", pipeline: "republishOutput" },
+  { event: "delivery.indexesStale", pipeline: "refreshIndexes" },
   { event: "delivery.llmsStale", pipeline: "refreshLlms" },
   { cron: "*/5 * * * *", pipeline: "resumeStalePages" },
 ],
@@ -150,10 +198,11 @@ triggers: [
 
 ```ts
 definePipeline({ name: "pageDependents", steps: ["delivery.markDependents:pages"] });
-definePipeline({ name: "settingsDependents", steps: ["delivery.markDependents:settings", "delivery.requestLlms"] });
+definePipeline({ name: "settingsDependents", steps: ["delivery.markDependents:settings", "delivery.requestIndexes"] });
 definePipeline({ name: "mediaDependents", steps: ["delivery.markDependents:media"] });
 definePipeline({ name: "republishOutput", steps: ["delivery.republishOutput"] });
-definePipeline({ name: "refreshLlms", steps: ["delivery.exportLlms"] });
+definePipeline({ name: "refreshIndexes", steps: ["delivery.exportIndexes"] });
+definePipeline({ name: "refreshLlms", steps: ["delivery.exportLlmsFull"] });
 definePipeline({ name: "resumeStalePages", steps: ["delivery.resumeStale"] });
 ```
 
@@ -163,8 +212,30 @@ show needs its own dependents trigger the same way, and the pipeline that writes
 `media.trashed` and `media.restored` triggers belong to a deployment that composes `media-default`'s
 trash pipelines; without a pipeline that raises them, boot warns about each.
 
-Boot fails with `"events"` unless both job triggers exist, and under `events-direct`, which would run every
-re-render inside the request that marked it.
+Boot fails with `"events"` unless a trigger runs `delivery.republishOutput` on `delivery.outputStale` and
+`delivery.exportIndexes` on `delivery.indexesStale`, and, with `llms.full`, `delivery.exportLlmsFull` on
+`delivery.llmsStale`; it also fails under `events-direct`, which would run every re-render inside the request that
+marked it.
+
+**Index exports.** `delivery.requestIndexes` belongs after every step that changes what the index files list:
+`delivery.publish`, `delivery.unpublish`, a settings change, `delivery.publishAll` or `delivery.markAll`, and the
+pipeline that runs `delivery.checkBuild` at boot, so a changed `siteUrl` or `robots.policy` reaches the files after a
+restart. It runs nothing itself:
+
+- With `"events"` it raises `delivery.indexesStale` (`coalesceKey: "indexes"`) and, with `llms.full`,
+  `delivery.llmsStale` (`coalesceKey: "llms"`). Both events carry no other data: coalescing keeps the first event of a
+  window, and both exports read the current state. With `events-queue`, `delayMs` holds each job back for a fixed
+  window, so one export follows a burst of saves; a delayed pipeline is never relayed into the request.
+- With `"background"` the loop exports the index files once `dependencies.indexesDelayMs` (default 1000) passed
+  after the first request, before its next batch of at most five renders, so the files never wait for a re-render
+  backlog. A failed index export is logged and retried after `dependencies.backoffSeconds`, and the renders go on.
+  llms-full.txt is exported once no render is due, with the same retry.
+
+After each re-render, llms-full.txt is asked for again (it reads the HTML), and the index files only when the
+output's path changed or the output started or stopped serving a file; a `live` output that fails and keeps its path
+asks for nothing. `delivery.resumeStale` asks for the index files on every run, which also repairs a lost or
+dead-lettered export and removes a deleted page that never got its export, and asks for llms-full.txt again while
+its last export failed.
 
 A render that fails keeps the previous output (`state: "error"`), records `staleError` and is tried again after
 `dependencies.backoffSeconds`, up to `dependencies.maxAttempts` times; with `"events"`, set both to the event
@@ -195,8 +266,7 @@ knowing about them) are never trusted and are derived afresh the same way; that 
 a row still at the path it was derived for, so a render that lands back on its own recorded path right after the
 move never has its own, correct write overwritten by the stale derivation. A re-render that writes fewer keys at the
 same path removes the difference without recording a path change, so it never marks its own output stale over its
-own cleanup; `delivery.exportLlms`'s `llms-full.txt` reads each page's own recorded `html` key the same way, falling
-back to the format-name assumption only when that key does not lie under the page's own path.
+own cleanup; `delivery.exportLlmsFull` reads each page's own recorded `html` key the same way.
 
 **Changes that overlap a render.** A render reads a document for the first time; the document changes and is
 marked before the render has recorded its dependencies, so the mark finds nothing. To close that gap without
@@ -223,12 +293,27 @@ was never delivered (drafts are checked and never rendered), and answers `{ mark
 `delivery.checkBuild` compares `payload.build` with the build stored in `delivery_state`; on a change it marks every
 output of every delivered type and stores the build only afterwards, so a failed or interrupted run marks again on
 the next start. Run it after every deploy: every output is then re-rendered, and its dependencies recorded by the new
-code. `delivery.resumeStale` (a recovery net, not the render path) releases expired claims, removes tombstones and
-orphaned sets, and re-raises marks that are older than a minute, due and unclaimed, for example after a process
-stopped. `delivery.retryStale` gives outputs that failed `maxAttempts` times new attempts. `delivery.readStaleStatus`
-answers `{ stale, failed, rendering, unknown, oldestStaleAt, abandoned }`.
+code. It answers `{ changed, restored, marked }`.
 
-Not included: sitemap, CDN invalidation.
+**A restored database.** A database restored from a backup holds older status rows than the files in the blob
+store. `delivery.checkBuild` keeps a random marker both in `delivery_state` and in the blob `.delivery-static-marker`
+(at the blob store's root, outside `prefix`) and replaces it in both after every check, on every
+`delivery.resumeStale` run after an output changed, and when the process stops. When the two differ at the next
+check, the database is older than the files: every output is marked as for a new build, `restored` is `true`, and
+a warning is logged. A process that never ran `delivery.checkBuild` writes no marker.
+
+`delivery.resumeStale` (a recovery net, not the render path) releases expired claims, removes tombstones and
+orphaned sets, re-raises marks that are older than a minute, due and unclaimed, for example after a process
+stopped, and asks for the index exports (see above). Once per database it also removes `index.<ext>` files under
+`prefix` at paths no status row has, which older versions could leave behind after a failed render followed by a
+slug change; files under `reservedPaths` and every other file are left alone. It waits while an output is marked or
+rendering, or while a published document has no `live` output, and gives up a run during which a page was rendered;
+each removed file is logged, and the completed run is recorded in `delivery_state`, so it never runs again. It
+answers `{ released, swept, dispatched, aged, orphans }`. `delivery.retryStale` gives outputs that failed
+`maxAttempts` times new attempts. `delivery.readStaleStatus` answers
+`{ stale, failed, rendering, unknown, oldestStaleAt, abandoned, exports }`.
+
+Not included: CDN invalidation, a sitemap index for more than 50 000 URLs.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
@@ -242,8 +327,12 @@ Not included: sitemap, CDN invalidation.
 | `prefixPrimary` | boolean | no | `false` |
 | `fallback` | boolean | no | `true` |
 | `reservedPaths` | array | no | `[]` |
+| `siteUrl` | string | no | – |
+| `sitemap` | boolean | no | `true` |
+| `robots` | object | no | `{}` |
+| `robots.policy` | enum | no | – |
+| `robots.extra` | array | no | `[]` |
 | `llms` | object | no | `{}` |
-| `llms.siteUrl` | string | no | – |
 | `llms.full` | boolean | no | `false` |
 | `llms.settings` | object | no | `{}` |
 | `llms.settings.type` | string | no | `"settings"` |
@@ -261,6 +350,7 @@ Not included: sitemap, CDN invalidation.
 | `dependencies.backoffSeconds` | array | no | `[60,300,900,3600]` |
 | `dependencies.claimTtlSeconds` | integer | no | `300` |
 | `dependencies.maxAgeSeconds` | integer | no | `null` |
+| `dependencies.indexesDelayMs` | integer | no | `1000` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
@@ -268,16 +358,17 @@ Not included: sitemap, CDN invalidation.
 | `delivery.unpublish:<arg>` | Remove rendered output of a <arg> | `params.id`, `payload` | – | object | – | 400 no document id in params or the event payload | – | no |
 | `delivery.readStatus:<arg>` | Publish status per locale of a <arg> | `params.id` | `result` | – | object[] | 400 missing id | – | yes |
 | `delivery.publishAll:<arg>` | Re-render every <arg> | – | `result` | – | { documents: number, live: number, errors: number, … } | – | – | no |
-| `delivery.exportLlms` | Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) | – | `result._llms` | – | { _llms: object, … } | – | – | no |
+| `delivery.exportIndexes` | Write sitemap.xml, robots.txt and llms.txt from the outputs that serve a file (live or error) of every delivered type, skipping noindex pages (adds `_indexes: { entries }` to the result) | – | `result._indexes` | – | { _indexes: object, … } | 503 a file could not be written or a dependency failed | – | no |
+| `delivery.exportLlmsFull` | Write llms-full.txt from the stored HTML of the same entries when `llms.full` is set (adds `_llmsFull: { entries }` to the result) | – | `result._llmsFull` | – | { _llmsFull: object, … } | 503 the file could not be written or a dependency failed | – | no |
 | `delivery.markDependents:<arg>` | Mark every published output whose last render read the changed <arg> (payload id and ids) for a re-render, and start it outside the request (adds `_dependents: { marked }` to the result) | `payload` | `result._dependents` | object | { _dependents: object, … } | 503 the marks or their jobs could not be written | – | no |
 | `delivery.markMoved` | Mark the own outputs of every document in payload.moves (site.pathsMoved) and every output linking to one of them for a re-render at its new path, and start it outside the request (adds `_moved: { marked }` to the result) | `payload` | `result._moved` | { moves: object[], … } | { _moved: object, … } | 400 payload.moves is missing or malformed; 503 the marks or their jobs could not be written | – | no |
 | `delivery.markAll:<arg>` | Mark every <arg> output for a re-render in the background, including documents that were never delivered (adds `marked` to the result) | – | `result` | – | { marked: integer, … } | 503 the marks or their jobs could not be written | – | no |
-| `delivery.checkBuild` | Mark every delivered output for a re-render when payload.build differs from the stored build, then store it | `payload` | `result` | { build: string, … } | { changed: boolean, marked: integer, … } | 400 payload.build is missing; 503 the marks could not be written; the build is not stored | – | no |
+| `delivery.checkBuild` | Mark every delivered output for a re-render when payload.build differs from the stored build or the database was restored from a backup, then store it | `payload` | `result` | { build: string, … } | { changed: boolean, restored: boolean, marked: integer, … } | 400 payload.build is missing; 503 the marks could not be written; the build is not stored | – | no |
 | `delivery.republishOutput` | Render one marked output (payload type, docId, locale) under a claim; a failed render is recorded on the output and answered as an error so the event delivery retries it | `payload` | `result` | { type: string, docId: string, locale: string, … } | { rendered: boolean, state: "live" \| "error" \| "draft" \| null, … } | 400 payload needs type, docId and locale; 503 the render failed or another render holds the output | – | no |
-| `delivery.requestLlms` | Ask for an llms.txt export after the pending re-renders, without running it here | – | – | – | – | 503 the request could not be queued | – | no |
-| `delivery.resumeStale` | Release expired render claims, remove old tombstones and orphaned dependency sets, and start the re-renders a stopped process or a lost job left marked | – | `result` | – | { released: integer, swept: integer, dispatched: integer, aged: integer, … } | – | – | no |
+| `delivery.requestIndexes` | Ask for a sitemap.xml, robots.txt and llms.txt export (and an llms-full.txt export with `llms.full`) without running it here | – | – | – | – | 503 the request could not be queued | – | no |
+| `delivery.resumeStale` | Release expired render claims, remove old tombstones and orphaned dependency sets, start the re-renders a stopped process or a lost job left marked, and ask for an index export | – | `result` | – | { released: integer, swept: integer, dispatched: integer, aged: integer, orphans: integer, … } | – | – | no |
 | `delivery.retryStale` | Reset the attempts of every output whose re-render failed maxAttempts times and start it again (adds `retried` to the result) | – | `result` | – | { retried: integer, … } | – | – | no |
-| `delivery.readStaleStatus` | How many outputs wait for a re-render, failed it, are rendering or have unknown dependencies, the oldest mark, and the renders this process abandoned at the timeout | – | `result` | – | { stale: integer, failed: integer, rendering: integer, unknown: integer, oldestStaleAt: number \| null, abandoned: integer, … } | – | – | yes |
+| `delivery.readStaleStatus` | How many outputs wait for a re-render, failed it, are rendering or have unknown dependencies, the oldest mark, the renders this process abandoned at the timeout, and the last index and llms-full.txt exports | – | `result` | – | { stale: integer, failed: integer, rendering: integer, unknown: integer, oldestStaleAt: number \| null, abandoned: integer, exports: object, … } | – | – | yes |
 
 Pipelines in `examples/minimal` using these steps:
 
@@ -285,10 +376,10 @@ Pipelines in `examples/minimal` using these steps:
 - **pageDependents** (event page.created, event page.updated, event page.restored, event page.translationRemoved, event page.deleted): **`delivery.markDependents:pages`**
 - **pagePublishStatus** (GET /admin/publish-status/pages/:id): `authn.requireUser` → `authz.requireRole` → `authz.require:pages.manage` → **`delivery.readStatus:pages`**
 - **pathsMovedDelivery** (event site.pathsMoved): **`delivery.markMoved`**
-- **publishAllPages** (POST /admin/publish-all/pages): `authn.requireUser` → `authz.requireRole` → `authz.require:pages.manage` → **`delivery.publishAll:pages`** → `redirects.export` → **`delivery.exportLlms`**
-- **publishPage** (event page.created, event page.updated, event page.restored, event page.translationRemoved): **`delivery.publish:pages`** → **`delivery.requestLlms`**
+- **publishAllPages** (POST /admin/publish-all/pages): `authn.requireUser` → `authz.requireRole` → `authz.require:pages.manage` → **`delivery.publishAll:pages`** → `redirects.export` → **`delivery.requestIndexes`**
+- **publishPage** (event page.created, event page.updated, event page.restored, event page.translationRemoved): **`delivery.publish:pages`** → **`delivery.requestIndexes`**
 - **resumeStalePages** (cron */5 * * * *): **`delivery.resumeStale`**
-- **settingsDependents** (event settings.updated): **`delivery.markDependents:settings`** → **`delivery.requestLlms`**
-- **unpublishPage** (event page.deleted): **`delivery.unpublish:pages`** → **`delivery.requestLlms`**
+- **settingsDependents** (event settings.updated): **`delivery.markDependents:settings`** → **`delivery.requestIndexes`**
+- **unpublishPage** (event page.deleted): **`delivery.unpublish:pages`** → **`delivery.requestIndexes`**
 
 <!-- kestrel-docs:end -->

@@ -576,7 +576,7 @@ describe("delivery/static: removes exactly the keys it wrote", () => {
     put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published" });
     expectOk(await delivery.publish("pages", "p1"));
     expect(blobs.blobs.has("site/seite/index.htm")).toBe(true);
-    expectOk(await delivery.exportLlms());
+    expectOk(await delivery.exportLlmsFull());
     const full = blobs.blobs.get("site/llms-full.txt");
     expect(full).toBeDefined();
     expect(new TextDecoder().decode(full!.data)).toContain("Rendered body text");
@@ -649,7 +649,7 @@ describe("delivery/static: removes exactly the keys it wrote", () => {
     expectOk(await delivery.publish("pages", "a"));
     expect(blobs.blobs.has("site/x/index.html")).toBe(true);
 
-    expectOk(await delivery.exportLlms());
+    expectOk(await delivery.exportLlmsFull());
     const full = blobs.blobs.get("site/llms-full.txt");
     expect(full).toBeDefined();
     expect(new TextDecoder().decode(full!.data)).toContain("A's own body");

@@ -215,15 +215,23 @@ describe("delivery/static module via runPipeline", () => {
     expect(result.result).toMatchObject({ documents: 1, live: 1, errors: 0 });
   });
 
-  it("exportLlms writes llms.txt from the live output of every delivered type", async () => {
+  it("exportIndexes and exportLlmsFull add their entry counts to the result", async () => {
     const { instance, put } = await boot();
     put("p1", { slug__de: "p1", title__de: "1", status__de: "published" });
     const publish = definePipeline({ name: "publish", steps: ["seed.id", "delivery.publish:pages"] });
     await runPipeline(publish, { params: { id: "p1" } }, { modules: [{ module, instance }], steps: { "seed.id": seedId } });
-    const pipeline = definePipeline({ name: "exportLlms", steps: ["delivery.exportLlms"] });
+    const pipeline = definePipeline({ name: "exports", steps: ["delivery.exportIndexes", "delivery.exportLlmsFull"] });
     const result = await runPipeline(pipeline, {}, { modules: [{ module, instance }] });
     expect(result.status).toBe(200);
-    expect(result.result).toMatchObject({ _llms: { entries: 1, full: false } });
+    expect(result.result).toEqual({ _indexes: { entries: 1 }, _llmsFull: { entries: 0 } });
+  });
+
+  it("has no exportLlms or requestLlms step", async () => {
+    const { instance } = await boot();
+    const steps = Object.keys(module.steps!(instance));
+    expect(steps).toEqual(expect.arrayContaining(["exportIndexes", "exportLlmsFull", "requestIndexes"]));
+    expect(steps).not.toContain("exportLlms");
+    expect(steps).not.toContain("requestLlms");
   });
 
   it("readStatus answers VALIDATION without params.id (no step in this package declares a payload schema)", async () => {
@@ -239,7 +247,7 @@ describe("delivery/static: atomicSafe is pinned", () => {
   it("matches the shipped table", async () => {
     const { instance } = await boot();
     const describeMap = boundaryCast<Record<string, StepDescription | ((arg: string) => StepDescription)>>(module.describe!(instance), "host");
-    const expected: Record<string, boolean> = { readStatus: true, publish: false, unpublish: false, publishAll: false, exportLlms: false, markDependents: false, markAll: false, checkBuild: false, republishOutput: false, requestLlms: false, resumeStale: false, retryStale: false, readStaleStatus: true };
+    const expected: Record<string, boolean> = { readStatus: true, publish: false, unpublish: false, publishAll: false, exportIndexes: false, exportLlmsFull: false, markDependents: false, markAll: false, checkBuild: false, republishOutput: false, requestIndexes: false, resumeStale: false, retryStale: false, readStaleStatus: true };
     for (const [name, expect_] of Object.entries(expected)) {
       const description = describeMap[name];
       const resolved = typeof description === "function" ? description("pages") : description;
@@ -261,24 +269,26 @@ function introspection(parts: { pipelines: Array<{ name: string; steps: string[]
   return { describe: () => manifest, observe: () => () => {}, health: () => ({ ok: true, restartRequired: false, modules: [] }) };
 }
 
-function checkEventsWiring(kestrel: Introspection): void {
-  module.attach!(boundaryCast<Delivery>({ render: "events" }, "host"), kestrel);
+function checkEventsWiring(kestrel: Introspection, llmsFull = true): void {
+  module.attach!(boundaryCast<Delivery>({ render: "events", llmsFull }, "host"), kestrel);
 }
 
 describe("delivery/static: dependencies config and the events wiring", () => {
   const wired = {
     pipelines: [
       { name: "republishOutput", steps: ["delivery.republishOutput"] },
-      { name: "refreshLlms", steps: ["delivery.exportLlms"] },
+      { name: "refreshIndexes", steps: ["delivery.exportIndexes"] },
+      { name: "refreshLlms", steps: ["delivery.exportLlmsFull"] },
     ],
     events: [
       { event: "delivery.outputStale", pipeline: "republishOutput" },
+      { event: "delivery.indexesStale", pipeline: "refreshIndexes" },
       { event: "delivery.llmsStale", pipeline: "refreshLlms" },
     ],
   };
 
   it("defaults to the background loop with the documented bounds", () => {
-    expect(configSchema.parse({ types: {} }).dependencies).toEqual({ render: "background", rendererReadsDocument: false, maxPerRender: 1000, renderTimeoutSeconds: 60, maxAttempts: 5, backoffSeconds: [60, 300, 900, 3600], claimTtlSeconds: 300, maxAgeSeconds: null });
+    expect(configSchema.parse({ types: {} }).dependencies).toEqual({ render: "background", rendererReadsDocument: false, maxPerRender: 1000, renderTimeoutSeconds: 60, maxAttempts: 5, backoffSeconds: [60, 300, 900, 3600], claimTtlSeconds: 300, maxAgeSeconds: null, indexesDelayMs: 1000 });
   });
 
   it("refuses a render timeout that, over every format, is not below the claim lifetime, naming both keys", () => {
@@ -294,16 +304,29 @@ describe("delivery/static: dependencies config and the events wiring", () => {
   });
 
   it("refuses render \"events\" without a job trigger for delivery.outputStale", () => {
-    expect(() => checkEventsWiring(introspection({ ...wired, events: [wired.events[1]!], hook: "events/queue" }))).toThrow('dependencies.render "events" needs a trigger that runs a pipeline with delivery.republishOutput on "delivery.outputStale"');
+    expect(() => checkEventsWiring(introspection({ ...wired, events: [wired.events[1]!, wired.events[2]!], hook: "events/queue" }))).toThrow('dependencies.render "events" needs a trigger that runs a pipeline with delivery.republishOutput on "delivery.outputStale"');
   });
 
   it("refuses render \"events\" when the delivery.outputStale trigger runs a pipeline without delivery.republishOutput", () => {
-    const events = [{ event: "delivery.outputStale", pipeline: "refreshLlms" }, wired.events[1]!];
+    const events = [{ event: "delivery.outputStale", pipeline: "refreshLlms" }, wired.events[1]!, wired.events[2]!];
     expect(() => checkEventsWiring(introspection({ ...wired, events, hook: "events/queue" }))).toThrow(/delivery\.republishOutput/);
   });
 
-  it("refuses render \"events\" without an export trigger for delivery.llmsStale", () => {
-    expect(() => checkEventsWiring(introspection({ ...wired, events: [wired.events[0]!], hook: "events/queue" }))).toThrow('dependencies.render "events" needs a trigger that runs a pipeline with delivery.exportLlms on "delivery.llmsStale"');
+  it("refuses render \"events\" without an export trigger for delivery.indexesStale", () => {
+    expect(() => checkEventsWiring(introspection({ ...wired, events: [wired.events[0]!, wired.events[2]!], hook: "events/queue" }))).toThrow('dependencies.render "events" needs a trigger that runs a pipeline with delivery.exportIndexes on "delivery.indexesStale"');
+  });
+
+  it("refuses render \"events\" with llms.full but without an export trigger for delivery.llmsStale", () => {
+    expect(() => checkEventsWiring(introspection({ ...wired, events: [wired.events[0]!, wired.events[1]!], hook: "events/queue" }))).toThrow('dependencies.render "events" needs a trigger that runs a pipeline with delivery.exportLlmsFull on "delivery.llmsStale"');
+  });
+
+  it("needs no delivery.llmsStale trigger without llms.full", () => {
+    expect(() => checkEventsWiring(introspection({ ...wired, events: [wired.events[0]!, wired.events[1]!], hook: "events/queue" }), false)).not.toThrow();
+  });
+
+  it("refuses an exportLlms subscriber in place of exportLlmsFull", () => {
+    const pipelines = [wired.pipelines[0]!, wired.pipelines[1]!, { name: "refreshLlms", steps: ["delivery.exportLlms"] }];
+    expect(() => checkEventsWiring(introspection({ ...wired, pipelines, hook: "events/queue" }))).toThrow(/delivery\.exportLlmsFull/);
   });
 
   it("refuses render \"events\" under events/direct, which would render inside the marking request", () => {
@@ -349,7 +372,7 @@ describe("delivery/static dependency steps via runPipeline", () => {
     const publish = await runPipeline(definePipeline({ name: "publish", steps: ["delivery.publish:pages"] }), { payload: { id: "p1" } }, { modules: [{ module, instance }] });
     expect(boundaryCast<{ _delivery: unknown[] }>(publish.result, "host")._delivery[0]).toMatchObject({ locale: "de", state: "live", stale: false, staleSince: null, staleFailed: false, staleError: null, dependencies: 0 });
     const checked = await runPipeline(definePipeline({ name: "checkBuild", steps: ["delivery.checkBuild"] }), { payload: { build: "b1" } }, { modules: [{ module, instance }] });
-    expect(checked.result).toEqual({ changed: true, marked: 2 });
+    expect(checked.result).toEqual({ changed: true, restored: false, marked: 2 });
     const all = await runPipeline(definePipeline({ name: "publishAll", steps: ["delivery.markAll:pages"] }), {}, { modules: [{ module, instance }] });
     expect(all.result).toEqual({ marked: 2 });
     const status = await runPipeline(definePipeline({ name: "staleStatus", steps: ["delivery.readStaleStatus"] }), {}, { modules: [{ module, instance }] });

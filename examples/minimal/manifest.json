@@ -2645,13 +2645,38 @@
               },
               "default": []
             },
+            "siteUrl": {
+              "type": "string"
+            },
+            "sitemap": {
+              "type": "boolean",
+              "default": true
+            },
+            "robots": {
+              "type": "object",
+              "properties": {
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "allow",
+                    "disallow"
+                  ]
+                },
+                "extra": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[^\\r\\n]*$"
+                  },
+                  "default": []
+                }
+              },
+              "additionalProperties": false,
+              "default": {}
+            },
             "llms": {
               "type": "object",
               "properties": {
-                "siteUrl": {
-                  "type": "string",
-                  "format": "url"
-                },
                 "full": {
                   "type": "boolean",
                   "default": false
@@ -2754,6 +2779,11 @@
                     }
                   ],
                   "default": null
+                },
+                "indexesDelayMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 1000
                 }
               },
               "additionalProperties": false,
@@ -2844,6 +2874,62 @@
             "default": []
           },
           {
+            "path": "siteUrl",
+            "type": "string",
+            "required": false,
+            "secret": false,
+            "set": true,
+            "status": "set",
+            "value": "http://127.0.0.1:4000",
+            "redacted": false
+          },
+          {
+            "path": "sitemap",
+            "type": "boolean",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": true,
+            "redacted": false,
+            "default": true
+          },
+          {
+            "path": "robots",
+            "type": "object",
+            "required": false,
+            "secret": false,
+            "set": true,
+            "status": "set",
+            "value": {
+              "policy": "disallow",
+              "extra": []
+            },
+            "redacted": false,
+            "default": {}
+          },
+          {
+            "path": "robots.policy",
+            "type": "enum",
+            "required": false,
+            "secret": false,
+            "set": true,
+            "status": "set",
+            "value": "disallow",
+            "redacted": false
+          },
+          {
+            "path": "robots.extra",
+            "type": "array",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": [],
+            "redacted": false,
+            "default": []
+          },
+          {
             "path": "llms",
             "type": "object",
             "required": false,
@@ -2865,16 +2951,6 @@
             },
             "redacted": false,
             "default": {}
-          },
-          {
-            "path": "llms.siteUrl",
-            "type": "string",
-            "required": false,
-            "secret": false,
-            "set": false,
-            "status": "missing",
-            "value": null,
-            "redacted": false
           },
           {
             "path": "llms.full",
@@ -2990,7 +3066,8 @@
                 3600
               ],
               "claimTtlSeconds": 300,
-              "maxAgeSeconds": null
+              "maxAgeSeconds": null,
+              "indexesDelayMs": 1000
             },
             "redacted": false,
             "default": {}
@@ -3092,6 +3169,17 @@
             "value": null,
             "redacted": false,
             "default": null
+          },
+          {
+            "path": "dependencies.indexesDelayMs",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 1000,
+            "redacted": false,
+            "default": 1000
           }
         ]
       },
@@ -3100,13 +3188,14 @@
         "delivery.unpublish",
         "delivery.readStatus",
         "delivery.publishAll",
-        "delivery.exportLlms",
+        "delivery.exportIndexes",
+        "delivery.exportLlmsFull",
         "delivery.markDependents",
         "delivery.markMoved",
         "delivery.markAll",
         "delivery.checkBuild",
         "delivery.republishOutput",
-        "delivery.requestLlms",
+        "delivery.requestIndexes",
         "delivery.resumeStale",
         "delivery.retryStale",
         "delivery.readStaleStatus"
@@ -3115,6 +3204,7 @@
       "atomicScope": false,
       "emits": [
         "delivery.outputStale",
+        "delivery.indexesStale",
         "delivery.llmsStale"
       ]
     },
@@ -11162,37 +11252,70 @@
       }
     },
     {
-      "name": "delivery.exportLlms",
+      "name": "delivery.exportIndexes",
       "module": "delivery/static",
       "factory": false,
       "description": {
-        "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
+        "summary": "Write sitemap.xml, robots.txt and llms.txt from the outputs that serve a file (live or error) of every delivered type, skipping noindex pages (adds `_indexes: { entries }` to the result)",
         "reads": [],
         "writes": [
-          "result._llms"
+          "result._indexes"
         ],
         "extendsOutput": {
           "type": "object",
           "properties": {
-            "_llms": {
+            "_indexes": {
               "type": "object",
               "properties": {
                 "entries": {
                   "type": "integer"
-                },
-                "full": {
-                  "type": "boolean"
                 }
               },
               "required": [
-                "entries",
-                "full"
+                "entries"
               ]
             }
           },
           "required": [
-            "_llms"
+            "_indexes"
           ]
+        },
+        "errors": {
+          "503": "a file could not be written or a dependency failed"
+        }
+      }
+    },
+    {
+      "name": "delivery.exportLlmsFull",
+      "module": "delivery/static",
+      "factory": false,
+      "description": {
+        "summary": "Write llms-full.txt from the stored HTML of the same entries when `llms.full` is set (adds `_llmsFull: { entries }` to the result)",
+        "reads": [],
+        "writes": [
+          "result._llmsFull"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "_llmsFull": {
+              "type": "object",
+              "properties": {
+                "entries": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "entries"
+              ]
+            }
+          },
+          "required": [
+            "_llmsFull"
+          ]
+        },
+        "errors": {
+          "503": "the file could not be written or a dependency failed"
         }
       }
     },
@@ -11349,7 +11472,7 @@
       "module": "delivery/static",
       "factory": false,
       "description": {
-        "summary": "Mark every delivered output for a re-render when payload.build differs from the stored build, then store it",
+        "summary": "Mark every delivered output for a re-render when payload.build differs from the stored build or the database was restored from a backup, then store it",
         "reads": [
           "payload"
         ],
@@ -11375,12 +11498,16 @@
             "changed": {
               "type": "boolean"
             },
+            "restored": {
+              "type": "boolean"
+            },
             "marked": {
               "type": "integer"
             }
           },
           "required": [
             "changed",
+            "restored",
             "marked"
           ]
         },
@@ -11453,11 +11580,11 @@
       }
     },
     {
-      "name": "delivery.requestLlms",
+      "name": "delivery.requestIndexes",
       "module": "delivery/static",
       "factory": false,
       "description": {
-        "summary": "Ask for an llms.txt export after the pending re-renders, without running it here",
+        "summary": "Ask for a sitemap.xml, robots.txt and llms.txt export (and an llms-full.txt export with `llms.full`) without running it here",
         "reads": [],
         "writes": [],
         "errors": {
@@ -11470,7 +11597,7 @@
       "module": "delivery/static",
       "factory": false,
       "description": {
-        "summary": "Release expired render claims, remove old tombstones and orphaned dependency sets, and start the re-renders a stopped process or a lost job left marked",
+        "summary": "Release expired render claims, remove old tombstones and orphaned dependency sets, start the re-renders a stopped process or a lost job left marked, and ask for an index export",
         "reads": [],
         "writes": [
           "result"
@@ -11489,13 +11616,17 @@
             },
             "aged": {
               "type": "integer"
+            },
+            "orphans": {
+              "type": "integer"
             }
           },
           "required": [
             "released",
             "swept",
             "dispatched",
-            "aged"
+            "aged",
+            "orphans"
           ]
         }
       }
@@ -11528,7 +11659,7 @@
       "module": "delivery/static",
       "factory": false,
       "description": {
-        "summary": "How many outputs wait for a re-render, failed it, are rendering or have unknown dependencies, the oldest mark, and the renders this process abandoned at the timeout",
+        "summary": "How many outputs wait for a re-render, failed it, are rendering or have unknown dependencies, the oldest mark, the renders this process abandoned at the timeout, and the last index and llms-full.txt exports",
         "reads": [],
         "writes": [
           "result"
@@ -11556,6 +11687,65 @@
             },
             "abandoned": {
               "type": "integer"
+            },
+            "exports": {
+              "type": "object",
+              "properties": {
+                "indexes": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "at": {
+                      "type": "number"
+                    },
+                    "entries": {
+                      "type": "integer"
+                    },
+                    "error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "at",
+                    "entries",
+                    "error"
+                  ]
+                },
+                "llmsFull": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "at": {
+                      "type": "number"
+                    },
+                    "entries": {
+                      "type": "integer"
+                    },
+                    "error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "at",
+                    "entries",
+                    "error"
+                  ]
+                }
+              },
+              "required": [
+                "indexes",
+                "llmsFull"
+              ]
             }
           },
           "required": [
@@ -11564,7 +11754,8 @@
             "rendering",
             "unknown",
             "oldestStaleAt",
-            "abandoned"
+            "abandoned",
+            "exports"
           ]
         },
         "atomicSafe": true
@@ -22868,37 +23059,15 @@
           }
         },
         {
-          "spec": "delivery.exportLlms",
-          "name": "delivery.exportLlms",
+          "spec": "delivery.requestIndexes",
+          "name": "delivery.requestIndexes",
           "module": "delivery/static",
           "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
+            "summary": "Ask for a sitemap.xml, robots.txt and llms.txt export (and an llms-full.txt export with `llms.full`) without running it here",
             "reads": [],
-            "writes": [
-              "result._llms"
-            ],
-            "extendsOutput": {
-              "type": "object",
-              "properties": {
-                "_llms": {
-                  "type": "object",
-                  "properties": {
-                    "entries": {
-                      "type": "integer"
-                    },
-                    "full": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "entries",
-                    "full"
-                  ]
-                }
-              },
-              "required": [
-                "_llms"
-              ]
+            "writes": [],
+            "errors": {
+              "503": "the request could not be queued"
             }
           }
         }
@@ -23020,11 +23189,11 @@
           }
         },
         {
-          "spec": "delivery.requestLlms",
-          "name": "delivery.requestLlms",
+          "spec": "delivery.requestIndexes",
+          "name": "delivery.requestIndexes",
           "module": "delivery/static",
           "description": {
-            "summary": "Ask for an llms.txt export after the pending re-renders, without running it here",
+            "summary": "Ask for a sitemap.xml, robots.txt and llms.txt export (and an llms-full.txt export with `llms.full`) without running it here",
             "reads": [],
             "writes": [],
             "errors": {
@@ -27043,7 +27212,7 @@
           "name": "delivery.resumeStale",
           "module": "delivery/static",
           "description": {
-            "summary": "Release expired render claims, remove old tombstones and orphaned dependency sets, and start the re-renders a stopped process or a lost job left marked",
+            "summary": "Release expired render claims, remove old tombstones and orphaned dependency sets, start the re-renders a stopped process or a lost job left marked, and ask for an index export",
             "reads": [],
             "writes": [
               "result"
@@ -27062,13 +27231,17 @@
                 },
                 "aged": {
                   "type": "integer"
+                },
+                "orphans": {
+                  "type": "integer"
                 }
               },
               "required": [
                 "released",
                 "swept",
                 "dispatched",
-                "aged"
+                "aged",
+                "orphans"
               ]
             }
           }
@@ -28327,11 +28500,11 @@
           }
         },
         {
-          "spec": "delivery.requestLlms",
-          "name": "delivery.requestLlms",
+          "spec": "delivery.requestIndexes",
+          "name": "delivery.requestIndexes",
           "module": "delivery/static",
           "description": {
-            "summary": "Ask for an llms.txt export after the pending re-renders, without running it here",
+            "summary": "Ask for a sitemap.xml, robots.txt and llms.txt export (and an llms-full.txt export with `llms.full`) without running it here",
             "reads": [],
             "writes": [],
             "errors": {
@@ -29066,11 +29239,11 @@
           }
         },
         {
-          "spec": "delivery.requestLlms",
-          "name": "delivery.requestLlms",
+          "spec": "delivery.requestIndexes",
+          "name": "delivery.requestIndexes",
           "module": "delivery/static",
           "description": {
-            "summary": "Ask for an llms.txt export after the pending re-renders, without running it here",
+            "summary": "Ask for a sitemap.xml, robots.txt and llms.txt export (and an llms-full.txt export with `llms.full`) without running it here",
             "reads": [],
             "writes": [],
             "errors": {
