@@ -4,7 +4,7 @@ import { createPipelineFile, hoistModuleConfigProperty, insertTriggers, removeNe
 import { isRecord } from "./guards.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
-import { combineEditParts, finding, moduleEntry, upgradingDocs } from "./ruleHelpers.ts";
+import { combineEditParts, finding, infoFinding, moduleEntry, upgradingDocs } from "./ruleHelpers.ts";
 
 const EXPORT_LLMS = "delivery.exportLlms";
 const INDEXES_STALE = "delivery.indexesStale";
@@ -88,6 +88,32 @@ export const robotsPolicyRule: Rule = {
   },
 };
 
+const RESTORE_CHECKS: ReadonlyArray<{ token: string; step: string }> = [
+  { token: "replication-sqlite", step: "replication.checkRestored" },
+  { token: "backup-blobstore", step: "backup.checkRestored" },
+];
+
+/** `delivery/restore-check`: `delivery.checkBuild` renders everything again after a database restore only when a `checkRestored` step of a restoring module runs before it in the same pipeline. */
+export const restoreCheckRule: Rule = {
+  id: "delivery/restore-check",
+  check(ctx) {
+    if (moduleEntry(ctx, "delivery-static") === undefined) return [];
+    const checks = RESTORE_CHECKS.filter((c) => moduleEntry(ctx, c.token) !== undefined).map((c) => c.step);
+    if (checks.length === 0) return [];
+    const findings: Finding[] = [];
+    for (const pipeline of ctx.project.input.pipelines) {
+      const steps = pipelineSteps(pipeline.steps);
+      const at = steps.indexOf("delivery.checkBuild");
+      if (at < 0 || steps.slice(0, at).some((s) => checks.includes(s))) continue;
+      const file = ctx.project.pipelineFiles.find((f) => f.pipelines.includes(pipeline.name))?.file;
+      const message = `${pipeline.name} runs delivery.checkBuild without ${checks.join(" or ")} before it, so a database restore with an unchanged build renders nothing again`;
+      const suggestion = `put ${checks[0]} before delivery.checkBuild in ${pipeline.name}`;
+      findings.push(infoFinding(`delivery/restore-check:${pipeline.name}`, "delivery/restore-check", message, suggestion, file === undefined ? { pipeline: pipeline.name } : { file, pipeline: pipeline.name }, upgradingDocs("delivery-restore-check")));
+    }
+    return findings;
+  },
+};
+
 interface ExportJob {
   event: string;
   pipeline: string;
@@ -143,4 +169,4 @@ export const indexTriggersRule: Rule = {
   },
 };
 
-export const DELIVERY_INDEX_RULES: readonly Rule[] = [exportLlmsRule, siteUrlRule, robotsPolicyRule, indexTriggersRule];
+export const DELIVERY_INDEX_RULES: readonly Rule[] = [exportLlmsRule, siteUrlRule, robotsPolicyRule, indexTriggersRule, restoreCheckRule];

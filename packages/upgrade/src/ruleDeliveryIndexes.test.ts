@@ -7,7 +7,7 @@ import { applyEdits } from "./apply.ts";
 import { parseTs } from "./ast.ts";
 import type { LoadedProject, RuleContext } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
-import { exportLlmsRule, indexTriggersRule, robotsPolicyRule, siteUrlRule } from "./ruleDeliveryIndexes.ts";
+import { exportLlmsRule, indexTriggersRule, restoreCheckRule, robotsPolicyRule, siteUrlRule } from "./ruleDeliveryIndexes.ts";
 import { upgradingDocs } from "./ruleHelpers.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
 
@@ -28,6 +28,7 @@ function contextFor(project: LoadedProject): RuleContext {
 interface ProjectOptions {
   configSource?: string;
   deliveryConfig?: Record<string, unknown>;
+  otherModules?: string[];
   triggers?: unknown[];
   pipelines?: Array<{ name: string; steps: string[]; file?: string; source?: string }>;
 }
@@ -52,7 +53,7 @@ async function project(options: ProjectOptions): Promise<LoadedProject> {
   const pipelines: PipelineDefinition[] = (options.pipelines ?? []).map((p) => ({ name: p.name, steps: p.steps }));
   return {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-    input: { config: { modules: options.deliveryConfig === undefined ? [] : [{ use: DELIVERY, config: options.deliveryConfig }], triggers: (options.triggers ?? []) as never }, modules: [], pipelines },
+    input: { config: { modules: [...(options.deliveryConfig === undefined ? [] : [{ use: DELIVERY, config: options.deliveryConfig }]), ...(options.otherModules ?? []).map((use) => ({ use, config: {} }))], triggers: (options.triggers ?? []) as never }, modules: [], pipelines },
     kind: "backend",
     configFile,
     moduleFiles: new Map(),
@@ -267,9 +268,37 @@ describe("delivery/robots-policy", () => {
   });
 });
 
+describe("delivery/restore-check", () => {
+  const REPLICATION = "@michaelthielemann/kestrel-replication-sqlite";
+  const BACKUP = "@michaelthielemann/kestrel-backup-blobstore";
+
+  it("reports a pipeline that runs delivery.checkBuild without a checkRestored step before it, next to a restoring module", async () => {
+    for (const use of [REPLICATION, BACKUP]) {
+      const p = await project({ deliveryConfig: {}, otherModules: [use], pipelines: [{ name: "deliveryBuildCheck", steps: ["delivery.checkBuild", "delivery.requestIndexes"] }] });
+      const findings = await restoreCheckRule.check(contextFor(p));
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({ rule: "delivery/restore-check", severity: "info", where: { pipeline: "deliveryBuildCheck" }, docs: upgradingDocs("delivery-restore-check") });
+      expect(findings[0]?.message).toContain(use === REPLICATION ? "replication.checkRestored" : "backup.checkRestored");
+    }
+  });
+
+  it("reports a checkRestored step that runs after delivery.checkBuild", async () => {
+    const p = await project({ deliveryConfig: {}, otherModules: [REPLICATION], pipelines: [{ name: "deliveryBuildCheck", steps: ["delivery.checkBuild", "replication.checkRestored"] }] });
+    expect(await restoreCheckRule.check(contextFor(p))).toHaveLength(1);
+  });
+
+  it("stays quiet with a checkRestored step before delivery.checkBuild, without a restoring module and without delivery-static", async () => {
+    const wired = [{ name: "deliveryBuildCheck", steps: ["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"] }];
+    expect(await restoreCheckRule.check(contextFor(await project({ deliveryConfig: {}, otherModules: [REPLICATION], pipelines: wired })))).toEqual([]);
+    const unwired = [{ name: "deliveryBuildCheck", steps: ["delivery.checkBuild"] }];
+    expect(await restoreCheckRule.check(contextFor(await project({ deliveryConfig: {}, pipelines: unwired })))).toEqual([]);
+    expect(await restoreCheckRule.check(contextFor(await project({ otherModules: [REPLICATION], pipelines: unwired })))).toEqual([]);
+  });
+});
+
 describe("the delivery index rules are part of the default rule set", () => {
-  it("lists all four", () => {
+  it("lists all five", () => {
     const ids = DEFAULT_RULES.map((r) => r.id);
-    expect(ids).toEqual(expect.arrayContaining(["delivery/export-llms", "delivery/site-url", "delivery/index-triggers", "delivery/robots-policy"]));
+    expect(ids).toEqual(expect.arrayContaining(["delivery/export-llms", "delivery/site-url", "delivery/index-triggers", "delivery/robots-policy", "delivery/restore-check"]));
   });
 });
