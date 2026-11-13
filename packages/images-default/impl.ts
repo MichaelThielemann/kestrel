@@ -707,15 +707,18 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       return isErr(removed) ? removed : ok(undefined);
     }
     const fields = { focus: framing.focus, crops: framing.crops, width, height, updatedAt: now() };
-    const found = await db.findOne<FramingRow>(FRAMING, { mediaId });
-    if (isErr(found)) return found;
-    if (found.value !== null) {
-      const updated = await db.updateOne<FramingRow>(FRAMING, found.value.id, fields);
-      return isErr(updated) ? updated : ok(undefined);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const found = await db.findOne<FramingRow>(FRAMING, { mediaId });
+      if (isErr(found)) return found;
+      if (found.value !== null) {
+        const updated = await db.updateOne<FramingRow>(FRAMING, found.value.id, fields);
+        return isErr(updated) ? updated : ok(undefined);
+      }
+      const created = await db.createOne<FramingRow>(FRAMING, { mediaId, ...fields });
+      if (!isErr(created)) return ok(undefined);
+      if (created.error.code !== "CONFLICT") return created;
     }
-    const created = await db.createOne<FramingRow>(FRAMING, { mediaId, ...fields });
-    if (!isErr(created)) return ok(undefined);
-    return created.error.code === "CONFLICT" ? err(failure("TRANSIENT", `images: the framing of media/${mediaId} was written by another process at the same time – set it again`)) : created;
+    return err(failure("TRANSIENT", `images: the framing of media/${mediaId} was written by another process at the same time – set it again`));
   }
 
   async function framingsOf(mediaIds: string[]): Promise<Result<Map<string, FramingView>, KestrelError>> {

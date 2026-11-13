@@ -2122,6 +2122,39 @@ describe("images/default writes racing a lease-free prune or a request left on a
     for (const images of [declaring, narrowed]) await images.close();
   });
 
+  it("two first framings saved at once, one by the holder of the item and one by another process, both succeed and the rows follow the one stored", async () => {
+    const w = await world();
+    const creating = gate();
+    let pausing = true;
+    const db: Persistence = {
+      ...w.db,
+      createOne: async <T extends Document>(collection: string, doc: Omit<T, "id">) => {
+        if (pausing && collection === FRAMING) {
+          pausing = false;
+          creating.arrive();
+          await creating.wait;
+        }
+        return w.db.createOne<T>(collection, doc);
+      },
+    };
+    const first = await w.open([SQUARE]);
+    expectOk(await first.generate("m1"));
+    const holder = await w.open([SQUARE], undefined, { db });
+    const other = await w.open([SQUARE]);
+    const saving = holder.setFraming("m1", LEFT);
+    await creating.reached;
+    expectOk(await other.setFraming("m1", RIGHT));
+    creating.open();
+    expectOk(await saving);
+    await whenIdle(holder);
+    await whenIdle(other);
+
+    const stored = expectOk(await w.db.findOne<FramingRow>(FRAMING, { mediaId: "m1" }));
+    expect(stored?.crops).toEqual(LEFT.crops);
+    await expectRenderedWith(w, holder, "0,0,600,600");
+    for (const images of [first, holder, other]) await images.close();
+  });
+
   it("images.generate renders the item after one failed read of its lease, and a sync job finishes past it", async () => {
     const w = await world();
     let failing = false;
