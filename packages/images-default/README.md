@@ -154,7 +154,9 @@ reports it as not `available`, and nothing writes a public copy for it again: no
 a new size, not the end of a render, not a retired path, not `images.syncPublic`, which also removes
 any copy of it that it finds. Both steps leave a request on the item's lease (see "Focus and crop")
 before they set or lift the mark, so a hide whose copies were not all removed, or a show whose copies
-were not all written, is finished by `images.resume` once `staleAfterMs` has passed. Every writer of a public copy checks the mark before and after it
+were not all written, is finished by `images.resume` once `staleAfterMs` has passed. A request
+another call left there is kept, and the step that takes the item places and renders it again before
+it lets go. Every writer of a public copy checks the mark before and after it
 writes, so a copy written while a hide in another process lands is withdrawn again, and written once
 more when a show followed before the withdrawal. Its rows, its
 private variants and its renders stay and go on as

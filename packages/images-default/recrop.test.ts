@@ -2059,6 +2059,14 @@ describe("images/default writes racing a lease-free prune or a request left on a
     };
   }
 
+  function holdLeaseElsewhere(w: World): Promise<unknown> {
+    return w.db.updateMany<ItemLease>(ITEMS, { mediaId: "m1" }, { writer: "elsewhere", writerUntil: 100 * LATER });
+  }
+
+  function freeLease(w: World): Promise<unknown> {
+    return w.db.updateMany<ItemLease>(ITEMS, { mediaId: "m1" }, { writer: "", writerUntil: 0 });
+  }
+
   it("a public copy of a row that another process prunes while the copy is written ends with the original's bytes at the retired path", async () => {
     for (const writer of ["images.showMany", "images.syncPublic"] as const) {
       const w = await world();
@@ -2153,6 +2161,29 @@ describe("images/default writes racing a lease-free prune or a request left on a
     expect(stored?.crops).toEqual(LEFT.crops);
     await expectRenderedWith(w, holder, "0,0,600,600");
     for (const images of [first, holder, other]) await images.close();
+  });
+
+  it("a trash that finds a request on a free lease serves it, so a framing stored for that request is rendered", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.generate("m1"));
+    expectOk(await first.setFraming("m1", LEFT));
+    expectOk(await first.generate("m1"));
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", renderedCrop: "0,0,600,600" });
+
+    await holdLeaseElsewhere(w);
+    const saver = await w.open([SQUARE]);
+    expectOk(await saver.setFraming("m1", RIGHT));
+    await freeLease(w);
+    expect(expectOk(await w.db.findOne<ItemLease>(ITEMS, { mediaId: "m1" }))?.request).not.toBe("");
+
+    const trashing = await w.open([SQUARE]);
+    expectOk(await trashing.hide(["m1"]));
+    await whenIdle(trashing);
+
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", crop: "400,0,600,600", renderedCrop: "400,0,600,600" });
+    expect(copyOf(w, "square.webp")).toBeNull();
+    for (const images of [first, saver, trashing]) await images.close();
   });
 
   it("images.generate renders the item after one failed read of its lease, and a sync job finishes past it", async () => {

@@ -461,6 +461,13 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return isErr(asked) ? asked : ok(mark.request);
   }
 
+  async function askUnlessAsked(mediaId: string): Promise<Result<string | undefined, KestrelError>> {
+    const mark = { request: randomUUID(), updatedAt: now() };
+    const asked = await db.updateMany<ItemLease>(ITEMS, { mediaId, request: "" }, mark);
+    if (isErr(asked)) return asked;
+    return ok(asked.value === 1 ? mark.request : undefined);
+  }
+
   async function renew(lease: Lease): Promise<Result<"held" | "requested" | "lost", KestrelError>> {
     const until = now() + config.staleAfterMs;
     const renewed = await db.updateMany<ItemLease>(ITEMS, { mediaId: lease.mediaId, writer: lease.token, request: lease.request }, { writerUntil: until });
@@ -516,7 +523,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok(updated.value === 1 ? { ...row, ...patch } : null);
   }
 
-  function withItem<T>(mediaId: string, work: (lease: Lease) => Promise<Result<T, KestrelError>>, handOver: () => Promise<Result<T, KestrelError>>, options: { serveLater?: boolean; asked?: string } = {}): Promise<Result<T, KestrelError>> {
+  function withItem<T>(mediaId: string, work: (lease: Lease) => Promise<Result<T, KestrelError>>, handOver: () => Promise<Result<T, KestrelError>>, options: { serveLater?: boolean; asked?: string | undefined } = {}): Promise<Result<T, KestrelError>> {
     return exclusive(mediaId, async (): Promise<Result<T, KestrelError>> => {
       const lease = await acquire(mediaId);
       if (isErr(lease)) return lease;
@@ -2095,7 +2102,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
           if (isErr(marked)) return marked;
           continue;
         }
-        const asked = await ask(mediaId);
+        const asked = await askUnlessAsked(mediaId);
         if (isErr(asked)) return asked;
         const marked = await markHidden(mediaId, true, versionOf(mediaId));
         if (isErr(marked)) return marked;
@@ -2118,7 +2125,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
           if (isErr(unmarked)) return unmarked;
           continue;
         }
-        const asked = await ask(mediaId);
+        const asked = await askUnlessAsked(mediaId);
         if (isErr(asked)) return asked;
         const unmarked = await markHidden(mediaId, false, versionOf(mediaId));
         if (isErr(unmarked)) return unmarked;
