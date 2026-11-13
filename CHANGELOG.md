@@ -506,8 +506,8 @@ Net changes since 5.8.1.
   `images-default` and no `media@1` provider fails boot (`missing-provider`); its `media` option
   (`media.collection`) is removed, so a config that still sets it fails boot; `createImages` takes
   `deps.media`. The module's setup hands `createImages` only a persistence handle limited by
-  `ownedPersistence` to `images_sizes`, `images_variants`, `images_jobs` and `images_retired` (exported
-  as `COLLECTIONS`), which throws a wiring error for any other collection; `createImages` uses the
+  `ownedPersistence` to the collections it stores, exported as `COLLECTIONS` (`images_sizes`,
+  `images_variants`, `images_jobs`, `images_retired`, `images_hidden` and `images_framing`), which throws a wiring error for any other collection; `createImages` uses the
   handle it is given as it is.
   - `images.generate` and `images.retryFailed` answer 404 for an item that is not ready (an upload in
     flight, a failed upload, an item being deleted); they answered 200 with no variants.
@@ -1450,8 +1450,9 @@ Net changes since 5.8.1.
   query.
 - `images-default`: a request to generate an item while a render of it runs waits for that render and
   renders once more, instead of sharing the running render, which may have read the rows before the
-  request. `images.resume` also renders items with a row left `pending` for longer than
-  `staleAfterMs`.
+  request. `images.resume` also renders items with a row of a declared size that already had a render
+  at its path and was left `pending` for longer than `staleAfterMs`; a row that never had a render is
+  left to the render queued for it.
 
 ### Fixed
 

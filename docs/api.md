@@ -597,8 +597,9 @@ deleted gets no variants and `POST /admin/images/retry-failed` with its id answe
 dimensions and format are decided from the original
 right after upload — before any variant is actually rendered — so the first render needs no
 republish: until it lands, the path answers with the original's own bytes and type instead of the
-resized image. Only a re-crop changes `variants[].path` (its `?v=`), and it marks the pages that
-show the item for a re-render (see [Focus and crop](#focus-and-crop)). `available` on the media item (`false` while any size still lacks its path, `true` once every
+resized image. Apart from a format change, which moves the size to a new path and retires the old
+one, only a re-crop changes `variants[].path` (its `?v=`), and it marks the pages that show the item
+for a re-render (see [Focus and crop](#focus-and-crop)). `available` on the media item (`false` while any size still lacks its path, `true` once every
 size has one) is what an editor UI should gate insertion on; a page or an admin view can otherwise
 link every `variants[]` entry from the very first read. Generation is caught up by a resumable sync
 job if needed, and the item's variants are deleted only on request. The original is never modified.

@@ -87,8 +87,8 @@ Steps: `images.register` (`VALIDATION` on an empty or malformed list, `CONFLICT`
 collision), `images.listSizes`, `images.plan` (id from params/payload/event; places without
 rendering), `images.generate` (id from params/payload/event; `VALIDATION` without an id, `NOT_FOUND`
 for an id `media@1` does not report as ready), `images.sync` (`CONFLICT` while a fresh job runs), `images.resume` (cron: also
-places and renders any item still `planned`, any item with a row left `pending` for longer than
-`staleAfterMs`, or any recent item with no rows at all), `images.retryFailed`
+places and renders any item still `planned`, any item with a row that already had a render at its
+path and was left `pending` for longer than `staleAfterMs`, or any recent item with no rows at all), `images.retryFailed`
 (`NOT_FOUND` for an id `media@1` does not report as ready), `images.prune` (`VALIDATION` for a name that is still declared or
 has no variants; retires rather than deletes the path), `images.readStatus`, `images.remove`
 (`VALIDATION` without an id), `images.removeMany` (after `media.listFolderItems` or
@@ -239,17 +239,28 @@ A render reads its row again right before it writes the path. When the row's cro
 ran, it writes nothing, so the path keeps the bytes its `?v=` names, and renders the item again in
 the background. A render marks its row `done` only while the row still has the crop, the state and
 the rendered crop it read right before writing. When the crop changes after that read, before the
-render marks its row `done`, its bytes stay at the path and the row records their crop as rendered:
-`?v=` names them, `images.variantsChanged` is raised, the row stays `pending` for the new crop, and
-the render renders the item again in the background. When a render of the newer crop already marked
-the row `done` meanwhile, the bytes at the path are no longer known: the row keeps its `?v=` and turns
-`pending`, and the item is rendered again. When only the state or the rendered crop changed (another
-render of the same crop, or a stale render that wrote the path after this one), the render writes
-its bytes to the path again before it marks the row `done`. A render that writes the path and then
-fails before it marks the row `done` (the public copy cannot be written, or the process stops) leaves
-the new bytes under the old `?v=` until a render of the row succeeds; `images.resume` renders a row
-left `pending` for longer than `staleAfterMs`. The version only ever changes after the bytes it
-names are at the path.
+render marks its row `done`, the render compares the variant and the public copy with the bytes it
+wrote:
+
+- Both hold its bytes: the row records their crop as rendered, so `?v=` names them and
+  `images.variantsChanged` is raised. The row stays `pending` for the new crop, or turns `pending`
+  when a render of the new crop already marked it `done`, and the item is rendered again in the
+  background; that render switches `?v=` back and raises the event once more.
+- Only one of them holds its bytes, or the row is still `planned` (a placement may put the
+  original's bytes into the public copy): `?v=` stays as it is, a `done` row turns `pending`, and the
+  item is rendered again.
+- Neither holds its bytes: a render of the new crop wrote the path after it, and a `done` row is left
+  as it is.
+
+When another process changes the row between that read and the write that records it, the render
+reads the row again and decides once more. Between a stale render's write and that record, the URL
+under the current `?v=` answers the stale bytes. When only the state or the rendered crop changed
+(another render of the same crop, or a stale render that wrote the path after this one), the render
+writes its bytes to the path again before it marks the row `done`. A render that writes the path and
+then fails before it marks the row `done` (the public copy cannot be written, or the process stops)
+leaves the new bytes under the old `?v=` until a render of the row succeeds; `images.resume` renders
+a row that already had a render at its path and was left `pending` for longer than `staleAfterMs`.
+A row that never had a render is left to the render queued for it.
 
 `images.attach` adds `focus` (the rectangle or `null`), meant for anonymous readers, and
 `framing: { focus, crops, width, height, ratios }`, meant for an editor. `width` and `height` are the
@@ -322,14 +333,20 @@ Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered
 ## What happens when generation fails or hangs
 
 **A crash mid-render** leaves the variant row at `state: "pending"` with the attempt already
-counted, never at a stale `"done"`. The next `images.generate` or sync pass picks it up, and
-`images.serve` hands out the full-size original meanwhile (header `x-kestrel-variant: original`).
+counted, never at a stale `"done"`. The next `images.generate` or sync pass picks it up, and so does
+`images.resume` once the row has waited longer than `staleAfterMs` if its path already held a render.
+Meanwhile `images.serve` hands out that earlier render, or the full-size original when the path has
+none yet (header `x-kestrel-variant: original`).
 A job row whose `updatedAt` is older than `staleAfterMs` counts as abandoned, so `images.sync` and
 the `images.resume` cron take it over instead of answering `CONFLICT`. The job's counters are
 written after each image rather than only at the end of a chunk, so a long-running chunk is never
 mistaken for a stalled job by `images.readStatus` or the `staleAfterMs` takeover. `images.resume`
-also places and renders any row still stuck at `planned` (a placement that never finished) and any
-media item created in the last 24 hours with no rows at all (a generation that never started). An
+also places and renders any row still stuck at `planned` (a placement that never finished), any row
+that already had a render at its path and was left `pending` for longer than `staleAfterMs` (a
+re-render that never finished), and any media item created in the last 24 hours with no rows at all
+(a generation that never started). It considers only rows of sizes that are still declared, and moves
+a `pending` row it could not advance behind the others, so a few items it cannot render never keep it
+from the rest. An
 item it cannot place or render — for instance one its provider reports as ready but whose bytes it
 has lost, which `images.plan` and `images.generate` report as `INTERNAL` (`the stored bytes of
 media/<id> are missing`) — is logged and skipped, and the
@@ -351,8 +368,10 @@ background loop to place right after the request.
 public copy cannot be written counts as a failed attempt too: the last failure sets `state:
 "failed"` instead of `"error"`, and generate/sync/resume skip the variant from then on, so one broken
 original cannot burn the whole budget of the job forever. `images.serve` does not hide such a variant behind the
-original: it keeps answering with the original's bytes and type, marked `x-kestrel-variant: original`,
-exactly like a `pending` one — a variant never 404s once it has been placed.
+original: for a size that has never rendered at its path it keeps answering with the original's bytes
+and type, marked `x-kestrel-variant: original`, exactly like a `pending` one; a size with an earlier
+render at the same path (a re-crop or a redefined size) keeps serving that render. A variant never
+404s once it has been placed.
 `images.readStatus` counts `failed` per size next to `done`/`pending`/`error`
 and adds `failed: { variants, recent }` — the totals over all sizes plus the twenty most recently
 failed variants with `mediaId`, `size`, `attempts`, `error` and `updatedAt`, which is what an admin
