@@ -68,7 +68,7 @@ interface World {
   media: FakeMedia;
   events: Events & { emitted: Array<{ name: string; ids: unknown }> };
   renders: Render[];
-  open(sizes?: Size[], render?: Renderer, deps?: { db?: Persistence; blobs?: Blobstore }): Promise<Images>;
+  open(sizes?: Size[], render?: Renderer, deps?: { db?: Persistence; blobs?: Blobstore; now?: () => number }): Promise<Images>;
 }
 
 function bytesFor(size: string, crop: PixelCrop | null, round: number): Uint8Array {
@@ -94,7 +94,7 @@ async function world(): Promise<World> {
     media,
     events,
     renders,
-    open: (sizes = SIZES, render = recording, deps = {}) => createImages({ ...CONFIG, sizes }, { blobs: deps.blobs ?? blobs, db: deps.db ?? db, media, logger: quiet, render, events }, () => 1000),
+    open: (sizes = SIZES, render = recording, deps = {}) => createImages({ ...CONFIG, sizes }, { blobs: deps.blobs ?? blobs, db: deps.db ?? db, media, logger: quiet, render, events }, deps.now ?? (() => 1000)),
   };
 }
 
@@ -118,6 +118,20 @@ function gate(): { wait: Promise<void>; open(): void; reached: Promise<void>; ar
   const wait = new Promise<void>((resolve) => { open = resolve; });
   const reached = new Promise<void>((resolve) => { arrive = resolve; });
   return { wait, open, reached, arrive };
+}
+
+function heldRenders(held: number): { render: Renderer; gates: Array<ReturnType<typeof gate>> } {
+  const gates = Array.from({ length: held }, () => gate());
+  let calls = 0;
+  const render: Renderer = async (d, s, p) => {
+    const g = gates[calls++];
+    if (g !== undefined) {
+      g.arrive();
+      await g.wait;
+    }
+    return { data: bytesFor(s.name, p.crop ?? null, calls), width: p.width, height: p.height, format: p.format, ext: p.format, contentType: `image/${p.format}` };
+  };
+  return { render, gates };
 }
 
 const CORNER_FOCUS = { focus: { x: 0, y: 0, w: 0.1, h: 0.1 } };
@@ -351,21 +365,17 @@ describe("images/default re-cropping while a render runs", () => {
     const w = await world();
     const first = await w.open([SQUARE]);
     expectOk(await first.generate("m1"));
-    const g = gate();
-    const gated: Renderer = async (d, s, p) => {
-      g.arrive();
-      await g.wait;
-      return { data: bytesFor(s.name, p.crop ?? null, 0), width: p.width, height: p.height, format: p.format, ext: p.format, contentType: `image/${p.format}` };
-    };
-    const renderer = await w.open([SQUARE], gated);
+    const { render, gates } = heldRenders(2);
+    const renderer = await w.open([SQUARE], render);
     const other = await w.open([SQUARE]);
 
     expectOk(await other.setFraming("m1", { crops: { "1:1": { x: 0, y: 0, w: 0.6, h: 1 } } }));
     const generating = renderer.generate("m1");
-    await g.reached;
+    await gates[0]!.reached;
     expectOk(await other.setFraming("m1", { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } }));
-    g.open();
+    gates[0]!.open();
     expectOk(await generating);
+    await gates[1]!.reached;
 
     const square = (await rowsBySize(w)).get("square")!;
     expect(square).toMatchObject({ state: "pending", crop: "400,0,600,600", renderedCrop: "" });
@@ -373,10 +383,129 @@ describe("images/default re-cropping while a render runs", () => {
     expect(copyOf(w, "square.webp")).toContain("|centre|");
     expect(text(expectOk(await first.read("m1", "square.webp"))?.data)).toContain("|centre|");
 
-    expectOk(await other.generate("m1"));
+    gates[1]!.open();
+    await whenIdle(renderer);
     expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", crop: "400,0,600,600", renderedCrop: "400,0,600,600" });
     expect(copyOf(w, "square.webp")).toContain("400,0,600,600");
     for (const images of [first, renderer, other]) await images.close();
+  });
+
+  it("a request to render while a render of the item runs renders again after it, so a crop changed after the running render passed that size is rendered", async () => {
+    const w = await world();
+    const twoRatios = [SQUARE, WIDE_SMALL];
+    const first = await w.open(twoRatios);
+    expectOk(await first.setFraming("m1", { crops: { "1:1": { x: 0, y: 0, w: 0.6, h: 1 } } }));
+    const { render, gates } = heldRenders(2);
+    const renderer = await w.open(twoRatios, render);
+    const other = await w.open(twoRatios);
+
+    const generating = renderer.generate("m1");
+    await gates[0]!.reached;
+    gates[0]!.open();
+    await gates[1]!.reached;
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", renderedCrop: "0,0,600,600" });
+    expectOk(await other.setFraming("m1", { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } }));
+    const requested = renderer.generate("m1");
+    gates[1]!.open();
+    expectOk(await generating);
+    expectOk(await requested);
+
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", crop: "400,0,600,600", renderedCrop: "400,0,600,600" });
+    expect(copyOf(w, "square.webp")).toContain("400,0,600,600");
+    for (const images of [first, renderer, other]) await images.close();
+  });
+
+  it("a render that loses its commit to a newer crop's render renders that crop again, whichever bytes reached the path last", async () => {
+    for (const lateWrite of ["variant", "public copy"] as const) {
+      const w = await world();
+      const first = await w.open([SQUARE]);
+      expectOk(await first.setFraming("m1", { crops: { "1:1": { x: 0, y: 0, w: 0.6, h: 1 } } }));
+      const g = gate();
+      let armed = true;
+      const writes: Blobstore = {
+        ...w.blobs,
+        put: async (key, data, options) => {
+          const held = armed && key.startsWith(lateWrite === "variant" ? "media-variants/" : "site/");
+          if (held) armed = false;
+          if (held && lateWrite === "variant") {
+            g.arrive();
+            await g.wait;
+          }
+          const put = await w.blobs.put(key, data, options);
+          if (held && lateWrite === "public copy") {
+            g.arrive();
+            await g.wait;
+          }
+          return put;
+        },
+      };
+      const slow = await w.open([SQUARE], undefined, { blobs: writes });
+      const other = await w.open([SQUARE]);
+
+      const generating = slow.generate("m1");
+      await g.reached;
+      expectOk(await other.setFraming("m1", { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } }));
+      expectOk(await other.generate("m1"));
+      g.open();
+      expectOk(await generating);
+      await whenIdle(slow);
+
+      const square = (await rowsBySize(w)).get("square")!;
+      expect(square, lateWrite).toMatchObject({ state: "done", crop: "400,0,600,600", renderedCrop: "400,0,600,600" });
+      expect(other.publicPath("m1", square)).toBe(`/media/m1/variants/square.webp?v=${cropToken({ left: 400, top: 0, width: 600, height: 600 })}`);
+      expect(text(w.blobs.blobs.get(square.key)?.data), lateWrite).toContain("400,0,600,600");
+      expect(copyOf(w, "square.webp"), lateWrite).toContain("400,0,600,600");
+      expect(text(expectOk(await other.read("m1", "square.webp"))?.data)).toContain("400,0,600,600");
+      expect(expectOk(await other.variantCounts(["m1"])).get("m1")).toEqual({ done: 1, pending: 0, error: 0, failed: 0 });
+      for (const images of [first, slow, other]) await images.close();
+    }
+  });
+
+  it("a newer crop's render that commits after a stale render wrote over its variant puts its bytes back, so ?v= names the bytes at the path", async () => {
+    const w = await world();
+    const first = await w.open([SQUARE]);
+    expectOk(await first.setFraming("m1", { crops: { "1:1": { x: 0, y: 0, w: 0.6, h: 1 } } }));
+    const held = (prefix: string): { blobs: Blobstore; g: ReturnType<typeof gate> } => {
+      const g = gate();
+      let armed = true;
+      return {
+        g,
+        blobs: {
+          ...w.blobs,
+          put: async (key, data, options) => {
+            if (armed && key.startsWith(prefix)) {
+              armed = false;
+              g.arrive();
+              await g.wait;
+            }
+            return w.blobs.put(key, data, options);
+          },
+        },
+      };
+    };
+    const stale = held("media-variants/");
+    const newer = held("site/");
+    const p = await w.open([SQUARE], undefined, { blobs: stale.blobs });
+    const q = await w.open([SQUARE], undefined, { blobs: newer.blobs });
+
+    const pRun = p.generate("m1");
+    await stale.g.reached;
+    expectOk(await first.setFraming("m1", { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } }));
+    const qRun = q.generate("m1");
+    await newer.g.reached;
+    stale.g.open();
+    expectOk(await pRun);
+    newer.g.open();
+    expectOk(await qRun);
+    await whenIdle(p);
+    await whenIdle(q);
+
+    const square = (await rowsBySize(w)).get("square")!;
+    expect(square).toMatchObject({ state: "done", crop: "400,0,600,600", renderedCrop: "400,0,600,600" });
+    expect(text(w.blobs.blobs.get(square.key)?.data)).toContain("400,0,600,600");
+    expect(copyOf(w, "square.webp")).toContain("400,0,600,600");
+    expect(text(expectOk(await first.read("m1", "square.webp"))?.data)).toContain("400,0,600,600");
+    for (const images of [first, p, q]) await images.close();
   });
 
   it("a render that finishes after a newer crop was committed leaves the newer crop's bytes at the path", async () => {
@@ -458,7 +587,9 @@ describe("images/default re-cropping while a render runs", () => {
         return w.blobs.put(key, data, options);
       },
     };
-    const slow = await w.open([SQUARE], undefined, { blobs: writes });
+    const { render, gates } = heldRenders(2);
+    gates[0]!.open();
+    const slow = await w.open([SQUARE], render, { blobs: writes });
     const other = await w.open([SQUARE]);
 
     expectOk(await other.setFraming("m1", { crops: { "1:1": { x: 0, y: 0, w: 0.6, h: 1 } } }));
@@ -468,6 +599,7 @@ describe("images/default re-cropping while a render runs", () => {
     expectOk(await other.setFraming("m1", kept));
     g.open();
     expectOk(await generating);
+    await gates[1]!.reached;
 
     const square = (await rowsBySize(w)).get("square")!;
     expect(square).toMatchObject({ state: "pending", crop: "400,0,600,600", renderedCrop: "0,0,600,600" });
@@ -475,7 +607,8 @@ describe("images/default re-cropping while a render runs", () => {
     expect(text(w.blobs.blobs.get(square.key)?.data)).toContain("0,0,600,600");
     expect(w.events.emitted).toEqual([{ name: "images.variantsChanged", ids: ["m1"] }]);
 
-    expectOk(await other.generate("m1"));
+    gates[1]!.open();
+    await whenIdle(slow);
     const settled = (await rowsBySize(w)).get("square")!;
     expect(settled).toMatchObject({ state: "done", crop: "400,0,600,600", renderedCrop: "400,0,600,600" });
     expect(copyOf(w, "square.webp")).toContain("400,0,600,600");
@@ -517,7 +650,7 @@ describe("images/default re-cropping while a render runs", () => {
     for (const images of [slow, other]) await images.close();
   });
 
-  it("re-plans in the background when the re-planning of images.setFraming fails after the framing was stored", async () => {
+  it("re-plans and renders in the background when the re-planning of images.setFraming fails after the framing was stored", async () => {
     const w = await world();
     let failing = false;
     const writes: Persistence = {
@@ -536,8 +669,29 @@ describe("images/default re-cropping while a render runs", () => {
     failing = true;
     expectErr(await images.setFraming("m1", { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } }), "TRANSIENT");
     await whenIdle(images);
-    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "pending", crop: "400,0,600,600" });
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", crop: "400,0,600,600", renderedCrop: "400,0,600,600" });
+    expect(copyOf(w, "square.webp")).toContain("400,0,600,600");
     await images.close();
+  });
+
+  it("images.resume renders a re-cropped row left pending longer than staleAfterMs, and leaves a recently re-cropped one to the render under way", async () => {
+    const w = await world();
+    const planner = await w.open([SQUARE]);
+    expectOk(await planner.generate("m1"));
+    expectOk(await planner.setFraming("m1", { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } }));
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "pending", crop: "400,0,600,600", renderedCrop: "" });
+
+    const soon = await w.open([SQUARE], undefined, { now: () => 1000 + CONFIG.staleAfterMs });
+    expectOk(await soon.resume());
+    await whenIdle(soon);
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "pending", renderedCrop: "" });
+
+    const later = await w.open([SQUARE], undefined, { now: () => 1001 + CONFIG.staleAfterMs });
+    expectOk(await later.resume());
+    await whenIdle(later);
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", crop: "400,0,600,600", renderedCrop: "400,0,600,600" });
+    expect(copyOf(w, "square.webp")).toContain("400,0,600,600");
+    for (const images of [planner, soon, later]) await images.close();
   });
 
   it("answers NOT_FOUND and stores nothing when the item is hidden while images.setFraming waits for a render of it", async () => {

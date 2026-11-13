@@ -36,6 +36,7 @@ export const DEFAULT_RENDER_TIMEOUT_MS = 30000;
 const FAILURE_SAMPLE = 20;
 const PLACEMENT_CONCURRENCY = 4;
 const REPAIR_SAMPLE = 200;
+const COMMIT_ATTEMPTS = 3;
 const NEW_ITEM_WINDOW_MS = 24 * 60 * 60 * 1000;
 const PAGE = 500;
 const EVENT_CHUNK = 200;
@@ -200,6 +201,12 @@ interface Content {
 interface Owner {
   row: Variant | null;
   retired: Retired | null;
+}
+
+interface RenderSignals {
+  touch: () => void;
+  recrop: () => void;
+  rerun: () => void;
 }
 
 interface Original {
@@ -387,21 +394,29 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     }
   }
 
-  function schedulePlacement(mediaId: string): void {
+  function inBackground(mediaId: string, what: string, work: () => Promise<Result<unknown, KestrelError>>): void {
     const promise = new Promise<void>((resolve) => {
       setImmediate(() => {
-        void planIds([mediaId])
-          .then((placed) => {
-            if (isErr(placed)) logger.error(`images: background placement for ${mediaId} failed`, { mediaId, error: placed.error.message });
+        void work()
+          .then((done) => {
+            if (isErr(done)) logger.error(`images: background ${what} for ${mediaId} failed`, { mediaId, error: done.error.message });
           })
           .catch((cause: unknown) => {
-            logger.error(`images: background placement for ${mediaId} failed`, { mediaId, error: errorMessage(cause) });
+            logger.error(`images: background ${what} for ${mediaId} failed`, { mediaId, error: errorMessage(cause) });
           })
           .then(() => resolve());
       });
     });
     placingQueue.add(promise);
     void promise.finally(() => placingQueue.delete(promise));
+  }
+
+  function schedulePlacement(mediaId: string): void {
+    inBackground(mediaId, "placement", () => planIds([mediaId]));
+  }
+
+  function scheduleRender(mediaId: string): void {
+    inBackground(mediaId, "render", () => generate(mediaId));
   }
 
   async function eachRow<T extends Document>(collection: string, filter: Filter, visit: (row: T) => Promise<Result<void, KestrelError>>): Promise<Result<void, KestrelError>> {
@@ -639,18 +654,17 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok(whenGone);
   }
 
-  const generating = new Map<string, Promise<Result<Variant[], KestrelError>>>();
+  const waitingRenders = new Map<string, Promise<Result<Variant[], KestrelError>>>();
   const removing = new Map<string, number>();
 
   function generate(mediaId: string): Promise<Result<Variant[], KestrelError>> {
-    const running = generating.get(mediaId);
-    if (running) return running;
-    const promise = exclusive(mediaId, () => generateOnce(mediaId));
-    generating.set(mediaId, promise);
-    const forget = (): void => {
-      if (generating.get(mediaId) === promise) generating.delete(mediaId);
-    };
-    promise.then(forget, forget);
+    const waiting = waitingRenders.get(mediaId);
+    if (waiting) return waiting;
+    const promise = exclusive(mediaId, () => {
+      waitingRenders.delete(mediaId);
+      return generateOnce(mediaId);
+    });
+    waitingRenders.set(mediaId, promise);
     return promise;
   }
 
@@ -881,17 +895,21 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const item = media.value;
     let touched = false;
     let recropped = false;
-    const outcome = await renderItem(
-      item,
-      () => {
+    let rerun = false;
+    const outcome = await renderItem(item, {
+      touch: () => {
         touched = true;
       },
-      () => {
+      recrop: () => {
         recropped = true;
       },
-    );
+      rerun: () => {
+        rerun = true;
+      },
+    });
     const settled = touched ? await settleWrites(mediaId, outcome, []) : outcome;
     if (recropped) raiseVariantsChanged([mediaId]);
+    if (rerun && !removing.has(mediaId)) scheduleRender(mediaId);
     return settled;
   }
 
@@ -899,8 +917,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return row.spec === spec(size) && (row.state === "planned" || row.state === "pending" || row.state === "error");
   }
 
-  async function renderItem(item: MediaFile, touch: () => void, recrop: () => void): Promise<Result<Variant[], KestrelError>> {
+  async function renderItem(item: MediaFile, signals: RenderSignals): Promise<Result<Variant[], KestrelError>> {
     const mediaId = item.id;
+    const { touch } = signals;
     const stored = await rowsOfItem(mediaId);
     if (isErr(stored)) return stored;
     let byName = stored.value;
@@ -953,7 +972,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         results.push(row);
         continue;
       }
-      const rendered = await renderVariant(item, size, row, original, touch, recrop);
+      const rendered = await renderVariant(item, size, row, original, signals);
       if (isErr(rendered)) {
         if ([...byName.values()].some((stored) => stored.state === "planned")) schedulePlacement(mediaId);
         return rendered;
@@ -966,8 +985,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok(results);
   }
 
-  async function renderVariant(item: MediaFile, size: Size, row: Variant, original: Original, touch: () => void, recrop: () => void): Promise<Result<Variant | null, KestrelError>> {
+  async function renderVariant(item: MediaFile, size: Size, row: Variant, original: Original, signals: RenderSignals): Promise<Result<Variant | null, KestrelError>> {
     const mediaId = item.id;
+    const { touch, recrop, rerun } = signals;
     const attempt = await renderWithin(original.data, item.contentType, size, { width: row.width, height: row.height, format: row.format, crop: parseCrop(row.crop) });
     const attempts = row.attempts + 1;
     const recordFailure = async (message: string): Promise<Result<Variant, KestrelError>> => {
@@ -983,45 +1003,49 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
 
     const fresh = await db.findOne<Variant>(VARIANTS, { id: row.id });
     if (isErr(fresh)) return fresh;
-    if (fresh.value === null || fresh.value.key !== row.key || fresh.value.spec !== row.spec || cropOf(fresh.value) !== cropOf(row)) return ok(fresh.value);
+    if (fresh.value === null || fresh.value.key !== row.key || fresh.value.spec !== row.spec || cropOf(fresh.value) !== cropOf(row)) {
+      if (fresh.value !== null && fresh.value.key === row.key) rerun();
+      return ok(fresh.value);
+    }
 
     touch();
     const rendered = attempt.value;
     const file = fileOf(row);
-    const failWrite = async (error: KestrelError): Promise<Result<Variant | null, KestrelError>> => {
-      const recorded = await recordFailure(error.message);
-      return isErr(recorded) ? recorded : err(error);
-    };
-    const stored = await blobs.put(row.key, rendered.data, { contentType: rendered.contentType });
-    if (isErr(stored)) return failWrite(stored.error);
-    const writeCopy = async (): Promise<Result<void, KestrelError>> => {
-      if (config.publicCopy === undefined) return ok(undefined);
+    const writePath = async (): Promise<Result<void, KestrelError>> => {
+      const stored = await blobs.put(row.key, rendered.data, { contentType: rendered.contentType });
+      if (isErr(stored) || config.publicCopy === undefined) return stored;
       const put = await putCopy(mediaId, file, rendered.data, publicTypeOf(rendered.contentType));
       return isErr(put) ? put : ok(undefined);
     };
-    const copied = await writeCopy();
-    if (isErr(copied)) return failWrite(copied.error);
-
-    const donePatch: Partial<Variant> = { state: "done", bytes: rendered.data.byteLength, attempts, error: null, updatedAt: now(), renderedCrop: cropOf(row) };
-    const committed = await db.updateMany<Variant>(VARIANTS, { id: row.id, key: row.key, spec: row.spec, state: row.state, crop: row.crop }, donePatch);
-    if (isErr(committed)) return committed;
-    if (committed.value === 1) {
-      if (cropOf(row) !== renderedCropOf(row)) recrop();
-      return ok({ ...row, ...donePatch });
+    const written = await writePath();
+    if (isErr(written)) {
+      const recorded = await recordFailure(written.error.message);
+      return isErr(recorded) ? recorded : err(written.error);
     }
 
-    const current = await db.findOne<Variant>(VARIANTS, { id: row.id });
-    if (isErr(current)) return current;
-    if (current.value !== null && current.value.key === row.key) {
-      if (current.value.spec !== row.spec || cropOf(current.value) !== cropOf(row)) return recordBytesAtPath(current.value, cropOf(row), recrop);
-      const recopied = await writeCopy();
-      if (isErr(recopied)) return recopied;
-      const again = await db.updateMany<Variant>(VARIANTS, { id: row.id, key: row.key, spec: row.spec, crop: current.value.crop }, donePatch);
-      if (isErr(again)) return again;
-      if (again.value === 1) {
-        if (cropOf(row) !== renderedCropOf(current.value)) recrop();
-        return ok({ ...current.value, ...donePatch });
+    const donePatch: Partial<Variant> = { state: "done", bytes: rendered.data.byteLength, attempts, error: null, updatedAt: now(), renderedCrop: cropOf(row) };
+    let seen = fresh.value;
+    for (let commit = 1; ; commit += 1) {
+      const committed = await db.updateMany<Variant>(VARIANTS, { id: row.id, key: row.key, spec: row.spec, crop: row.crop, state: seen.state, renderedCrop: seen.renderedCrop }, donePatch);
+      if (isErr(committed)) return committed;
+      if (committed.value === 1) {
+        if (cropOf(row) !== renderedCropOf(seen)) recrop();
+        return ok({ ...seen, ...donePatch });
       }
+      const current = await db.findOne<Variant>(VARIANTS, { id: row.id });
+      if (isErr(current)) return current;
+      if (current.value === null || current.value.key !== row.key) break;
+      if (current.value.spec !== row.spec || cropOf(current.value) !== cropOf(row)) {
+        rerun();
+        return recordBytesAtPath(current.value, cropOf(row), recrop);
+      }
+      if (commit === COMMIT_ATTEMPTS) {
+        rerun();
+        return ok(current.value);
+      }
+      const rewritten = await writePath();
+      if (isErr(rewritten)) return rewritten;
+      seen = current.value;
     }
     const dropped = await dropStaleRender(item, row, original);
     if (isErr(dropped)) return dropped;
@@ -1031,11 +1055,11 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   }
 
   async function recordBytesAtPath(current: Variant, written: string, recrop: () => void): Promise<Result<Variant | null, KestrelError>> {
-    if (renderedCropOf(current) !== written) {
-      const rerender: Partial<Variant> = current.state === "done" ? { state: "pending", attempts: 0, error: null } : {};
-      const recorded = await db.updateMany<Variant>(VARIANTS, { id: current.id, key: current.key, spec: current.spec, crop: current.crop, state: current.state, renderedCrop: current.renderedCrop }, { ...rerender, renderedCrop: written, updatedAt: now() });
+    const patch: Partial<Variant> | null = current.state === "done" ? { state: "pending", attempts: 0, error: null, updatedAt: now() } : renderedCropOf(current) !== written ? { renderedCrop: written, updatedAt: now() } : null;
+    if (patch !== null) {
+      const recorded = await db.updateMany<Variant>(VARIANTS, { id: current.id, key: current.key, spec: current.spec, crop: current.crop, state: current.state, renderedCrop: current.renderedCrop }, patch);
       if (isErr(recorded)) return recorded;
-      if (recorded.value === 1) recrop();
+      if (recorded.value === 1 && patch.renderedCrop !== undefined) recrop();
     }
     const latest = await db.findOne<Variant>(VARIANTS, { id: current.id });
     return isErr(latest) ? latest : ok(latest.value);
@@ -1493,7 +1517,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (closed) return err(failure("CONFLICT", "images: images are shutting down"));
       const stalePlanned = await db.findMany<Variant>(VARIANTS, { state: "planned" }, { limit: REPAIR_SAMPLE, sort: { updatedAt: "asc" } });
       if (isErr(stalePlanned)) return stalePlanned;
-      const ids = new Set(stalePlanned.value.items.map((row) => row.mediaId));
+      const stalePending = await db.findMany<Variant>(VARIANTS, { state: "pending", updatedAt: { lt: now() - config.staleAfterMs } }, { limit: REPAIR_SAMPLE, sort: { updatedAt: "asc" } });
+      if (isErr(stalePending)) return stalePending;
+      const ids = new Set([...stalePlanned.value.items, ...stalePending.value.items].map((row) => row.mediaId));
       const recent = await eachMediaFile({ ...ELIGIBLE, createdSince: now() - NEW_ITEM_WINDOW_MS }, async (file) => {
         if (ids.size >= REPAIR_SAMPLE) return ok(undefined);
         const has = await db.count(VARIANTS, { mediaId: file.id });
@@ -1909,7 +1935,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         const planned = await settleWrites(mediaId, await planItem(mediaId), { changed: false });
         if (isErr(planned)) {
           if (focusChanged) raiseVariantsChanged([mediaId]);
-          schedulePlacement(mediaId);
+          inBackground(mediaId, "re-planning", async () => {
+            const placed = await planIds([mediaId]);
+            return isErr(placed) ? placed : generate(mediaId);
+          });
           return planned;
         }
         if (planned.value.changed || focusChanged) raiseVariantsChanged([mediaId]);

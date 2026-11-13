@@ -87,7 +87,8 @@ Steps: `images.register` (`VALIDATION` on an empty or malformed list, `CONFLICT`
 collision), `images.listSizes`, `images.plan` (id from params/payload/event; places without
 rendering), `images.generate` (id from params/payload/event; `VALIDATION` without an id, `NOT_FOUND`
 for an id `media@1` does not report as ready), `images.sync` (`CONFLICT` while a fresh job runs), `images.resume` (cron: also
-places and renders any item still `planned`, or any recent item with no rows at all), `images.retryFailed`
+places and renders any item still `planned`, any item with a row left `pending` for longer than
+`staleAfterMs`, or any recent item with no rows at all), `images.retryFailed`
 (`NOT_FOUND` for an id `media@1` does not report as ready), `images.prune` (`VALIDATION` for a name that is still declared or
 has no variants; retires rather than deletes the path), `images.readStatus`, `images.remove`
 (`VALIDATION` without an id), `images.removeMany` (after `media.listFolderItems` or
@@ -224,7 +225,7 @@ pipeline renders them by running `images.generate` after it, as `setMediaFraming
 a row only while it still has the crop, spec and state it was read with, and reads the item again
 otherwise, so two framings saved at once in two processes leave the rows on the framing that is
 stored. When re-planning fails after the framing was stored, `images.setFraming` answers the error
-and plans the item again in the background.
+and plans and renders the item again in the background.
 
 Until the new render is at the path, the origin and the public copy serve the old variant, never the
 original's bytes. Once it is there, `variants[].path` gains `?v=<token>`, a short hash of the crop
@@ -235,13 +236,20 @@ are; a check that compares exported URLs with files ignores the query. Back at t
 has no query again.
 
 A render reads its row again right before it writes the path. When the row's crop changed while it
-ran, it writes nothing, so the path keeps the bytes its `?v=` names, and the row waits for the next
-render, in this process or another. When the crop changes after that read, before the render marks
-its row `done`, its bytes stay at the path and the row records their crop as rendered: `?v=` names
-them, `images.variantsChanged` is raised, and the row stays `pending` for the new crop. A render
-that writes the path and then fails before it marks the row `done` (the public copy cannot be
-written, or the process stops) leaves the new bytes under the old `?v=` until a render of the row
-succeeds; the version only ever changes after the bytes it names are at the path.
+ran, it writes nothing, so the path keeps the bytes its `?v=` names, and renders the item again in
+the background. A render marks its row `done` only while the row still has the crop, the state and
+the rendered crop it read right before writing. When the crop changes after that read, before the
+render marks its row `done`, its bytes stay at the path and the row records their crop as rendered:
+`?v=` names them, `images.variantsChanged` is raised, the row stays `pending` for the new crop, and
+the render renders the item again in the background. When a render of the newer crop already marked
+the row `done` meanwhile, the bytes at the path are no longer known: the row keeps its `?v=` and turns
+`pending`, and the item is rendered again. When only the state or the rendered crop changed (another
+render of the same crop, or a stale render that wrote the path after this one), the render writes
+its bytes to the path again before it marks the row `done`. A render that writes the path and then
+fails before it marks the row `done` (the public copy cannot be written, or the process stops) leaves
+the new bytes under the old `?v=` until a render of the row succeeds; `images.resume` renders a row
+left `pending` for longer than `staleAfterMs`. The version only ever changes after the bytes it
+names are at the path.
 
 `images.attach` adds `focus` (the rectangle or `null`), meant for anonymous readers, and
 `framing: { focus, crops, width, height, ratios }`, meant for an editor. `width` and `height` are the
@@ -285,9 +293,10 @@ subscribed.
 
 ## Behaviour
 
-Concurrent requests to generate variants for the same media item share one render instead of running
-it twice; two callers that start a sync job in the same instant share the same start, so only one job
-row is ever created. Placing never runs more than four public-copy writes at a time.
+A request to generate the variants of a media item while a render of it runs waits for that render
+and then renders once more, since the running render may have read the rows before the request;
+every request that arrives meanwhile shares that one further render. Two callers that start a sync
+job in the same instant share the same start, so only one job row is ever created. Placing never runs more than four public-copy writes at a time.
 
 Within one process, placing, rendering, `images.remove` and the public-copy sync's writes of one item
 run one at a time, so `images.remove` waits for a plan or a render of that item already in progress;
