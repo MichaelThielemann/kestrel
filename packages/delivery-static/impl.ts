@@ -13,8 +13,8 @@ import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import { observeReads, type ObservedRead } from "@michaelthielemann/kestrel/reads";
 import { canonicalJson, normalizeReads, type DependencySpec } from "./dependencies.ts";
 import { dependencyPrefix, dependencyRowId, scan, setIdOf, statusIdOf, type DependencyKind, type OutputRef } from "./keys.ts";
-import { createIndexFiles, type ExportCount, type IndexCandidate } from "./indexes.ts";
-import { validateLlmsConfig } from "./llms.ts";
+import { createIndexFiles, ROBOTS_KEY, SITEMAP_KEY, type ExportCount, type IndexCandidate } from "./indexes.ts";
+import { LLMS_KEY, validateLlmsConfig } from "./llms.ts";
 import { normalizeSiteUrl } from "./site-url.ts";
 import { createBackgroundLoop, type BackgroundLoop, type PassOutcome } from "./loop.ts";
 import type { configSchema } from "./module.ts";
@@ -243,6 +243,7 @@ const ORPHAN_CANDIDATES = "orphans:candidates";
 const INDEXES_OUTCOME = "export:indexes";
 const LLMS_FULL_OUTCOME = "export:llmsFull";
 const INDEX_FILE = /^index\.([A-Za-z0-9]+)$/;
+const SITE_FILES = new Set([ROBOTS_KEY, SITEMAP_KEY, LLMS_KEY]);
 const SEQUENCE = "changes";
 const SEQUENCE_WIDTH = 16;
 const SEQUENCE_TRIES = 100;
@@ -1464,11 +1465,16 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       return ok();
     });
     if (isErr(walked)) return walked;
+    const otherSites: string[] = [];
+    for (const { key } of listed.value) {
+      const parts = key.slice(config.prefix.length).split("/");
+      if (parts.length > 1 && SITE_FILES.has(parts.pop() ?? "")) otherSites.push(`/${parts.join("/")}`);
+    }
     const orphans = new Map<string, string[]>();
     for (const { key } of listed.value) {
       const file = pageFileOf(key);
       if (file === null || file.path === "/" || !extensions.has(file.extension) || owned.has(key) || uploadedAssets.has(key) || ownedPaths.has(file.path)) continue;
-      if (reservedMatch(file.path, config.reservedPaths) !== undefined) continue;
+      if (reservedMatch(file.path, config.reservedPaths) !== undefined || reservedMatch(file.path, otherSites) !== undefined) continue;
       orphans.set(file.path, [...(orphans.get(file.path) ?? []), key]);
     }
     return ok({ orphans, ownedPaths: ownedPaths.size });
@@ -1537,13 +1543,6 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     if (orphans.size > ownedPaths) {
       logWarn(logger, `delivery/static: the one-time removal of orphaned output files found ${orphans.size} paths no status row has, more than the ${ownedPaths} paths status rows own, so it removes nothing; remove files that no page serves by hand`);
       const gaveUp = await recordOrphansDone({ removed: 0, unowned: orphans.size });
-      return isErr(gaveUp) ? gaveUp : ok(0);
-    }
-    const paths = [...orphans.keys()];
-    const nested = paths.find((path) => paths.some((above) => path.startsWith(`${above}/`)));
-    if (nested !== undefined) {
-      logWarn(logger, `delivery/static: the one-time removal of orphaned output files found the orphaned page ${nested} below another orphaned path, which looks like another site under this prefix, so it removes nothing; list that site's path in reservedPaths and remove files that no page serves by hand`);
-      const gaveUp = await recordOrphansDone({ removed: 0, nested });
       return isErr(gaveUp) ? gaveUp : ok(0);
     }
     if (orphans.size === 0) {

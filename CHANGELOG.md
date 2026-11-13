@@ -38,8 +38,9 @@ Net changes since 5.8.1.
   "delivery-orphan-removal"). The root page stays. It runs once per database and waits for the build
   check of the process; a restore that `delivery.checkBuild` learns of through `_databaseRestoredAt`
   records it as done. It never runs on a new or empty database or with a `prefix` that does not end in
-  `/`. Another site below `prefix` and hand-placed index files that no page owns need their path in
-  `reservedPaths`; an orphaned page below another orphaned path makes it remove nothing.
+  `/`. Paths at and below a directory under `prefix` that holds a robots.txt, sitemap.xml or llms.txt
+  are taken for another site and left alone; any other site below `prefix` and hand-placed index
+  files that no page owns need their path in `reservedPaths`.
 - **A slug belongs to its locale; a translation without a slug of its own is never served.** `site@1`
   finds a locale only by its own slug there: `site.resolve`, `pathOf`, `resolveLinks`, `_paths`,
   `site.attachPaths`, the moves `site.pathsMoved` reports (and so the automatic redirects built from
@@ -1123,9 +1124,9 @@ Net changes since 5.8.1.
   no output is `live` or a published document has no `live` output, and until `delivery.checkBuild`
   ran in the process, gives up a run during which a page started to render, removes only
   paths a run at least `claimTtlSeconds` after the first still finds unowned, checking each one again
-  right before its removal, removes nothing when more paths look orphaned than status rows own or
-  when an orphaned page lies below another orphaned path (another site below `prefix`), and leaves the
-  root page, renderer assets, media copies and `reservedPaths` alone. A failure of this removal is
+  right before its removal, removes nothing when more paths look orphaned than status rows own, and leaves the
+  root page, renderer assets, media copies, `reservedPaths` and the paths at and below a directory
+  that holds a robots.txt, sitemap.xml or llms.txt (another site below `prefix`) alone. A failure of this removal is
   logged and retried on the next run without failing the recovery pass. The result gains `orphans`.
 - `@michaelthielemann/kestrel/reads`: `observeReads`, `noteRead` and `unobserved`, one read scope per
   async context kept on `globalThis`; `noteRead` keeps a plain JSON copy of what it is given, and only

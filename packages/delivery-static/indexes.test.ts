@@ -1091,14 +1091,19 @@ describe("the one-time removal of orphaned output files", () => {
     expect(h.blobs.files.has("site/alt/index.html")).toBe(false);
   });
 
-  it("gives up for good, removing nothing, when an orphaned path has another orphaned page below it, as an unreserved nested deployment has", async () => {
+  it("removes the orphaned pages of a renamed parent together with its orphaned children", async () => {
     const h = await upgraded();
-    placed(h, "site/preview/index.html", "site/preview/about/index.html", "site/alt/index.html");
-    expect(await sweep(h)).toBe(0);
-    for (const key of ["site/preview/index.html", "site/preview/about/index.html", "site/alt/index.html"]) expect(h.blobs.files.has(key), key).toBe(true);
-    expect(h.logger.warnings.some((w) => w.includes("/preview/about") && w.includes("removes nothing") && w.includes("reservedPaths"))).toBe(true);
-    expect(expectOk(await h.db.findOne(STATE, { id: "orphans" }))).not.toBeNull();
-    expect(await sweep(h)).toBe(0);
+    placed(h, "site/about/index.html", "site/about/team/index.html", "site/alt/index.html");
+    expect(await sweep(h)).toBe(3);
+    for (const key of ["site/about/index.html", "site/about/team/index.html", "site/alt/index.html"]) expect(h.blobs.files.has(key), key).toBe(false);
+  });
+
+  it.each(["robots.txt", "sitemap.xml", "llms.txt"])("leaves another site below this prefix alone when its path holds a %s, and removes the other orphans", async (name) => {
+    const h = await upgraded();
+    placed(h, "site/preview/index.html", "site/preview/about/index.html", `site/preview/${name}`, "site/alt/index.html");
+    expect(await sweep(h)).toBe(1);
+    for (const key of ["site/preview/index.html", "site/preview/about/index.html", `site/preview/${name}`]) expect(h.blobs.files.has(key), key).toBe(true);
+    expect(h.blobs.files.has("site/alt/index.html")).toBe(false);
   });
 
   it("waits until delivery.checkBuild ran in this process", async () => {
