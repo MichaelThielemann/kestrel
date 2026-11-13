@@ -1408,13 +1408,18 @@ Net changes since 5.8.1.
   size renders again after a framing change it keeps the old crop together with the old `?v=`, and
   both change once the new render is done; the path answers the new bytes shortly before that. A
   variant that has not finished a render yet, one whose format changed until its first render at the
-  new path, and a row without a readable rendered crop (one rendered by 5.x, which cut only from the
-  centre), report `null`. Two listed variants in state `done` with the same aspect ratio (up to the
-  rounding of `width` and `height`) and an equal `crop` show the same picture, so a `srcset` can
-  combine exactly those, except while a write that stalled past `staleAfterMs` is being rendered
+  new path, and a row whose rendered crop is missing or does not parse report `null`; the first
+  render at a path that never held a render before changes `crop` from `null` to its cut and keeps
+  the plain path. A failed attempt whose public copy failed and whose path could not get the earlier
+  bytes back records the crop, byte size and a new `?v=` of the render left at the path. Two listed
+  variants in state `done` with the same aspect ratio (up to the rounding of `width` and `height`,
+  about one pixel of the smaller variant) and an equal `crop` show the same picture, so a `srcset`
+  can combine exactly those, except while a write that stalled past `staleAfterMs` is being rendered
   again: until that render the path may answer the stalled bytes under the current `?v=`, and the
-  render after it gives a new `?v=` and raises `images.variantsChanged`. Applying this needs
-  `variants[].state`, which anonymous callers do not receive by default.
+  render after it gives a new `?v=` and raises `images.variantsChanged`. That render covers the
+  item's `error` and `failed` sizes as well; if it fails, the entry lists the crop and `?v=` recorded
+  before the stalled write landed. Applying this needs `variants[].state`, which anonymous callers do
+  not receive by default.
   `examples/minimal` grants `variants[].crop` to anonymous media reads, and `kestrel upgrade`
   proposes it in the anonymous media grant when `images.attach` runs.
 

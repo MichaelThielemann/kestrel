@@ -647,16 +647,26 @@ query), and `width`/`height` are the planned dimensions, present in
 every state, not only once the render is `done`. `crop` is the part of the original, after its EXIF
 orientation, that the bytes of the last finished render at `path` show, `{ left, top, width, height }`
 in pixels, or `null` for the whole image (an `inside` size), the centred cut of the size's ratio, or a
-variant with no finished render yet. At an unchanged path it changes only with the render that marks
-the variant `done`, the same render that gives the path its new `?v=`; that render writes its bytes
-shortly before, so for that moment a `pending` entry lists the old `crop` while the path already
-answers the new bytes. A format change moves the size to a path with no finished render, where `crop`
+variant with no finished render yet. At a path that already had a finished render it changes only
+with the render that marks the variant `done`, the same render that gives the path its new `?v=`;
+that render writes its bytes shortly before, so for that moment a `pending` entry lists the old `crop`
+while the path already answers the new bytes. A failed attempt whose public copy failed and whose
+path could not get the earlier bytes back leaves the new bytes at the path, so it moves `crop` to them
+together with a new `?v=` while the entry is `error` or `failed`. The first render at a path that never
+held a render before changes `crop` from `null` to its cut and keeps the plain path, without a `?v=`,
+since until then the path answered the original's bytes. A format change moves the size to a path with no finished render, where `crop`
 is `null` until the first render there. Two `done` variants with the same aspect ratio (up to the
-rounding of `width` and `height` to whole pixels) and an equal `crop` show the same picture, so a
+rounding of `width` and `height` to whole pixels, which is coarse enough to match two variants a
+few dozen pixels high that differ by about one pixel of their cut) and an equal `crop` show the same
+picture, so a
 `srcset` combines only such variants, except while a write that stalled past `staleAfterMs` is being
 rendered again: until that render the path may answer the stalled bytes under the current `?v=`, and
-the render after it gives a new `?v=` and raises `images.variantsChanged`. Applying this needs
-`state`, which an anonymous caller does not receive by default (see
+the render after it gives a new `?v=` and raises `images.variantsChanged`; if that render fails, the
+entry goes to `error` and then `failed` with the `crop` and `?v=` recorded before the stalled write
+landed. Applying this needs `state`, which an anonymous caller does not receive by default, so it
+cannot tell a `done` entry from one whose path still answers the original's bytes (after an upload,
+for a size added to the configuration or registered again, after a format change) or from a
+`pending`, `error` or `failed` one (see
 [Focus and crop](../packages/images-default/README.md#focus-and-crop)). `variants[]` never lists a size whose path has no
 object at all yet (still `planned`, internal to `images-default`) — every listed path always answers.
 `available` is `false` for an eligible image with at least one such size still unplaced, `true`

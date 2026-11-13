@@ -240,8 +240,9 @@ Until the new render is at the path, the origin and the public copy serve the ol
 original's bytes. Once it is there, `variants[].path` ends in a new `?v=<token>`, and
 `images.variantsChanged` is raised for the item, so pages that show it render again with the new
 URL. The token is a short hash of the variant's row and the number of its finished renders
-(`renders`), which a render raises in the same conditional update that marks the row `done`. So the
-query changes only once new bytes are at the path, and it never comes back for that path: a crop
+(`renders`), which a render raises in the same conditional update that marks the row `done`, or
+that records a failed attempt whose bytes stayed at the path (described under "Focus and crop"). So
+the query changes only once new bytes are at the path, and it never comes back for that path: a crop
 set back to an earlier one, or a framing reset to the centre, gets a URL of its own, and a URL
 that a cache filled stays bound to the bytes it got then. The same holds for any later render at
 the path, after a changed size or format, a repair by `images.resume`, or a size registered again
@@ -282,9 +283,11 @@ It changes a variant row only while the row is still as it read it, so it never 
 records a failed attempt or marks a row `done` over what the new holder wrote. A single write of a
 path that stalls that long can still land after the new holder's; the stalled holder notices when
 it has finished its writes (after a failed public copy, once it put the earlier bytes back), marks
-the item, and every rendered size of the item renders again. Until then that path answers the
-stalled bytes, and a cache that fetched it meanwhile keeps them under the current `?v=`; the render
-after it gives the path a new `?v=` and raises `images.variantsChanged`.
+the item, and every size of the item that is `done`, `error` or `failed` renders again. Until then
+that path answers the stalled bytes, and a cache that fetched it meanwhile keeps them under the
+current `?v=`; the render after it gives the path a new `?v=` and raises `images.variantsChanged`. If
+that render fails, the size goes to `error` and then `failed` while its path keeps answering the
+stalled bytes, until a later render of it succeeds, for example after `images.retryFailed`.
 
 A page published before a re-render goes on asking for its URL (the plain path or an earlier `?v=`)
 until it is published again after `images.variantsChanged`, while the path already answers the new
@@ -311,9 +314,16 @@ it `done`, and both change with that render. The path answers the old variant un
 bytes are written, shortly before the row is marked `done`, so for that moment a `pending` entry
 lists the old crop while the path already answers the new bytes. A format change moves the size to a
 path without a finished render, where `crop` is `null` until the first render there. A variant that
-has not finished a render yet reports `null`, as does a row whose rendered crop is missing or does
-not parse, such as one rendered by 5.x, which cut only from the centre. A render that fails keeps
-the entry on the crop and `?v=` of the bytes the path still answers, also once it is `failed`. For a
+has not finished a render yet reports `null`, and its path answers the original's bytes; the first
+render at a path that never held a render before changes `crop` from `null` to its cut and keeps the
+plain path, without a `?v=`. A row whose rendered crop is missing or does not parse reports `null`
+as well. A render that fails keeps the entry on the crop and `?v=` of the bytes the path still
+answers, also once it is `failed`. When its public copy fails and the earlier bytes cannot be put
+back at the path either, the path answers the new render, so the failed attempt moves the entry to
+that render's crop and a new `?v=`; the public copy may hold the earlier bytes until it is written
+again. After a write that stalled past `staleAfterMs` landed late and the render after it failed, an
+`error` or `failed` entry lists the crop and `?v=` of the render recorded before the stalled write
+landed, while its path answers the stalled bytes. For a
 `cover` size whose ratio equals the original's, the centred cut is the whole image, so its variants
 report `null` like the `inside` variants of that ratio, unless a manual crop for its key applies.
 
@@ -321,9 +331,12 @@ Two listed variants in state `done` with the same aspect ratio and an equal `cro
 picture at different resolutions. `width` and `height` are rounded to whole pixels, so their ratio
 matches only up to that rounding: two variants have the same aspect ratio when their ranges from
 `(width - 0.5) / (height + 0.5)` to `(width + 0.5) / (height - 0.5)` overlap, as for 1000 × 563 and
-320 × 180, both 16:9. A `srcset` should combine only such
-variants: one that mixes crops shows a different picture depending on the viewport and pixel
-density, and one that leaves out an interchangeable variant renders blurry on high-density screens.
+320 × 180, both 16:9. A `srcset` should combine only such variants: one that mixes crops shows a
+different picture depending on the viewport and pixel density, and one that leaves out an
+interchangeable variant renders blurry on high-density screens. The ratio test is approximate,
+equal up to about one pixel of the smaller variant: from a 1000 × 600 original, an `inside` 16 × 10
+of the whole image and a `cover` 24 × 16 of its centred 3:2 cut both pass it with `crop` `null`.
+Leaving variants only a few dozen pixels high out of the comparison avoids such matches.
 This holds for `done` entries only: a `pending` entry may still answer the previous render with
 dimensions planned for the next one, or already the next render's bytes just before it is marked
 `done`, and an entry whose path has not had a render yet answers the original's bytes. It has one
@@ -332,8 +345,11 @@ stalled holder, a `done` entry lists the crop and `?v=` of the newer render whil
 the stalled bytes, until the item renders again; that render gives the path a new `?v=` and raises
 `images.variantsChanged`. A reader needs `state` to apply the rule. Anonymous callers do not receive
 it with the grants of `examples/minimal` or the grant `kestrel upgrade` proposes, so a page built
-from such a read cannot tell a `done` entry from one whose path has no finished render yet, which
-happens while a size added to the configuration still renders.
+from such a read cannot tell a `done` entry from the others: from one whose path has no finished
+render yet and answers the original's bytes (after an upload, for a size added to the configuration
+or registered again after a prune, and after a format change until the first render at the new
+path), from a `pending` one whose next render has already written its bytes, and from an `error` or
+`failed` one.
 
 A framing outlives the trash: the item is hidden, not gone, so trash and restore keep it unchanged,
 and a render of a hidden item writes no public copy. `images.remove`, `images.removeMany` and the
