@@ -692,8 +692,10 @@ Net changes since 5.8.1.
 - Focus and crop change exported types of `images-default` (`/impl`): `Images` gains `setFraming`
   and `framingsOf`, and `Variant` gains `crop`, `renderedCrop`, `originalWidth` and `originalHeight`
   (`""` or `null` for the centre, `0` or `null` for unknown dimensions), which a hand-built
-  implementation, test double or variant row must add. `kestrel upgrade`'s
-  `types/breaking-signatures` names them.
+  implementation, test double or variant row must add. `Planned` gains `crop`: a `Renderer` passed
+  to `createImages` as `deps.render` must cut `planned.crop` from the original after its EXIF
+  orientation before it resizes, or a framed size records a crop its bytes do not have. `kestrel
+  upgrade`'s `types/breaking-signatures` names them.
 
 ### Added
 

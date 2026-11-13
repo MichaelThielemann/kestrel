@@ -524,7 +524,10 @@ needs a check; `Media` gains `trash`, `trashFolder`, `restore`, `listTrash`, `tr
 `selectTrash` and `purge`, and `Images` gains `hide`, `show` and `hidden`, which a hand-built test
 double of either must add. Focus and crop add `setFraming` and `framingsOf` to `Images` and the
 fields `crop`, `renderedCrop`, `originalWidth` and `originalHeight` to `Variant`, which a hand-built
-variant row must set (`""` or `null` for the centre, `0` or `null` for unknown dimensions).
+variant row must set (`""` or `null` for the centre, `0` or `null` for unknown dimensions). `Planned`
+gains `crop`: a `Renderer` passed to `createImages` as `deps.render` must cut `planned.crop` from the
+original after its EXIF orientation before it resizes, or a framed size records a crop its bytes do
+not have.
 
 #### responses-breaking-step-shapes
 A pipeline runs a step whose 6.0.0 response or manifest shape differs from 5.8's — `redirects.lookup`,
