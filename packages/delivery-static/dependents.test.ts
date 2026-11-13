@@ -416,6 +416,7 @@ describe("delivery/static dependencies: cycles and repeated build checks", () =>
     const two = await harness({ render: "background", db, content, blobs });
     const ids = await seed(one);
     await one.settle();
+    expectOk(await one.delivery.resumeStale());
     const [first, second] = await Promise.all([one.delivery.checkBuild("build-9"), two.delivery.checkBuild("build-9")]);
     expect(expectOk(first).changed || expectOk(second).changed).toBe(true);
     await one.settle();

@@ -172,6 +172,8 @@ export interface DeliveryDeps {
   events?: Events | undefined;
   /** Picks the robots.txt policy when `robots.policy` is not set: `allow` for `production`, otherwise `disallow`. Defaults to `process.env.NODE_ENV`. */
   nodeEnv?: string | undefined;
+  /** Waits between the reads of a restore check that found the database behind the blob store, until another process stores its marker or the wait ends. Defaults to a timer. */
+  delay?: ((ms: number) => Promise<void>) | undefined;
 }
 
 interface DependencyRow extends Document {
@@ -238,6 +240,11 @@ interface RenderOutcome {
   failure: string | null;
 }
 
+interface MarkerPair {
+  held: string | null;
+  blob: string | null;
+}
+
 interface MarkerEpoch {
   seq: number;
   token: string;
@@ -252,6 +259,7 @@ const LOOP_BATCH = 5;
 const RESUME_MIN_AGE_MS = 60_000;
 const UNPUBLISH_TRIES = 5;
 const MARKER_SEAL_DELAY_MS = 5000;
+const MARKER_POLL_MS = 500;
 const LLMS_COALESCE_KEY = "llms";
 const INDEXES_COALESCE_KEY = "indexes";
 const BUILD = "build";
@@ -355,6 +363,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   validateLlmsConfig(config.llms, model, config.formats);
   if (dependencies.render === "events" && deps.events === undefined) throw new Error('delivery/static: dependencies.render "events" needs an events@1 provider');
   const events = deps.events;
+  const delay = deps.delay ?? ((ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms)));
   const siteUrl = config.siteUrl === undefined ? undefined : normalizeSiteUrl(config.siteUrl);
   const markerKey = markerKeyFor(config.prefix);
   if (siteUrl === undefined && config.sitemap) logWarn(logger, "delivery/static: no siteUrl is set, so no sitemap.xml is written and llms.txt lists paths instead of URLs");
@@ -414,7 +423,12 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   let llmsFullFailures = 0;
   let renderStarts = 0;
   let rendersInFlight = 0;
-  let markerState: "unchecked" | "pending" | "armed" = "unchecked";
+  let markerPhase: "unchecked" | "pending" | "checked" = "unchecked";
+  let bootRead: Promise<MarkerPair | null> | null = null;
+  let owedReset: string | null = null;
+  let unreported: { marked: number } | null = null;
+  let closed = false;
+  let putChain: Promise<boolean> = Promise.resolve(true);
   let epoch: MarkerEpoch | null = null;
   let epochSeq = 0;
   let sealedSeq = 0;
@@ -422,7 +436,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   const retiredEpochs: Array<{ epoch: MarkerEpoch; waitFor: Set<number> }> = [];
   let sealChain: Promise<void> = Promise.resolve();
   let sealTimer: NodeJS.Timeout | undefined;
-  let arming: Promise<Result<{ restored: boolean; marked: number }, DeliveryError>> | null = null;
+  let arming: Promise<Result<void, DeliveryError>> | null = null;
   let opSeq = 0;
   const activeOps = new Set<number>();
   const idleWaiters: Array<() => void> = [];
@@ -1459,16 +1473,14 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return ok({ marked: dispatched.value });
   };
 
-  const readMarker = async (): Promise<"missing" | "same" | "differs" | null> => {
-    if (markerKey === null) return "same";
+  const readMarker = async (key: string): Promise<MarkerPair | null> => {
     const stored = await db.findOne<StateRow>(STATE, { id: MARKER });
-    const blob = await blobs.get(markerKey);
+    const blob = await blobs.get(key);
     if (isErr(stored) || isErr(blob)) {
       logger.error("delivery/static: could not read the restore marker, this build check cannot tell whether the database was restored", { error: isErr(stored) ? stored.error.message : isErr(blob) ? blob.error.message : "" });
       return null;
     }
-    if (blob.value === null) return stored.value === null ? "missing" : "differs";
-    return new TextDecoder().decode(blob.value) === stored.value?.value ? "same" : "differs";
+    return { held: stored.value?.value ?? null, blob: blob.value === null ? null : new TextDecoder().decode(blob.value) };
   };
 
   const putMarker = async (token: string): Promise<boolean> => {
@@ -1485,42 +1497,88 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return false;
   };
 
-  const resetMarker = async (): Promise<boolean> => {
-    const token = randomUUID();
-    const stored = await writeState(MARKER, token);
-    if (isErr(stored)) {
-      logger.error("delivery/static: could not store the restore marker, the next build check renders every output again", { error: stored.error.message });
-      return false;
+  const foreign = (token: string | null): boolean => token !== null && !ownTokens.has(token);
+
+  const heldByLiveProcess = async (key: string, first: MarkerPair): Promise<boolean | null> => {
+    if (first.blob === null) return false;
+    const rounds = Math.ceil((MARKER_SEAL_DELAY_MS + dependencies.renderTimeoutSeconds * config.formats.length * 1000) / MARKER_POLL_MS);
+    for (let round = 0; round < rounds; round++) {
+      if (stopping) return null;
+      await delay(MARKER_POLL_MS);
+      const again = await readMarker(key);
+      if (again === null) return null;
+      if ((again.held !== first.held && foreign(again.held)) || (again.blob !== first.blob && foreign(again.blob))) return true;
     }
-    if (await putMarker(token)) return true;
-    logger.error("delivery/static: the restore marker is stored but not written next to the prefix, the next build check renders every output again");
     return false;
   };
 
-  const checkMarker = async (): Promise<Result<{ restored: boolean; marked: number }, DeliveryError>> => {
-    const marker = await readMarker();
-    if (marker === null) return ok({ restored: false, marked: 0 });
+  const recordRestore = async (): Promise<Result<void, DeliveryError>> => {
+    orphansDone = true;
+    const recorded = await db.createOne<StateRow>(STATE, { id: ORPHANS, value: JSON.stringify({ at: now(), removed: 0, restored: true }), seq: null, updatedAt: now() });
+    if (isErr(recorded) && recorded.error.code !== "CONFLICT") return err(dbFailure(recorded.error));
+    logWarn(logger, "delivery/static: the database is older than the delivered files (restored from a backup), so every output is rendered again");
     let marked = 0;
-    if (marker === "differs") {
-      logWarn(logger, "delivery/static: the database is older than the delivered files (restored from a backup), so every output is rendered again");
-      for (const type of deliveredTypes) {
-        const all = await markAll(type);
-        if (isErr(all)) return all;
-        marked += all.value.marked;
-      }
+    for (const type of deliveredTypes) {
+      const all = await markAll(type);
+      if (isErr(all)) return all;
+      marked += all.value.marked;
     }
-    if (marker === "same" || (await resetMarker())) markerState = "armed";
-    return ok({ restored: marker === "differs", marked });
+    unreported = { marked };
+    return ok();
   };
 
-  const armMarker = (): Promise<Result<{ restored: boolean; marked: number }, DeliveryError>> => {
-    arming ??= checkMarker().finally(() => {
+  const readBootPair = (key: string): Promise<MarkerPair | null> => {
+    bootRead ??= readMarker(key).then((pair) => {
+      if (pair === null) bootRead = null;
+      return pair;
+    });
+    return bootRead;
+  };
+
+  const compareMarker = async (key: string): Promise<Result<"checked" | "reset" | null, DeliveryError>> => {
+    const first = bootRead === null ? await readMarker(key) : await bootRead;
+    if (first === null) return ok(null);
+    if (first.blob !== null && first.blob === first.held) return ok("checked");
+    if (first.held !== null || first.blob !== null) {
+      const live = await heldByLiveProcess(key, first);
+      if (live === null) return ok(null);
+      if (live) return ok("checked");
+      const recorded = await recordRestore();
+      if (isErr(recorded)) return recorded;
+    }
+    return ok(bootRead === null && epochSeq === 0 ? "reset" : "checked");
+  };
+
+  const checkMarker = async (key: string): Promise<Result<void, DeliveryError>> => {
+    if (owedReset === null) {
+      const compared = await compareMarker(key);
+      if (isErr(compared) || compared.value === null) return isErr(compared) ? compared : ok();
+      if (compared.value === "checked") {
+        markerPhase = "checked";
+        return ok();
+      }
+      owedReset = randomUUID();
+    }
+    if (!(await putMarker(owedReset))) return ok();
+    const stored = await writeState(MARKER, owedReset);
+    if (isErr(stored)) {
+      logger.error("delivery/static: could not store the restore marker, the next build check renders every output again", { error: stored.error.message });
+      return ok();
+    }
+    owedReset = null;
+    markerPhase = "checked";
+    return ok();
+  };
+
+  const markerIsChecked = (): boolean => markerPhase === "checked";
+
+  const armMarker = (): Promise<Result<void, DeliveryError>> => {
+    if (markerKey === null) return Promise.resolve(ok());
+    arming ??= checkMarker(markerKey).finally(() => {
       arming = null;
     });
     return arming;
   };
-
-  const markerArmed = (): boolean => markerState === "armed";
 
   const tracked = async <T>(run: () => Promise<T>): Promise<T> => {
     opSeq += 1;
@@ -1598,7 +1656,9 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     epochSeq += 1;
     const token = randomUUID();
     ownTokens.set(token, epochSeq);
-    const opened: MarkerEpoch = { seq: epochSeq, token, heldWhenPut, written: putMarker(token) };
+    const written = putChain.then(() => putMarker(token));
+    putChain = written;
+    const opened: MarkerEpoch = { seq: epochSeq, token, heldWhenPut, written };
     epoch = opened;
     clearTimeout(sealTimer);
     sealTimer = setTimeout(() => {
@@ -1610,11 +1670,14 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   };
 
   const advanceMarker = async (): Promise<Result<void, DeliveryError>> => {
-    if (markerKey === null || markerState === "unchecked") return ok();
-    if (markerState === "pending") {
+    if (markerKey === null) return ok();
+    if (closed) return err(stoppingFailure());
+    if (markerPhase === "pending") {
       const checked = await armMarker();
       if (isErr(checked)) return checked;
-      if (!markerArmed()) return err(transient("delivery/static: the restore marker could not be checked, so no file is written – try again"));
+      if (!markerIsChecked()) return err(transient("delivery/static: the restore marker could not be checked, so no file is written – try again"));
+    } else if (markerPhase === "unchecked" && (await readBootPair(markerKey)) === null) {
+      return err(transient("delivery/static: the restore marker could not be read, so no file is written – try again"));
     }
     const stored = await db.findOne<StateRow>(STATE, { id: MARKER });
     const held = isErr(stored) ? undefined : (stored.value?.value ?? null);
@@ -1728,6 +1791,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       return ok(0);
     };
     const interrupted = (): boolean => renderStarts !== startedBefore || rendersInFlight > 0;
+    if (markerPhase !== "checked") return skip("delivery.checkBuild has not checked the restore marker yet");
     for (const filter of [{ staleToken: { ne: null }, staleAttempts: { lt: dependencies.maxAttempts } }, { claimedBy: { ne: null } }]) {
       const busy = await db.count(STATUS, filter);
       if (isErr(busy)) return err(dbFailure(busy.error));
@@ -1885,17 +1949,18 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     markMoved,
     markAll,
     async checkBuild(build) {
+      if (markerKey !== null && markerPhase === "unchecked") markerPhase = "pending";
       const stored = await db.findOne<StateRow>(STATE, { id: BUILD });
       if (isErr(stored)) return err(dbFailure(stored.error));
       const changed = stored.value?.value !== build;
-      let restored = false;
-      let marked = 0;
-      if (markerKey !== null && markerState !== "armed") {
-        markerState = "pending";
+      if (markerPhase === "pending") {
         const checked = await armMarker();
         if (isErr(checked)) return checked;
-        ({ restored, marked } = checked.value);
       }
+      const detected = unreported;
+      unreported = null;
+      const restored = detected !== null;
+      let marked = detected?.marked ?? 0;
       if (changed && !restored) {
         for (const type of deliveredTypes) {
           const all = await markAll(type);
@@ -1912,31 +1977,33 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     async republishOutput(target) {
       typeConfig(target.type);
       if (stopping) return err(stoppingFailure());
-      const found = await readRow(target.type, target.docId, target.locale);
-      if (isErr(found)) return found;
-      if (found.value === null || found.value.state === "deleted") return ok({ rendered: false, state: null });
-      const token = await claim(found.value.id);
-      if (isErr(token)) return token;
-      if (token.value === null) return err(transient(`delivery/static: ${target.type}/${target.docId}/${target.locale} is being rendered elsewhere – try again`));
-      let rendered = false;
-      try {
-        const row = await db.findOne<StatusRow>(STATUS, { id: found.value.id });
-        if (isErr(row)) return err(dbFailure(row.error));
-        if (row.value === null || row.value.state === "deleted" || row.value.staleToken === null) return ok({ rendered: false, state: row.value === null || row.value.state === "deleted" ? null : row.value.state });
-        rendered = true;
-        const outcome = await renderMarked(row.value);
-        if (isErr(outcome)) return outcome;
-        if (outcome.value.failure !== null) return err(transient(`delivery/static: re-rendering ${target.type}/${target.docId}/${target.locale} failed: ${outcome.value.failure}`));
-        return ok({ rendered: true, state: outcome.value.status?.state ?? null });
-      } finally {
-        await release(found.value.id, token.value);
-        if (rendered) await requestAfterRender(found.value);
-      }
+      return tracked(async (): Promise<Result<{ rendered: boolean; state: State | null }, DeliveryError>> => {
+        const found = await readRow(target.type, target.docId, target.locale);
+        if (isErr(found)) return found;
+        if (found.value === null || found.value.state === "deleted") return ok({ rendered: false, state: null });
+        const token = await claim(found.value.id);
+        if (isErr(token)) return token;
+        if (token.value === null) return err(transient(`delivery/static: ${target.type}/${target.docId}/${target.locale} is being rendered elsewhere – try again`));
+        let rendered = false;
+        try {
+          const row = await db.findOne<StatusRow>(STATUS, { id: found.value.id });
+          if (isErr(row)) return err(dbFailure(row.error));
+          if (row.value === null || row.value.state === "deleted" || row.value.staleToken === null) return ok({ rendered: false, state: row.value === null || row.value.state === "deleted" ? null : row.value.state });
+          rendered = true;
+          const outcome = await renderMarked(row.value);
+          if (isErr(outcome)) return outcome;
+          if (outcome.value.failure !== null) return err(transient(`delivery/static: re-rendering ${target.type}/${target.docId}/${target.locale} failed: ${outcome.value.failure}`));
+          return ok({ rendered: true, state: outcome.value.status?.state ?? null });
+        } finally {
+          await release(found.value.id, token.value);
+          if (rendered) await requestAfterRender(found.value);
+        }
+      });
     },
     requestIndexes: requestIndexesNow,
     async resumeStale() {
       if (stopping) return err(stoppingFailure());
-      if (markerState === "pending") {
+      if (markerPhase === "pending") {
         const checked = await armMarker();
         if (isErr(checked)) logger.error("delivery/static: could not check the restore marker, the next recovery pass tries again", { error: checked.error.message });
       }
@@ -2033,6 +2100,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       stopping = true;
       await loop?.stop();
       await settled(dependencies.renderTimeoutSeconds * config.formats.length * 1000);
+      closed = true;
       await rotate();
       clearTimeout(sealTimer);
     },

@@ -178,7 +178,7 @@ describe("delivery/static module via runPipeline", () => {
     put("p1", { slug__de: "kontakt", title__de: "Kontakt", status__de: "published" });
     const publish = definePipeline({ name: "publish", steps: ["seed.id", "delivery.publish:pages"] });
     await runPipeline(publish, { params: { id: "p1" } }, { modules: [{ module, instance }], steps: { "seed.id": seedId } });
-    const publishedKeys = [...blobs.blobs.keys()];
+    const publishedKeys = [...blobs.blobs.keys()].filter((key) => !key.endsWith(".delivery-marker"));
     expect(publishedKeys.length).toBeGreaterThan(0);
     const pipeline = definePipeline({ name: "unpublish", steps: ["delivery.unpublish:pages"] });
     const result = await runPipeline(pipeline, { params: { id: "p1" } }, { modules: [{ module, instance }] });
@@ -191,7 +191,7 @@ describe("delivery/static module via runPipeline", () => {
     put("p1", { slug__de: "kontakt", title__de: "Kontakt", status__de: "published" });
     const publish = definePipeline({ name: "publish", steps: ["seed.id", "delivery.publish:pages"] });
     await runPipeline(publish, { params: { id: "p1" } }, { modules: [{ module, instance }], steps: { "seed.id": seedId } });
-    const publishedKeys = [...blobs.blobs.keys()];
+    const publishedKeys = [...blobs.blobs.keys()].filter((key) => !key.endsWith(".delivery-marker"));
     const pipeline = definePipeline({ name: "unpublish", steps: ["delivery.unpublish:pages"] });
     const result = await runPipeline(pipeline, { payload: { id: "p1" } }, { modules: [{ module, instance }] });
     expect(result.status).toBe(200);

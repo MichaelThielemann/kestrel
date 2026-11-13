@@ -67,6 +67,10 @@ function fakeBlobs(): Blobstore & { blobs: Map<string, { data: Uint8Array; conte
   };
 }
 
+function servedKeys(blobs: ReturnType<typeof fakeBlobs>): string[] {
+  return [...blobs.blobs.keys()].filter((key) => key.startsWith("site/")).sort();
+}
+
 function fakeRenderer(failFor: Set<string> = new Set()): Renderer & { calls: string[]; documents: Record<string, unknown>[] } {
   const calls: string[] = [];
   const documents: Record<string, unknown>[] = [];
@@ -126,7 +130,7 @@ describe("delivery/static", () => {
     put("p1", { slug__de: "kontakt", title__de: "Kontakt", status__de: "published", status__en: "published" });
     const result = expectOk(await delivery.publish("pages", "p1"));
     expect(result.map((s) => [s.locale, s.state, s.path])).toEqual([["de", "live", "/kontakt"], ["en", "live", "/en/kontakt"]]);
-    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_app/app.js", "site/en/kontakt/index.html", "site/kontakt/index.html"]);
+    expect(servedKeys(blobs)).toEqual(["site/_app/app.js", "site/en/kontakt/index.html", "site/kontakt/index.html"]);
     expect(renderer.calls.filter((c) => c.startsWith("html")).length).toBe(2);
     expect(new TextDecoder().decode(blobs.blobs.get("site/en/kontakt/index.html")?.data)).toBe("<h1>Kontakt</h1>");
     expect(renderer.documents.every((d) => d._links !== undefined)).toBe(true);
@@ -135,7 +139,7 @@ describe("delivery/static", () => {
     put("p1", { status__en: "draft" });
     const again = expectOk(await delivery.publish("pages", "p1"));
     expect(again.map((s) => [s.locale, s.state])).toEqual([["de", "live"], ["en", "draft"]]);
-    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_app/app.js", "site/kontakt/index.html"]);
+    expect(servedKeys(blobs)).toEqual(["site/_app/app.js", "site/kontakt/index.html"]);
     expect(expectOk(await db.count(STATUS, {}))).toBe(2);
   });
 
@@ -160,12 +164,12 @@ describe("delivery/static", () => {
     const delivery = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
     put("p1", { slug__de: "home", title__de: "Start", status__de: "published" });
     expectOk(await delivery.publish("pages", "p1"));
-    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_app/app.js", "site/index.html", "site/index.pdf"]);
+    expect(servedKeys(blobs)).toEqual(["site/_app/app.js", "site/index.html", "site/index.pdf"]);
     put("p1", { slug__de: "start" });
     expectOk(await delivery.publish("pages", "p1"));
-    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_app/app.js", "site/start/index.html", "site/start/index.pdf"]);
+    expect(servedKeys(blobs)).toEqual(["site/_app/app.js", "site/start/index.html", "site/start/index.pdf"]);
     expect(expectOk(await delivery.unpublish("pages", "p1"))).toBe(2);
-    expect([...blobs.blobs.keys()]).toEqual(["site/_app/app.js"]);
+    expect(servedKeys(blobs)).toEqual(["site/_app/app.js"]);
     expect(expectOk(await delivery.status("pages", "p1"))).toEqual([]);
   });
 
@@ -463,9 +467,9 @@ describe("delivery/static: removes exactly the keys it wrote", () => {
     const delivery = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: mismatchedRenderer(), blobs, db, logger: fakeLogger() });
     put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published", status__en: "published" });
     expectOk(await delivery.publish("pages", "p1"));
-    expect([...blobs.blobs.keys()].sort()).toEqual(["site/en/seite/index.htm", "site/en/seite/index.pdf-doc", "site/seite/index.htm", "site/seite/index.pdf-doc"]);
+    expect(servedKeys(blobs)).toEqual(["site/en/seite/index.htm", "site/en/seite/index.pdf-doc", "site/seite/index.htm", "site/seite/index.pdf-doc"]);
     expect(expectOk(await delivery.unpublish("pages", "p1"))).toBe(2);
-    expect(blobs.blobs.size).toBe(0);
+    expect(servedKeys(blobs)).toEqual([]);
   });
 
   it("removes the real files of a path a rename left, even when the renderer's extension differs from the format name", async () => {
@@ -503,10 +507,10 @@ describe("delivery/static: removes exactly the keys it wrote", () => {
     const wide = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
     put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published" });
     expectOk(await wide.publish("pages", "p1"));
-    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_app/app.js", "site/seite/index.html", "site/seite/index.pdf"]);
+    expect(servedKeys(blobs)).toEqual(["site/_app/app.js", "site/seite/index.html", "site/seite/index.pdf"]);
     const narrow = await createDeliveryStatic({ ...config, formats: ["html"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
     expectOk(await narrow.publish("pages", "p1"));
-    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_app/app.js", "site/seite/index.html"]);
+    expect(servedKeys(blobs)).toEqual(["site/_app/app.js", "site/seite/index.html"]);
   });
 
   it("a row published before written keys were recorded still loses every real file on unpublish", async () => {
