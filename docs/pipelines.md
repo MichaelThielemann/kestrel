@@ -846,8 +846,8 @@ run's own rows by id — the ones `events.emit` just wrote — and runs each one
 `attempts`/backoff/dead-letter machinery the worker uses, before the response goes out. Whatever it
 does not reach within the config key `relayMs` (default 5000 ms, checked before every claim
 including the first, never enforced mid-pipeline) is reported `"pending"` and stays for the worker,
-which takes it once its row's `availableAt` (`createdAt + relayMs` for a row belonging to a run)
-comes due — the head start that keeps a live worker from racing the relay for the same row.
+which takes it once its row's `availableAt` (`createdAt + relayMs` for a row belonging to a run,
+except a delayed pipeline's, see below) comes due — the head start that keeps a live worker from racing the relay for the same row.
 `relayMs: 0` disables the relay entirely: every row is immediately the worker's. A run that
 enqueued nothing costs the relay no persistence query.
 
@@ -863,6 +863,11 @@ login audit) while another subscriber of the same event still gets its head star
 page). Naming a pipeline unknown to the booted manifest, or one no event trigger runs, fails boot
 at `attach()`, once every pipeline is resolved, naming the module, the pipeline(s) and which of the
 two it is.
+
+A pipeline with a delay above `0` in `events-queue`'s `delayMs` is never relayed, whatever
+`relayPipelines` says: its row is written with `availableAt = createdAt + delayMs`, the relay never
+claims it, and `_events.pipelines` names it with `status: "queued"`. The worker takes it once that
+window ends. An array `relayPipelines` that names a delayed pipeline fails boot at `attach()`.
 
 A relayed delivery is an ordinary run: it carries `parentRunId`, so it appears in the logs and in
 insights' recent failures linked to the request that raised it, and a delivery pipeline that hangs
