@@ -331,7 +331,10 @@ describe("images/default variants[].crop in images.attach", () => {
     }
     await images.close();
   });
-  it("renders a failed size again after a write that stalled past staleAfterMs lands late, so crop and ?v= follow the bytes at the path", async () => {
+  it.each([
+    ["error", 1],
+    ["failed", CONFIG.maxAttempts],
+  ])("renders an %s size again after a write that stalled past staleAfterMs lands late, so crop and ?v= follow the bytes at the path", async (state, failures) => {
     const w = await world();
     const first = await w.open([SQUARE]);
     expectOk(await first.setFraming("m1", RIGHT_CROP));
@@ -358,8 +361,8 @@ describe("images/default variants[].crop in images.attach", () => {
 
     const failing: Renderer = async () => { throw new Error("render failed"); };
     const later = await w.open([SQUARE], failing, { now: () => LATER });
-    for (let attempt = 0; attempt < CONFIG.maxAttempts; attempt += 1) expectOk(await later.generate("m1"));
-    expect((await attached(later)).get("square")).toMatchObject({ state: "failed", crop: RIGHT, path: before.path });
+    for (let attempt = 0; attempt < failures; attempt += 1) expectOk(await later.generate("m1"));
+    expect((await attached(later)).get("square")).toMatchObject({ state, crop: RIGHT, path: before.path });
 
     held.open();
     await generating;
@@ -369,6 +372,7 @@ describe("images/default variants[].crop in images.attach", () => {
     expect(after).toMatchObject({ state: "done", crop: LEFT });
     expect(after.path).toMatch(VERSIONED_SQUARE);
     expect(after.path).not.toBe(before.path);
+    expect(expectOk(await later.variantsOf(["m1"])).get("m1")!.map((row) => [row.state, row.attempts])).toEqual([["done", 1]]);
     expect(await leftEdgeIsBlue(later, "square.webp")).toBe(false);
     for (const images of [first, slow, later]) await images.close();
   });
@@ -391,9 +395,13 @@ describe("images/default variants[].crop in images.attach", () => {
       },
     };
     const images = await w.open([SQUARE], render, { blobs: broken });
+    w.events.emitted.length = 0;
     await images.generate("m1");
+    expect(w.events.emitted).toEqual([{ name: "images.variantsChanged", ids: ["m1"] }]);
     const errored = (await attached(images)).get("square")!;
     expect(errored).toMatchObject({ state: "error", crop: LEFT });
+    expect(errored.bytes).toBe(w.blobs.blobs.get("media-variants/m1/square.webp")!.data.byteLength);
+    expect(errored.bytes).not.toBe(before.bytes);
     expect(errored.path).toMatch(VERSIONED_SQUARE);
     expect(errored.path).not.toBe(before.path);
     expect(await leftEdgeIsBlue(images, "square.webp")).toBe(false);
