@@ -63,9 +63,9 @@ export function createDeviceCookies(config: DeviceCookieConfig, now: () => numbe
     const [expires, nonce, signature, extra] = value.split(".");
     if (expires === undefined || nonce === undefined || signature === undefined || extra !== undefined) return undefined;
     if (!/^\d{1,12}$/.test(expires) || Number(expires) * 1000 <= now() || !NONCE.test(nonce)) return undefined;
-    const given = Buffer.from(signature, "base64url");
+    const given = Buffer.from(signature);
     return keys.some((k) => {
-      const expected = mac(k, expires, nonce, account);
+      const expected = Buffer.from(mac(k, expires, nonce, account).toString("base64url"));
       return given.length === expected.length && timingSafeEqual(given, expected);
     })
       ? nonce

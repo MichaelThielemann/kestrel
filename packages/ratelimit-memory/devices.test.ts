@@ -55,6 +55,22 @@ describe("device cookies", () => {
     expect(other.verify(forged(value), "account")).toBeUndefined();
   });
 
+  it("refuse a signature written in any other way than it was issued, even when it decodes to the same bytes", () => {
+    const cookies = createDeviceCookies({ secretKey: KEY, maxAgeSeconds: 60, secure: true });
+    const [name, value = ""] = (cookieHeader(cookies.issue("account")).cookie ?? "").split("=");
+    const [expires = "", nonce = "", signature = ""] = value.split(".");
+    const forged = (v: string) => ({ cookie: `${name}=${v}` });
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const lastBits = alphabet.indexOf(signature.at(-1) ?? "");
+    const unusedBitsSet = `${signature.slice(0, -1)}${alphabet[lastBits + 1] ?? ""}`;
+    for (const variant of [unusedBitsSet, `${signature}=`, `${signature.slice(0, 10)}*${signature.slice(10)}`]) {
+      expect(variant).not.toBe(signature);
+      expect(Buffer.from(variant, "base64url").equals(Buffer.from(signature, "base64url"))).toBe(true);
+      expect(cookies.verify(forged(`${expires}.${nonce}.${variant}`), "account")).toBeUndefined();
+    }
+    expect(cookies.verify(forged(value), "account")).toBeDefined();
+  });
+
   it("stay valid across a key change while the old key is listed as a previous key", () => {
     const issued = cookieHeader(createDeviceCookies({ secretKey: KEY, maxAgeSeconds: 60, secure: true }).issue("account"));
     expect(createDeviceCookies({ secretKey: OTHER_KEY, previousSecretKeys: [KEY], maxAgeSeconds: 60, secure: true }).verify(issued, "account")).toBeDefined();
