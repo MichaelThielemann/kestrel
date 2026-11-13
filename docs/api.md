@@ -642,7 +642,8 @@ error, failed } }], job, orphaned: { sizes: [name], variants: n }, registrySeen,
 `GET /media/:id` and `GET /media` additionally return `available` and
 `variants: [{ size, width, height, format, bytes, state, path, crop }]`; `path` is the public path
 `/media/<id>/variants/<size>.<ext>`, followed by `?v=<token>` once a later render replaced bytes the
-path already had, or after a format change of a variant that rendered before, with a token that path is never given again (the file name never carries the
+path already had, after a format change of a variant that rendered before, or once a write put other
+bytes into the variant's public copy, with a token that path is never given again (the file name never carries the
 query), and `width`/`height` are the planned dimensions, present in
 every state, not only once the render is `done`. `crop` is the part of the original, after its EXIF
 orientation, that the bytes of the last finished render at `path` show, `{ left, top, width, height }`
@@ -651,14 +652,16 @@ variant with no finished render yet. At a path that already had a finished rende
 with the render that marks the variant `done`, the same render that gives the path its new `?v=`;
 that render writes its bytes shortly before, so for that moment a `pending` entry lists the old `crop`
 while the path already answers the new bytes. A failed attempt whose public copy failed and whose
-path could not get the earlier bytes back leaves the new bytes at the path, so it moves `crop` to them
-together with a new `?v=` while the entry is `error` or `failed`. The first render at a path that never
+path could not get the earlier bytes back leaves the new bytes at the path and counts as a render, so
+it moves `crop` to them while the entry is `error` or `failed`, with a new `?v=` from the path's second
+render on; it writes them to the public copy too, and if that write fails as well, the public copy
+keeps the earlier bytes until a later write puts the new ones there and gives the path a new `?v=`.
+The first render at a path that never
 held a render before changes `crop` from `null` to its cut and keeps the plain path, without a `?v=`,
 since until then the path answered the original's bytes. A format change moves the size to a path with no finished render, where `crop`
 is `null` until the first render there. Two `done` variants with the same aspect ratio (up to the
-rounding of `width` and `height` to whole pixels, which is coarse enough to match two variants a
-few dozen pixels high that differ by about one pixel of their cut) and an equal `crop` show the same
-picture, so a
+rounding of `width` and `height` to whole pixels, which lets two variants of any size match whose
+cuts differ by a few pixels across the smaller one) and an equal `crop` show the same picture, so a
 `srcset` combines only such variants, except while a write that stalled past `staleAfterMs` is being
 rendered again: until that render the path may answer the stalled bytes under the current `?v=`, and
 the render after it gives a new `?v=` and raises `images.variantsChanged`; if that render fails, the

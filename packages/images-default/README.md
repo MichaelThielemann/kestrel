@@ -241,8 +241,9 @@ original's bytes. Once it is there, `variants[].path` ends in a new `?v=<token>`
 `images.variantsChanged` is raised for the item, so pages that show it render again with the new
 URL. The token is a short hash of the variant's row and the number of its finished renders
 (`renders`), which a render raises in the same conditional update that marks the row `done`, or
-that records a failed attempt whose bytes stayed at the path (described under "Focus and crop"). So
-the query changes only once new bytes are at the path, and it never comes back for that path: a crop
+that records a failed attempt whose bytes stayed at the path (described under "Focus and crop"),
+and which a write that puts other bytes into a variant's public copy raises right after it, together
+with `images.variantsChanged`. So the query changes only once new bytes are at the path, and it never comes back for that path: a crop
 set back to an earlier one, or a framing reset to the centre, gets a URL of its own, and a URL
 that a cache filled stays bound to the bytes it got then. The same holds for any later render at
 the path, after a changed size or format, a repair by `images.resume`, or a size registered again
@@ -283,7 +284,8 @@ It changes a variant row only while the row is still as it read it, so it never 
 records a failed attempt or marks a row `done` over what the new holder wrote. A single write of a
 path that stalls that long can still land after the new holder's; the stalled holder notices when
 it has finished its writes (after a failed public copy, once it put the earlier bytes back), marks
-the item, and every size of the item that is `done`, `error` or `failed` renders again. Until then
+the item, and every size of the item that is `done`, `error` or `failed` renders again, except the
+sizes of an original that cannot be decoded, which stay `failed` with `cannot decode`. Until then
 that path answers the stalled bytes, and a cache that fetched it meanwhile keeps them under the
 current `?v=`; the render after it gives the path a new `?v=` and raises `images.variantsChanged`. If
 that render fails, the size goes to `error` and then `failed` while its path keeps answering the
@@ -319,9 +321,15 @@ render at a path that never held a render before changes `crop` from `null` to i
 plain path, without a `?v=`. A row whose rendered crop is missing or does not parse reports `null`
 as well. A render that fails keeps the entry on the crop and `?v=` of the bytes the path still
 answers, also once it is `failed`. When its public copy fails and the earlier bytes cannot be put
-back at the path either, the path answers the new render, so the failed attempt moves the entry to
-that render's crop and a new `?v=`; the public copy may hold the earlier bytes until it is written
-again. After a write that stalled past `staleAfterMs` landed late and the render after it failed, an
+back at the path either, the path answers the new render, so the failed attempt counts as a render:
+the entry moves to that render's crop, and the path gets a new `?v=` from its second render on,
+while a first render at a path that never held a render keeps the plain path. The public copy is
+then written with that render too. If that write fails as well, the public copy keeps the earlier
+bytes until it is written again, and a cache that fetches the entry's URL from the public copy
+meanwhile stores those bytes under it; the write that puts other bytes into a public copy gives the
+path a new `?v=` and raises `images.variantsChanged`. A size whose render stays at its private path
+without being recorded, because the attempt was its first and nothing of it could be taken back,
+keeps `crop` `null`, and its path answers the original's bytes. After a write that stalled past `staleAfterMs` landed late and the render after it failed, an
 `error` or `failed` entry lists the crop and `?v=` of the render recorded before the stalled write
 landed, while its path answers the stalled bytes. For a
 `cover` size whose ratio equals the original's, the centred cut is the whole image, so its variants
@@ -333,10 +341,10 @@ matches only up to that rounding: two variants have the same aspect ratio when t
 `(width - 0.5) / (height + 0.5)` to `(width + 0.5) / (height - 0.5)` overlap, as for 1000 × 563 and
 320 × 180, both 16:9. A `srcset` should combine only such variants: one that mixes crops shows a
 different picture depending on the viewport and pixel density, and one that leaves out an
-interchangeable variant renders blurry on high-density screens. The ratio test is approximate,
-equal up to about one pixel of the smaller variant: from a 1000 × 600 original, an `inside` 16 × 10
-of the whole image and a `cover` 24 × 16 of its centred 3:2 cut both pass it with `crop` `null`.
-Leaving variants only a few dozen pixels high out of the comparison avoids such matches.
+interchangeable variant renders blurry on high-density screens. The ratio test is approximate:
+two variants that pass it can differ by a few pixels across the smaller one, about two pixels per
+side for a wide variant, at any size. From a 2000 × 800 original, an `inside` 799 × 320 of the whole
+image and a `cover` 798 × 321 of its centred cut, 1989 pixels wide, both pass it with `crop` `null`.
 This holds for `done` entries only: a `pending` entry may still answer the previous render with
 dimensions planned for the next one, or already the next render's bytes just before it is marked
 `done`, and an entry whose path has not had a render yet answers the original's bytes. It has one
@@ -469,7 +477,9 @@ write fails answers the error and counts nothing). A render whose public copy ca
 whose check after writing it fails, puts the earlier render back at the private path and the public
 copy; when the path had none, it removes its bytes from the private path and writes the original's
 bytes to the public copy. The origin and the public copy then answer the same bytes under the row's
-`?v=`; the item keeps a request that `images.resume` serves. The last failure sets `state: "failed"`
+`?v=`; the item keeps a request that `images.resume` serves. When the private path cannot get its
+earlier bytes back, it writes the new render to the public copy instead, so both answer the render
+the failed attempt records (see "Focus and crop"). The last failure sets `state: "failed"`
 instead of `"error"`, and generate/sync/resume skip the variant from then on, so one broken original
 cannot burn the whole budget of the job forever. `images.serve` does not hide such a variant behind
 the original: for a size that has never rendered at its path it keeps answering with the original's
