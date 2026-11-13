@@ -4,7 +4,6 @@ import {
   EMPTY_FRAMING,
   centredCrop,
   cropForRatio,
-  cropToken,
   effectiveCrop,
   focusFits,
   formatCrop,
@@ -160,7 +159,7 @@ describe("focusFits", () => {
   });
 });
 
-describe("formatCrop, parseCrop and cropToken", () => {
+describe("formatCrop and parseCrop", () => {
   it("round-trips a crop and stores the centre as the empty string", () => {
     const crop = { left: 12, top: 0, width: 640, height: 360 };
     expect(formatCrop(crop)).toBe("12,0,640,360");
@@ -171,13 +170,6 @@ describe("formatCrop, parseCrop and cropToken", () => {
     expect(parseCrop(undefined)).toBeNull();
     expect(parseCrop("1,2,0,4")).toBeNull();
     expect(parseCrop("1,2,3")).toBeNull();
-  });
-
-  it("gives a short token that is stable for a crop and differs between crops", () => {
-    const a = cropToken({ left: 0, top: 0, width: 100, height: 100 });
-    expect(a).toMatch(/^[0-9a-z]{1,8}$/);
-    expect(cropToken({ left: 0, top: 0, width: 100, height: 100 })).toBe(a);
-    expect(cropToken({ left: 1, top: 0, width: 100, height: 100 })).not.toBe(a);
   });
 });
 

@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
@@ -12,7 +15,6 @@ import { failure } from "@michaelthielemann/kestrel/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import { DEFAULT_RENDER_TIMEOUT_MS, FRAMING, HIDDEN, ITEMS, JOBS, RETIRED, VARIANTS, createImages, whenIdle, type Config, type FramingRow, type Images, type ItemLease, type Job, type Variant } from "./impl.ts";
-import { cropToken, parseCrop } from "./framing.ts";
 import type { PixelCrop } from "./framing.ts";
 import type { Renderer } from "./generate.ts";
 import type { Size } from "./sizes.ts";
@@ -136,6 +138,14 @@ function heldRenders(held: number): { render: Renderer; gates: Array<ReturnType<
 }
 
 const CORNER_FOCUS = { focus: { x: 0, y: 0, w: 0.1, h: 0.1 } };
+const SQUARE_PATH = "/media/m1/variants/square.webp";
+const VERSIONED_SQUARE = /^\/media\/m1\/variants\/square\.webp\?v=[0-9a-z]+$/;
+
+function expectSquarePath(images: Images, square: Variant): void {
+  const path = images.publicPath("m1", square);
+  if ((square.renders ?? 0) >= 2) expect(path).toMatch(VERSIONED_SQUARE);
+  else expect(path).toBe(SQUARE_PATH);
+}
 
 describe("images/default images.setFraming", () => {
   it("stores the framing and answers it with the id", async () => {
@@ -251,7 +261,7 @@ describe("images/default re-cropping at the same path", () => {
     const after = await rowsBySize(w);
     expect(after.get("wide-small")).toMatchObject({ state: "done", crop: "0,0,1000,563", renderedCrop: "0,0,1000,563" });
     expect(after.get("square")).toMatchObject({ state: "done", crop: "0,0,600,600", renderedCrop: "0,0,600,600" });
-    expect(images.publicPath("m1", after.get("wide-small")!)).toBe(`/media/m1/variants/wide-small.webp?v=${cropToken(wideCrop)}`);
+    expect(images.publicPath("m1", after.get("wide-small")!)).toMatch(/^\/media\/m1\/variants\/wide-small\.webp\?v=[0-9a-z]+$/);
     expect(copyOf(w, "wide-small.webp")).not.toBe(oldBytes);
     expect(copyOf(w, "wide-small.webp")).toContain("0,0,1000,563");
     expect(w.events.emitted).toEqual([{ name: "images.variantsChanged", ids: ["m1"] }]);
@@ -274,12 +284,12 @@ describe("images/default re-cropping at the same path", () => {
     await images.close();
   });
 
-  it("framing an item back to the centre re-renders without a crop and drops ?v=", async () => {
+  it("framing an item back to the centre re-renders without a crop under a ?v= of its own", async () => {
     const w = await world();
     const images = await w.open();
     expectOk(await images.setFraming("m1", CORNER_FOCUS));
     expectOk(await images.generate("m1"));
-    expect(images.publicPath("m1", (await rowsBySize(w)).get("square")!)).toMatch(/\?v=/);
+    expect(images.publicPath("m1", (await rowsBySize(w)).get("square")!)).toBe(SQUARE_PATH);
     w.renders.length = 0;
 
     expectOk(await images.setFraming("m1", { focus: { x: 0.5, y: 0.5, w: 0, h: 0 } }));
@@ -287,7 +297,7 @@ describe("images/default re-cropping at the same path", () => {
     expect(w.renders.map((r) => r.crop)).toEqual([null, null, null]);
     const square = (await rowsBySize(w)).get("square")!;
     expect(square).toMatchObject({ state: "done", crop: "", renderedCrop: "" });
-    expect(images.publicPath("m1", square)).toBe("/media/m1/variants/square.webp");
+    expect(images.publicPath("m1", square)).toMatch(VERSIONED_SQUARE);
     await images.close();
   });
 
@@ -357,6 +367,173 @@ describe("images/default re-cropping at the same path", () => {
     w.events.emitted.length = 0;
     expectOk(await images.generate("m1"));
     expect(w.events.emitted).toEqual([]);
+    await images.close();
+  });
+});
+
+describe("images/default ?v= of a re-rendered variant", () => {
+  const A = { crops: { "1:1": { x: 0, y: 0, w: 0.6, h: 1 } } };
+  const B = { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } };
+
+  async function squarePath(w: World, images: Images): Promise<string> {
+    return images.publicPath("m1", (await rowsBySize(w)).get("square")!);
+  }
+
+  it("keeps the plain path after the first render, with and without a crop", async () => {
+    const unframed = await world();
+    const plain = await unframed.open();
+    expectOk(await plain.generate("m1"));
+    for (const row of (await rowsBySize(unframed)).values()) expect(plain.publicPath("m1", row)).toBe(`/media/m1/variants/${row.size}.webp`);
+    await plain.close();
+
+    const framed = await world();
+    const images = await framed.open([SQUARE]);
+    expectOk(await images.setFraming("m1", A));
+    expectOk(await images.generate("m1"));
+    expect((await rowsBySize(framed)).get("square")).toMatchObject({ state: "done", renderedCrop: "0,0,600,600" });
+    expect(await squarePath(framed, images)).toBe(SQUARE_PATH);
+    await images.close();
+  });
+
+  it("gives a crop set back to an earlier one a path it never had", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    const paths: string[] = [];
+    for (const framing of [A, B, A]) {
+      expectOk(await images.setFraming("m1", framing));
+      expectOk(await images.generate("m1"));
+      paths.push(await squarePath(w, images));
+    }
+    expect(paths[0]).toBe(SQUARE_PATH);
+    expect(paths[1]).toMatch(VERSIONED_SQUARE);
+    expect(paths[2]).toMatch(VERSIONED_SQUARE);
+    expect(new Set(paths).size).toBe(3);
+    await images.close();
+  });
+
+  it("keeps a query after a reset to automatic, different from the query before it", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.generate("m1"));
+    expect(await squarePath(w, images)).toBe(SQUARE_PATH);
+    expectOk(await images.setFraming("m1", A));
+    expectOk(await images.generate("m1"));
+    const cropped = await squarePath(w, images);
+    expect(cropped).toMatch(VERSIONED_SQUARE);
+
+    expectOk(await images.setFraming("m1", {}));
+    expectOk(await images.generate("m1"));
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", crop: "", renderedCrop: "" });
+    const reset = await squarePath(w, images);
+    expect(reset).toMatch(VERSIONED_SQUARE);
+    expect(reset).not.toBe(cropped);
+    await images.close();
+  });
+
+  it("never hands out the same path twice over many re-renders", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.generate("m1"));
+    const paths = [await squarePath(w, images)];
+    for (const framing of [A, B, {}, A, {}, B, A]) {
+      expectOk(await images.setFraming("m1", framing));
+      expectOk(await images.generate("m1"));
+      paths.push(await squarePath(w, images));
+    }
+    expect(new Set(paths).size).toBe(paths.length);
+    await images.close();
+  });
+
+  it("changes the query only once the new render is at the path", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.setFraming("m1", A));
+    expectOk(await images.generate("m1"));
+    expectOk(await images.setFraming("m1", B));
+    expectOk(await images.generate("m1"));
+    const before = await squarePath(w, images);
+
+    expectOk(await images.setFraming("m1", A));
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "pending", renderedCrop: "400,0,600,600" });
+    expect(await squarePath(w, images)).toBe(before);
+    expect(copyOf(w, "square.webp")).toContain("400,0,600,600");
+    expectOk(await images.generate("m1"));
+    expect(copyOf(w, "square.webp")).toContain("|0,0,600,600|");
+    expect(await squarePath(w, images)).not.toBe(before);
+    await images.close();
+  });
+
+  it("raises images.variantsChanged once a re-render with an unchanged crop changed the path", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.generate("m1"));
+    const before = await squarePath(w, images);
+    expectOk(await w.db.updateMany<Variant>(VARIANTS, { mediaId: "m1" }, { state: "pending" }));
+    w.events.emitted.length = 0;
+    expectOk(await images.generate("m1"));
+    expect(await squarePath(w, images)).toMatch(VERSIONED_SQUARE);
+    expect(await squarePath(w, images)).not.toBe(before);
+    expect(w.events.emitted).toEqual([{ name: "images.variantsChanged", ids: ["m1"] }]);
+    await images.close();
+  });
+
+  it("changes the query when a sync job or images.resume renders the re-crop in the background", async () => {
+    const w = await world();
+    const planner = await w.open([SQUARE]);
+    expectOk(await planner.generate("m1"));
+    expectOk(await planner.setFraming("m1", A));
+    expect(await squarePath(w, planner)).toBe(SQUARE_PATH);
+    expectOk(await planner.sync());
+    await whenIdle(planner);
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", renderedCrop: "0,0,600,600" });
+    const synced = await squarePath(w, planner);
+    expect(synced).toMatch(VERSIONED_SQUARE);
+
+    expectOk(await planner.setFraming("m1", B));
+    const later = await w.open([SQUARE], undefined, { now: () => 1001 + CONFIG.staleAfterMs });
+    expectOk(await later.resume());
+    await whenIdle(later);
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done", renderedCrop: "400,0,600,600" });
+    const resumed = await squarePath(w, later);
+    expect(resumed).toMatch(VERSIONED_SQUARE);
+    expect(resumed).not.toBe(synced);
+    for (const images of [planner, later]) await images.close();
+  });
+
+  it("gives a size registered again after a prune a query on its first render, since its path held bytes before", async () => {
+    const w = await world();
+    const images = await w.open([THUMB, SQUARE]);
+    expectOk(await images.generate("m1"));
+    expect(await squarePath(w, images)).toBe(SQUARE_PATH);
+    const narrowed = await w.open([THUMB]);
+    expectOk(await narrowed.prune(["square"]));
+    expect((await rowsBySize(w)).has("square")).toBe(false);
+
+    const grown = await w.open([THUMB, SQUARE]);
+    expectOk(await grown.plan(["m1"]));
+    expectOk(await grown.generate("m1"));
+    expect((await rowsBySize(w)).get("square")).toMatchObject({ state: "done" });
+    expect(await squarePath(w, grown)).toMatch(VERSIONED_SQUARE);
+    for (const open of [images, narrowed, grown]) await open.close();
+  });
+
+  it("exports each variant under its plain path with the bytes of its last render", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    for (const framing of [A, B, A]) {
+      expectOk(await images.setFraming("m1", framing));
+      expectOk(await images.generate("m1"));
+    }
+    expect(await squarePath(w, images)).toMatch(VERSIONED_SQUARE);
+    const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "images-export-"));
+    try {
+      expect(expectOk(await images.exportTo(dir)).written).toBe(1);
+      const files = await readdir(dir, { recursive: true });
+      expect(files).toEqual(["photo.jpg.square.webp"]);
+      expect(await readFile(join(dir, "photo.jpg.square.webp"), "utf8")).toContain("|0,0,600,600|");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
     await images.close();
   });
 });
@@ -453,7 +630,7 @@ describe("images/default re-cropping while a render runs", () => {
 
       const square = (await rowsBySize(w)).get("square")!;
       expect(square, lateWrite).toMatchObject({ state: "done", crop: "400,0,600,600", renderedCrop: "400,0,600,600" });
-      expect(other.publicPath("m1", square)).toBe(`/media/m1/variants/square.webp?v=${cropToken({ left: 400, top: 0, width: 600, height: 600 })}`);
+      expectSquarePath(other, square);
       expect(text(w.blobs.blobs.get(square.key)?.data), lateWrite).toContain("400,0,600,600");
       expect(copyOf(w, "square.webp"), lateWrite).toContain("400,0,600,600");
       expect(text(expectOk(await other.read("m1", "square.webp"))?.data)).toContain("400,0,600,600");
@@ -493,7 +670,7 @@ describe("images/default re-cropping while a render runs", () => {
 
     const square = (await rowsBySize(w)).get("square")!;
     expect(square).toMatchObject({ state: "pending", crop: "400,0,600,600", renderedCrop: "0,0,600,600" });
-    expect(other.publicPath("m1", square)).toBe(`/media/m1/variants/square.webp?v=${cropToken({ left: 0, top: 0, width: 600, height: 600 })}`);
+    expectSquarePath(other, square);
     expect(copyOf(w, "square.webp")).toContain("0,0,600,600");
 
     gates[1]!.open();
@@ -554,14 +731,14 @@ describe("images/default re-cropping while a render runs", () => {
 
     const square = (await rowsBySize(w)).get("square")!;
     expect(square).toMatchObject({ state: "done", crop: "400,0,600,600", renderedCrop: "400,0,600,600" });
-    expect(other.publicPath("m1", square)).toBe(`/media/m1/variants/square.webp?v=${cropToken({ left: 400, top: 0, width: 600, height: 600 })}`);
+    expectSquarePath(other, square);
     expect(text(w.blobs.blobs.get(square.key)?.data)).toContain("400,0,600,600");
     expect(copyOf(w, "square.webp")).toContain("400,0,600,600");
     expect(text(expectOk(await other.read("m1", "square.webp"))?.data)).toContain("400,0,600,600");
     for (const images of [first, slow, other]) await images.close();
   });
 
-  it("a render whose crop was replaced and set back meanwhile writes nothing, so the path keeps the bytes ?v= names", async () => {
+  it("a render whose crop was replaced and set back meanwhile writes nothing, and the render after it leaves that crop's bytes at the path under a new ?v=", async () => {
     const w = await world();
     const first = await w.open([SQUARE]);
     const kept = { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } };
@@ -587,7 +764,8 @@ describe("images/default re-cropping while a render runs", () => {
 
     const square = (await rowsBySize(w)).get("square")!;
     expect(square).toMatchObject({ crop: "400,0,600,600", renderedCrop: "400,0,600,600" });
-    expect(other.publicPath("m1", square)).toBe(path);
+    expect(other.publicPath("m1", square)).toMatch(VERSIONED_SQUARE);
+    expect(other.publicPath("m1", square)).not.toBe(path);
     expect(text(w.blobs.blobs.get(square.key)?.data)).toContain("400,0,600,600");
     expect(copyOf(w, "square.webp")).toContain("400,0,600,600");
     for (const images of [first, slow, other]) await images.close();
@@ -625,7 +803,7 @@ describe("images/default re-cropping while a render runs", () => {
 
     const square = (await rowsBySize(w)).get("square")!;
     expect(square).toMatchObject({ state: "pending", crop: "400,0,600,600", renderedCrop: "0,0,600,600" });
-    expect(other.publicPath("m1", square)).toBe(`/media/m1/variants/square.webp?v=${cropToken({ left: 0, top: 0, width: 600, height: 600 })}`);
+    expectSquarePath(other, square);
     expect(text(w.blobs.blobs.get(square.key)?.data)).toContain("0,0,600,600");
     expect(w.events.emitted).toEqual([{ name: "images.variantsChanged", ids: ["m1"] }]);
 
@@ -909,7 +1087,7 @@ function stopAt(w: World, state: Variant["state"]): { db: Persistence; stopped: 
 async function expectRenderedWith(w: World, images: Images, crop: string): Promise<void> {
   const square = (await rowsBySize(w)).get("square")!;
   expect(square).toMatchObject({ state: "done", crop, renderedCrop: crop });
-  expect(images.publicPath("m1", square)).toBe(`/media/m1/variants/square.webp?v=${cropToken(parseCrop(crop)!)}`);
+  expectSquarePath(images, square);
   expect(text(w.blobs.blobs.get(square.key)?.data)).toContain(`|${crop}|`);
   expect(copyOf(w, "square.webp")).toContain(`|${crop}|`);
   expect(text(expectOk(await images.read("m1", "square.webp"))?.data)).toContain(`|${crop}|`);
@@ -1231,7 +1409,7 @@ describe("images/default one writer per item across processes", () => {
     expect(expectOk(await w.db.count(FRAMING, {}))).toBe(0);
     const square = (await rowsBySize(w)).get("square")!;
     expect(square).toMatchObject({ state: "done", crop: "", renderedCrop: "" });
-    expect(other.publicPath("m1", square)).toBe("/media/m1/variants/square.webp");
+    expectSquarePath(other, square);
     expect(copyOf(w, "square.webp")).toContain("|centre|");
     expect(expectOk(await other.framingsOf(["m1"])).get("m1")!.ratios[0]).toMatchObject({ manual: false, crop: null });
     for (const images of [slow, other]) await images.close();
@@ -1292,7 +1470,7 @@ describe("images/default one writer per item across processes", () => {
 
     const square = (await rowsBySize(w)).get("square")!;
     expect(square).toMatchObject({ state: "error", crop: "400,0,600,600", renderedCrop: "0,0,600,600", attempts: 1 });
-    expect(other.publicPath("m1", square)).toBe(`/media/m1/variants/square.webp?v=${cropToken({ left: 0, top: 0, width: 600, height: 600 })}`);
+    expectSquarePath(other, square);
     expect(text(w.blobs.blobs.get(square.key)?.data)).toContain("|0,0,600,600|");
     expect(copyOf(w, "square.webp")).toContain("|0,0,600,600|");
     expect(text(expectOk(await other.read("m1", "square.webp"))?.data)).toContain("|0,0,600,600|");
@@ -1504,7 +1682,7 @@ describe("images/default writes of a holder whose item or row changed meanwhile"
       expect(square.state).toBe("error");
       if (before === "rendered") {
         expect(square.renderedCrop).toBe("0,0,600,600");
-        expect(other.publicPath("m1", square)).toBe(`/media/m1/variants/square.webp?v=${cropToken({ left: 0, top: 0, width: 600, height: 600 })}`);
+        expectSquarePath(other, square);
         expect(text(w.blobs.blobs.get(square.key)?.data)).toContain("|0,0,600,600|");
         expect(copyOf(w, "square.webp")).toContain("|0,0,600,600|");
       } else {

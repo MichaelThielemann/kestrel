@@ -262,7 +262,7 @@ class Run {
       const rows = expectOk(await this.db.findMany<Variant>(VARIANTS, { mediaId: id })).items;
       if (listed.available && rows.some((row) => row.state === "planned")) problems.push(`${id} is available with a planned row`);
       const seen = this.everListed.get(id) ?? new Set<string>();
-      for (const variant of listed.variants) seen.add(variant.path.slice(variant.path.lastIndexOf("/") + 1));
+      for (const variant of listed.variants) seen.add(variant.path.slice(variant.path.lastIndexOf("/") + 1).replace(/\?v=[0-9a-z]+$/, ""));
       this.everListed.set(id, seen);
       for (const file of seen) {
         if (!this.blobs.blobs.has(`site/media/${id}/variants/${file}`)) problems.push(`listed ${id}/variants/${file} has no copy`);

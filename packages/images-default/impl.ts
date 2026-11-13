@@ -13,7 +13,7 @@ import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import type { z } from "zod";
 import { framingView, type FramingView } from "./framed.ts";
-import { EMPTY_FRAMING, cropToken, effectiveCrop, formatCrop, parseCrop, parseFraming, type Framing, type PixelCrop, type Rect } from "./framing.ts";
+import { EMPTY_FRAMING, effectiveCrop, formatCrop, parseCrop, parseFraming, type Framing, type PixelCrop, type Rect } from "./framing.ts";
 import { contentTypeOf, eligible, ELIGIBLE, render } from "./generate.ts";
 import type { Planned, Rendered, Renderer } from "./generate.ts";
 import { orientedOriginalDimensions, plannedDimensions, plannedExt, plannedFormat } from "./plan.ts";
@@ -68,6 +68,8 @@ export interface Variant extends Document {
   crop: string | null;
   /** The crop of the bytes the last finished render left at the path, in the form of `crop`; `""` or `null` for the centre or no render yet. */
   renderedCrop: string | null;
+  /** How many renders of the row were marked `done`, counting one more when the row was placed at a path that held bytes before; `0` or `null` for none. From `2` on, the variant's public URL carries `?v=`. */
+  renders: number | null;
   /** The width of the original after its EXIF orientation, as the row was planned; `0` or `null` when it is not known. */
   originalWidth: number | null;
   /** The height of the original after its EXIF orientation, as the row was planned; `0` or `null` when it is not known. */
@@ -187,7 +189,7 @@ export interface Images {
   variantCounts(mediaIds: string[]): Promise<Result<Map<string, VariantCounts>, KestrelError>>;
   read(mediaId: string, file: string): Promise<Result<VariantBlob | null, KestrelError>>;
   exportTo(dir: string): Promise<Result<{ written: number; skipped: number }, KestrelError>>;
-  /** The variant's public URL, `<publicPath>/<id>/variants/<file>`; once a render with a crop is at that path, followed by `?v=<cropToken>` of that crop. */
+  /** The variant's public URL, `<publicPath>/<id>/variants/<file>`; once a further render is at a path that held bytes before (`renders` from `2` on), followed by `?v=<token>`, which no other render of that path is given. */
   publicPath(mediaId: string, variant: Variant): string;
   publicCopyEnabled(): boolean;
   syncPublic(): Promise<Result<PublicSync, KestrelError>>;
@@ -205,7 +207,7 @@ export interface Images {
   close(): Promise<void>;
 }
 
-type NewVariant = Pick<Variant, "mediaId" | "size" | "slot" | "spec" | "width" | "height" | "format" | "key" | "bytes" | "state" | "error" | "attempts" | "updatedAt" | "crop" | "renderedCrop" | "originalWidth" | "originalHeight">;
+type NewVariant = Pick<Variant, "mediaId" | "size" | "slot" | "spec" | "width" | "height" | "format" | "key" | "bytes" | "state" | "error" | "attempts" | "updatedAt" | "crop" | "renderedCrop" | "renders" | "originalWidth" | "originalHeight">;
 
 interface Lease {
   mediaId: string;
@@ -307,6 +309,15 @@ function renderedCropOf(row: Pick<Variant, "renderedCrop">): string {
   return row.renderedCrop ?? "";
 }
 
+function versionToken(id: string, renders: number): string {
+  let hash = 0x811c9dc5;
+  for (const char of `${id}:${renders}`) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(36);
+}
+
 function sameRect(a: Rect | null, b: Rect | null): boolean {
   if (a === null || b === null) return a === b;
   return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
@@ -329,7 +340,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
 
   const collections: Array<[string, Schema]> = [
     [SIZES, { name: "string", width: "number", height: "number", fit: "string", format: "string", quality: "number", source: "string", updatedAt: "number" }],
-    [VARIANTS, { mediaId: "string", size: "string", slot: { type: "string", unique: true }, spec: "string", width: "number", height: "number", format: "string", key: "string", bytes: "number", state: "string", error: "json", attempts: "number", updatedAt: "number", crop: "string", renderedCrop: "string", originalWidth: "number", originalHeight: "number" }],
+    [VARIANTS, { mediaId: "string", size: "string", slot: { type: "string", unique: true }, spec: "string", width: "number", height: "number", format: "string", key: "string", bytes: "number", state: "string", error: "json", attempts: "number", updatedAt: "number", crop: "string", renderedCrop: "string", renders: "number", originalWidth: "number", originalHeight: "number" }],
     [JOBS, { state: "string", total: "number", done: "number", failed: "number", cursor: "string", startedAt: "number", updatedAt: "number", finishedAt: "json", error: "json" }],
     [RETIRED, { mediaId: "string", file: "string", slot: { type: "string", unique: true }, retiredAt: "number" }],
     [HIDDEN, { mediaId: { type: "string", unique: true }, hidden: "boolean", version: "number", updatedAt: "number" }],
@@ -514,7 +525,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   }
 
   function asRead(row: Variant): Filter {
-    return { id: row.id, key: row.key, spec: row.spec, state: row.state, crop: row.crop ?? null, attempts: row.attempts };
+    return { id: row.id, key: row.key, spec: row.spec, state: row.state, crop: row.crop ?? null, attempts: row.attempts, renders: row.renders ?? null };
   }
 
   async function updateAsRead(row: Variant, patch: Partial<Variant>): Promise<Result<Variant | null, KestrelError>> {
@@ -974,7 +985,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return decodable && framing !== null ? effectiveCrop(framing, size, ow, oh) : null;
   }
 
-  function newRow(item: MediaFile, size: Size, decodable: boolean, ow: number, oh: number, framing: Framing | null): NewVariant {
+  function newRow(item: MediaFile, size: Size, decodable: boolean, ow: number, oh: number, framing: Framing | null, renders = 0): NewVariant {
     const crop = plannedCrop(size, decodable, ow, oh, framing);
     const planned = decodable ? plannedDimensions(size, ow, oh, crop) : { width: item.width ?? 0, height: item.height ?? 0 };
     return {
@@ -993,9 +1004,21 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       updatedAt: now(),
       crop: formatCrop(crop),
       renderedCrop: "",
+      renders,
       originalWidth: decodable ? ow : 0,
       originalHeight: decodable ? oh : 0,
     };
+  }
+
+  async function newRows(item: MediaFile, sizes: Size[], decodable: boolean, ow: number, oh: number, framing: Framing | null): Promise<Result<NewVariant[], KestrelError>> {
+    const rows: NewVariant[] = [];
+    for (const size of sizes) {
+      const row = newRow(item, size, decodable, ow, oh, framing);
+      const retired = await db.findOne<Retired>(RETIRED, { slot: slotOf(item.id, fileOf(row)) });
+      if (isErr(retired)) return retired;
+      rows.push(retired.value === null ? row : { ...row, renders: 1 });
+    }
+    return ok(rows);
   }
 
   async function planItem(mediaId: string, lease: Lease): Promise<Result<{ changed: boolean }, KestrelError>> {
@@ -1056,7 +1079,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     let changed = missing.length > 0 || respec.length > 0 || reformat.length > 0 || toPlace.length > 0;
 
     if (missing.length > 0) {
-      const created = await db.createMany<Variant>(VARIANTS, missing.map((size) => newRow(item, size, decodable, ow, oh, framing)));
+      const fresh = await newRows(item, missing, decodable, ow, oh, framing);
+      if (isErr(fresh)) return fresh;
+      const created = await db.createMany<Variant>(VARIANTS, fresh.value);
       if (isErr(created)) return created;
       touch();
       toPlace.push(...created.value);
@@ -1186,7 +1211,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       original = dims.value.original;
       const framed = await readFraming(mediaId);
       if (isErr(framed)) return framed;
-      const created = await db.createMany<Variant>(VARIANTS, missing.map((size) => newRow(item, size, decodable, ow, oh, framed.value)));
+      const fresh = await newRows(item, missing, decodable, ow, oh, framed.value);
+      if (isErr(fresh)) return fresh;
+      const created = await db.createMany<Variant>(VARIANTS, fresh.value);
       if (isErr(created)) return created;
       touch();
       for (const row of created.value) byName.set(row.size, row);
@@ -1309,10 +1336,11 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const kept = await wroteHeld(lease);
     if (isErr(kept) || !kept.value) return isErr(kept) ? kept : ok(null);
 
-    const committed = await updateAsRead(row, { state: "done", bytes: rendered.data.byteLength, attempts, error: null, updatedAt: now(), renderedCrop: cropOf(row) });
+    const renders = (row.renders ?? 0) + 1;
+    const committed = await updateAsRead(row, { state: "done", bytes: rendered.data.byteLength, attempts, error: null, updatedAt: now(), renderedCrop: cropOf(row), renders });
     if (isErr(committed)) return committed;
     if (committed.value === null) return dropStaleRender(item, row, original);
-    if (cropOf(row) !== renderedCropOf(row)) signals.recrop();
+    if (renders >= 2 || cropOf(row) !== renderedCropOf(row)) signals.recrop();
     return committed;
   }
 
@@ -1967,8 +1995,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
 
     publicPath(mediaId, variant) {
       const path = `${config.publicPath}/${mediaId}/variants/${fileOf(variant)}`;
-      const rendered = parseCrop(variant.renderedCrop);
-      return rendered === null ? path : `${path}?v=${cropToken(rendered)}`;
+      const renders = variant.renders ?? 0;
+      return renders < 2 ? path : `${path}?v=${versionToken(variant.id, renders)}`;
     },
 
     publicCopyEnabled() {

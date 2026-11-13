@@ -161,16 +161,6 @@ export function parseCrop(value: string | null | undefined): PixelCrop | null {
   return { left, top, width, height };
 }
 
-/** A short token for a crop, the same for the same crop: a 32-bit FNV-1a hash of `formatCrop`, in base 36. */
-export function cropToken(crop: PixelCrop): string {
-  let hash = 0x811c9dc5;
-  for (const char of formatCrop(crop)) {
-    hash ^= char.charCodeAt(0);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash.toString(36);
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

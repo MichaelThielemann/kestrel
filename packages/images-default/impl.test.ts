@@ -435,7 +435,7 @@ describe("images/default images.variantsChanged outside an upload", () => {
     expect(boundaryCast<{ ids: string[] }>(events.emitted[0]!.data, "host").ids.sort()).toEqual(ids);
   });
 
-  it("a format change applied by the sync job raises one event per chunk with the ids it changed", async () => {
+  it("a format change applied by the sync job raises one event per chunk with the ids it changed, and one per item once its render changed the variant's path", async () => {
     const events = fakeEvents();
     const { open } = await threeRendered(events);
     events.emitted.length = 0;
@@ -443,7 +443,7 @@ describe("images/default images.variantsChanged outside an upload", () => {
     reformed.attach(introspectionOf(manifestWithPipelines([{ pipeline: "serveImageVariant", module: "images/default", step: "images.serve" }])));
     await whenIdle(reformed);
     const updates = events.emitted.filter((e) => e.name === "images.variantsChanged").map((e) => boundaryCast<{ ids: string[] }>(e.data, "host").ids);
-    expect(updates).toEqual([["a", "b"], ["c"]]);
+    expect(updates).toEqual([["a"], ["b"], ["a", "b"], ["c"], ["c"]]);
   });
 
   it("without an events provider nothing is raised and the prune still succeeds", async () => {

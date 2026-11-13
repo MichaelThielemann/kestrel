@@ -13,7 +13,6 @@ import { err, ok } from "@michaelthielemann/kestrel/result";
 import { validateSchema } from "@michaelthielemann/kestrel/schema";
 import module from "./module.ts";
 import { DEFAULT_RENDER_TIMEOUT_MS, createImages, type Config, type Images } from "./impl.ts";
-import { cropToken, parseCrop } from "./framing.ts";
 import type { PixelCrop } from "./framing.ts";
 import type { Renderer } from "./generate.ts";
 import type { Size } from "./sizes.ts";
@@ -142,7 +141,7 @@ describe("images/default setFraming and attach steps", () => {
       ],
     });
     const square = item.variants.find((v) => v.size === "square")!;
-    expect(square.path).toBe(`/media/m1/variants/square.webp?v=${cropToken(parseCrop("400,0,600,600")!)}`);
+    expect(square.path).toBe("/media/m1/variants/square.webp");
     expect(validateSchema(description.extendsItems, single.result)).toEqual([]);
 
     const list = expectOk(await steps.attach(ctx({ result: { items: [{ id: "m1", contentType: "image/jpeg" }, { id: "doc", contentType: "application/pdf" }] } })));
@@ -150,6 +149,33 @@ describe("images/default setFraming and attach steps", () => {
     expect(items[0]).toMatchObject({ focus: { x: 0, y: 0, w: 0.5, h: 0.2 } });
     expect(items[1]).toMatchObject({ focus: null, framing: { focus: null, crops: {}, width: null, height: null, ratios: [] } });
     for (const entry of items) expect(validateSchema(description.extendsItems, entry)).toEqual([]);
+    await images.close();
+  });
+
+  it("generate and attach answer a path that changes with every re-render, also when a crop is set back, and keep it after a reset", async () => {
+    interface GenerateSteps extends Steps {
+      generate: Step;
+    }
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    const steps = boundaryCast<GenerateSteps>(module.steps!(images), "host");
+    const description = boundaryCast<{ output: Record<string, unknown> }>(module.describe!(images).generate, "host");
+    const left = { crops: { "1:1": { x: 0, y: 0, w: 0.6, h: 1 } } };
+    const right = { crops: { "1:1": { x: 0.4, y: 0, w: 0.6, h: 1 } } };
+    const paths: string[] = [];
+    for (const framing of [left, right, left, {}]) {
+      expectOk(await images.setFraming("m1", framing));
+      const generated = expectOk(await steps.generate(ctx({ params: { id: "m1" } })));
+      expect(validateSchema(description.output, generated.result)).toEqual([]);
+      const rows = boundaryCast<{ variants: Array<{ size: string; state: string; renders: number }> }>(generated.result, "host").variants;
+      expect(rows).toEqual([expect.objectContaining({ size: "square", state: "done", renders: paths.length + 1 })]);
+      const attached = expectOk(await steps.attach(ctx({ result: { id: "m1", contentType: "image/jpeg" } })));
+      const square = boundaryCast<{ variants: Array<{ size: string; path: string }> }>(attached.result, "host").variants.find((v) => v.size === "square")!;
+      paths.push(square.path);
+    }
+    expect(paths[0]).toBe("/media/m1/variants/square.webp");
+    for (const path of paths.slice(1)) expect(path).toMatch(/^\/media\/m1\/variants\/square\.webp\?v=[0-9a-z]+$/);
+    expect(new Set(paths).size).toBe(4);
     await images.close();
   });
 });
