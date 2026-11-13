@@ -647,10 +647,17 @@ query), and `width`/`height` are the planned dimensions, present in
 every state, not only once the render is `done`. `crop` is the part of the original, after its EXIF
 orientation, that the bytes of the last finished render at `path` show, `{ left, top, width, height }`
 in pixels, or `null` for the whole image (an `inside` size), the centred cut of the size's ratio, or a
-variant with no finished render yet. It changes only with the render that marks the variant `done`,
-the same render that gives a path which held bytes before its new `?v=`. Two `done`
-variants with the same aspect ratio and an equal `crop` show the same picture, so a `srcset` combines
-only such variants (see [Focus and crop](../packages/images-default/README.md#focus-and-crop)). `variants[]` never lists a size whose path has no
+variant with no finished render yet. At an unchanged path it changes only with the render that marks
+the variant `done`, the same render that gives the path its new `?v=`; that render writes its bytes
+shortly before, so for that moment a `pending` entry lists the old `crop` while the path already
+answers the new bytes. A format change moves the size to a path with no finished render, where `crop`
+is `null` until the first render there. Two `done` variants with the same aspect ratio (up to the
+rounding of `width` and `height` to whole pixels) and an equal `crop` show the same picture, so a
+`srcset` combines only such variants, except while a write that stalled past `staleAfterMs` is being
+rendered again: until that render the path may answer the stalled bytes under the current `?v=`, and
+the render after it gives a new `?v=` and raises `images.variantsChanged`. Applying this needs
+`state`, which an anonymous caller does not receive by default (see
+[Focus and crop](../packages/images-default/README.md#focus-and-crop)). `variants[]` never lists a size whose path has no
 object at all yet (still `planned`, internal to `images-default`) — every listed path always answers.
 `available` is `false` for an eligible image with at least one such size still unplaced, `true`
 otherwise (including for a non-image, an SVG or a GIF, which have no variants at all). A broken

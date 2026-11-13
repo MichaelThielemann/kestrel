@@ -306,20 +306,34 @@ Each entry of `variants[]` carries `crop`: the part of the oriented original tha
 `path` show, `{ left, top, width, height }` in the form of `framing.ratios[].crop`, or `null` when
 they show the whole image (an `inside` size) or the centred cut of their ratio. It is the crop of
 the last finished render at the path, not the one planned: while a size renders again after a
-framing change, its entry keeps the old crop together with the old `?v=`, since the path still
-answers the old variant, and both change with the render that marks it `done`. A variant that has
-not finished a render yet reports `null`, as does a row whose rendered crop is missing or does not
-parse, such as one rendered by 5.x, which cut only from the centre. For a `cover` size whose ratio
-equals the original's, the centred cut is the whole image, so its variants report `null` like the
-`inside` variants of that ratio, unless a manual crop for its key applies.
+framing change, its entry keeps the old crop together with the old `?v=` until the render that marks
+it `done`, and both change with that render. The path answers the old variant until that render's
+bytes are written, shortly before the row is marked `done`, so for that moment a `pending` entry
+lists the old crop while the path already answers the new bytes. A format change moves the size to a
+path without a finished render, where `crop` is `null` until the first render there. A variant that
+has not finished a render yet reports `null`, as does a row whose rendered crop is missing or does
+not parse, such as one rendered by 5.x, which cut only from the centre. A render that fails keeps
+the entry on the crop and `?v=` of the bytes the path still answers, also once it is `failed`. For a
+`cover` size whose ratio equals the original's, the centred cut is the whole image, so its variants
+report `null` like the `inside` variants of that ratio, unless a manual crop for its key applies.
 
-Two listed variants in state `done` with the same aspect ratio (`width`/`height`) and an equal
-`crop` show the same picture at different resolutions. A `srcset` should combine only such
+Two listed variants in state `done` with the same aspect ratio and an equal `crop` show the same
+picture at different resolutions. `width` and `height` are rounded to whole pixels, so their ratio
+matches only up to that rounding: two variants have the same aspect ratio when their ranges from
+`(width - 0.5) / (height + 0.5)` to `(width + 0.5) / (height - 0.5)` overlap, as for 1000 × 563 and
+320 × 180, both 16:9. A `srcset` should combine only such
 variants: one that mixes crops shows a different picture depending on the viewport and pixel
 density, and one that leaves out an interchangeable variant renders blurry on high-density screens.
-This holds for `done` entries only: a `pending` entry may still answer the previous render
-with dimensions planned for the next one, and an entry whose path has not had a render yet answers
-the original's bytes.
+This holds for `done` entries only: a `pending` entry may still answer the previous render with
+dimensions planned for the next one, or already the next render's bytes just before it is marked
+`done`, and an entry whose path has not had a render yet answers the original's bytes. It has one
+exception: after a write that stalled past `staleAfterMs` landed late, as described above for a
+stalled holder, a `done` entry lists the crop and `?v=` of the newer render while its path answers
+the stalled bytes, until the item renders again; that render gives the path a new `?v=` and raises
+`images.variantsChanged`. A reader needs `state` to apply the rule. Anonymous callers do not receive
+it with the grants of `examples/minimal` or the grant `kestrel upgrade` proposes, so a page built
+from such a read cannot tell a `done` entry from one whose path has no finished render yet, which
+happens while a size added to the configuration still renders.
 
 A framing outlives the trash: the item is hidden, not gone, so trash and restore keep it unchanged,
 and a render of a hidden item writes no public copy. `images.remove`, `images.removeMany` and the

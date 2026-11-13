@@ -1406,11 +1406,15 @@ Net changes since 5.8.1.
   the form of `framing.ratios[].crop`, or `null` for the whole image (an `inside` size) or the
   centred cut of the size's ratio. It is the crop of the last finished render at the path: while a
   size renders again after a framing change it keeps the old crop together with the old `?v=`, and
-  both change once the new render is done. A variant that has not finished a render yet, and a row
-  without a readable rendered crop (one rendered by 5.x, which cut only from the centre), report
-  `null`. Two listed variants in state `done` with
-  the same aspect ratio and an equal `crop` show the same picture, so a `srcset` can combine exactly
-  those.
+  both change once the new render is done; the path answers the new bytes shortly before that. A
+  variant that has not finished a render yet, one whose format changed until its first render at the
+  new path, and a row without a readable rendered crop (one rendered by 5.x, which cut only from the
+  centre), report `null`. Two listed variants in state `done` with the same aspect ratio (up to the
+  rounding of `width` and `height`) and an equal `crop` show the same picture, so a `srcset` can
+  combine exactly those, except while a write that stalled past `staleAfterMs` is being rendered
+  again: until that render the path may answer the stalled bytes under the current `?v=`, and the
+  render after it gives a new `?v=` and raises `images.variantsChanged`. Applying this needs
+  `variants[].state`, which anonymous callers do not receive by default.
   `examples/minimal` grants `variants[].crop` to anonymous media reads, and `kestrel upgrade`
   proposes it in the anonymous media grant when `images.attach` runs.
 
