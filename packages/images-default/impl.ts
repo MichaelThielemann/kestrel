@@ -897,6 +897,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       },
     );
     waitingRenders.set(mediaId, promise);
+    const forget = (): void => {
+      if (waitingRenders.get(mediaId) === promise) waitingRenders.delete(mediaId);
+    };
+    promise.then(forget, forget);
     return promise;
   }
 

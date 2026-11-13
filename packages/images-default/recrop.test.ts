@@ -2035,3 +2035,35 @@ describe("images/default work a call leaves unfinished", () => {
     }
   });
 });
+
+describe("images/default writes racing a lease-free prune or a request left on a free lease", () => {
+  it("images.generate renders the item after one failed read of its lease, and a sync job finishes past it", async () => {
+    const w = await world();
+    let failing = false;
+    const db: Persistence = {
+      ...w.db,
+      findOne: async <T extends Document>(collection: string, filter: Filter) => {
+        if (failing && collection === ITEMS) {
+          failing = false;
+          return err(failure("TRANSIENT", "database busy"));
+        }
+        return w.db.findOne<T>(collection, filter);
+      },
+    };
+    const images = await w.open([SQUARE], undefined, { db });
+    failing = true;
+    expectErr(await images.generate("m1"), "TRANSIENT");
+
+    const rendered = expectOk(await images.generate("m1"));
+    expect(rendered.map((row) => [row.size, row.state])).toEqual([["square", "done"]]);
+    w.media.add({ id: "m2", contentType: "image/jpeg", data: expectOk(await w.media.load("m1"))!.data, filename: "second.jpg", createdAt: 1000 });
+    failing = true;
+    expectErr(await images.generate("m2"), "TRANSIENT");
+    expectOk(await images.sync());
+    await whenIdle(images);
+
+    expect(expectOk(await w.db.findMany<Job>(JOBS, {})).items.map((job) => job.state)).toEqual(["done"]);
+    expect((await rowsBySize(w, "m2")).get("square")).toMatchObject({ state: "done" });
+    await images.close();
+  });
+});
