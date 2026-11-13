@@ -7171,6 +7171,9 @@
               "type": "null"
             }
           ]
+        },
+        "errors": {
+          "409": "images are shutting down"
         }
       }
     },
@@ -28099,6 +28102,9 @@
                   "type": "null"
                 }
               ]
+            },
+            "errors": {
+              "409": "images are shutting down"
             }
           }
         }
