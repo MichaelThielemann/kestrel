@@ -1335,9 +1335,10 @@ Net changes since 5.8.1.
   another process stores what it was asked to (a framing, for instance), leaves a request and
   returns, and the holder places and renders the item again before it lets go, so the rows end on
   the stored framing and `?v=` names the bytes at the path. A request left after the holder let go
-  is served by `images.resume` once `staleAfterMs` has passed. A failed `images.setFraming` plans and
-  renders the item in the background, also when it stored the framing but could not leave its
-  request; `images.resume` takes over a lease whose holder stopped once it
+  is served by `images.resume` once `staleAfterMs` has passed, except that `images.showMany` takes
+  the item itself then and writes its public copies. An `images.setFraming` that fails after it
+  stored the framing, also because it could not leave its request, places and renders the item in
+  the background; `images.resume` takes over a lease whose holder stopped once it
   has run out and serves a request left open. `variantCounts` counts a row rendered with another
   crop as `pending`.
   `images.attach` adds `focus` and `framing: { focus, crops, width, height, ratios: [{ key, sizes,
