@@ -790,10 +790,10 @@ describe("info rules", () => {
     expect(byStep.get("media.reconcile")).toContain("<prefix><id>/<name>");
   });
 
-  it("responses/breaking-step-shapes names the versioned variant path, focus and framing of images.attach", async () => {
+  it("responses/breaking-step-shapes names the versioned variant path, the variant crop, focus and framing of images.attach", async () => {
     const p = await project({ pipelines: [{ name: "getMedia", steps: ["media.get", "images.attach"] }] });
     const message = (await breakingStepShapesRule.check(contextFor(p))).find((f) => f.where.step === "images.attach")?.message;
-    for (const part of ["?v=<token>", "gets a new token with every such render", "width/height follow the crop", "gains focus and framing"]) expect(message).toContain(part);
+    for (const part of ["?v=<token>", "gets a new token with every such render", "width/height follow the crop", "each variant gains crop ({ left, top, width, height } or null, the crop its bytes show)", "gains focus and framing"]) expect(message).toContain(part);
     expect(message).not.toContain("final width/height and path");
   });
 
