@@ -11482,9 +11482,10 @@
       "module": "delivery/static",
       "factory": false,
       "description": {
-        "summary": "Mark every delivered output for a re-render when payload.build differs from the stored build or the database was restored from a backup, then store it",
+        "summary": "Mark every delivered output for a re-render when payload.build differs from the stored build or an earlier step set result._databaseRestored because this boot restored the database, then store it",
         "reads": [
-          "payload"
+          "payload",
+          "result._databaseRestored?"
         ],
         "writes": [
           "result"

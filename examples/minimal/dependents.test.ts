@@ -165,7 +165,7 @@ async function bootExample(options: Options): Promise<Example> {
     definePipeline({ name: "speakerDependents", steps: ["delivery.markDependents:speakers"] }),
     definePipeline({ name: "lineupDependents", steps: ["delivery.markDependents:lineups"] }),
     definePipeline({ name: "staleStatus", steps: ["delivery.readStaleStatus"] }),
-    definePipeline({ name: "buildCheck", steps: ["delivery.checkBuild"] }),
+    definePipeline({ name: "buildCheck", steps: ["replication.checkRestored", "delivery.checkBuild"] }),
   );
   let triggers = [...configInput.triggers];
   triggers.push(
@@ -390,7 +390,7 @@ for (const mode of ["queue", "direct"] as const) {
         expect(readFileSync(join(example.site, "robots.txt"), "utf8")).toBe("User-agent: *\nDisallow: /\n\nSitemap: http://127.0.0.1:4000/sitemap.xml\n");
 
         example.reading.delayMs = 200;
-        expect(await call(example, "buildCheck", { body: { build: "next" } })).toMatchObject({ changed: true });
+        expect(await call(example, "buildCheck", { body: { build: "next" } })).toMatchObject({ changed: true, restored: false });
         await pollUntil(async () => (await stale(example)).stale >= 25);
         const savedAt = Date.now();
         await call(example, "createPage", { token, body: { slug: "neu", title: "Neu", status: "published" } });

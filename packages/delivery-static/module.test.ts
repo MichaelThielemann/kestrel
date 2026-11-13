@@ -178,7 +178,7 @@ describe("delivery/static module via runPipeline", () => {
     put("p1", { slug__de: "kontakt", title__de: "Kontakt", status__de: "published" });
     const publish = definePipeline({ name: "publish", steps: ["seed.id", "delivery.publish:pages"] });
     await runPipeline(publish, { params: { id: "p1" } }, { modules: [{ module, instance }], steps: { "seed.id": seedId } });
-    const publishedKeys = [...blobs.blobs.keys()].filter((key) => !key.endsWith(".delivery-marker"));
+    const publishedKeys = [...blobs.blobs.keys()];
     expect(publishedKeys.length).toBeGreaterThan(0);
     const pipeline = definePipeline({ name: "unpublish", steps: ["delivery.unpublish:pages"] });
     const result = await runPipeline(pipeline, { params: { id: "p1" } }, { modules: [{ module, instance }] });
@@ -191,7 +191,7 @@ describe("delivery/static module via runPipeline", () => {
     put("p1", { slug__de: "kontakt", title__de: "Kontakt", status__de: "published" });
     const publish = definePipeline({ name: "publish", steps: ["seed.id", "delivery.publish:pages"] });
     await runPipeline(publish, { params: { id: "p1" } }, { modules: [{ module, instance }], steps: { "seed.id": seedId } });
-    const publishedKeys = [...blobs.blobs.keys()].filter((key) => !key.endsWith(".delivery-marker"));
+    const publishedKeys = [...blobs.blobs.keys()];
     const pipeline = definePipeline({ name: "unpublish", steps: ["delivery.unpublish:pages"] });
     const result = await runPipeline(pipeline, { payload: { id: "p1" } }, { modules: [{ module, instance }] });
     expect(result.status).toBe(200);
@@ -378,6 +378,21 @@ describe("delivery/static dependency steps via runPipeline", () => {
     const status = await runPipeline(definePipeline({ name: "staleStatus", steps: ["delivery.readStaleStatus"] }), {}, { modules: [{ module, instance }] });
     expect(status.status).toBe(200);
     expect(status.result).toMatchObject({ failed: 0, abandoned: 0 });
+    await instance.close();
+  });
+
+  it("checkBuild takes a restore from result._databaseRestored that an earlier step wrote, and none without it", async () => {
+    const { instance, put } = await boot();
+    put("p1", { slug__de: "kontakt", title__de: "Kontakt", status__de: "published" });
+    const build = definePipeline({ name: "checkBuild", steps: ["delivery.checkBuild"] });
+    expect((await runPipeline(build, { payload: { build: "b1" } }, { modules: [{ module, instance }] })).result).toMatchObject({ changed: true, restored: false });
+    const restoredBoot = definePipeline({ name: "restoredBoot", steps: ["test.checkRestored", "delivery.checkBuild"] });
+    const signal = (restored: boolean): Step => async (ctx) => okStep({ ...ctx, result: { _databaseRestored: restored } });
+    const quiet = await runPipeline(restoredBoot, { payload: { build: "b1" } }, { modules: [{ module, instance }], steps: { "test.checkRestored": signal(false) }, writes: { "test.checkRestored": ["result._databaseRestored"] } });
+    expect(quiet.result).toEqual({ changed: false, restored: false, marked: 0 });
+    const restored = await runPipeline(restoredBoot, { payload: { build: "b1" } }, { modules: [{ module, instance }], steps: { "test.checkRestored": signal(true) }, writes: { "test.checkRestored": ["result._databaseRestored"] } });
+    expect(restored.result).toMatchObject({ changed: false, restored: true });
+    expect(boundaryCast<{ marked: number }>(restored.result, "host").marked).toBeGreaterThan(0);
     await instance.close();
   });
 

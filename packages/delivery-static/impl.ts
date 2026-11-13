@@ -31,16 +31,6 @@ export const OUTPUT_STALE = "delivery.outputStale";
 export const INDEXES_STALE = "delivery.indexesStale";
 /** Raised through `events@1` with `dependencies.render: "events"` and `llms.full`, by `delivery.requestIndexes` and after a re-render; its data carries `coalesceKey: "llms"`. */
 export const LLMS_STALE = "delivery.llmsStale";
-/**
- * The blob key of the marker that tells a database restored from a backup apart from the one that wrote the current
- * files: next to `prefix`, outside the files it serves (`site/` keeps `site.delivery-marker`). `null` for a prefix
- * that does not end in `/`, the empty one included, which keeps no marker, so a restore goes undetected there.
- */
-export function markerKeyFor(prefix: string): string | null {
-  if (!prefix.endsWith("/")) return null;
-  return `${prefix.replace(/\/+$/, "")}${MARKER_SUFFIX}`;
-}
-
 export { normalizeSiteUrl, pageUrl } from "./site-url.ts";
 
 export type Config = z.output<typeof configSchema>;
@@ -138,8 +128,8 @@ export interface Delivery {
   markMoved(moves: readonly MovedPath[]): Promise<Result<{ marked: number }, DeliveryError>>;
   /** Marks every output of a delivered type, creating a marked `draft` row for each document and locale without one. */
   markAll(type: string): Promise<Result<{ marked: number }, DeliveryError>>;
-  /** Marks every output of every delivered type when `build` differs from the stored one or the database was restored from a backup, then stores it. */
-  checkBuild(build: string): Promise<Result<{ changed: boolean; restored: boolean; marked: number }, DeliveryError>>;
+  /** Marks every output of every delivered type when `build` differs from the stored one or `databaseRestored` says this boot restored the database, then stores it. */
+  checkBuild(build: string, databaseRestored?: boolean): Promise<Result<{ changed: boolean; restored: boolean; marked: number }, DeliveryError>>;
   /** Renders one marked output under a claim; a failed render answers `Err` after recording the attempt on the row. */
   republishOutput(target: OutputTarget): Promise<Result<{ rendered: boolean; state: State | null }, DeliveryError>>;
   /** Asks for an index export and, with `llms.full`, an llms-full.txt export, without running either here. */
@@ -148,7 +138,7 @@ export interface Delivery {
   resumeStale(): Promise<Result<{ released: number; swept: number; dispatched: number; aged: number; orphans: number }, DeliveryError>>;
   retryStale(): Promise<Result<{ retried: number }, DeliveryError>>;
   readStaleStatus(): Promise<Result<StaleStatus, DeliveryError>>;
-  /** Stops the background loop, refuses renders and unpublishes that start afterwards, waits up to `renderTimeoutSeconds` per format for the ones in flight, and stores the restore marker. */
+  /** Stops the background loop; exports that start afterwards answer `TRANSIENT`. */
   close(): Promise<void>;
 }
 
@@ -172,8 +162,6 @@ export interface DeliveryDeps {
   events?: Events | undefined;
   /** Picks the robots.txt policy when `robots.policy` is not set: `allow` for `production`, otherwise `disallow`. Defaults to `process.env.NODE_ENV`. */
   nodeEnv?: string | undefined;
-  /** Waits between the reads of a restore check that found the database behind the blob store, until another process stores its marker or the wait ends. Defaults to a timer. */
-  delay?: ((ms: number) => Promise<void>) | undefined;
 }
 
 interface DependencyRow extends Document {
@@ -240,33 +228,17 @@ interface RenderOutcome {
   failure: string | null;
 }
 
-interface MarkerPair {
-  held: string | null;
-  blob: string | null;
-}
-
-interface MarkerEpoch {
-  seq: number;
-  token: string;
-  heldWhenPut: string | null;
-  written: Promise<boolean>;
-}
-
 const PAGE = 100;
 const MARK_CHUNK = 200;
 const ROW_PAGE = 500;
 const LOOP_BATCH = 5;
 const RESUME_MIN_AGE_MS = 60_000;
 const UNPUBLISH_TRIES = 5;
-const MARKER_SEAL_DELAY_MS = 5000;
-const MARKER_POLL_MS = 500;
 const LLMS_COALESCE_KEY = "llms";
 const INDEXES_COALESCE_KEY = "indexes";
 const BUILD = "build";
-const MARKER = "marker";
 const ORPHANS = "orphans";
 const ORPHAN_CANDIDATES = "orphans:candidates";
-const MARKER_SUFFIX = ".delivery-marker";
 const INDEXES_OUTCOME = "export:indexes";
 const LLMS_FULL_OUTCOME = "export:llmsFull";
 const INDEX_FILE = /^index\.([A-Za-z0-9]+)$/;
@@ -363,9 +335,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   validateLlmsConfig(config.llms, model, config.formats);
   if (dependencies.render === "events" && deps.events === undefined) throw new Error('delivery/static: dependencies.render "events" needs an events@1 provider');
   const events = deps.events;
-  const delay = deps.delay ?? ((ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms)));
   const siteUrl = config.siteUrl === undefined ? undefined : normalizeSiteUrl(config.siteUrl);
-  const markerKey = markerKeyFor(config.prefix);
   if (siteUrl === undefined && config.sitemap) logWarn(logger, "delivery/static: no siteUrl is set, so no sitemap.xml is written and llms.txt lists paths instead of URLs");
   const nodeEnv = "nodeEnv" in deps ? deps.nodeEnv : process.env.NODE_ENV;
   const robots = config.robots === false ? null : { policy: config.robots.policy ?? (nodeEnv === "production" ? "allow" : "disallow"), extra: config.robots.extra };
@@ -423,23 +393,8 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   let llmsFullFailures = 0;
   let renderStarts = 0;
   let rendersInFlight = 0;
-  let markerPhase: "unchecked" | "pending" | "checked" = "unchecked";
-  let bootRead: Promise<MarkerPair | null> | null = null;
-  let owedReset: string | null = null;
-  let unreported: { marked: number } | null = null;
-  let closed = false;
-  let putChain: Promise<boolean> = Promise.resolve(true);
-  let epoch: MarkerEpoch | null = null;
-  let epochSeq = 0;
-  let sealedSeq = 0;
-  const ownTokens = new Map<string, number>();
-  const retiredEpochs: Array<{ epoch: MarkerEpoch; waitFor: Set<number> }> = [];
-  let sealChain: Promise<void> = Promise.resolve();
-  let sealTimer: NodeJS.Timeout | undefined;
-  let arming: Promise<Result<void, DeliveryError>> | null = null;
-  let opSeq = 0;
-  const activeOps = new Set<number>();
-  const idleWaiters: Array<() => void> = [];
+  let buildChecked = false;
+  let restoreHandled = false;
   let orphansDone = false;
   let orphansSkipLogged = false;
   let loop: BackgroundLoop | undefined;
@@ -452,7 +407,6 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return tc;
   };
   const dbFailure = (error: KestrelError): DeliveryError => transientOnly(error, "persistence@1");
-  const stoppingFailure = (): DeliveryError => transient("delivery/static: the process is stopping, try again after the restart");
   const attemptsOf = (row: StatusRow): number => row.staleAttempts ?? 0;
   const backoffMs = (attempts: number): number => (dependencies.backoffSeconds[Math.min(attempts - 1, dependencies.backoffSeconds.length - 1)] ?? 0) * 1000;
 
@@ -495,10 +449,6 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   };
 
   const removeKeys = async (keys: readonly string[]): Promise<Result<void, DeliveryError>> => {
-    if (keys.length > 0) {
-      const advanced = await advanceMarker();
-      if (isErr(advanced)) return advanced;
-    }
     for (const key of keys) {
       const removed = await blobs.remove(key);
       if (isErr(removed)) return err(transientOnly(removed.error, "blobstore@1"));
@@ -946,11 +896,9 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     renderStarts += 1;
     rendersInFlight += 1;
     try {
-      return await tracked(async () => {
-        const flight = await startFlight();
-        if (isErr(flight)) return flight;
-        return renderLocale(flight.value, type, id, locale);
-      });
+      const flight = await startFlight();
+      if (isErr(flight)) return flight;
+      return await renderLocale(flight.value, type, id, locale);
     } finally {
       rendersInFlight -= 1;
     }
@@ -993,8 +941,6 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     if ("failure" in rendered) return failed(rendered.failure, { renderPath: null, written: {} }, reads);
 
     const written: Record<string, string> = {};
-    const advanced = await advanceMarker();
-    if (isErr(advanced)) return failed(advanced.error.message, { renderPath: null, written: {} }, reads);
     try {
       for (const { format, output: out } of rendered.outputs) {
         const key = keyFor(config.prefix, path, out.extension);
@@ -1017,16 +963,13 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
 
   const publish: Delivery["publish"] = async (type, id) => {
     typeConfig(type);
-    if (stopping) return err(stoppingFailure());
-    return tracked(async () => {
-      const out: PublishStatus[] = [];
-      for (const locale of locales.length > 0 ? locales : [undefined]) {
-        const outcome = await publishLocale(type, id, locale);
-        if (isErr(outcome)) return outcome;
-        if (outcome.value.status) out.push(outcome.value.status);
-      }
-      return ok(out);
-    });
+    const out: PublishStatus[] = [];
+    for (const locale of locales.length > 0 ? locales : [undefined]) {
+      const outcome = await publishLocale(type, id, locale);
+      if (isErr(outcome)) return outcome;
+      if (outcome.value.status) out.push(outcome.value.status);
+    }
+    return ok(out);
   };
 
   const filterFor = (type: string): Filter => {
@@ -1473,222 +1416,6 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return ok({ marked: dispatched.value });
   };
 
-  const readMarker = async (key: string): Promise<MarkerPair | null> => {
-    const stored = await db.findOne<StateRow>(STATE, { id: MARKER });
-    const blob = await blobs.get(key);
-    if (isErr(stored) || isErr(blob)) {
-      logger.error("delivery/static: could not read the restore marker, this build check cannot tell whether the database was restored", { error: isErr(stored) ? stored.error.message : isErr(blob) ? blob.error.message : "" });
-      return null;
-    }
-    return { held: stored.value?.value ?? null, blob: blob.value === null ? null : new TextDecoder().decode(blob.value) };
-  };
-
-  const putMarker = async (token: string): Promise<boolean> => {
-    if (markerKey === null) return false;
-    let failed: string;
-    try {
-      const written = await blobs.put(markerKey, new TextEncoder().encode(token), { contentType: "text/plain; charset=utf-8" });
-      if (!isErr(written)) return true;
-      failed = written.error.message;
-    } catch (error) {
-      failed = errorText(error);
-    }
-    logger.error("delivery/static: could not write the restore marker, no file is written until it can be", { error: failed });
-    return false;
-  };
-
-  const foreign = (token: string | null): boolean => token !== null && !ownTokens.has(token);
-
-  const heldByLiveProcess = async (key: string, first: MarkerPair): Promise<boolean | null> => {
-    if (first.blob === null) return false;
-    const rounds = Math.ceil((MARKER_SEAL_DELAY_MS + dependencies.renderTimeoutSeconds * config.formats.length * 1000) / MARKER_POLL_MS);
-    for (let round = 0; round < rounds; round++) {
-      if (stopping) return null;
-      await delay(MARKER_POLL_MS);
-      const again = await readMarker(key);
-      if (again === null) return null;
-      if ((again.held !== first.held && foreign(again.held)) || (again.blob !== first.blob && foreign(again.blob))) return true;
-    }
-    return false;
-  };
-
-  const recordRestore = async (): Promise<Result<void, DeliveryError>> => {
-    orphansDone = true;
-    const recorded = await db.createOne<StateRow>(STATE, { id: ORPHANS, value: JSON.stringify({ at: now(), removed: 0, restored: true }), seq: null, updatedAt: now() });
-    if (isErr(recorded) && recorded.error.code !== "CONFLICT") return err(dbFailure(recorded.error));
-    logWarn(logger, "delivery/static: the database is older than the delivered files (restored from a backup), so every output is rendered again");
-    let marked = 0;
-    for (const type of deliveredTypes) {
-      const all = await markAll(type);
-      if (isErr(all)) return all;
-      marked += all.value.marked;
-    }
-    unreported = { marked };
-    return ok();
-  };
-
-  const readBootPair = (key: string): Promise<MarkerPair | null> => {
-    bootRead ??= readMarker(key).then((pair) => {
-      if (pair === null) bootRead = null;
-      return pair;
-    });
-    return bootRead;
-  };
-
-  const compareMarker = async (key: string): Promise<Result<"checked" | "reset" | null, DeliveryError>> => {
-    const first = bootRead === null ? await readMarker(key) : await bootRead;
-    if (first === null) return ok(null);
-    if (first.blob !== null && first.blob === first.held) return ok("checked");
-    if (first.held !== null || first.blob !== null) {
-      const live = await heldByLiveProcess(key, first);
-      if (live === null) return ok(null);
-      if (live) return ok("checked");
-      const recorded = await recordRestore();
-      if (isErr(recorded)) return recorded;
-    }
-    return ok(bootRead === null && epochSeq === 0 ? "reset" : "checked");
-  };
-
-  const checkMarker = async (key: string): Promise<Result<void, DeliveryError>> => {
-    if (owedReset === null) {
-      const compared = await compareMarker(key);
-      if (isErr(compared) || compared.value === null) return isErr(compared) ? compared : ok();
-      if (compared.value === "checked") {
-        markerPhase = "checked";
-        return ok();
-      }
-      owedReset = randomUUID();
-    }
-    if (!(await putMarker(owedReset))) return ok();
-    const stored = await writeState(MARKER, owedReset);
-    if (isErr(stored)) {
-      logger.error("delivery/static: could not store the restore marker, the next build check renders every output again", { error: stored.error.message });
-      return ok();
-    }
-    owedReset = null;
-    markerPhase = "checked";
-    return ok();
-  };
-
-  const markerIsChecked = (): boolean => markerPhase === "checked";
-
-  const armMarker = (): Promise<Result<void, DeliveryError>> => {
-    if (markerKey === null) return Promise.resolve(ok());
-    arming ??= checkMarker(markerKey).finally(() => {
-      arming = null;
-    });
-    return arming;
-  };
-
-  const tracked = async <T>(run: () => Promise<T>): Promise<T> => {
-    opSeq += 1;
-    const id = opSeq;
-    activeOps.add(id);
-    try {
-      return await run();
-    } finally {
-      activeOps.delete(id);
-      for (const entry of retiredEpochs) entry.waitFor.delete(id);
-      sealDue();
-      if (activeOps.size === 0) for (const wake of idleWaiters.splice(0)) wake();
-    }
-  };
-
-  const settled = (limitMs: number): Promise<void> => {
-    if (activeOps.size === 0) return Promise.resolve();
-    return new Promise((resolve) => {
-      const timer = setTimeout(resolve, limitMs);
-      timer.unref();
-      idleWaiters.push(() => {
-        clearTimeout(timer);
-        resolve();
-      });
-    });
-  };
-
-  const storeMarker = async (ready: MarkerEpoch, markerAt: string): Promise<void> => {
-    const blob = await blobs.get(markerAt);
-    if (isErr(blob)) {
-      logger.error("delivery/static: could not read the restore marker before storing it, the next build check may render every output again", { error: blob.error.message });
-      return;
-    }
-    const holder = blob.value === null ? undefined : ownTokens.get(new TextDecoder().decode(blob.value));
-    if (holder === undefined || holder < ready.seq) return;
-    const stored = await writeState(MARKER, ready.token);
-    if (isErr(stored)) logger.error("delivery/static: could not store the restore marker, the next build check renders every output again", { error: stored.error.message });
-    else sealedSeq = ready.seq;
-  };
-
-  const seal = async (ready: MarkerEpoch): Promise<void> => {
-    if (markerKey === null || ready.seq <= sealedSeq || !(await ready.written)) return;
-    try {
-      await storeMarker(ready, markerKey);
-    } catch (error) {
-      logger.error("delivery/static: could not store the restore marker, the next build check renders every output again", { error: errorText(error) });
-    }
-    for (const [token, seq] of ownTokens) if (seq < ready.seq && seq !== sealedSeq) ownTokens.delete(token);
-  };
-
-  const sealDue = (): void => {
-    for (let next = retiredEpochs[0]; next !== undefined && next.waitFor.size === 0; next = retiredEpochs[0]) {
-      retiredEpochs.shift();
-      const ready = next.epoch;
-      sealChain = sealChain.then(() => seal(ready));
-    }
-  };
-
-  const retire = (current: MarkerEpoch): void => {
-    if (epoch === current) {
-      epoch = null;
-      clearTimeout(sealTimer);
-      sealTimer = undefined;
-    }
-    retiredEpochs.push({ epoch: current, waitFor: new Set(activeOps) });
-    sealDue();
-  };
-
-  const rotate = async (): Promise<void> => {
-    if (epoch !== null) retire(epoch);
-    await sealChain;
-  };
-
-  const openEpoch = (heldWhenPut: string | null): MarkerEpoch => {
-    epochSeq += 1;
-    const token = randomUUID();
-    ownTokens.set(token, epochSeq);
-    const written = putChain.then(() => putMarker(token));
-    putChain = written;
-    const opened: MarkerEpoch = { seq: epochSeq, token, heldWhenPut, written };
-    epoch = opened;
-    clearTimeout(sealTimer);
-    sealTimer = setTimeout(() => {
-      sealTimer = undefined;
-      void rotate();
-    }, MARKER_SEAL_DELAY_MS);
-    sealTimer.unref();
-    return opened;
-  };
-
-  const advanceMarker = async (): Promise<Result<void, DeliveryError>> => {
-    if (markerKey === null) return ok();
-    if (closed) return err(stoppingFailure());
-    if (markerPhase === "pending") {
-      const checked = await armMarker();
-      if (isErr(checked)) return checked;
-      if (!markerIsChecked()) return err(transient("delivery/static: the restore marker could not be checked, so no file is written – try again"));
-    } else if (markerPhase === "unchecked" && (await readBootPair(markerKey)) === null) {
-      return err(transient("delivery/static: the restore marker could not be read, so no file is written – try again"));
-    }
-    const stored = await db.findOne<StateRow>(STATE, { id: MARKER });
-    const held = isErr(stored) ? undefined : (stored.value?.value ?? null);
-    const current = epoch;
-    if (current !== null && (held === undefined || (held !== current.heldWhenPut && (held === null || !ownTokens.has(held))))) retire(current);
-    const active = epoch ?? openEpoch(held ?? null);
-    if (await active.written) return ok();
-    if (epoch === active) retire(active);
-    return err(transient("delivery/static: could not write the restore marker next to the prefix, so no file is written – try again"));
-  };
-
   const publishedWithoutLiveRow = async (): Promise<Result<boolean, DeliveryError>> => {
     for (const type of deliveredTypes) {
       for (const locale of deliveredLocales) {
@@ -1737,12 +1464,11 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       return ok();
     });
     if (isErr(walked)) return walked;
-    const nested = listed.value.filter(({ key }) => key.endsWith(MARKER_SUFFIX)).map(({ key }) => `${key.slice(0, -MARKER_SUFFIX.length)}/`);
     const orphans = new Map<string, string[]>();
     for (const { key } of listed.value) {
       const file = pageFileOf(key);
       if (file === null || file.path === "/" || !extensions.has(file.extension) || owned.has(key) || uploadedAssets.has(key) || ownedPaths.has(file.path)) continue;
-      if (reservedMatch(file.path, config.reservedPaths) !== undefined || nested.some((dir) => key.startsWith(dir))) continue;
+      if (reservedMatch(file.path, config.reservedPaths) !== undefined) continue;
       orphans.set(file.path, [...(orphans.get(file.path) ?? []), key]);
     }
     return ok({ orphans, ownedPaths: ownedPaths.size });
@@ -1774,7 +1500,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   const removeOrphans = async (): Promise<Result<number, DeliveryError>> => {
     const startedBefore = renderStarts;
     if (orphansDone || stopping) return ok(0);
-    if (markerKey === null) {
+    if (!config.prefix.endsWith("/")) {
       logger.info("delivery/static: the one-time removal of orphaned output files does not run with a prefix that does not end in /");
       orphansDone = true;
       return ok(0);
@@ -1791,7 +1517,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       return ok(0);
     };
     const interrupted = (): boolean => renderStarts !== startedBefore || rendersInFlight > 0;
-    if (markerPhase !== "checked") return skip("delivery.checkBuild has not checked the restore marker yet");
+    if (!buildChecked) return skip("delivery.checkBuild has not run in this process yet");
     for (const filter of [{ staleToken: { ne: null }, staleAttempts: { lt: dependencies.maxAttempts } }, { claimedBy: { ne: null } }]) {
       const busy = await db.count(STATUS, filter);
       if (isErr(busy)) return err(dbFailure(busy.error));
@@ -1830,8 +1556,6 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     for (const [path, keys] of orphans) {
       if (!candidates.value.paths.has(path)) continue;
       if (stopping || interrupted()) return ok(removed);
-      const advanced = await advanceMarker();
-      if (isErr(advanced)) return advanced;
       const owned = await pathOwned(path);
       if (isErr(owned)) return owned;
       if (owned.value) continue;
@@ -1912,8 +1636,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     publish,
     async unpublish(type, id) {
       typeConfig(type);
-      if (stopping) return err(stoppingFailure());
-      return tracked(() => unpublishOutputs(type, id));
+      return unpublishOutputs(type, id);
     },
     async status(type, id) {
       typeConfig(type);
@@ -1948,121 +1671,110 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     markDependents,
     markMoved,
     markAll,
-    async checkBuild(build) {
-      if (markerKey !== null && markerPhase === "unchecked") markerPhase = "pending";
+    async checkBuild(build, databaseRestored = false) {
       const stored = await db.findOne<StateRow>(STATE, { id: BUILD });
       if (isErr(stored)) return err(dbFailure(stored.error));
       const changed = stored.value?.value !== build;
-      if (markerPhase === "pending") {
-        const checked = await armMarker();
-        if (isErr(checked)) return checked;
+      const restored = databaseRestored && !restoreHandled;
+      if (restored) {
+        const recorded = await db.createOne<StateRow>(STATE, { id: ORPHANS, value: JSON.stringify({ at: now(), removed: 0, restored: true }), seq: null, updatedAt: now() });
+        if (isErr(recorded) && recorded.error.code !== "CONFLICT") return err(dbFailure(recorded.error));
+        orphansDone = true;
+        const forgotten = await db.deleteMany(STATE, { id: BUILD });
+        if (isErr(forgotten)) return err(dbFailure(forgotten.error));
       }
-      const detected = unreported;
-      unreported = null;
-      const restored = detected !== null;
-      let marked = detected?.marked ?? 0;
-      if (changed && !restored) {
+      let marked = 0;
+      if (changed || restored) {
         for (const type of deliveredTypes) {
           const all = await markAll(type);
           if (isErr(all)) return all;
           marked += all.value.marked;
         }
-      }
-      if (changed) {
-        const written = stored.value === null ? await db.createOne<StateRow>(STATE, { id: BUILD, value: build, seq: null, updatedAt: now() }) : await db.updateOne<StateRow>(STATE, BUILD, { value: build, updatedAt: now() });
+        const written = stored.value === null || restored ? await db.createOne<StateRow>(STATE, { id: BUILD, value: build, seq: null, updatedAt: now() }) : await db.updateOne<StateRow>(STATE, BUILD, { value: build, updatedAt: now() });
         if (isErr(written) && written.error.code !== "CONFLICT") return err(dbFailure(written.error));
       }
+      if (restored) logWarn(logger, "delivery/static: this boot restored the database from a backup, so every output is rendered again");
+      restoreHandled ||= databaseRestored;
+      buildChecked = true;
       return ok({ changed, restored, marked });
     },
     async republishOutput(target) {
       typeConfig(target.type);
-      if (stopping) return err(stoppingFailure());
-      return tracked(async (): Promise<Result<{ rendered: boolean; state: State | null }, DeliveryError>> => {
-        const found = await readRow(target.type, target.docId, target.locale);
-        if (isErr(found)) return found;
-        if (found.value === null || found.value.state === "deleted") return ok({ rendered: false, state: null });
-        const token = await claim(found.value.id);
-        if (isErr(token)) return token;
-        if (token.value === null) return err(transient(`delivery/static: ${target.type}/${target.docId}/${target.locale} is being rendered elsewhere – try again`));
-        let rendered = false;
-        try {
-          const row = await db.findOne<StatusRow>(STATUS, { id: found.value.id });
-          if (isErr(row)) return err(dbFailure(row.error));
-          if (row.value === null || row.value.state === "deleted" || row.value.staleToken === null) return ok({ rendered: false, state: row.value === null || row.value.state === "deleted" ? null : row.value.state });
-          rendered = true;
-          const outcome = await renderMarked(row.value);
-          if (isErr(outcome)) return outcome;
-          if (outcome.value.failure !== null) return err(transient(`delivery/static: re-rendering ${target.type}/${target.docId}/${target.locale} failed: ${outcome.value.failure}`));
-          return ok({ rendered: true, state: outcome.value.status?.state ?? null });
-        } finally {
-          await release(found.value.id, token.value);
-          if (rendered) await requestAfterRender(found.value);
-        }
-      });
+      const found = await readRow(target.type, target.docId, target.locale);
+      if (isErr(found)) return found;
+      if (found.value === null || found.value.state === "deleted") return ok({ rendered: false, state: null });
+      const token = await claim(found.value.id);
+      if (isErr(token)) return token;
+      if (token.value === null) return err(transient(`delivery/static: ${target.type}/${target.docId}/${target.locale} is being rendered elsewhere – try again`));
+      let rendered = false;
+      try {
+        const row = await db.findOne<StatusRow>(STATUS, { id: found.value.id });
+        if (isErr(row)) return err(dbFailure(row.error));
+        if (row.value === null || row.value.state === "deleted" || row.value.staleToken === null) return ok({ rendered: false, state: row.value === null || row.value.state === "deleted" ? null : row.value.state });
+        rendered = true;
+        const outcome = await renderMarked(row.value);
+        if (isErr(outcome)) return outcome;
+        if (outcome.value.failure !== null) return err(transient(`delivery/static: re-rendering ${target.type}/${target.docId}/${target.locale} failed: ${outcome.value.failure}`));
+        return ok({ rendered: true, state: outcome.value.status?.state ?? null });
+      } finally {
+        await release(found.value.id, token.value);
+        if (rendered) await requestAfterRender(found.value);
+      }
     },
     requestIndexes: requestIndexesNow,
     async resumeStale() {
-      if (stopping) return err(stoppingFailure());
-      if (markerPhase === "pending") {
-        const checked = await armMarker();
-        if (isErr(checked)) logger.error("delivery/static: could not check the restore marker, the next recovery pass tries again", { error: checked.error.message });
+      const released = await releaseExpiredClaims();
+      if (isErr(released)) return released;
+      const at = now();
+      let swept = 0;
+      const tombstones = await db.findMany<StatusRow>(STATUS, { state: "deleted", updatedAt: { lte: at - claimTtlMs } }, { limit: ROW_PAGE });
+      if (isErr(tombstones)) return err(dbFailure(tombstones.error));
+      for (const row of tombstones.value.items) {
+        if (row.path !== null) {
+          const keys = Object.values(await ownedKeys(row));
+          const removed = await removeStaleKeys(row.path, keys);
+          if (isErr(removed)) continue;
+          const cleared = await db.updateMany<StatusRow>(STATUS, { id: row.id, version: row.version }, { path: null, writtenKeys: {} });
+          if (isErr(cleared) || cleared.value === 0) continue;
+        }
+        const deleted = await db.deleteMany(STATUS, { id: row.id, version: row.version });
+        if (isErr(deleted)) return err(dbFailure(deleted.error));
+        swept += deleted.value;
       }
-      const resumed = await tracked(async (): Promise<Result<{ released: number; swept: number; dispatched: number; aged: number; orphans: number }, DeliveryError>> => {
-        const released = await releaseExpiredClaims();
-        if (isErr(released)) return released;
-        const at = now();
-        let swept = 0;
-        const tombstones = await db.findMany<StatusRow>(STATUS, { state: "deleted", updatedAt: { lte: at - claimTtlMs } }, { limit: ROW_PAGE });
-        if (isErr(tombstones)) return err(dbFailure(tombstones.error));
-        for (const row of tombstones.value.items) {
-          if (row.path !== null) {
-            const keys = Object.values(await ownedKeys(row));
-            const removed = await removeStaleKeys(row.path, keys);
-            if (isErr(removed)) continue;
-            const cleared = await db.updateMany<StatusRow>(STATUS, { id: row.id, version: row.version }, { path: null, writtenKeys: {} });
-            if (isErr(cleared) || cleared.value === 0) continue;
-          }
-          const deleted = await db.deleteMany(STATUS, { id: row.id, version: row.version });
-          if (isErr(deleted)) return err(dbFailure(deleted.error));
-          swept += deleted.value;
-        }
-        const pending = await sweepSets({ state: "pending", createdAt: { lte: at - claimTtlMs } });
-        if (isErr(pending)) return pending;
-        const retired = await sweepSets({ state: "retired" });
-        if (isErr(retired)) return retired;
-        swept += pending.value + retired.value;
-        const newest = await readSequence();
-        if (isErr(newest)) return newest;
-        const pruned = await pruneChanges(newest.value);
-        if (isErr(pruned)) return pruned;
-        let aged = 0;
-        if (dependencies.maxAgeSeconds !== null) {
-          const old: string[] = [];
-          const walked = await pagedRows({ state: "live", publishedAt: { lte: at - dependencies.maxAgeSeconds * 1000 } }, (rows) => {
-            for (const row of rows) old.push(row.id);
-            return ok();
-          });
-          if (isErr(walked)) return walked;
-          const marked = await markRows(old, ["live"]);
-          if (isErr(marked)) return marked;
-          aged = marked.value;
-        }
-        let dispatched = 0;
-        const due = await pagedRows({ staleAt: { lte: at - RESUME_MIN_AGE_MS }, claimedBy: null, staleRetryAt: { lte: at }, staleAttempts: { lt: dependencies.maxAttempts }, type: { in: deliveredTypes } }, async (rows) => {
-          dispatched += rows.length;
-          return dispatch(rows);
+      const pending = await sweepSets({ state: "pending", createdAt: { lte: at - claimTtlMs } });
+      if (isErr(pending)) return pending;
+      const retired = await sweepSets({ state: "retired" });
+      if (isErr(retired)) return retired;
+      swept += pending.value + retired.value;
+      const newest = await readSequence();
+      if (isErr(newest)) return newest;
+      const pruned = await pruneChanges(newest.value);
+      if (isErr(pruned)) return pruned;
+      let aged = 0;
+      if (dependencies.maxAgeSeconds !== null) {
+        const old: string[] = [];
+        const walked = await pagedRows({ state: "live", publishedAt: { lte: at - dependencies.maxAgeSeconds * 1000 } }, (rows) => {
+          for (const row of rows) old.push(row.id);
+          return ok();
         });
-        if (isErr(due)) return due;
-        logged("could not request an index export from the recovery pass", {})(await requestIndexFiles());
-        const llmsFull = config.llms.full ? await readOutcome(LLMS_FULL_OUTCOME) : ok(null);
-        if (isErr(llmsFull)) logger.error("delivery/static: could not read the outcome of the last llms-full.txt export", { error: llmsFull.error.message });
-        else if (llmsFull.value?.error !== null && llmsFull.value?.error !== undefined) logged("could not request an llms-full.txt export from the recovery pass", {})(await requestLlmsFull());
-        const orphans = await removeOrphans();
-        if (isErr(orphans)) logger.error("delivery/static: the one-time removal of orphaned output files failed, the next recovery pass tries again", { error: orphans.error.message });
-        return ok({ released: released.value, swept, dispatched, aged, orphans: isErr(orphans) ? 0 : orphans.value });
+        if (isErr(walked)) return walked;
+        const marked = await markRows(old, ["live"]);
+        if (isErr(marked)) return marked;
+        aged = marked.value;
+      }
+      let dispatched = 0;
+      const due = await pagedRows({ staleAt: { lte: at - RESUME_MIN_AGE_MS }, claimedBy: null, staleRetryAt: { lte: at }, staleAttempts: { lt: dependencies.maxAttempts }, type: { in: deliveredTypes } }, async (rows) => {
+        dispatched += rows.length;
+        return dispatch(rows);
       });
-      await rotate();
-      return resumed;
+      if (isErr(due)) return due;
+      logged("could not request an index export from the recovery pass", {})(await requestIndexFiles());
+      const llmsFull = config.llms.full ? await readOutcome(LLMS_FULL_OUTCOME) : ok(null);
+      if (isErr(llmsFull)) logger.error("delivery/static: could not read the outcome of the last llms-full.txt export", { error: llmsFull.error.message });
+      else if (llmsFull.value?.error !== null && llmsFull.value?.error !== undefined) logged("could not request an llms-full.txt export from the recovery pass", {})(await requestLlmsFull());
+      const orphans = await removeOrphans();
+      if (isErr(orphans)) logger.error("delivery/static: the one-time removal of orphaned output files failed, the next recovery pass tries again", { error: orphans.error.message });
+      return ok({ released: released.value, swept, dispatched, aged, orphans: isErr(orphans) ? 0 : orphans.value });
     },
     async retryStale() {
       const failed: string[] = [];
@@ -2099,10 +1811,6 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     async close() {
       stopping = true;
       await loop?.stop();
-      await settled(dependencies.renderTimeoutSeconds * config.formats.length * 1000);
-      closed = true;
-      await rotate();
-      clearTimeout(sealTimer);
     },
   };
 }

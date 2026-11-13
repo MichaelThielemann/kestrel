@@ -2,21 +2,21 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
 import { createContentDefault } from "@michaelthielemann/kestrel-content-default/impl";
 import { err, failure, ok } from "@michaelthielemann/kestrel-contracts/errors";
 import type { EventData, Events } from "@michaelthielemann/kestrel-contracts/events";
 import { renderFailed } from "@michaelthielemann/kestrel-contracts/helpers/renderer";
-import type { Document, FindOptions, NewDocument, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Document, FindOptions, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { Filter } from "@michaelthielemann/kestrel-contracts/query";
 import type { Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createSiteDefault } from "@michaelthielemann/kestrel-site-default/impl";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
-import { INDEXES_STALE, LLMS_STALE, STATE, STATUS, createDeliveryStatic, markerKeyFor, type Delivery, type StatusRow } from "./impl.ts";
+import { INDEXES_STALE, LLMS_STALE, STATE, STATUS, createDeliveryStatic, type Delivery, type StatusRow } from "./impl.ts";
 import { buildRobotsTxt, buildSitemapXml, dedupeEntries, normalizeSiteUrl, pageUrl, sitemapUrls, type IndexEntry } from "./indexes.ts";
 import { configSchema } from "./module.ts";
 
@@ -205,7 +205,6 @@ interface Options {
   blobs?: Files;
   render?: "events" | "background";
   clock?: { t: number };
-  delay?: (ms: number) => Promise<void>;
 }
 
 const instances: Delivery[] = [];
@@ -240,7 +239,7 @@ async function harness(options: Options = {}) {
   let offset = 0;
   const config = configSchema.parse({ types: { pages: { home: "home" } }, prefix: "site/", siteUrl: "https://example.org", robots: { policy: "allow" }, dependencies: { render: options.render ?? "events" }, ...options.config });
   const clock = options.clock;
-  const delivery = await createDeliveryStatic(config, { content, site, renderer, blobs, db, logger, events, delay: options.delay ?? (async () => {}), ...(options.nodeEnv === undefined ? {} : { nodeEnv: options.nodeEnv }) }, clock === undefined ? () => Date.now() + offset : () => clock.t);
+  const delivery = await createDeliveryStatic(config, { content, site, renderer, blobs, db, logger, events, ...(options.nodeEnv === undefined ? {} : { nodeEnv: options.nodeEnv }) }, clock === undefined ? () => Date.now() + offset : () => clock.t);
   instances.push(delivery);
   const page = async (de: Record<string, unknown>, en?: Record<string, unknown>): Promise<string> => {
     const id = expectOk(await content.create("pages", de, { locale: "de" })).id;
@@ -865,460 +864,75 @@ describe("index exports in the background loop, on a manual clock", () => {
   });
 });
 
-const MARKER_KEY = "site.delivery-marker";
+const RESTORE_WARNING = "delivery/static: this boot restored the database from a backup, so every output is rendered again";
 
 describe("a database restored from a backup", () => {
-  it("keeps the marker next to the prefix, outside the files it serves, and keeps none with an empty prefix", () => {
-    expect(markerKeyFor("site/")).toBe(MARKER_KEY);
-    expect(markerKeyFor("prod/site/")).toBe("prod/site.delivery-marker");
-    expect(markerKeyFor("")).toBeNull();
-  });
+  const markedRows = async (db: Persistence): Promise<number> => expectOk(await db.count(STATUS, { staleToken: { ne: null } }));
+  const servingRows = async (db: Persistence): Promise<number> => expectOk(await db.count(STATUS, { state: { in: ["live", "error"] } }));
 
-  it("two sites in one blob store under different prefixes never take each other's marker for a restore", async () => {
-    const blobs = memoryBlobs();
-    const prod = await harness({ blobs, config: { prefix: "prod/site/" } });
-    const staging = await harness({ blobs, config: { prefix: "staging/site/" } });
-    expect(expectOk(await prod.delivery.checkBuild("b1"))).toMatchObject({ restored: false });
-    expect(expectOk(await staging.delivery.checkBuild("b1"))).toMatchObject({ restored: false });
-    expect(expectOk(await prod.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
-    expect(expectOk(await staging.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
-    expect([...blobs.files.keys()].filter((k) => k.endsWith(".delivery-marker")).sort()).toEqual(["prod/site.delivery-marker", "staging/site.delivery-marker"]);
-  });
-
-  it("with an empty prefix writes no marker into the served root and still checks the build", async () => {
-    const h = await harness({ config: { prefix: "" } });
-    await h.page({ slug: "kontakt", title: "Kontakt", status: "published" });
-    expect(expectOk(await h.delivery.checkBuild("b1"))).toMatchObject({ changed: true, restored: false });
-    expect(expectOk(await h.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
-    await h.delivery.close();
-    expect([...h.blobs.files.keys()].filter((k) => k.includes("marker"))).toEqual([]);
-  });
-
-  it("still marks and stores a changed build when the marker cannot be read, and leaves the marker as it is", async () => {
+  it("checkBuild renders every output again in the boot that restored the database, even with the same build, and once per process", async () => {
     const db = createFakePersistence();
     const blobs = memoryBlobs();
     const first = await harness({ db, blobs });
     await seed(first);
     expectOk(await first.delivery.checkBuild("b1"));
     await first.delivery.close();
-    const marker = blobs.files.get(MARKER_KEY)!.text;
-    const get = blobs.get.bind(blobs);
-    blobs.get = async (key) => (key === MARKER_KEY ? err(failure("TRANSIENT", "store unavailable")) : get(key));
-    const next = await harness({ db, blobs, content: first.content });
-    const checked = expectOk(await next.delivery.checkBuild("b2"));
-    expect(checked).toMatchObject({ changed: true, restored: false });
-    expect(checked.marked).toBeGreaterThan(0);
-    expect(next.logger.errors).toContain("delivery/static: could not read the restore marker, this build check cannot tell whether the database was restored");
-    expect(expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "build" }))!.value).toBe("b2");
-    await next.delivery.close();
-    expect(blobs.files.get(MARKER_KEY)!.text).toBe(marker);
-    expect(expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "marker" }))!.value).toBe(marker);
+
+    const restored = await harness({ db, blobs, content: first.content });
+    const checked = expectOk(await restored.delivery.checkBuild("b1", true));
+    expect(checked).toMatchObject({ changed: false, restored: true });
+    expect(checked.marked).toBeGreaterThanOrEqual(await servingRows(db));
+    expect(expectOk(await db.count(STATUS, { state: { in: ["live", "error"] }, staleToken: null }))).toBe(0);
+    expect(restored.emitted.filter((e) => e.name === "delivery.outputStale")).toHaveLength(checked.marked);
+    expect(restored.logger.warnings).toContain(RESTORE_WARNING);
+    expect(expectOk(await restored.delivery.checkBuild("b1", true))).toEqual({ changed: false, restored: false, marked: 0 });
+    expect(restored.logger.warnings.filter((w) => w === RESTORE_WARNING)).toHaveLength(1);
   });
 
-  it("checkBuild renders every output again when the database is older than the delivered files, even with the same build", async () => {
+  it("an unclean stop during a re-render backlog, a second process on the same database and a clean restart are no restore", async () => {
     const db = createFakePersistence();
     const blobs = memoryBlobs();
-    const first = await harness({ db, blobs });
-    await seed(first);
-    expect(expectOk(await first.delivery.checkBuild("b1"))).toMatchObject({ changed: true, restored: false });
-    expectOk(await first.delivery.resumeStale());
-    const backup = expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "marker" }))!.value;
-    await first.page({ slug: "neu", title: "Neu", status: "published" });
-    await first.delivery.close();
-    expect(blobs.files.has(MARKER_KEY)).toBe(true);
-    expect(expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "marker" }))!.value).toBe(blobs.files.get(MARKER_KEY)!.text);
+    const crashed = await harness({ db, blobs });
+    await seed(crashed);
+    expectOk(await crashed.delivery.checkBuild("b1"));
+    const backlog = expectOk(await crashed.delivery.markAll("pages")).marked;
+    expect(backlog).toBeGreaterThan(0);
 
-    const restarted = await harness({ db, blobs, content: first.content });
+    const second = await harness({ db, blobs, content: crashed.content });
+    expect(expectOk(await second.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
+    expect(await markedRows(db)).toBe(backlog);
+    await second.delivery.close();
+    const restarted = await harness({ db, blobs, content: crashed.content });
     expect(expectOk(await restarted.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
-    await restarted.delivery.close();
-
-    expectOk(await db.updateMany(STATE, { id: "marker" }, { value: backup }));
-    const restored = await harness({ db, blobs, content: first.content });
-    const checked = expectOk(await restored.delivery.checkBuild("b1"));
-    expect(checked).toMatchObject({ changed: false, restored: true });
-    expect(checked.marked).toBeGreaterThan(0);
-    expect(restored.logger.warnings).toContain("delivery/static: the database is older than the delivered files (restored from a backup), so every output is rendered again");
-    expect(expectOk(await restored.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
+    for (const h of [second, restarted]) expect(h.logger.warnings).not.toContain(RESTORE_WARNING);
   });
 
-  it("detects a restore that lost a page written after the last recovery pass, when the process stopped without shutting down", async () => {
-    const db = createFakePersistence();
-    const blobs = memoryBlobs();
-    const first = await harness({ db, blobs });
-    await seed(first);
-    expectOk(await first.delivery.checkBuild("b1"));
-    expectOk(await first.delivery.resumeStale());
-    const replicated = expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "marker" }))!.value;
-    const neu = await first.page({ slug: "neu", title: "Neu", status: "published" });
-    expect(blobs.files.has("site/neu/index.html")).toBe(true);
-
-    expectOk(await db.deleteMany(STATUS, { docId: neu }));
-    expectOk(await db.updateMany(STATE, { id: "marker" }, { value: replicated }));
-    const restarted = await harness({ db, blobs, content: first.content });
-    expect(expectOk(await restarted.delivery.checkBuild("b1"))).toMatchObject({ changed: false, restored: true });
-  });
-
-  it("a restart with no output changed writes no marker, neither at the build check nor at shutdown", async () => {
+  it("a restore whose marking failed is marked again by the next build check, which no longer has the restore signal", async () => {
     const db = createFakePersistence();
     const blobs = memoryBlobs();
     const first = await harness({ db, blobs });
     await seed(first);
     expectOk(await first.delivery.checkBuild("b1"));
     await first.delivery.close();
-    const marker = blobs.files.get(MARKER_KEY)!.text;
-    blobs.puts.length = 0;
-    const next = await harness({ db, blobs, content: first.content });
-    expect(expectOk(await next.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
-    expectOk(await next.delivery.resumeStale());
-    await next.delivery.close();
-    expect(blobs.puts.filter((key) => key === MARKER_KEY)).toEqual([]);
-    expect(blobs.files.get(MARKER_KEY)!.text).toBe(marker);
-    expect(expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "marker" }))!.value).toBe(marker);
-  });
-
-  const stateValue = async (db: Persistence, id: string): Promise<string | undefined> => expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id }))?.value;
-  const blobMarker = (blobs: Files): string | undefined => blobs.files.get(MARKER_KEY)?.text;
-  const holdRenders = (h: Harness): (() => void) => {
-    let release = (): void => {};
-    h.state.held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    return () => {
-      h.state.held = undefined;
-      release();
+    const content = first.content;
+    let failList = true;
+    const flaky: Content = {
+      ...content,
+      list: (type, filter, options) => {
+        if (failList && type === "pages") {
+          failList = false;
+          return Promise.resolve(err(failure("TRANSIENT", "store busy")));
+        }
+        return content.list(type, filter, options);
+      },
     };
-  };
-
-  it("a process puts a new marker before its next write once another process stored its own, so a backup taken in between is detected", async () => {
-    const db = createFakePersistence();
-    const blobs = memoryBlobs();
-    const a = await harness({ db, blobs });
-    const b = await harness({ db, blobs, content: a.content });
-    expectOk(await a.delivery.checkBuild("b1"));
-    expectOk(await b.delivery.checkBuild("b1"));
-    await b.page({ slug: "von-b", title: "Von B", status: "published" });
-    await a.page({ slug: "von-a", title: "Von A", status: "published" });
-    expectOk(await a.delivery.resumeStale());
-    const backup = await stateValue(db, "marker");
-    expect(blobMarker(blobs)).toBe(backup);
-
-    const lost = await b.page({ slug: "verloren", title: "Verloren", status: "published" });
-    expect(blobs.files.has("site/verloren/index.html")).toBe(true);
-    expect(blobMarker(blobs)).not.toBe(backup);
-    await b.delivery.close();
-    await a.delivery.close();
-
-    expectOk(await db.deleteMany(STATUS, { docId: lost }));
-    expectOk(await db.updateMany(STATE, { id: "marker" }, { value: backup }));
-    const c = await harness({ db, blobs, content: a.content });
-    expect(expectOk(await c.delivery.checkBuild("b1"))).toMatchObject({ restored: true });
-  });
-
-  it("the database takes the marker of a recovery pass once the renders in flight at that pass finished, also while later renders keep starting", async () => {
-    const h = await harness();
-    const ids = await seed(h);
-    expectOk(await h.delivery.checkBuild("b1"));
-    await h.page({ slug: "eins", title: "Eins", status: "published" });
-    const sealedBefore = await stateValue(h.db, "marker");
-    for (const id of [ids.kontakt, ids.home]) {
-      const release = holdRenders(h);
-      const rendering = h.delivery.publish("pages", id);
-      const passMarker = blobMarker(h.blobs);
-      expectOk(await h.delivery.resumeStale());
-      expect(await stateValue(h.db, "marker")).not.toBe(passMarker);
-      release();
-      expectOk(await rendering);
-      await expect.poll(() => stateValue(h.db, "marker")).toBe(passMarker);
-    }
-    expect(await stateValue(h.db, "marker")).not.toBe(sealedBefore);
-  });
-
-  it("an idle process stores its marker a few seconds after its last write, so an unclean stop after that is no restore", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      const db = createFakePersistence();
-      const blobs = memoryBlobs();
-      const first = await harness({ db, blobs });
-      await seed(first);
-      expectOk(await first.delivery.checkBuild("b1"));
-      await first.page({ slug: "neu", title: "Neu", status: "published" });
-      expect(await stateValue(db, "marker")).not.toBe(blobMarker(blobs));
-      await vi.advanceTimersByTimeAsync(10_000);
-      await expect.poll(() => stateValue(db, "marker")).toBe(blobMarker(blobs));
-      const restarted = await harness({ db, blobs, content: first.content });
-      expect(expectOk(await restarted.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("a graceful stop waits for the render in flight and stores the marker, and refuses renders that start after it", async () => {
-    const db = createFakePersistence();
-    const blobs = memoryBlobs();
-    const first = await harness({ db, blobs });
-    const ids = await seed(first);
-    expectOk(await first.delivery.checkBuild("b1"));
-    expectOk(await first.delivery.markAll("pages"));
-    const release = holdRenders(first);
-    const rendering = first.delivery.publish("pages", ids.kontakt);
-    const closing = first.delivery.close();
-    expectErr(await first.delivery.publish("pages", ids.home), "TRANSIENT");
-    expectErr(await first.delivery.republishOutput({ type: "pages", docId: ids.home, locale: "de" }), "TRANSIENT");
-    expectErr(await first.delivery.unpublish("pages", ids.home), "TRANSIENT");
-    release();
-    expectOk(await rendering);
-    await closing;
-    expect(await stateValue(db, "marker")).toBe(blobMarker(blobs));
-    const restarted = await harness({ db, blobs, content: first.content });
-    expect(expectOk(await restarted.delivery.checkBuild("b1"))).toMatchObject({ changed: false, restored: false });
-  });
-
-  it("writes no file when the marker cannot be written, and the next write tries the marker again", async () => {
-    const h = await harness();
-    await seed(h);
-    expectOk(await h.delivery.checkBuild("b1"));
-    expectOk(await h.delivery.resumeStale());
-    h.blobs.failPut.add(MARKER_KEY);
-    const zwei = await h.page({ slug: "zwei", title: "Zwei", status: "published" });
-    expect(h.blobs.files.has("site/zwei/index.html")).toBe(false);
-    expect(expectOk(await h.db.findOne<StatusRow>(STATUS, { docId: zwei, locale: "de" }))).toMatchObject({ state: "error" });
-    h.blobs.failPut.delete(MARKER_KEY);
-    h.blobs.puts.length = 0;
-    await h.page({ slug: "drei", title: "Drei", status: "published" });
-    expect(h.blobs.puts.indexOf(MARKER_KEY)).toBe(0);
-    expect(h.blobs.files.has("site/drei/index.html")).toBe(true);
-  });
-
-  it("a process whose build check could not read the marker reads it again before its first write, and writes no file while it cannot", async () => {
-    const db = createFakePersistence();
-    const blobs = memoryBlobs();
-    const first = await harness({ db, blobs });
-    await seed(first);
-    expectOk(await first.delivery.checkBuild("b1"));
-    await first.delivery.close();
-    const get = blobs.get.bind(blobs);
-    let unreadable = true;
-    blobs.get = async (key) => (key === MARKER_KEY && unreadable ? err(failure("TRANSIENT", "store unavailable")) : get(key));
-    const next = await harness({ db, blobs, content: first.content });
-    expect(expectOk(await next.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
-    await next.page({ slug: "neu", title: "Neu", status: "published" });
-    expect(blobs.files.has("site/neu/index.html")).toBe(false);
-    unreadable = false;
-    blobs.puts.length = 0;
-    await next.page({ slug: "spaeter", title: "Später", status: "published" });
-    expect(blobs.puts.indexOf(MARKER_KEY)).toBe(0);
-    expect(blobs.files.has("site/spaeter/index.html")).toBe(true);
-    expect(blobMarker(blobs)).not.toBe(await stateValue(db, "marker"));
-  });
-
-  it("a marker the database holds but the blob store lacks counts as a restore, as after a lost blob volume or a changed prefix", async () => {
-    const db = createFakePersistence();
-    const blobs = memoryBlobs();
-    const first = await harness({ db, blobs });
-    await seed(first);
-    expectOk(await first.delivery.checkBuild("b1"));
-    await first.delivery.close();
-    const moved = await harness({ db, blobs, content: first.content, config: { prefix: "www/" } });
-    const checked = expectOk(await moved.delivery.checkBuild("b1"));
-    expect(checked).toMatchObject({ changed: false, restored: true });
-    expect(checked.marked).toBeGreaterThan(0);
-    await moved.delivery.close();
-    blobs.files.clear();
-    const lost = await harness({ db, blobs, content: first.content });
-    expect(expectOk(await lost.delivery.checkBuild("b1"))).toMatchObject({ changed: false, restored: true });
-  });
-
-  it("a process that never checked a build checks the marker before its first write and stores it at shutdown", async () => {
-    const h = await harness();
-    await seed(h);
-    await h.delivery.close();
-    expect(blobMarker(h.blobs)).toBeDefined();
-    expect(await stateValue(h.db, "marker")).toBe(blobMarker(h.blobs));
-  });
-
-  const RESTORE_WARNING = "delivery/static: the database is older than the delivered files (restored from a backup), so every output is rendered again";
-
-  it("a process whose build check failed before it read the marker still covers its writes, so a restore of a backup taken before them is detected", async () => {
-    const db = createFakePersistence();
-    const blobs = memoryBlobs();
-    const first = await harness({ db, blobs });
-    await seed(first);
-    expectOk(await first.delivery.checkBuild("b1"));
-    await first.delivery.close();
-    const backup = await stateValue(db, "marker");
-    const findOne = db.findOne.bind(db);
-    let failBuildRead = true;
-    db.findOne = async <T extends Document>(collection: string, filter: Filter) => {
-      if (failBuildRead && collection === STATE && filter.id === "build") {
-        failBuildRead = false;
-        return err(failure("TRANSIENT", "database is locked"));
-      }
-      return findOne<T>(collection, filter);
-    };
-    const next = await harness({ db, blobs, content: first.content });
-    expectErr(await next.delivery.checkBuild("b1"), "TRANSIENT");
-    const lost = await next.page({ slug: "neu", title: "Neu", status: "published" });
-    expect(blobs.files.has("site/neu/index.html")).toBe(true);
-    expect(blobMarker(blobs)).not.toBe(backup);
-    await next.delivery.close();
-
-    expectOk(await db.deleteMany(STATUS, { docId: lost }));
-    expectOk(await db.updateMany(STATE, { id: "marker" }, { value: backup }));
-    const restored = await harness({ db, blobs, content: first.content });
-    expect(expectOk(await restored.delivery.checkBuild("b1"))).toMatchObject({ changed: false, restored: true });
-  });
-
-  it("a page a queue renders before the build check is covered by the marker", async () => {
-    const db = createFakePersistence();
-    const blobs = memoryBlobs();
-    const first = await harness({ db, blobs });
-    await seed(first);
-    expectOk(await first.delivery.checkBuild("b1"));
-    await first.delivery.close();
-    const backup = await stateValue(db, "marker");
-    const next = await harness({ db, blobs, content: first.content });
-    const lost = await next.page({ slug: "neu", title: "Neu", status: "published" });
-    expect(blobMarker(blobs)).not.toBe(backup);
-    expect(expectOk(await next.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
-    await next.delivery.close();
-
-    expectOk(await db.deleteMany(STATUS, { docId: lost }));
-    expectOk(await db.updateMany(STATE, { id: "marker" }, { value: backup }));
-    const restored = await harness({ db, blobs, content: first.content });
-    expect(expectOk(await restored.delivery.checkBuild("b1"))).toMatchObject({ changed: false, restored: true });
-  });
-
-  it("a marker put that keeps failing after a detected restore marks every output once, and the failed re-renders count their attempts", async () => {
-    const db = createFakePersistence();
-    const blobs = memoryBlobs();
-    const first = await harness({ db, blobs });
-    const ids = await seed(first);
-    expectOk(await first.delivery.checkBuild("b1"));
-    const backup = await stateValue(db, "marker");
-    await first.page({ slug: "neu", title: "Neu", status: "published" });
-    await first.delivery.close();
-    expectOk(await db.updateMany(STATE, { id: "marker" }, { value: backup }));
-
-    const next = await harness({ db, blobs, content: first.content });
-    blobs.failPut.add(MARKER_KEY);
+    const restored = await harness({ db, blobs, content: flaky });
+    expectErr(await restored.delivery.checkBuild("b1", true), "TRANSIENT");
+    await restored.delivery.close();
+    const next = await harness({ db, blobs, content });
     const checked = expectOk(await next.delivery.checkBuild("b1"));
-    expect(checked).toMatchObject({ changed: false, restored: true });
-    const raised = next.emitted.length;
-    expect(raised).toBe(checked.marked);
-    for (let attempt = 0; attempt < 3; attempt++) expectErr(await next.delivery.republishOutput({ type: "pages", docId: ids.kontakt, locale: "de" }), "TRANSIENT");
-    expect(next.logger.warnings.filter((w) => w === RESTORE_WARNING)).toHaveLength(1);
-    expect(next.emitted.filter((e) => e.name === "delivery.outputStale")).toHaveLength(raised);
-    expect(expectOk(await db.findOne<StatusRow>(STATUS, { docId: ids.kontakt, locale: "de" }))).toMatchObject({ staleAttempts: 3 });
-
-    blobs.failPut.delete(MARKER_KEY);
-    expectOk(await next.delivery.republishOutput({ type: "pages", docId: ids.kontakt, locale: "de" }));
-    await next.delivery.close();
-    expect(await stateValue(db, "marker")).toBe(blobMarker(blobs));
-    const later = await harness({ db, blobs, content: first.content });
-    expect(expectOk(await later.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
-  });
-
-  it("a marker put that fails on the first start leaves no marker behind that a later check takes for a restore", async () => {
-    const h = await harness();
-    h.blobs.failPut.add(MARKER_KEY);
-    await seed(h);
-    expectOk(await h.delivery.checkBuild("b1"));
-    h.blobs.failPut.delete(MARKER_KEY);
-    await h.page({ slug: "neu", title: "Neu", status: "published" });
-    expect(h.blobs.files.has("site/neu/index.html")).toBe(true);
-    expect(h.logger.warnings).not.toContain(RESTORE_WARNING);
-  });
-
-  it("a graceful stop waits for a re-render job that passed its stopping check before the stop", async () => {
-    const db = createFakePersistence();
-    let gate: Promise<void> | null = null;
-    const updateMany = db.updateMany.bind(db);
-    db.updateMany = async <T extends Document>(collection: string, filter: Filter, patch: Partial<Omit<T, "id">>) => {
-      if (gate !== null && collection === STATUS && filter.claimedBy === null && isRecord(patch) && typeof patch.claimedBy === "string") await gate;
-      return updateMany<T>(collection, filter, patch);
-    };
-    const first = await harness({ db });
-    const ids = await seed(first);
-    expectOk(await first.delivery.checkBuild("b1"));
-    expectOk(await first.delivery.markAll("pages"));
-    expectOk(await first.delivery.resumeStale());
-    expect(await stateValue(db, "marker")).toBe(blobMarker(first.blobs));
-    let open = (): void => {};
-    gate = new Promise<void>((resolve) => {
-      open = resolve;
-    });
-    const job = first.delivery.republishOutput({ type: "pages", docId: ids.kontakt, locale: "de" });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    const closing = first.delivery.close();
-    gate = null;
-    open();
-    expect(expectOk(await job)).toMatchObject({ rendered: true });
-    await closing;
-    expect(await stateValue(db, "marker")).toBe(blobMarker(first.blobs));
-    const next = await harness({ db, blobs: first.blobs, content: first.content });
-    expect(expectOk(await next.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
-  });
-
-  it("a marker put that lands after a later one never lets the database take a marker while a later write is uncommitted", async () => {
-    const db = createFakePersistence();
-    let gate: Promise<void> | null = null;
-    const createOne = db.createOne.bind(db);
-    db.createOne = async <T extends Document>(collection: string, row: NewDocument<T>) => {
-      if (gate !== null && collection === STATUS && isRecord(row) && row.path === "/r3") await gate;
-      return createOne<T>(collection, row);
-    };
-    const h = await harness({ db });
-    await seed(h);
-    expectOk(await h.delivery.checkBuild("b1"));
-    expectOk(await h.delivery.resumeStale());
-    let slow = true;
-    h.blobs.onPut = async (key) => {
-      if (key !== MARKER_KEY || !slow) return;
-      slow = false;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    };
-    const r1 = h.page({ slug: "r1", title: "R1", status: "published" });
-    await until(() => !slow);
-    expectOk(await h.delivery.resumeStale());
-    await h.page({ slug: "r2", title: "R2", status: "published" });
-    await r1;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    let open = (): void => {};
-    gate = new Promise<void>((resolve) => {
-      open = resolve;
-    });
-    const r3 = h.page({ slug: "r3", title: "R3", status: "published" });
-    await until(() => h.blobs.files.has("site/r3/index.html"));
-    expect(await stateValue(db, "marker")).not.toBe(blobMarker(h.blobs));
-    gate = null;
-    open();
-    await r3;
-  });
-
-  it("a process that starts next to one whose marker the database has not taken yet reports no restore", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      const db = createFakePersistence();
-      const blobs = memoryBlobs();
-      const running = await harness({ db, blobs });
-      await seed(running);
-      expectOk(await running.delivery.checkBuild("b1"));
-      expectOk(await running.delivery.resumeStale());
-      await running.page({ slug: "neu", title: "Neu", status: "published" });
-      expect(await stateValue(db, "marker")).not.toBe(blobMarker(blobs));
-      const starting = await harness({
-        db,
-        blobs,
-        content: running.content,
-        delay: async (ms) => {
-          await vi.advanceTimersByTimeAsync(ms);
-        },
-      });
-      expect(expectOk(await starting.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
-      expect(starting.logger.warnings).not.toContain(RESTORE_WARNING);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(checked).toMatchObject({ changed: true, restored: false });
+    expect(checked.marked).toBeGreaterThanOrEqual(await servingRows(db));
   });
 });
 
@@ -1329,9 +943,8 @@ describe("the one-time removal of orphaned output files", () => {
     const first = await harness(options);
     await seed(first);
     await first.delivery.close();
-    expectOk(await first.db.deleteMany(STATE, { id: { in: ["orphans", "marker"] } }));
+    expectOk(await first.db.deleteMany(STATE, { id: "orphans" }));
     expectOk(await first.db.createOne(STATE, { id: "build", value: "b1", seq: null, updatedAt: 0 }));
-    first.blobs.files.delete(MARKER_KEY);
     const upgradedHarness = await harness({ ...options, db: first.db, content: first.content, blobs: first.blobs });
     expect(expectOk(await upgradedHarness.delivery.checkBuild("b1"))).toEqual({ changed: false, restored: false, marked: 0 });
     return upgradedHarness;
@@ -1433,12 +1046,28 @@ describe("the one-time removal of orphaned output files", () => {
     expect(h.blobs.files.has("site/alt/index.html")).toBe(false);
   });
 
-  it("leaves the pages of another deployment whose prefix lies below this one's alone", async () => {
-    const h = await upgraded();
-    placed(h, "site/preview.delivery-marker", "site/preview/index.html", "site/preview/about/index.html", "site/alt/index.html");
+  it("leaves the pages of another deployment below this one's prefix alone when its path is reserved", async () => {
+    const h = await upgraded({ config: { reservedPaths: ["/preview"] } });
+    placed(h, "site/preview/index.html", "site/preview/about/index.html", "site/alt/index.html");
     expect(await sweep(h)).toBe(1);
     expect(h.blobs.files.has("site/preview/index.html")).toBe(true);
     expect(h.blobs.files.has("site/preview/about/index.html")).toBe(true);
+    expect(h.blobs.files.has("site/alt/index.html")).toBe(false);
+  });
+
+  it("waits until delivery.checkBuild ran in this process", async () => {
+    const first = await harness();
+    await seed(first);
+    await first.delivery.close();
+    expectOk(await first.db.deleteMany(STATE, { id: "orphans" }));
+    const h = await harness({ db: first.db, content: first.content, blobs: first.blobs });
+    placed(h, "site/alt/index.html");
+    expect(await sweep(h)).toBe(0);
+    expect(h.blobs.files.has("site/alt/index.html")).toBe(true);
+    expect(h.logger.infos.map((i) => i.message)).toContain("delivery/static: the one-time removal of orphaned output files waits: delivery.checkBuild has not run in this process yet");
+    expectOk(await h.delivery.checkBuild("b1"));
+    expectOk(await h.delivery.publishAll("pages"));
+    expect(await sweep(h)).toBe(1);
     expect(h.blobs.files.has("site/alt/index.html")).toBe(false);
   });
 
@@ -1478,52 +1107,34 @@ describe("the one-time removal of orphaned output files", () => {
     expect(await sweep(h)).toBe(1);
   });
 
-  it("a restore that checkBuild detects does not run it again, so files the restored database lacks stay", async () => {
-    const db = createFakePersistence();
-    const blobs = memoryBlobs();
-    const first = await harness({ db, blobs });
-    await seed(first);
-    expectOk(await first.delivery.checkBuild("b1"));
-    expectOk(await first.delivery.publishAll("pages"));
-    expect(expectOk(await first.delivery.resumeStale()).orphans).toBe(0);
-    expect(expectOk(await db.findOne(STATE, { id: "orphans" }))).not.toBeNull();
-    const backup = expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "marker" }))!.value;
-    const later = await first.page({ slug: "spaeter", title: "Später", status: "published" });
-    await first.delivery.close();
-    expect(blobs.files.has("site/spaeter/index.html")).toBe(true);
-
-    expectOk(await first.content.update("pages", later, { status: "draft" }, { locale: "de" }));
-    expectOk(await db.deleteMany(STATUS, { docId: later }));
-    expectOk(await db.updateMany(STATE, { id: "marker" }, { value: backup }));
-    const restored = await harness({ db, blobs, content: first.content });
-    expect(expectOk(await restored.delivery.checkBuild("b1"))).toMatchObject({ restored: true });
-    expectOk(await restored.delivery.publishAll("pages"));
-    expect(await sweep(restored)).toBe(0);
-    expect(blobs.files.has("site/spaeter/index.html")).toBe(true);
-  });
-
-  it("a restore of a backup taken after this version first started, before the removal finished, does not run it again", async () => {
+  it("a restored database never runs it, so files the restored database lacks stay", async () => {
     const h = await upgraded();
-    expect(expectOk(await h.delivery.checkBuild("b2"))).toMatchObject({ changed: true, restored: false });
-    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
-    const backup = expectOk(await h.db.findOne<{ id: string; value: string }>(STATE, { id: "marker" }))!.value;
-    expect(expectOk(await h.db.findOne(STATE, { id: "orphans:candidates" }))).toBeNull();
-    expectOk(await h.delivery.publishAll("pages"));
-    expect(await sweep(h)).toBe(0);
-    expect(expectOk(await h.db.findOne(STATE, { id: "orphans" }))).not.toBeNull();
     const later = await h.page({ slug: "spaeter", title: "Später", status: "published" });
     await h.delivery.close();
     expect(h.blobs.files.has("site/spaeter/index.html")).toBe(true);
 
     expectOk(await h.content.update("pages", later, { status: "draft" }, { locale: "de" }));
     expectOk(await h.db.deleteMany(STATUS, { docId: later }));
-    expectOk(await h.db.deleteMany(STATE, { id: { in: ["orphans", "orphans:candidates"] } }));
-    expectOk(await h.db.updateMany(STATE, { id: "marker" }, { value: backup }));
     const restored = await harness({ db: h.db, blobs: h.blobs, content: h.content });
-    expect(expectOk(await restored.delivery.checkBuild("b2"))).toMatchObject({ restored: true });
+    expect(expectOk(await restored.delivery.checkBuild("b1", true))).toMatchObject({ restored: true });
+    expect(expectOk(await h.db.findOne(STATE, { id: "orphans" }))).not.toBeNull();
     expectOk(await restored.delivery.publishAll("pages"));
     expect(await sweep(restored)).toBe(0);
-    expect(restored.blobs.files.has("site/spaeter/index.html")).toBe(true);
+    expect(h.blobs.files.has("site/spaeter/index.html")).toBe(true);
+  });
+
+  it("a restore of a backup taken while the removal waited for its second pass does not run it either", async () => {
+    const h = await upgraded();
+    placed(h, "site/alt/index.html");
+    expect(expectOk(await h.delivery.resumeStale()).orphans).toBe(0);
+    expect(expectOk(await h.db.findOne(STATE, { id: "orphans:candidates" }))).not.toBeNull();
+    await h.delivery.close();
+    const restored = await harness({ db: h.db, blobs: h.blobs, content: h.content });
+    expectOk(await restored.delivery.checkBuild("b1", true));
+    expectOk(await restored.delivery.publishAll("pages"));
+    restored.advance(CLAIM_TTL_MS + 1);
+    expect(await sweep(restored)).toBe(0);
+    expect(h.blobs.files.has("site/alt/index.html")).toBe(true);
   });
 
   it("keeps the file of a page published at an orphaned path while the removal checks that path for an owner", async () => {
@@ -1555,7 +1166,7 @@ describe("the one-time removal of orphaned output files", () => {
 
     const db = createFakePersistence();
     const fresh = await harness({ blobs, db });
-    expect(expectOk(await fresh.delivery.checkBuild("b1"))).toMatchObject({ restored: true });
+    expect(expectOk(await fresh.delivery.checkBuild("b1"))).toMatchObject({ changed: true, restored: false });
     for (const slug of ["eins", "zwei", "drei", "vier", "fuenf", "sechs"]) await fresh.page({ slug, title: slug, status: "published" });
     expectOk(await fresh.delivery.resumeStale());
     await fresh.page({ slug: "sieben", title: "Sieben", status: "published" });
@@ -1588,7 +1199,7 @@ describe("the one-time removal of orphaned output files", () => {
     expect(pages.length).toBeGreaterThan(0);
 
     const empty = await harness({ blobs });
-    expect(expectOk(await empty.delivery.checkBuild("b1"))).toMatchObject({ changed: true, restored: true, marked: 0 });
+    expect(expectOk(await empty.delivery.checkBuild("b1"))).toEqual({ changed: true, restored: false, marked: 0 });
     expect(expectOk(await empty.delivery.resumeStale()).orphans).toBe(0);
     await empty.page({ slug: "neu", title: "Neu", status: "published" });
     expect(await sweep(empty)).toBe(0);
