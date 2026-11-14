@@ -325,6 +325,93 @@ describe("blobstore/s3 admin: copy", () => {
   });
 });
 
+describe("blobstore/s3 admin: serverTime", () => {
+  it("reads the store's own clock from a probe object's LastModified and reports the skew against the local clock", async () => {
+    const s3 = fakeS3({ clockOffsetMs: 90_000 });
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    const clock = expectOk(await admin.serverTime());
+    expect(Math.abs(clock.serverMs - clock.localMs - 90_000)).toBeLessThan(2000);
+    expect(clock.skewMs).toBe(clock.serverMs - clock.localMs);
+  });
+
+  it("lists again until the probe object appears", async () => {
+    const s3 = fakeS3({ listingLag: 3 });
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    expectOk(await admin.serverTime());
+    expect(s3.sent.filter((sent) => sent instanceof ListObjectsV2Command).length).toBe(4);
+  });
+
+  it("answers TRANSIENT when the probe object never shows up in a listing", async () => {
+    const s3 = fakeS3({ listingLag: 50 });
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, { ...fastOptions, observeAttempts: 3 });
+    expectErr(await admin.serverTime(), "TRANSIENT");
+  });
+
+  it("leaves no probe object behind and writes under the configured prefix", async () => {
+    const s3 = fakeS3();
+    const admin = createS3Admin({ bucket: "b", prefix: "site/" }, s3.client, fastOptions);
+    expectOk(await admin.serverTime());
+    const puts = s3.sent.filter((sent): sent is PutObjectCommand => sent instanceof PutObjectCommand);
+    expect(puts.every((put) => put.input.Key?.startsWith("site/") === true)).toBe(true);
+    expect(s3.objects.size).toBe(0);
+  });
+});
+
+describe("blobstore/s3 admin: probeCapabilities", () => {
+  it("reports a capability as supported only when the store refused the stale condition", async () => {
+    const s3 = fakeS3();
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    const probed = expectOk(await admin.probeCapabilities());
+    for (const capability of [probed.conditionalCreate, probed.conditionalOverwrite, probed.copySourceIfMatch]) {
+      expect(capability).toMatchObject({ supported: true, outcome: "enforced" });
+    }
+  });
+
+  it("reports unproven, so unsupported, when the store ignores conditional headers", async () => {
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, fakeS3({ ignoreConditions: true }).client, fastOptions);
+    const probed = expectOk(await admin.probeCapabilities());
+    for (const capability of [probed.conditionalCreate, probed.conditionalOverwrite, probed.copySourceIfMatch]) {
+      expect(capability).toMatchObject({ supported: false, outcome: "ignored" });
+    }
+  });
+
+  it("reports unsupported when the store answers 501", async () => {
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, fakeS3({ notImplementedConditions: true }).client, fastOptions);
+    const probed = expectOk(await admin.probeCapabilities());
+    for (const capability of [probed.conditionalCreate, probed.conditionalOverwrite, probed.copySourceIfMatch]) {
+      expect(capability).toMatchObject({ supported: false, outcome: "not-implemented" });
+    }
+  });
+
+  it("reports an unexpected refusal as unsupported with the error name", async () => {
+    const s3 = fakeS3();
+    const original = s3.client.send.bind(s3.client);
+    s3.client.send = async (command) => {
+      if (command instanceof PutObjectCommand && command.input.IfNoneMatch !== undefined) throw httpError("InvalidArgument", 400);
+      return original(command);
+    };
+    const probed = expectOk(await createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions).probeCapabilities());
+    expect(probed.conditionalCreate).toMatchObject({ supported: false, outcome: "error", detail: "InvalidArgument" });
+    expect(probed.conditionalOverwrite.supported).toBe(true);
+  });
+
+  it("works on a scratch prefix under the configured prefix and removes what it wrote", async () => {
+    const s3 = fakeS3({ ignoreConditions: true });
+    const admin = createS3Admin({ bucket: "b", prefix: "site/" }, s3.client, fastOptions);
+    s3.put("site/keep.txt", 1);
+    expectOk(await admin.probeCapabilities());
+    const written = s3.sent.flatMap((sent) => (sent instanceof PutObjectCommand || sent instanceof CopyObjectCommand ? [sent.input.Key ?? ""] : []));
+    expect(written.length).toBeGreaterThan(0);
+    expect(written.every((key) => key.startsWith("site/."))).toBe(true);
+    expect([...s3.objects.keys()]).toEqual(["site/keep.txt"]);
+  });
+
+  it("answers TRANSIENT when the store cannot be reached and lets a denied write throw", async () => {
+    expectErr(await createS3Admin({ bucket: "b", prefix: "" }, failingS3(httpError("SlowDown", 503)), fastOptions).probeCapabilities(), "TRANSIENT");
+    await expect(createS3Admin({ bucket: "b", prefix: "" }, failingS3(httpError("AccessDenied", 403)), fastOptions).probeCapabilities()).rejects.toThrow(/AccessDenied/);
+  });
+});
+
 describe("blobstore/s3 admin: lifecycle", () => {
   it("close() destroys a real S3Client and is a no-op for a stub", () => {
     const destroy = vi.spyOn(S3Client.prototype, "destroy");

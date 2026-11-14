@@ -1,4 +1,5 @@
-import { CopyObjectCommand, HeadObjectCommand, ListObjectsV2Command, S3Client, type DeleteObjectCommand, type GetObjectCommand, type PutObjectCommand } from "@aws-sdk/client-s3";
+import { randomUUID } from "node:crypto";
+import { CopyObjectCommand, DeleteObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { customFailure, failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import { err, ok, type Result } from "@michaelthielemann/kestrel/result";
@@ -6,7 +7,7 @@ import { createClient, isTransient, type Config } from "./impl.ts";
 
 /** The client surface the admin operations use; `S3Client` satisfies it, tests pass a fake. */
 export interface S3AdminLike {
-  send(command: ListObjectsV2Command | HeadObjectCommand | CopyObjectCommand | PutObjectCommand | GetObjectCommand | DeleteObjectCommand): Promise<unknown>;
+  send(command: ListObjectsV2Command | HeadObjectCommand | CopyObjectCommand | PutObjectCommand | DeleteObjectCommand): Promise<unknown>;
 }
 
 /** `TRANSIENT` after the SDK's own retries; `NOT_FOUND` for a missing source. Anything else (a denied request, a bad bucket) throws as a wiring bug. */
@@ -42,6 +43,37 @@ export interface S3AdminOptions {
   verifyAttempts?: number;
   /** Pause between those attempts in milliseconds. Default 200. */
   retryDelayMs?: number;
+  /** Listings of a fresh probe object before `serverTime` gives up. Default 10. */
+  observeAttempts?: number;
+  /** The local clock in epoch milliseconds. */
+  now?: () => number;
+}
+
+/** The store's clock against the local one. `skewMs` is positive when the store is ahead. */
+export interface ServerClock {
+  serverMs: number;
+  localMs: number;
+  skewMs: number;
+}
+
+/** What one probe saw: `enforced` is a refusal with 412, `ignored` a success despite the stale condition, `not-implemented` a 501. */
+export type ProbeOutcome = "enforced" | "ignored" | "not-implemented" | "error";
+
+export interface CapabilityProbe {
+  /** True only when the store was seen to refuse the stale condition; anything not proven counts as unsupported. */
+  supported: boolean;
+  outcome: ProbeOutcome;
+  /** The error name for `outcome: "error"`. */
+  detail?: string;
+}
+
+export interface Capabilities {
+  /** `If-None-Match: *` on a write refuses to overwrite an existing key. */
+  conditionalCreate: CapabilityProbe;
+  /** `If-Match` on a write refuses a stale ETag. */
+  conditionalOverwrite: CapabilityProbe;
+  /** `x-amz-copy-source-if-match` on a copy refuses a stale source ETag. */
+  copySourceIfMatch: CapabilityProbe;
 }
 
 export interface S3Admin {
@@ -56,6 +88,17 @@ export interface S3Admin {
    * or reject that header, by comparing the source's ETag before and after the copy. Sources above 5 GiB are refused.
    */
   copy(from: string, to: string, options?: CopyOptions): Promise<Result<CopyResult, S3CopyError>>;
+  /**
+   * Reads the store's clock: writes a probe object, lists until it appears and returns its `LastModified`, which
+   * listings report with millisecond precision. The probe object is removed again.
+   */
+  serverTime(): Promise<Result<ServerClock, S3AdminError>>;
+  /**
+   * Tests which write conditions the store enforces, on scratch keys under the configured prefix that are removed
+   * afterwards. A store that ignores a condition accepts the stale write, so a probe that never saw a refusal
+   * reports the capability as unsupported.
+   */
+  probeCapabilities(): Promise<Result<Capabilities, S3AdminError>>;
   close(): void;
 }
 
@@ -63,6 +106,10 @@ export interface S3Admin {
 export const MAX_SINGLE_COPY_BYTES = 5 * 1024 ** 3;
 const DEFAULT_VERIFY_ATTEMPTS = 5;
 const DEFAULT_RETRY_DELAY_MS = 200;
+const DEFAULT_OBSERVE_ATTEMPTS = 10;
+const CLOCK_PREFIX = ".kestrel-clock/";
+const PROBE_PREFIX = ".kestrel-probe/";
+const NEVER_MATCHING_ETAG = '"kestrel-probe-no-such-etag"';
 
 function compareKeys(a: ObjectInfo, b: ObjectInfo): number {
   return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
@@ -101,6 +148,19 @@ function preconditionFailed(key: string, expected: string, found: string): S3Cop
   return customFailure("PRECONDITION_FAILED", 412, `blobstore/s3 admin: ${JSON.stringify(key)} no longer has the expected ETag`, { details: { expectedEtag: expected, foundEtag: found } });
 }
 
+async function classify(attempt: () => Promise<unknown>): Promise<Result<CapabilityProbe, S3AdminError>> {
+  try {
+    await attempt();
+    return ok({ supported: false, outcome: "ignored" });
+  } catch (cause) {
+    const status = statusOf(cause);
+    if (status === 412) return ok({ supported: true, outcome: "enforced" });
+    if (status === 501) return ok({ supported: false, outcome: "not-implemented" });
+    if (isTransient(cause)) return err(describeFailure("capability probe", cause));
+    return ok({ supported: false, outcome: "error", detail: boundaryCast<{ name?: string }>(cause, "host").name ?? "Error" });
+  }
+}
+
 function isNotFound(cause: unknown): boolean {
   const info = boundaryCast<{ name?: string; $metadata?: { httpStatusCode?: number } }>(cause, "host");
   return info.name === "NotFound" || info.name === "NoSuchKey" || info.$metadata?.httpStatusCode === 404;
@@ -115,12 +175,51 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const verifyAttempts = options.verifyAttempts ?? DEFAULT_VERIFY_ATTEMPTS;
   const retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+  const observeAttempts = options.observeAttempts ?? DEFAULT_OBSERVE_ATTEMPTS;
+  const now = options.now ?? Date.now;
 
   const fullKey = (key: string): string => {
     if (key === "" || key.startsWith("/")) throw new Error(`blobstore/s3 admin: invalid key ${JSON.stringify(key)}`);
     return config.prefix + key;
   };
   const relativeKey = (key: string): string => key.slice(config.prefix.length);
+
+  function listDetailed(prefix: string): Promise<Result<ObjectInfo[], S3AdminError>> {
+    return guarded(`list ${JSON.stringify(prefix)}`, async () => {
+      const out: ObjectInfo[] = [];
+      let token: string | undefined;
+      do {
+        const page = boundaryCast<{ Contents?: ListedItem[]; NextContinuationToken?: string }>(
+          await client.send(new ListObjectsV2Command({ Bucket: config.bucket, Prefix: config.prefix + prefix, ContinuationToken: token })),
+          "host",
+        );
+        for (const item of page.Contents ?? []) {
+          if (item.Key === undefined) continue;
+          out.push({ key: relativeKey(item.Key), size: item.Size ?? 0, etag: normalizeEtag(item.ETag ?? ""), lastModified: item.LastModified?.getTime() ?? null });
+        }
+        token = page.NextContinuationToken;
+      } while (token);
+      return out.sort(compareKeys);
+    });
+  }
+
+  async function bestEffortRemove(key: string): Promise<void> {
+    try {
+      await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: fullKey(key) }));
+    } catch {
+      return;
+    }
+  }
+
+  function write(key: string, body: Uint8Array, conditions: { ifNoneMatch?: string; ifMatch?: string } = {}): Promise<unknown> {
+    return client.send(new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: fullKey(key),
+      Body: body,
+      ...(conditions.ifNoneMatch === undefined ? {} : { IfNoneMatch: conditions.ifNoneMatch }),
+      ...(conditions.ifMatch === undefined ? {} : { IfMatch: conditions.ifMatch }),
+    }));
+  }
 
   async function head(key: string): Promise<Result<ObjectInfo | null, S3AdminError>> {
     const target = fullKey(key);
@@ -134,31 +233,58 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
     }
   }
 
+  async function serverTime(): Promise<Result<ServerClock, S3AdminError>> {
+    const key = `${CLOCK_PREFIX}${randomUUID()}`;
+    const before = now();
+    const written = await guarded("clock probe write", () => write(key, new Uint8Array(0)));
+    if (!written.ok) return written;
+    const localMs = Math.round((before + now()) / 2);
+    try {
+      for (let attempt = 0; attempt < observeAttempts; attempt += 1) {
+        if (attempt > 0) await sleep(retryDelayMs);
+        const listed = await listDetailed(key);
+        if (!listed.ok) return listed;
+        const modified = listed.value.find((item) => item.key === key)?.lastModified;
+        if (modified !== null && modified !== undefined) return ok({ serverMs: modified, localMs, skewMs: modified - localMs });
+      }
+      return err(failure("TRANSIENT", `blobstore/s3 admin: the clock probe object did not appear in ${observeAttempts} listings`));
+    } finally {
+      await bestEffortRemove(key);
+    }
+  }
+
+  async function probeCapabilities(): Promise<Result<Capabilities, S3AdminError>> {
+    const scratch = `${PROBE_PREFIX}${randomUUID()}/`;
+    const original = `${scratch}original`;
+    const copied = `${scratch}copy`;
+    const created = await guarded("capability probe write", () => write(original, new TextEncoder().encode("one")));
+    if (!created.ok) return created;
+    try {
+      const conditionalCreate = await classify(() => write(original, new TextEncoder().encode("two"), { ifNoneMatch: "*" }));
+      if (!conditionalCreate.ok) return conditionalCreate;
+      const conditionalOverwrite = await classify(() => write(original, new TextEncoder().encode("three"), { ifMatch: NEVER_MATCHING_ETAG }));
+      if (!conditionalOverwrite.ok) return conditionalOverwrite;
+      const copySourceIfMatch = await classify(() =>
+        client.send(new CopyObjectCommand({ Bucket: config.bucket, Key: fullKey(copied), CopySource: `${config.bucket}/${fullKey(original).split("/").map(encodeURIComponent).join("/")}`, CopySourceIfMatch: NEVER_MATCHING_ETAG })),
+      );
+      if (!copySourceIfMatch.ok) return copySourceIfMatch;
+      return ok({ conditionalCreate: conditionalCreate.value, conditionalOverwrite: conditionalOverwrite.value, copySourceIfMatch: copySourceIfMatch.value });
+    } finally {
+      await bestEffortRemove(original);
+      await bestEffortRemove(copied);
+    }
+  }
+
   return {
     close() {
       if (client instanceof S3Client) client.destroy();
     },
 
-    listDetailed(prefix) {
-      return guarded(`list ${JSON.stringify(prefix)}`, async () => {
-        const out: ObjectInfo[] = [];
-        let token: string | undefined;
-        do {
-          const page = boundaryCast<{ Contents?: ListedItem[]; NextContinuationToken?: string }>(
-            await client.send(new ListObjectsV2Command({ Bucket: config.bucket, Prefix: config.prefix + prefix, ContinuationToken: token })),
-            "host",
-          );
-          for (const item of page.Contents ?? []) {
-            if (item.Key === undefined) continue;
-            out.push({ key: relativeKey(item.Key), size: item.Size ?? 0, etag: normalizeEtag(item.ETag ?? ""), lastModified: item.LastModified?.getTime() ?? null });
-          }
-          token = page.NextContinuationToken;
-        } while (token);
-        return out.sort(compareKeys);
-      });
-    },
+    listDetailed,
 
     head,
+    serverTime,
+    probeCapabilities,
 
     async copy(from, to, copyOptions = {}) {
       const source = await head(from);
