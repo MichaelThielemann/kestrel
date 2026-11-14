@@ -320,6 +320,33 @@ describe("backup and restore against an in-memory store", () => {
     }
   });
 
+  it.each(["blobs.jsonl", "site.jsonl"])("refuses to prune while the %s of a kept backup was cut at a line boundary, since the objects it refers to are then unknown", async (file) => {
+    const bucket = new MemoryBucket(`cut-${file}-prune`);
+    const h = createHarness({ store: memoryStore(bucket) });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const id = String((await h.run(["backup", "create", "--freeze", "--yes", "--json"])).json.id);
+      const key = `${LOCATION}backups/${id}/${file}`;
+      const lines = new TextDecoder().decode(bucket.objects.get(key)?.data ?? new Uint8Array()).split("\n").filter((line) => line !== "");
+      expect(lines.length).toBeGreaterThan(1);
+      bucket.tamper(key, new TextEncoder().encode(`${lines[0] ?? ""}\n`));
+      const objects = (): string[] => [...bucket.objects.keys()].filter((k) => k.startsWith(`${LOCATION}objects/`)).sort();
+      const before = objects();
+      const later = { clock: () => Date.now() + 3 * 24 * 3_600_000 };
+
+      const dry = await h.run(["backup", "prune", "--dry-run", "--json"], later);
+      expect(dry.code).toBe(1);
+      expect(dry.stderr).toContain(`refusing to prune: ${file} of backup ${id} holds 1 entry, the manifest counts ${lines.length}, so the objects it refers to are unknown`);
+      expect(dry.json).toMatchObject({ ok: false, element: file });
+      const real = await h.run(["backup", "prune", "--yes"], later);
+      expect(real.code).toBe(1);
+      expect(objects()).toEqual(before);
+    } finally {
+      await h.dispose();
+    }
+  });
+
   it("names a site.jsonl whose keys differ from the manifest's when verification fails", async () => {
     const bucket = new MemoryBucket("renamed-site");
     const h = createHarness({ store: memoryStore(bucket) });

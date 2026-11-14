@@ -300,6 +300,17 @@ function sampledOriginals<T extends { sha256: string | null }>(entries: readonly
   return out;
 }
 
+/** How a `blobs.jsonl` or `site.jsonl` whose length differs from its manifest's count is named. */
+export function entryCountMismatch(entries: number, count: number): string {
+  return `holds ${entries} ${entries === 1 ? "entry" : "entries"}, the manifest counts ${count}`;
+}
+
+function countedEntries(manifest: Manifest | null, part: "blobs" | "site"): number | null {
+  const section: unknown = manifest === null ? undefined : Reflect.get(manifest, part);
+  const count: unknown = typeof section === "object" && section !== null ? Reflect.get(section, "count") : undefined;
+  return typeof count === "number" ? count : null;
+}
+
 /**
  * Verifies a backup from what the backup location holds: the database (when the backup has one) is read back, hashed and fully
  * integrity-checked, its rows are counted against the manifest, `blobs.jsonl` and `site.jsonl` hold as many entries as
@@ -357,9 +368,8 @@ export async function verifyBackup(ctx: OpsContext, id: string): Promise<Verific
   }
   const blobs = "entries" in blobList ? blobList.entries : null;
   const site = "entries" in siteList ? siteList.entries : null;
-  const holds = (n: number, count: number): string => `holds ${n} ${n === 1 ? "entry" : "entries"}, the manifest counts ${count}`;
-  if (blobs !== null && blobs.length !== manifest.blobs.count) problems.push({ element: "blobs.jsonl", message: holds(blobs.length, manifest.blobs.count) });
-  if (site !== null && site.length !== manifest.site.count) problems.push({ element: "site.jsonl", message: holds(site.length, manifest.site.count) });
+  if (blobs !== null && blobs.length !== manifest.blobs.count) problems.push({ element: "blobs.jsonl", message: entryCountMismatch(blobs.length, manifest.blobs.count) });
+  if (site !== null && site.length !== manifest.site.count) problems.push({ element: "site.jsonl", message: entryCountMismatch(site.length, manifest.site.count) });
   else if (site !== null && sha256(site.map((s) => s.key).join("\n")) !== manifest.site.pathsSha256) problems.push({ element: "site.jsonl", message: "its keys do not hash to the manifest's pathsSha256" });
   if (blobs !== null && file !== null) {
     const byKey = new Map(blobs.map((b) => [b.key, b]));
@@ -514,10 +524,11 @@ export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResu
   const keep = new Set<string>();
   const remove: string[] = [];
   const manifests = new Map<string, Manifest | null>();
-  for (const b of all) manifests.set(b.id, b.complete ? await readManifest(ctx, b.id).catch((cause: unknown) => {
+  const parsedManifest = (id: string): Promise<Manifest | null> => readManifest(ctx, id).catch((cause: unknown) => {
     if (cause instanceof OpsError && cause.element === "manifest.json") return null;
     throw cause;
-  }) : null);
+  });
+  for (const b of all) manifests.set(b.id, b.complete ? await parsedManifest(b.id) : null);
   for (const kind of BACKUP_KINDS) {
     const count = ctx.env.backups.retention[kind];
     const ofKind = all.filter((b) => b.kind === kind && b.complete).reverse();
@@ -542,9 +553,13 @@ export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResu
   const recent = await recentBackupIds(ctx, now);
   for (const id of new Set([...(await backupIdsAtLocation(ctx)), ...recent])) {
     if (removing.has(id) && !recent.includes(id)) continue;
-    for (const [list, file] of [[await readJsonl<BlobEntry>(ctx, ctx.location + keys.blobs(id)), "blobs.jsonl"], [await readJsonl<SiteEntry>(ctx, ctx.location + keys.site(id)), "site.jsonl"]] as const) {
+    const manifest = manifests.has(id) ? (manifests.get(id) ?? null) : await parsedManifest(id);
+    for (const [list, file, part] of [[await readJsonl<BlobEntry>(ctx, ctx.location + keys.blobs(id)), "blobs.jsonl", "blobs"], [await readJsonl<SiteEntry>(ctx, ctx.location + keys.site(id)), "site.jsonl", "site"]] as const) {
       if ("unreadable" in list) throw new OpsError(`refusing to prune: ${file} of backup ${id} holds ${list.unreadable}, so the objects it refers to are unknown`, 1, file);
-      if ("entries" in list) for (const entry of list.entries) referenced.add(ctx.location + entry.object);
+      if (!("entries" in list)) continue;
+      const count = countedEntries(manifest, part);
+      if (count !== null && list.entries.length !== count) throw new OpsError(`refusing to prune: ${file} of backup ${id} ${entryCountMismatch(list.entries.length, count)}, so the objects it refers to are unknown`, 1, file);
+      for (const entry of list.entries) referenced.add(ctx.location + entry.object);
     }
   }
   const objects = (await ctx.backups.list(`${ctx.location}objects/`)).filter((o) => !referenced.has(o.key) && now - o.lastModified >= PRUNE_MIN_AGE_MS).map((o) => o.key);

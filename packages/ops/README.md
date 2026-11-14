@@ -306,7 +306,8 @@ under `objects/` without writing it again, so the object's age does not protect 
 not show yet still counts, since prune reads the backups of today and yesterday from `recent/`, which it finds
 by key, not by listing, and forgets older days there. It refuses while another run is open (a journal
 without an end entry, active in the last two hours) or holds the lock, and when the `blobs.jsonl` or `site.jsonl`
-of a backup it keeps cannot be parsed, since the objects that backup refers to are then unknown. A backup's
+of a backup it keeps cannot be parsed or holds another number of entries than its manifest counts, since the
+objects that backup refers to are then unknown. A backup's
 verification state is the result of its newest verification; a `manifest.json`, `blobs.jsonl` or `site.jsonl`
 that cannot be parsed fails it. Interactive runs ask before deleting;
 `--dry-run` only lists.
