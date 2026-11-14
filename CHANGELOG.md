@@ -21,7 +21,9 @@ Net changes since 5.8.2.
   share up only after its teardown has shipped the last WAL frames and sealed the generation. An in-memory
   database takes no lock. `kestrel.health()` reports a lost lock (another instance took it over, or its file was
   gone after the process had not renewed it for longer than its TTL) as `ok: false` with `restartRequired: true`.
-  `checkBoot({ setup: "all" })` takes the lock on the real file while it runs and gives it up before it returns;
+  `checkBoot()` with `setup: "all"`, or with `setup: { only: [...] }` naming one of these modules, takes the lock
+  on the real file while it runs and gives it up before it returns, so a process that boots on the file during the
+  check is refused;
   `kestrel check --run-setup` runs these modules against a scratch database. To run several processes on one file
   on purpose, set the new option `allowConcurrentProcesses: true` (default `false`) on every module that names
   the file; one module of the file with it and another without it fails boot with `invalid-module-config`, naming

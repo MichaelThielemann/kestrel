@@ -292,6 +292,19 @@ describe("boot checks and the instance lock", () => {
     expect(readFileSync(lockFileOf(file), "utf8")).toBe(held);
   });
 
+  it("takes the lock at the real path from checkBoot when the setup list names a storage module", async () => {
+    const dir = freshDir();
+    const file = join(dir, "kestrel.db");
+    const held = holdForeignLock(file);
+    const recording = recordingBlobstore(lockFileOf(file));
+
+    const check = await checkBoot(storageInput(recording.module, {}, { file }, { file }, dir), { setup: { only: ["@michaelthielemann/kestrel-persistence-sqlite"] } });
+
+    expect(check.errors.map((problem) => [problem.code, problem.module])).toContainEqual(["instance-locked", "persistence/sqlite"]);
+    expect(readdirSync(dir)).toEqual(["kestrel.db.instance"]);
+    expect(readFileSync(lockFileOf(file), "utf8")).toBe(held);
+  });
+
   it("runs the storage modules of a sandboxed check against the scratch directory even when the check consents to them", async () => {
     const dir = freshDir();
     const scratch = freshDir();

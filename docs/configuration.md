@@ -295,10 +295,12 @@ dataflow, hooks, output declarations, attach — and returns every problem as da
 `warnings`, `notChecked`) instead of throwing at the first one. `setup` has no default: `"none"`
 runs no module code beyond `configSchema`, `"all"` runs every module's `setup()`, and
 `{ only: [...] }` names the config `use` entries whose `setup()` may run, since `setup()`,
-`attach()` and `teardown()` reach whatever storage a module's config names. With `"all"`, the
-storage modules take the instance lock on the real database file while the check runs and give it
-up before `checkBoot()` returns, so a check beside a running process reports `instance-locked` and
-changes nothing there. `kestrel check --run-setup` runs those modules against a database in a
+`attach()` and `teardown()` reach whatever storage a module's config names. A storage module
+whose `setup()` runs, with `"all"` or named in `{ only: [...] }`, takes the instance lock on the
+real database file while the check runs and gives it up before `checkBoot()` returns. A check
+beside a running process therefore reports `instance-locked` and changes nothing there, and a
+process that boots on the file while the check runs is refused with `instance-locked` naming the
+checking process. `kestrel check --run-setup` runs those modules against a database in a
 scratch directory and never takes the lock of the real one. Each problem's `code` is
 covered by semver from 6.0.0 and a reader must handle one it does not recognize; `reason` and every
 message text are not covered and may change in any release.
