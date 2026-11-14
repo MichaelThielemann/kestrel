@@ -1,5 +1,6 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -81,6 +82,20 @@ describe("the 5.8.1 upgrade fixture: provenance", () => {
   });
 
   it("ships the database as one self-contained file", () => {
+  it("removes its work directory when the run fails", () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "kestrel-fixture-cleanup-"));
+    scratch.push(sandbox);
+    const work = join(sandbox, "tmp");
+    mkdirSync(work);
+    const run = spawnSync(process.execPath, [GENERATOR, "--out", join(sandbox, "out")], {
+      env: { ...process.env, TMPDIR: work, npm_config_registry: "http://127.0.0.1:9/", npm_config_fetch_retries: "0", npm_config_fetch_retry_mintimeout: "100", npm_config_fetch_retry_maxtimeout: "100" },
+      encoding: "utf8",
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("seed-upgrade-fixture:");
+    expect(readdirSync(work).filter((entry) => entry.startsWith("kestrel-upgrade-fixture-"))).toEqual([]);
+  }, 60_000);
+
     expect(existsSync(join(FIXTURE, "kestrel.db"))).toBe(true);
     expect(existsSync(join(FIXTURE, "kestrel.db-wal"))).toBe(false);
     expect(existsSync(join(FIXTURE, "kestrel.db-shm"))).toBe(false);

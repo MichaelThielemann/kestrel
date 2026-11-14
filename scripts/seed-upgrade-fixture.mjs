@@ -24,9 +24,10 @@ const SEED_COPY = "seed-upgrade-fixture.mjs";
 const SCOPE = "@michaelthielemann";
 export const BACKUP_KEY = "backups/kestrel.db";
 
+class GeneratorError extends Error {}
+
 function fail(message) {
-  console.error(`seed-upgrade-fixture: ${message}`);
-  process.exit(1);
+  throw new GeneratorError(message);
 }
 
 function run(command, args, options = {}) {
@@ -297,7 +298,13 @@ async function seed() {
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const options = parseArgs(process.argv.slice(2));
-  if (options.seed) await seed();
-  else await generate(options);
+  try {
+    const options = parseArgs(process.argv.slice(2));
+    if (options.seed) await seed();
+    else await generate(options);
+  } catch (error) {
+    if (!(error instanceof GeneratorError)) throw error;
+    console.error(`seed-upgrade-fixture: ${error.message}`);
+    process.exit(1);
+  }
 }
