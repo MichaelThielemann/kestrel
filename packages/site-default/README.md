@@ -126,13 +126,23 @@ it could not finish, `site.resumePaths` (on a cron, every minute) finishes, so t
 one interval after a failure. Boot fails when a pipeline writes a routed type without this wiring, or
 reads it with a `home` or `slugField` the route does not have.
 
-**Resolve steps carry the route's filter.** `site.resolve:<t>` and `site.resolveLinks:<t>` on a routed type
-with a `liveWhen` must name every field of it as an argument, with the same value when `liveWhen` holds a
-plain value: `liveWhen: { status: "published" }` needs `site.resolve:pages?home=home&status=published`.
-Without it the step would resolve a path to documents the route does not publish, and boot fails naming the
-pipeline and the argument. A `liveWhen` condition such as `{ in: [...] }` cannot be written as an argument, so
-the step names the field with the value it serves. A step that follows `authn.requireUser` in its pipeline is
-a signed-in preview and may stay unfiltered; `authn.identifyUser` does not exempt it.
+**Resolve steps carry the route's filter.** `site.resolve:<t>` on a routed type with a `liveWhen` must name every
+field of it as an argument, with the value the route publishes: `liveWhen: { status: "published" }` needs
+`site.resolve:pages?home=home&status=published`. A `liveWhen` of `{ eq: v }`, `{ ne: v }` or `{ in: [...] }` is
+checked against the value the argument names; an argument holds one value, so a step on `{ in: [...] }` serves
+the one value it names. Any other condition, and `null`, cannot be written as an argument, and only the field
+must be named. Without the filter the step would resolve a path to documents the route does not publish, and
+boot fails naming the pipeline and the argument. A resolve step that follows `authn.requireUser` in its pipeline
+is a signed-in preview and may stay unfiltered; `authn.identifyUser` does not exempt it.
+
+A filtered step also serves a routed document only while the route's own `liveWhen` holds for it, whatever
+value the filter names.
+
+`site.resolveLinks:<t>` links a routed target by the route of the target's own type, so the filter names no
+field of `<t>`. A step with no filter argument links every valid path, drafts included; boot fails for such a step
+when any route has a `liveWhen`, unless it follows `authn.requireUser`. With a filter (`status=published`) a
+routed target is linked only while its own route publishes it, and an unrouted target only when it passes the
+filter itself.
 
 `site.readTree:<t>` lists every document of the mount target type with its parent, label, valid
 paths and per-locale `live` state. `site.attachPaths:<t>?reachable` adds `_paths` to a list or read answer (reachable paths only; without

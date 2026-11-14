@@ -4,7 +4,9 @@ import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import type { RoutesConfig } from "./routes.ts";
 
 const WRITE = /^content\.(create|update|remove|removeTranslation):([^?]+)/;
-const FILTERED_READ = /^site\.(resolve|resolveLinks):([^?]+)(?:\?(.*))?$/;
+const RESOLVE = /^site\.resolve:([^?]+)(?:\?(.*))?$/;
+const RESOLVE_LINKS = /^site\.resolveLinks:[^?]+(?:\?(.*))?$/;
+const RULE_ARGUMENTS = new Set(["home", "slugField", "fallback", "prefixPrimary"]);
 const READ = /^site\.(resolve|resolveLinks|route|attachPaths|previewPath|readTree):([^?]+)(?:\?(.*))?$/;
 
 /** Boot errors for a routed type whose model cannot carry a path. */
@@ -46,8 +48,27 @@ export function checkRoutedModel(config: RoutesConfig, model: ContentModel, logg
   if (problems.length > 0) throw new Error(`site/default: ${problems.join("; ")}`);
 }
 
-function argumentOf(expected: unknown): string | undefined {
-  return typeof expected === "string" || typeof expected === "number" || typeof expected === "boolean" ? String(expected) : undefined;
+function isScalar(value: unknown): value is string | number | boolean {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function condition(expected: unknown): [string, unknown] | undefined {
+  if (typeof expected !== "object" || expected === null || Array.isArray(expected)) return undefined;
+  const entries = Object.entries(expected);
+  return entries.length === 1 ? entries[0] : undefined;
+}
+
+function agrees(expected: unknown, actual: string): boolean {
+  if (isScalar(expected)) return String(expected) === actual;
+  const [operator, operand] = condition(expected) ?? [];
+  if (operator === "eq" && isScalar(operand)) return String(operand) === actual;
+  if (operator === "ne" && isScalar(operand)) return String(operand) !== actual;
+  if (operator === "in" && Array.isArray(operand) && operand.every(isScalar)) return operand.some((value) => String(value) === actual);
+  return true;
+}
+
+function requirement(field: string, expected: unknown): string {
+  return isScalar(expected) ? `${field}=${String(expected)}` : `${field} matching ${JSON.stringify(expected)}`;
 }
 
 /**
@@ -91,16 +112,22 @@ export function checkPathWiring(manifest: ReturnType<Introspection["describe"]>,
         if (slugField !== null && slugField !== route.slugField) problems.push(`pipeline "${pipeline.name}": ${step.spec} names slugField "${slugField}", but routes.${readType}.slugField is "${route.slugField}"`);
         if (home !== null && home !== route.home) problems.push(`pipeline "${pipeline.name}": ${step.spec} names home "${home}", but routes.${readType}.home is ${route.home === null ? "unset" : `"${route.home}"`}`);
       }
-      const filtered = FILTERED_READ.exec(step.spec);
-      const filteredRoute = filtered?.[2] === undefined ? undefined : routes[filtered[2]];
-      if (filtered && filteredRoute && !steps.slice(0, i).some((earlier) => earlier.spec === "authn.requireUser")) {
-        const args = new URLSearchParams(filtered[3] ?? "");
-        const missing = Object.entries(filteredRoute.liveWhen).flatMap(([field, expected]) => {
-          const wanted = argumentOf(expected);
+      const preview = steps.slice(0, i).some((earlier) => earlier.spec === "authn.requireUser");
+      const resolve = RESOLVE.exec(step.spec);
+      const resolveRoute = resolve?.[1] === undefined ? undefined : routes[resolve[1]];
+      if (resolve && resolveRoute && !preview) {
+        const args = new URLSearchParams(resolve[2] ?? "");
+        const missing = Object.entries(resolveRoute.liveWhen).flatMap(([field, expected]) => {
           const actual = args.get(field);
-          return actual === null || (wanted !== undefined && actual !== wanted) ? [wanted === undefined ? field : `${field}=${wanted}`] : [];
+          return actual !== null && agrees(expected, actual) ? [] : [requirement(field, expected)];
         });
         if (missing.length > 0) problems.push(`pipeline "${pipeline.name}": ${step.spec} must carry ${missing.join("&")}, the route's liveWhen, or it serves documents the route does not publish`);
+      }
+      const links = RESOLVE_LINKS.exec(step.spec);
+      if (links && !preview) {
+        const filtered = [...new URLSearchParams(links[1] ?? "").keys()].some((key) => !RULE_ARGUMENTS.has(key));
+        const example = Object.values(routes).flatMap((r) => Object.entries(r.liveWhen))[0];
+        if (!filtered && example !== undefined) problems.push(`pipeline "${pipeline.name}": ${step.spec} must carry a filter such as ${isScalar(example[1]) ? requirement(example[0], example[1]) : `${example[0]}=<value>`}, or it links to documents the routes do not publish`);
       }
     });
   }

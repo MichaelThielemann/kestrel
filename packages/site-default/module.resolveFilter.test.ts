@@ -80,9 +80,24 @@ describe("site/default routed: resolve status filter", () => {
     await expect(bootWith(pipelines)).rejects.toThrow(/pipeline "resolvePage": site\.resolve:pages\?home=home&fallback=true must carry status=published, the route's liveWhen/);
   });
 
-  it("fails when site.resolveLinks on a routed type carries no filter", async () => {
-    const pipelines = [definePipeline({ name: "resolvePage", steps: ["site.resolve:pages?home=home&status=published", "site.resolveLinks:pages?home=home"] })];
-    await expect(bootWith(pipelines)).rejects.toThrow(/site\.resolveLinks:pages\?home=home must carry status=published/);
+  it("fails when site.resolveLinks carries no filter, whichever type it is named for", async () => {
+    for (const type of ["notes", "pages"]) {
+      const pipelines = [definePipeline({ name: "resolvePage", steps: ["site.resolve:pages?home=home&status=published", `site.resolveLinks:${type}`] })];
+      await expect(bootWith(pipelines)).rejects.toThrow(new RegExp(`pipeline "resolvePage": site\\.resolveLinks:${type} must carry a filter such as status=published`));
+    }
+  });
+
+  it("does not require the route's field on site.resolveLinks, so a link to another routed type stays whole", async () => {
+    const pipelines = [definePipeline({ name: "resolvePage", steps: ["site.resolve:pages?home=home&status=published", "site.resolveLinks:pages?home=home&featured=true"] })];
+    const kestrel = await bootWith(pipelines, { pages: { home: "home", liveWhen: { status: "published" } }, notes: {} });
+    await kestrel.stop();
+  });
+
+  it("accepts an unfiltered site.resolveLinks after authn.requireUser or when no route has a liveWhen", async () => {
+    const preview = [definePipeline({ name: "previewPage", steps: ["authn.requireUser", "site.resolve:pages?home=home", "site.resolveLinks:pages?home=home"] })];
+    await (await bootWith(preview)).stop();
+    const open = [definePipeline({ name: "resolveNote", steps: ["site.resolve:notes", "site.resolveLinks:notes"] })];
+    await (await bootWith(open, { pages: { home: "home" } })).stop();
   });
 
   it("fails when the step filters on another value than the route's liveWhen", async () => {
@@ -131,5 +146,13 @@ describe("site/default routed: resolve status filter", () => {
     await expect(bootWith([definePipeline({ name: "resolvePage", steps: ["site.resolve:pages?home=home"] })], routes)).rejects.toThrow(/must carry status/);
     const kestrel = await bootWith([definePipeline({ name: "resolvePage", steps: ["site.resolve:pages?home=home&status=published"] })], routes);
     await kestrel.stop();
+  });
+
+  it("checks the value a step names against an eq, ne or in condition of the liveWhen", async () => {
+    const wiring = (liveWhen: Record<string, unknown>, status: string) => bootWith([definePipeline({ name: "resolvePage", steps: [`site.resolve:pages?home=home&status=${status}`] })], { pages: { home: "home", liveWhen } });
+    await expect(wiring({ status: { ne: "draft" } }, "draft")).rejects.toThrow(/must carry status matching \{"ne":"draft"\}/);
+    await expect(wiring({ status: { eq: "published" } }, "draft")).rejects.toThrow(/must carry status matching \{"eq":"published"\}/);
+    await expect(wiring({ status: { in: ["published", "archived"] } }, "draft")).rejects.toThrow(/must carry status matching/);
+    for (const [liveWhen, status] of [[{ status: { ne: "draft" } }, "published"], [{ status: { eq: "published" } }, "published"], [{ status: { in: ["published", "archived"] } }, "archived"]] as const) await (await wiring(liveWhen, status)).stop();
   });
 });

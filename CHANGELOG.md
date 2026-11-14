@@ -6,14 +6,18 @@ Net changes since 5.8.2.
 
 ### Breaking
 
-- `site-default`: **a resolve step on a routed type must carry the route's `liveWhen` filter.** A pipeline
-  whose `site.resolve:<type>` or `site.resolveLinks:<type>` step lacks a field of the route's `liveWhen`, or
-  names another value for it, fails boot with `site/default: pipeline "<name>": <step> must carry
-  status=published, …`, because the step would serve drafts and other unpublished documents at their path.
-  Add the filter to the step, for example `site.resolve:pages?home=home&status=published&fallback=true` for
-  `liveWhen: { status: "published" }`. A resolve step behind `authn.requireUser` is a signed-in preview and
-  stays unfiltered; `authn.identifyUser` does not make a step one. Routed types without a `liveWhen` and
-  types that are not routed are not checked.
+- `site-default`: **a resolve step must carry the route's `liveWhen` filter, and `site.resolveLinks` a filter.** A
+  pipeline whose `site.resolve:<type>` on a routed type lacks a field of the route's `liveWhen`, or names a value
+  the route excludes, fails boot with `site/default: pipeline "<name>": <step> must carry status=published, …`,
+  because the step would serve drafts and other unpublished documents at their path. A `site.resolveLinks` step
+  with no filter argument fails boot when any route has a `liveWhen`, because it would give drafts a path in
+  every document it rewrites. Add the filter, for example
+  `site.resolve:pages?home=home&status=published&fallback=true` for `liveWhen: { status: "published" }`, and
+  `site.resolveLinks:pages?home=home&status=published&fallback=true`. A filtered `site.resolveLinks` links a
+  routed target by the route of the target's own type, so a link to a type without the filter's field is
+  resolved when that type's route publishes it. A resolve step behind `authn.requireUser` is a signed-in
+  preview and stays unfiltered; `authn.identifyUser` does not make a step one. Routed types without a
+  `liveWhen` and resolve steps on types that are not routed are not checked.
 - **zod 4.** Every package that lists `zod` requires `^4.6.6` (was `^3.23.8`), which fixes a published
   advisory in array parsing that no zod 3 release fixes. A module's `configSchema` is read through
   zod 4's own definitions for its JSON Schema, variables, defaults and secrets, so a project's own
