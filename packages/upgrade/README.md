@@ -33,9 +33,10 @@ default; a question with no safe default stays open under `--yes`. `--data-repor
 JSON the `data` command's own `--out <file>` writes, read back through `RuleContext.project.dataReport`
 (`model/underscore-field` reads its `underscoreFields` counts from there, kept separate from a
 plugin's own `LoadedProject.data` so a report never overwrites it). `data` copies the given SQLite
-file (and any `-wal`/`-shm` siblings), verifies the copy with `PRAGMA quick_check` — the only SQL
-the tool issues itself — then reads it through the project's own installed `persistence-sqlite`, so
-the storage layout stays that module's knowledge; its `data/media-layout` check runs the detection
+file (and any `-wal`/`-shm` siblings), verifies the copy with `PRAGMA quick_check`, then reads it
+through the project's own installed `persistence-sqlite`, so the storage layout stays that module's
+knowledge. Besides `PRAGMA quick_check`, the tool itself only reads the table list from
+`sqlite_master` and the columns of a table through `PRAGMA table_info`, all read-only. Its `data/media-layout` check runs the detection
 step of the storage migrations `media-default` and `images-default` export under `./storage`.
 `migrate` converts a copy of the database and of the filesystem blob store in place: it runs those
 storage migrations through the project's own `persistence-sqlite` and `blobstore-filesystem`

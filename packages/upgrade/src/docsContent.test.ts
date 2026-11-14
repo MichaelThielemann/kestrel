@@ -62,3 +62,12 @@ describe("the media conversion docs name what happens to a 5.x SVG", () => {
     expect(section).toMatch(/new item with a new id/);
   });
 });
+
+describe("the upgrade README names every query the tool sends to SQLite itself", () => {
+  it("lists the table and column lookups next to PRAGMA quick_check", () => {
+    const readme = readFileSync(join(HERE, "..", "README.md"), "utf8");
+    expect(readme).not.toContain("the only SQL");
+    expect(readme).toContain("sqlite_master");
+    expect(readme).toContain("PRAGMA table_info");
+  });
+});
