@@ -286,7 +286,9 @@ one page per language. A language without its own slug reaches the page through 
 language's slug (`/en/kontakt`) until another published page takes `/en/kontakt` with a slug of its
 own. When a page's path changes (slug renamed, translation removed, taken over), the old path
 answers `{ redirect: { to: "<new path>", status: 301 } }` from then on, and `redirects.json` lists
-it after the editor's rules.
+it after the editor's rules. An old path under `reservedPaths` of `redirects-default` (`/admin`, `/api`
+and `/media` by default) gets no automatic redirect: `redirects.lookup`, `redirects.export` and
+`redirects.render` leave it out.
 When a redirect rule matches, the route responds with `{ redirect: { to, status } }` instead of a
 document — even if a page exists at that path. `redirects.lookup` runs only after
 `authz.require:pages.read`; if `anonymous` lacks the `pages.read` permission on a deployment, logged
