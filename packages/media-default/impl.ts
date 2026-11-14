@@ -194,7 +194,7 @@ export interface PublicSync {
   missing: number;
 }
 
-/** `created` is false when the upload was idempotent: same folder, same filename, same checksum, so `item` is the row that was already there. */
+/** `created` is false when the upload was idempotent: same folder, same filename, same checksum (of the bytes as sent or as stored), so `item` is the row that was already there. */
 export interface Upload {
   item: MediaItem;
   created: boolean;
@@ -537,12 +537,12 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     if (isErr(taken)) return taken;
     return taken.value ? err(locationConflict(location)) : ok();
   };
-  const existingFor = async (location: string, checksum: string): Promise<Result<MediaItem | null, MediaError>> => {
+  const existingFor = async (location: string, checksums: string[]): Promise<Result<MediaItem | null, MediaError>> => {
     const row = await db.findOne<Document>(COLLECTION, { location });
     if (isErr(row)) return row;
     if (row.value === null) return ok(null);
     const item = resolveWith(row.value, fallbackLocale);
-    return isReady(item) && item.checksum === checksum ? ok(item) : err(locationConflict(location));
+    return isReady(item) && item.checksum !== null && checksums.includes(item.checksum) ? ok(item) : err(locationConflict(location));
   };
   const releaseFailed = async (location: string): Promise<Result<void, MediaError>> => {
     const row = await db.findOne<MediaItem>(COLLECTION, { location });
@@ -927,7 +927,8 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         else if (stripped.kind === "malformed") logWarn(logger, `media/default: could not remove the metadata from ${name}, it is stored as uploaded`, { name });
       }
       const checksum = createHash("sha256").update(data).digest("hex");
-      const existing = await existingFor(location, checksum);
+      const sentChecksum = data === file.data ? checksum : createHash("sha256").update(file.data).digest("hex");
+      const existing = await existingFor(location, [checksum, sentChecksum]);
       if (isErr(existing)) return existing;
       if (existing.value !== null) return ok({ item: existing.value, created: false });
       const parsedProvenance = parseProvenance(provenance);

@@ -78,6 +78,27 @@ describe("media.upload removes image metadata", () => {
     expect(again.item.id).toBe(first.item.id);
   });
 
+  it("answers a file stored with its metadata as the existing item once stripping is on", async () => {
+    const store = fakeBlobstore();
+    const persistence = createFakePersistence();
+    const logger: Logger = { step() {}, info() {}, error() {}, warn() {} };
+    const before = await createMediaDefault({ ...CONFIG, stripImageMetadata: false }, store, persistence, logger, () => 7);
+    const after = await createMediaDefault(CONFIG, store, persistence, logger, () => 7);
+    const first = expectOk(await before.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: jpeg() }));
+    const again = expectOk(await after.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: jpeg() }));
+    expect(first.created).toBe(true);
+    expect(again.created).toBe(false);
+    expect(again.item.id).toBe(first.item.id);
+    expect(store.blobs.size).toBe(1);
+  });
+
+  it("still rejects different bytes at an occupied location", async () => {
+    const { media } = await setup();
+    expectOk(await media.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: jpeg(1) }));
+    const other = await media.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: jpeg(1).slice(0, -3) });
+    expect(other.ok).toBe(false);
+  });
+
   it("stores the bytes as sent when stripImageMetadata is false", async () => {
     const { media, blobs } = await setup({ ...CONFIG, stripImageMetadata: false });
     const source = jpeg();

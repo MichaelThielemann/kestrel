@@ -1757,7 +1757,8 @@ Net changes since 5.8.2.
   profiles and animation are copied byte for byte, and the EXIF orientation stays as the only tag.
   The stored file, its `size` and its checksum are those of the stripped bytes. New option
   `stripImageMetadata` (default `true`); `false` stores uploads as sent. Files uploaded earlier keep
-  their metadata.
+  their metadata, and uploading such a file again to the same place still answers the existing item.
+  AVIF, HEIC, TIFF and other image types are stored as sent and keep their metadata.
 
 ### Fixed
 
