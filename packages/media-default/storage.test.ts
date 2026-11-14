@@ -333,6 +333,20 @@ describe("media-default storage: converting 5.x items to the id key layout", () 
     expect((await rowsOf(db))[0]).toMatchObject({ id: "d4", status: "ready", key: "media/d4/report.pdf", location: "docs/report.pdf" });
   });
 
+  it("records the size and sha256 of the bytes it copied when they differ from the 5.x row, so syncPublic writes the public copy once", async () => {
+    const { db, blobs } = await oldStore([{ id: "a1", folder: "", filename: "Logo.png", contentType: "image/png", blob: "short" }], false);
+    const actual = bytes("bytes that were replaced outside the library");
+    expectOk(await blobs.put("media/Logo.png", actual));
+    const outcome = expectOk(await migrate(db, blobs)).modules[0]!.migrations[0]!.outcome!;
+    expect(outcome.notes.map((n) => [n.item, n.reason])).toEqual([["a1", "the bytes at media/Logo.png differ from the item's recorded size or checksum; the item records those of the copy"]]);
+    const row = (await rowsOf(db))[0]!;
+    expect([row.key, row.size, row.checksum]).toEqual(["media/a1/Logo.png", actual.byteLength, sha(actual)]);
+    expect(sha(expectOk(await blobs.get(row.key))!)).toBe(sha(actual));
+    const media = await createMediaDefault({ ...CONFIG, publicCopy: { prefix: "site/" } }, blobs, db, silentLogger);
+    expect(expectOk(await media.syncPublic()).written).toBe(1);
+    expect(expectOk(await media.syncPublic()).written).toBe(0);
+  });
+
   it("finds nothing to convert in a 6.x store whose purge stopped after marking an item removing, also next to an item of the same name", async () => {
     const root = await mkdtemp(join(tmpdir(), "kestrel-media-storage-"));
     tempDirs.push(root);

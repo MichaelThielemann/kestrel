@@ -198,7 +198,7 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
     introducedIn: "6.0.0",
     kind: "auto",
     blobWrites: true,
-    summary: `copies each original stored as <prefix><folder>/<filename> to <prefix><id>/<name>, checks its size and sha256 against the item, switches the item to the new key and fills in its location; the old blob stays until a cleanup`,
+    summary: `copies each original stored as <prefix><folder>/<filename> to <prefix><id>/<name>, checks its size and sha256 against the item (a difference is reported, and the item records those of the copy), switches the item to the new key and fills in its location; the old blob stays until a cleanup`,
     questions: [MISSING_ORIGINAL],
 
     async detect(ctx) {
@@ -274,8 +274,9 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
             const sourceSha = await blobSha256(ctx, row.key, source.value);
             if (isErr(sourceSha)) return sourceSha;
             if (source.value.size !== row.size || (row.checksum !== null && sourceSha.value !== row.checksum)) {
-              notes.push({ item: row.id, reason: `the bytes at ${row.key} differ from the item's recorded size or checksum` });
+              notes.push({ item: row.id, reason: `the bytes at ${row.key} differ from the item's recorded size or checksum; the item records those of the copy` });
             }
+            Object.assign(patch, { size: source.value.size, checksum: sourceSha.value });
             const targetSha = target.value === null ? ok(null) : await blobSha256(ctx, key, target.value);
             if (isErr(targetSha)) return targetSha;
             if (target.value === null || target.value.size !== source.value.size || targetSha.value !== sourceSha.value) {
