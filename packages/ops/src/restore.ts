@@ -139,6 +139,7 @@ function describeLoss(ctx: OpsContext, loss: LossReport): string[] {
  * (with explicit consent for access changes), takes a `pre-restore` backup of the stopped state, copies originals
  * back without deleting any, replaces the delivery prefix, empties the login sessions of the restored database,
  * promotes it as the newest replica generation (or places it for a target that keeps its disk) and starts the app.
+ * A failure after the `pre-restore` backup was written is an {@link OpsError} whose `backupId` names that backup.
  */
 export async function restoreBackup(ctx: OpsContext, options: RestoreOptions): Promise<RestoreResult> {
   const manifest = await readManifest(ctx, options.backupId);
@@ -163,6 +164,7 @@ export async function restoreBackup(ctx: OpsContext, options: RestoreOptions): P
       ctx.out.error(`the restore stopped before it changed the store${stop.wasRunning ? "; starting the app again" : ""}`);
       if (stop.wasRunning) await startTarget(ctx).catch((cause: unknown) => ctx.out.error(`starting the app again failed: ${messageOf(cause)}`));
     }
+    if (state.safetyBackup !== null) throw new OpsError(messageOf(error), error instanceof OpsError ? error.exitCode : 1, error instanceof OpsError ? error.element : undefined, state.safetyBackup);
     throw error;
   }
 }

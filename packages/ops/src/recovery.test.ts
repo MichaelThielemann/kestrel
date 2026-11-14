@@ -204,6 +204,34 @@ describe("a restore that fails after it changed the store", () => {
     }
   });
 
+  it("carries the pre-restore backup's id in the --json error once it is written, before and after the app started again", async () => {
+    const { h, failNext, restoreArgs } = await seededWithChange("json-error-backup-id");
+    const waitReady = h.app.waitReady.bind(h.app);
+    try {
+      failNext((key) => key.endsWith("-loss-report-done.json"));
+      const before = await h.run(restoreArgs());
+      expect(before.code).toBe(1);
+      expect(before.json).toMatchObject({ schema: "kestrel-ops/error@1", ok: false });
+      expect(before.json).not.toHaveProperty("backupId");
+
+      failNext((key) => key.endsWith("-blobs-done.json"));
+      const changed = await h.run(restoreArgs());
+      expect(changed.code).toBe(1);
+      expect(changed.stderr).toContain("the app stays stopped");
+      expect(changed.json).toMatchObject({ schema: "kestrel-ops/error@1", ok: false, backupId: expect.stringMatching(/^prod-\d{8}T\d{6}Z-pre-restore-[0-9a-f]{4}$/) });
+      expect(changed.stderr).toContain(`or restore the pre-restore backup ${String(changed.json.backupId)}`);
+
+      h.app.waitReady = async () => false;
+      const started = await h.run(restoreArgs());
+      h.app.waitReady = waitReady;
+      expect(started.code).toBe(1);
+      expect(started.json).toMatchObject({ schema: "kestrel-ops/error@1", ok: false, element: "target", backupId: expect.stringMatching(/-pre-restore-[0-9a-f]{4}$/) });
+      expect(started.stderr).toContain(`or restore the pre-restore backup ${String(started.json.backupId)}`);
+    } finally {
+      await h.dispose();
+    }
+  });
+
   it("names no pre-restore backup when --no-safety-backup skipped it", async () => {
     const { h, failNext, id } = await seededWithChange("no-safety");
     try {
