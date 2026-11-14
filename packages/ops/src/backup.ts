@@ -69,7 +69,7 @@ export async function readSeal(ctx: OpsContext): Promise<SealReport> {
 
 type CopiedEntry = { key: string; size: number; etag: string; object: string; objectEtag: string };
 
-async function copyIntoObjects(ctx: OpsContext, info: ObjectInfo, existing: Map<string, ObjectInfo>, checksum: string | null = null): Promise<{ entry: CopiedEntry; copied: boolean } | null> {
+async function copyIntoObjects(ctx: OpsContext, info: ObjectInfo, existing: Map<string, ObjectInfo>, checksum: string | null = null, mismatch?: (found: string) => void): Promise<{ entry: CopiedEntry; copied: boolean } | null> {
   let current: ObjectInfo | null = info;
   for (let attempt = 0; attempt < COPY_ATTEMPTS && current !== null; attempt++) {
     const source: ObjectInfo = current;
@@ -91,7 +91,10 @@ async function copyIntoObjects(ctx: OpsContext, info: ObjectInfo, existing: Map<
     const written = await ctx.backups.head(object);
     const now = written !== null && written.size === source.size && streamed === null && written.etag !== source.etag ? await ctx.app.head(source.key) : source;
     if (written !== null && written.size === source.size && now !== null && now.etag === source.etag) {
-      if (streamed !== null && checksum !== null && sha256(streamed) !== checksum) throw new OpsError(`the copy of ${source.key} does not hash to the checksum of its media row`, 1, source.key);
+      if (streamed !== null && checksum !== null && sha256(streamed) !== checksum) {
+        if (mismatch === undefined) throw new OpsError(`the copy of ${source.key} does not hash to the checksum of its media row`, 1, source.key);
+        mismatch(sha256(streamed));
+      }
       existing.set(object, written);
       return { entry: entry(written.etag), copied: true };
     }
@@ -173,12 +176,21 @@ async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: Exclud
   const live = await listMap(ctx.app, app.mediaPrefix);
   const blobs: BlobEntry[] = [];
   const missing: string[] = [];
+  const mismatched = new Map<string, string>();
+  const keepMismatch = options.kind === "pre-restore";
   const refs = dbFile === null ? [...live.keys()].map((key) => ({ key, sha256: null })) : referencedBlobs(dbFile, app.media);
   for (const ref of refs) {
     const info = live.get(ref.key) ?? (await ctx.app.head(ref.key));
-    const copied = info === null ? null : await copyIntoObjects(ctx, info, existing, ref.sha256);
+    const copied = info === null ? null : await copyIntoObjects(ctx, info, existing, ref.sha256, keepMismatch ? (found) => mismatched.set(ref.key, found) : undefined);
     if (copied === null) missing.push(ref.key);
     else blobs.push({ ...copied.entry, sha256: ref.sha256 });
+  }
+  if (keepMismatch) {
+    for (const entry of sampledOriginals(blobs)) {
+      if (mismatched.has(entry.key)) continue;
+      const bytes = await ctx.backups.get(ctx.location + entry.object);
+      if (bytes !== null && sha256(bytes) !== entry.sha256) mismatched.set(entry.key, sha256(bytes));
+    }
   }
   const site: SiteEntry[] = [];
   for (const info of await stableList(ctx.app, app.deliveryPrefix, ctx.poll)) {
@@ -211,13 +223,14 @@ async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: Exclud
     node: process.version,
     lockfileSha256: ctx.project.lockfileSha256,
     db,
-    blobs: { count: blobs.length, bytes: blobs.reduce((n, b) => n + b.size, 0), missingAtBackup: missing },
+    blobs: { count: blobs.length, bytes: blobs.reduce((n, b) => n + b.size, 0), missingAtBackup: missing, mismatchAtBackup: [...mismatched].map(([key, found]) => ({ key, sha256: found })) },
     site: { prefix: app.deliveryPrefix, count: site.length, bytes: site.reduce((n, s) => n + s.size, 0), pathsSha256: sha256(site.map((s) => s.key).join("\n")) },
     derived: derivedTotals,
     target: facts,
   };
   await putNew(ctx.backups, ctx.location + keys.manifest(id), new TextEncoder().encode(ctx.redactor.json(manifest, 2) + "\n"), "application/json");
   for (const key of missing) ctx.out.warn(`original ${key} is referenced by a media row but missing in the store`);
+  for (const key of mismatched.keys()) ctx.out.warn(`original ${key} does not hash to the checksum of its media row; the ${options.kind} backup keeps it as the store holds it`);
   const verification = await verifyBackup(ctx, id);
   await ctx.journal.record("backup", verification.ok ? "done" : "failed", { backupId: id, problems: verification.problems });
   if (!verification.ok) throw new OpsError(`backup ${id} failed verification: ${verification.problems.map((p) => `${p.element}: ${p.message}`).join("; ")}`, 1, verification.problems[0]?.element);
@@ -260,6 +273,17 @@ async function readJsonl<T>(ctx: OpsContext, key: string): Promise<T[] | null> {
 /** How many originals verification hashes: 25 or 2 %, whichever is more, at most 200. */
 export function sampleSize(total: number): number {
   return Math.min(total, Math.min(200, Math.max(25, Math.ceil(total * 0.02))));
+}
+
+function sampledOriginals<T extends { sha256: string | null }>(entries: readonly T[]): Array<T & { sha256: string }> {
+  const hashed = entries.filter((entry): entry is T & { sha256: string } => entry.sha256 !== null);
+  const step = hashed.length / Math.max(1, sampleSize(hashed.length));
+  const out: Array<T & { sha256: string }> = [];
+  for (let i = 0; i < sampleSize(hashed.length); i++) {
+    const entry = hashed[Math.floor(i * step)];
+    if (entry) out.push(entry);
+  }
+  return out;
 }
 
 /**
@@ -324,14 +348,12 @@ export async function verifyBackup(ctx: OpsContext, id: string): Promise<Verific
       else if (object.size !== entry.size) problems.push({ element: entry.key, message: `backup object ${entry.object} has ${object.size} bytes, expected ${entry.size}` });
     }
   }
-  const hashed = (blobs ?? []).filter((b) => b.sha256 !== null && objects.has(ctx.location + b.object));
-  const step = hashed.length / Math.max(1, sampleSize(hashed.length));
-  for (let i = 0; i < sampleSize(hashed.length); i++) {
-    const entry = hashed[Math.floor(i * step)];
-    if (!entry) continue;
+  const recorded = new Map((manifest.blobs.mismatchAtBackup ?? []).map((m) => [m.key, m.sha256]));
+  for (const entry of sampledOriginals((blobs ?? []).filter((b) => objects.has(ctx.location + b.object)))) {
     checked.sampled += 1;
     const bytes = await ctx.backups.get(ctx.location + entry.object);
-    if (bytes === null || sha256(bytes) !== entry.sha256) problems.push({ element: entry.key, message: `backup object ${entry.object} does not hash to the checksum of its media row` });
+    const digest = bytes === null ? null : sha256(bytes);
+    if (digest === null || (digest !== entry.sha256 && digest !== recorded.get(entry.key))) problems.push({ element: entry.key, message: `backup object ${entry.object} does not hash to the checksum of its media row` });
   }
   return finish();
 }

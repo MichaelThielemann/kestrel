@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { acceptSeal, createBackup, readManifest, verifyBackup, type BackupMode } from "./backup.ts";
 import { messageOf, recordQuietly, runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
+import { Interrupted } from "./interrupt.ts";
 import { fromJsonl, hex, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
 import { placedUnstarted, recordPlacement, unfinishedPlacements } from "./placements.ts";
@@ -238,7 +239,12 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   if (options.noSafetyBackup) ctx.out.warn("no pre-restore backup: --no-safety-backup");
   else {
     const mode: BackupMode = current.kind === "unreadable" ? { kind: "unreadable", reason: current.reason, stoppedAt: stop.stoppedAt } : { kind: "stopped", seal: current.seal, stoppedAt: stop.stoppedAt };
-    safetyBackup = (await createBackup(ctx, { kind: "pre-restore", mode, pinFor: ctx.runId })).id;
+    try {
+      safetyBackup = (await createBackup(ctx, { kind: "pre-restore", mode, pinFor: ctx.runId })).id;
+    } catch (cause) {
+      if (!(cause instanceof Interrupted)) ctx.out.error("the pre-restore backup failed; --no-safety-backup restores without one");
+      throw cause;
+    }
     state.safetyBackup = safetyBackup;
     ctx.out.info(`pre-restore backup ${safetyBackup} written and verified`);
   }

@@ -107,7 +107,8 @@ export interface Manifest {
   lockfileSha256: string | null;
   /** Null for a backup taken while the replica could not be read: it holds originals and delivery keys only. */
   db: { bytes: number; sha256: string; integrity: string; rows: Record<string, number> } | null;
-  blobs: { count: number; bytes: number; missingAtBackup: string[] };
+  /** `mismatchAtBackup` lists originals a `pre-restore` backup found not hashing to the checksum of their row, with the sha256 it found; every other kind of backup stops on such an original. */
+  blobs: { count: number; bytes: number; missingAtBackup: string[]; mismatchAtBackup?: Array<{ key: string; sha256: string }> };
   site: { prefix: string; count: number; bytes: number; pathsSha256: string };
   derived: Record<string, { count: number; bytes: number }>;
   target: Record<string, unknown>;

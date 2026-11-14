@@ -149,7 +149,10 @@ source still has the listed one is kept (a multipart or KMS-encrypted source has
 `blobs.jsonl` and `site.jsonl` records the ETag the copy got. When `backups.storage` names another bucket or
 other credentials, the bytes are read with `If-Match` and written with the source's Content-Type, and an
 original that does not hash to the checksum of its row stops the backup. A referenced original missing in the
-store is recorded in `missingAtBackup`.
+store is recorded in `missingAtBackup`. A `pre-restore` backup takes a damaged original as the store holds it
+instead of stopping: it hashes the originals that verification samples, records every original whose bytes do not
+match the checksum of its row in `mismatchAtBackup` with the sha256 it found, warns about each, and verification
+accepts that sha256 for them. So a restore that repairs an overwritten original still writes its undo backup.
 With `--freeze` the originals and the delivery prefix are copied once while the app runs and only the
 difference after the stop.
 
@@ -191,7 +194,8 @@ is listed until two listings agree.
    while the replica is read, such as a timeout, or a signal that arrives then, ends the restore before it
    changed anything and starts the app again.
 3. A `pre-restore` backup of the stopped state is written and verified, so the restore itself can be undone
-   with `restore --backup <that id>`. Only `--no-safety-backup` skips it. Over an unreadable replica it holds
+   with `restore --backup <that id>`. Only `--no-safety-backup` skips it; when the `pre-restore` backup fails,
+   the restore ends before it changed anything and its error names that flag. Over an unreadable replica it holds
    every original under the media prefix and the delivery keys but no database (`db` is null in its
    manifest); `restore` refuses such a backup, and its `blobs.jsonl` and `site.jsonl` name the objects.
 4. Every original of the backup whose key is missing or holds other bytes is copied back. No original is
