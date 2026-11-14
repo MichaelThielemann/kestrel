@@ -21,6 +21,15 @@ const damages: Array<[string, Damage]> = [
       bucket.tamper(newest.snapshot.key, new TextEncoder().encode("not a database"));
     },
   ],
+  [
+    "has a sealed newest generation that lacks a segment the seal counts",
+    async (bucket) => {
+      const newest = (await listGenerations(memoryStore(bucket), PREFIXES.replica)).at(-1);
+      const last = newest?.segments.at(-1);
+      if (!newest?.files["sealed.json"] || !last) throw new Error("a sealed generation with segments expected");
+      bucket.objects.delete(last.key);
+    },
+  ],
 ];
 
 describe("restore over a replica that cannot be read", () => {
@@ -34,6 +43,7 @@ describe("restore over a replica that cannot be read", () => {
         const backup = await h.run(["backup", "create", "--freeze", "--json"]);
         expect(backup.code).toBe(0);
         const id = String(backup.json.id);
+        h.app.run(`INSERT INTO pages VALUES ('late', 'Late', 'after the backup')`);
         await h.app.stop();
         await damage(bucket);
 

@@ -133,7 +133,7 @@ its last sync may be missing), `unsupported` for a runtime before 6, or `unknown
 the runtime version. All three show the time of the last shipped segment and need the answer
 `unsealed-stop`. A backup of a running app reads `live`. A runtime numbers the segments of a generation
 consecutively, so whatever the seal, a listing that shows a later segment without an earlier one is listed
-again, and a gap that stays stops the backup or restore with exit 1, naming the missing number. The `local` target reads the runtime version from
+again, and a gap that stays stops the backup with exit 1, naming the missing number. The `local` target reads the runtime version from
 the packages the app resolves, also when it gets `replication-sqlite` through another package.
 
 Verification works only from what the backup location holds: it downloads `db.sqlite`, compares its sha256
@@ -150,7 +150,8 @@ is listed until two listings agree.
    restore drops, reverts and brings back, the audit entries the backup does not hold, and the access changes: users
    created, deleted or deactivated, changed roles and reset second factors. A restore that would bring back
    revoked access, or any restore of a `production` environment, needs the answer `access-changes`.
-   When the stopped replica has no generation or its newest one cannot be rebuilt, there is nothing to compare:
+   When the stopped replica has no generation or its newest one cannot be rebuilt (a listing that does not settle,
+   or a segment that stays missing, also against its seal), there is nothing to compare:
    the restore says so and goes on only after the answer `unreadable-current`.
 3. A `pre-restore` backup of the stopped state is written and verified, so the restore itself can be undone
    with `restore --backup <that id>`. Only `--no-safety-backup` skips it. Over an unreadable replica it holds

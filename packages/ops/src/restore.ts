@@ -147,9 +147,15 @@ type Current = { kind: "readable"; seal: SealReport; file: string } | { kind: "u
 
 async function readCurrent(ctx: OpsContext, stoppedAt: number): Promise<Current> {
   const prefix = ctx.env.app.replicaPrefix;
-  const newest = (await stableGenerations(ctx.app, prefix, ctx.poll)).at(-1);
-  if (!newest) return { kind: "unreadable", reason: `the replica under ${prefix} has no generation` };
-  const seal = await sealOf(ctx.app, prefix, newest, runtimeVersion(await ctx.target.describe()), ctx.poll);
+  let seal: SealReport;
+  try {
+    const newest = (await stableGenerations(ctx.app, prefix, ctx.poll)).at(-1);
+    if (!newest) return { kind: "unreadable", reason: `the replica under ${prefix} has no generation` };
+    seal = await sealOf(ctx.app, prefix, newest, runtimeVersion(await ctx.target.describe()), ctx.poll);
+  } catch (cause) {
+    if (cause instanceof OpsError) return { kind: "unreadable", reason: cause.message };
+    throw cause;
+  }
   await acceptSeal(ctx, seal, stoppedAt);
   const file = ctx.workspace.path("current.db");
   try {
