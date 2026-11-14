@@ -43,8 +43,7 @@ type Op = "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "in" | "like";
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const OPERATORS: Record<Op, string> = { eq: "=", ne: "!=", gt: ">", gte: ">=", lt: "<", lte: "<=", in: "IN", like: "LIKE" };
 
-/** How many prepared statements one connection keeps; the least recently used one is dropped beyond it. */
-export const STATEMENT_CACHE_LIMIT = 256;
+const STATEMENT_CACHE_LIMIT = 256;
 const COLUMN_TYPE: Record<FieldType, string> = { string: "TEXT", number: "REAL", boolean: "INTEGER", json: "TEXT" };
 
 function quote(identifier: string, what: string): string {

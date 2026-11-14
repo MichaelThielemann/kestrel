@@ -5,7 +5,9 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
-import { createPersistenceSqlite, STATEMENT_CACHE_LIMIT, type PersistenceSqlite } from "./impl.ts";
+import { createPersistenceSqlite, type PersistenceSqlite } from "./impl.ts";
+
+const STATEMENT_CACHE_LIMIT = 256;
 
 interface Item {
   id: string;
@@ -93,7 +95,7 @@ describe("persistence/sqlite statement cache", () => {
     db.close();
   });
 
-  it("keeps at most STATEMENT_CACHE_LIMIT statements, dropping the least recently used", async () => {
+  it("keeps at most 256 statements, dropping the least recently used", async () => {
     const db = await open();
     const sqls = prepared();
     const byLength = async (length: number) => expectOk(await db.findMany<Item>("items", { id: { in: Array.from({ length }, (_, i) => `i${i}`) } }, { withTotal: false }));
