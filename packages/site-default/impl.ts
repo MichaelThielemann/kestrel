@@ -11,7 +11,7 @@ import type { SitePaths } from "./paths.ts";
 
 export { createSitePaths, type SitePaths, type SitePathsDeps } from "./paths.ts";
 export { routesConfig, type Mounts, type Move, type Route, type RoutesConfig } from "./routes.ts";
-import { splitTail, tailOf, withoutUnstatable, type Route } from "./routes.ts";
+import { splitTail, tailOf, withRouteConditions, type Route } from "./routes.ts";
 import { pathOfTail, prefixSource } from "./table.ts";
 
 interface Rules {
@@ -149,7 +149,7 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
     const readLocale = split.explicit ? split.locale : undefined;
     const effective = split.locale === "" ? undefined : split.locale;
     const claim = table.table.claim(split.locale, split.tail);
-    const filter = withoutUnstatable(route, rules.filter);
+    const filter = withRouteConditions(route, rules.filter);
     const gated = Object.keys(rules.filter).length > 0;
     const answered = await unobserved(async (): Promise<Result<{ candidate: string | null; doc: ContentDocument | null }, SiteError>> => {
       let holder = claim.strong?.valid === true && (claim.strong.live || !gated) ? claim.strong : undefined;
@@ -204,7 +204,7 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
     if (!row || row.tail === null || !row.valid) return ok(null);
     if (Object.keys(rules.filter).length === 0) return ok(pathOfTail(table.format, row.tail, locale, rules.prefixPrimary));
     if (!row.live) return ok(null);
-    const passes = await unobserved(() => satisfiesFilter(content, t, id, locale === "" ? undefined : locale, ownFields(content.model().types[t], withoutUnstatable(route, rules.filter))));
+    const passes = await unobserved(() => satisfiesFilter(content, t, id, locale === "" ? undefined : locale, ownFields(content.model().types[t], withRouteConditions(route, rules.filter))));
     if (isErr(passes)) return err(transientOnly(passes.error));
     return ok(passes.value ? pathOfTail(table.format, row.tail, locale, rules.prefixPrimary) : null);
   }

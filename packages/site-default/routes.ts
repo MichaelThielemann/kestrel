@@ -77,9 +77,9 @@ export function stated(expected: unknown, actual: string): boolean {
   return false;
 }
 
-/** `filter` without the fields whose `liveWhen` condition no argument can state; the route's own `liveWhen` decides those. */
-export function withoutUnstatable(route: Route, filter: Filter): Filter {
-  return Object.fromEntries(Object.entries(filter).filter(([name]) => !(name in route.liveWhen) || isStatable(route.liveWhen[name])));
+/** `filter` with each field whose `liveWhen` condition no argument can state replaced by the route's own condition, so every check of the step sees the condition that decides publication. */
+export function withRouteConditions(route: Route, filter: Filter): Filter {
+  return Object.fromEntries(Object.entries(filter).map(([name, value]) => [name, name in route.liveWhen && !isStatable(route.liveWhen[name]) ? route.liveWhen[name] : value]));
 }
 
 /** Type → id of the mount target page it lives under, or `null` for the top level. */

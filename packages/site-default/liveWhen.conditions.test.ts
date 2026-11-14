@@ -30,3 +30,38 @@ describe("site/default: a liveWhen condition that no argument can state is decid
     });
   }
 });
+
+const LOCALIZED: ContentModel = {
+  locales: ["de", "en"],
+  defaultLocale: "de",
+  types: {
+    pages: {
+      kind: "multi",
+      fields: {
+        slug: { type: "slug", required: true, unique: true, localized: true },
+        title: { type: "text", localized: true },
+        body: { type: "text", localized: true },
+        retired: { type: "text", localized: true },
+      },
+    },
+  },
+};
+
+describe("site/default: a fallback never fills from a default locale the route does not publish", () => {
+  const cases = [
+    { liveWhen: { retired: null }, hiddenDe: { retired: "x" }, openEn: {}, named: ["", "null"] },
+    { liveWhen: { retired: { ne: null } }, hiddenDe: {}, openEn: { retired: "x" }, named: ["", "null"] },
+  ];
+  for (const { liveWhen, hiddenDe, openEn, named } of cases) {
+    it(`leaves the field empty and the default locale out of _translations for ${JSON.stringify(liveWhen)}`, async () => {
+      const { site, content } = await routedSite({ model: LOCALIZED, routes: { pages: routeWith({ home: "home", liveWhen }) } });
+      const page = expectOk(await content.create("pages", { slug: "geheim", title: "Geheim", body: "Secret DE", ...hiddenDe }, { locale: "de" }));
+      expectOk(await content.update("pages", page.id, { slug: "open", title: "Open", ...openEn }, { locale: "en" }));
+      for (const value of named) {
+        const rules = { home: "home", fallback: true, filter: { retired: value } };
+        const served = expectOk(await site.resolve("pages", "en/open", { rules }));
+        expect(served).toMatchObject({ id: page.id, body: null, _translations: { de: false, en: true } });
+      }
+    });
+  }
+});
