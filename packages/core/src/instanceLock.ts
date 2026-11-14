@@ -26,7 +26,8 @@ export interface InstanceLockOptions {
 export interface InstanceLock {
   /**
    * Gives up this holder's share; the lock file is removed with the last share in the process.
-   * Calling it again does nothing. It never throws: a lock file it cannot remove is taken over
+   * Calling it again does nothing. It waits for up to 6 s while another process is in the middle
+   * of changing the lock file. It never throws: a lock file it cannot remove is taken over
    * once its heartbeat is older than the TTL, or at once in this PID namespace once the process
    * has ended.
    */
@@ -54,6 +55,15 @@ interface LockRecord {
 
 type Seen = { kind: "absent" } | { kind: "held"; raw: string; record: LockRecord } | { kind: "unreadable"; raw: string; mtimeMs: number };
 
+interface GuardLabel {
+  token: string;
+  pid: number;
+  pidNamespace: string;
+  processStart: string;
+  bootId: string;
+  host: string;
+}
+
 interface Holder {
   lockPath: string;
   record: LockRecord;
@@ -73,6 +83,7 @@ const DEFAULT_HEARTBEAT_MS = 10_000;
 const ATTEMPTS = 20;
 const RETRY_PAUSE_MS = 20;
 const GUARD_STALE_MS = 5_000;
+const GUARD_WAIT_MS = GUARD_STALE_MS + 1_000;
 const SAME_PROCESS_SLACK_MS = 1_000;
 const MAX_LINK_HOPS = 40;
 const MAX_TIMER_MS = 2 ** 31 - 1;
@@ -152,7 +163,10 @@ export function instanceLockFile(file: string): string {
  * another PID namespace, such as another container with the same hostname, is judged by its
  * heartbeat alone. Any lock that is not taken over makes the call throw a `KestrelBootError` with
  * code `instance-locked` at once; the reason names that process's host, PID and start time, the
- * time from which the lock is taken over and the `optOut` setting. A container restarted after
+ * time from which the lock is taken over and the `optOut` setting. While another process is in
+ * the middle of taking over or releasing the lock, the call waits for it for up to 6 s and then
+ * throws `instance-locked` naming that process; a process on this machine and in this PID
+ * namespace that died in that moment is noticed at once, one elsewhere after 5 s. A container restarted after
  * its process was killed usually runs in a new PID namespace and fails to boot until the TTL
  * after the previous run's last heartbeat; only when the kernel gave the new namespace the id of
  * the old one is the lock judged by PID and start time and taken over at once. A process that
@@ -272,24 +286,35 @@ function take(file: string, lockPath: string, opts: InstanceLockOptions, { ttlMs
 
 function claim(file: string, lockPath: string, record: LockRecord, token: string, ttlMs: number, opts: InstanceLockOptions): LockRecord {
   const content = JSON.stringify(record);
-  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+  const deadline = performance.now() + GUARD_WAIT_MS;
+  for (let changes = 0; changes < ATTEMPTS; ) {
     if (createExclusive(lockPath, content)) return record;
     const seen = readLock(lockPath);
-    if (seen.kind === "absent") continue;
-    const verdict = judge(seen, ttlMs);
-    if (verdict === "taken") throw new KestrelBootError(opts.module, refusal(file, lockPath, seen, ttlMs, opts.optOut ?? DEFAULT_OPT_OUT), "instance-locked");
-    if (verdict === "this-process" && seen.kind === "held") {
-      const joined = renewed(seen.record, token, ttlMs);
-      const outcome = guarded(lockPath, () => replaceIf(lockPath, seen.raw, JSON.stringify(joined)));
-      if (outcome === "replaced") return joined;
-      if (outcome === BUSY) pause(RETRY_PAUSE_MS);
+    if (seen.kind === "absent") {
+      changes++;
       continue;
     }
-    const outcome = guarded(lockPath, () => replaceIf(lockPath, seen.raw, content));
-    if (outcome === "replaced" && ownedBy(lockPath, record.instanceId)) return record;
-    if (outcome === BUSY) pause(RETRY_PAUSE_MS);
+    const verdict = judge(seen, ttlMs);
+    if (verdict === "taken") throw new KestrelBootError(opts.module, refusal(file, lockPath, seen, ttlMs, opts.optOut ?? DEFAULT_OPT_OUT), "instance-locked");
+    const joining = verdict === "this-process" && seen.kind === "held";
+    const next = joining ? renewed(seen.record, token, ttlMs) : record;
+    const outcome = guarded(lockPath, () => replaceIf(lockPath, seen.raw, JSON.stringify(next)));
+    if (outcome === BUSY) {
+      if (performance.now() >= deadline) throw new KestrelBootError(opts.module, guardRefusal(file, lockPath), "instance-locked");
+      pause(RETRY_PAUSE_MS);
+      continue;
+    }
+    if (outcome === "replaced" && (joining || ownedBy(lockPath, record.instanceId))) return next;
+    changes++;
   }
   throw new KestrelBootError(opts.module, `${file}: could not take the instance lock ${lockPath} because other processes kept changing it; retry once they have settled`, "instance-locked");
+}
+
+function guardRefusal(file: string, lockPath: string): string {
+  const guard = guardPath(lockPath);
+  const label = parseGuard(readQuietly(guard) ?? "");
+  const holder = label === undefined ? "a process that did not name itself" : `host "${label.host}", pid ${label.pid}`;
+  return `${file}: could not take the instance lock ${lockPath} because ${holder} kept its takeover marker ${guard} for more than ${GUARD_WAIT_MS / 1000} s; retry once that process has finished`;
 }
 
 function renewed(record: LockRecord, token: string, ttlMs: number): LockRecord {
@@ -351,12 +376,14 @@ function drop(holder: Holder): void {
   stop(holder);
   holders.delete(holder.lockPath);
   if (lost) return;
-  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+  const deadline = performance.now() + GUARD_WAIT_MS;
+  for (;;) {
     try {
       if (guarded(holder.lockPath, () => leave(holder)) !== BUSY) return;
     } catch {
       return;
     }
+    if (performance.now() >= deadline) return;
     pause(RETRY_PAUSE_MS);
   }
 }
@@ -423,25 +450,30 @@ function siblingPath(path: string, suffix: string): string {
 
 const BUSY = Symbol("busy");
 
+function guardPath(lockPath: string): string {
+  return `${lockPath}.takeover`;
+}
+
 function guarded<T>(lockPath: string, fn: () => T): T | typeof BUSY {
-  const guard = `${lockPath}.takeover`;
-  const token = randomUUID();
-  if (!createExclusive(guard, token)) {
+  const guard = guardPath(lockPath);
+  const label: GuardLabel = { token: randomUUID(), pid: process.pid, pidNamespace: PID_NAMESPACE, processStart: PROCESS_START, bootId: BOOT_ID, host: hostname() };
+  const content = JSON.stringify(label);
+  if (!createExclusive(guard, content)) {
     clearAbandonedGuard(guard);
     return BUSY;
   }
   try {
     return fn();
   } finally {
-    if (readQuietly(guard) === token) rmSync(guard, { force: true });
+    if (readQuietly(guard) === content) rmSync(guard, { force: true });
   }
 }
 
 function clearAbandonedGuard(guard: string): void {
-  let token: string;
+  let raw: string;
   try {
-    token = readFileSync(guard, "utf8");
-    if (Date.now() - statSync(guard).mtimeMs <= GUARD_STALE_MS) return;
+    raw = readFileSync(guard, "utf8");
+    if (!guardAbandoned(parseGuard(raw), statSync(guard).mtimeMs)) return;
   } catch (err) {
     if (errorCode(err) === "ENOENT") return;
     throw err;
@@ -454,12 +486,33 @@ function clearAbandonedGuard(guard: string): void {
     throw err;
   }
   try {
-    if (readQuietly(aside) !== token) linkSync(aside, guard);
+    if (readQuietly(aside) !== raw) linkSync(aside, guard);
   } catch (err) {
     if (errorCode(err) !== "EEXIST") throw err;
   } finally {
     rmSync(aside, { force: true });
   }
+}
+
+function guardAbandoned(label: GuardLabel | undefined, mtimeMs: number): boolean {
+  if (label === undefined || !sameKernel(label) || label.pidNamespace !== PID_NAMESPACE) return Date.now() - mtimeMs > GUARD_STALE_MS;
+  if (label.pid !== process.pid) return !runs(label.pid, label.processStart);
+  return PROCESS_START !== "" && label.processStart !== "" && label.processStart !== PROCESS_START;
+}
+
+function parseGuard(raw: string): GuardLabel | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (typeof value !== "object" || value === null) return undefined;
+  if (!("token" in value && "pid" in value && "pidNamespace" in value && "processStart" in value && "bootId" in value && "host" in value)) return undefined;
+  const { token, pid, pidNamespace, processStart, bootId, host } = value;
+  if (typeof token !== "string" || typeof pidNamespace !== "string" || typeof processStart !== "string" || typeof bootId !== "string" || typeof host !== "string") return undefined;
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return undefined;
+  return { token, pid, pidNamespace, processStart, bootId, host };
 }
 
 function replaceIf(lockPath: string, expected: string, content: string): "replaced" | "changed" {
@@ -505,7 +558,7 @@ function judge(seen: Exclude<Seen, { kind: "absent" }>, ttlMs: number): "stale" 
   return runs(record.pid, record.processStart) ? "taken" : "stale";
 }
 
-function sameKernel(record: LockRecord): boolean {
+function sameKernel(record: { bootId: string; host: string }): boolean {
   if (BOOT_ID !== "" && record.bootId !== "") return record.bootId === BOOT_ID;
   return record.host === hostname();
 }

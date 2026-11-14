@@ -88,6 +88,14 @@ function writeRecord(record: Partial<LockRecord>): LockRecord {
   return full;
 }
 
+function writeGuard(holder: { pid: number; processStart?: string; pidNamespace?: string; host?: string; bootId?: string }, ageMs = 0): string {
+  const guard = `${instanceLockFile(file)}.takeover`;
+  writeFileSync(guard, JSON.stringify({ token: randomUUID(), pidNamespace: ownPidNamespace(), processStart: "1", ...onThisHost, ...holder }));
+  const at = new Date(Date.now() - ageMs);
+  utimesSync(guard, at, at);
+  return guard;
+}
+
 function deadPid(): number {
   const child = spawnSync(process.execPath, ["-e", ""]);
   if (child.pid === undefined) throw new Error("could not start a child process");
@@ -457,14 +465,47 @@ describe("acquireInstanceLock", () => {
     expect(readRecord().pid).toBe(process.pid);
   });
 
-  it("leaves a stale lock alone while another process is in the middle of taking it over", () => {
+  it("waits for the takeover marker of a process on another host until it has expired, and then takes over a stale lock", () => {
+    const stale = new Date(Date.now() - 120_000).toISOString();
+    writeRecord({ startedAt: stale, heartbeatAt: stale });
+    const guard = writeGuard({ pid: 4242, host: "web-2", bootId: randomUUID() }, 4_500);
+    const began = performance.now();
+    take(file);
+    expect(performance.now() - began).toBeGreaterThanOrEqual(300);
+    expect(readRecord().pid).toBe(process.pid);
+    expect(existsSync(guard)).toBe(false);
+  });
+
+  it("never clears the takeover marker of a live process on this host by its age, and refuses naming that process", () => {
     const stale = new Date(Date.now() - 120_000).toISOString();
     const foreign = writeRecord({ startedAt: stale, heartbeatAt: stale });
-    writeFileSync(`${instanceLockFile(file)}.takeover`, randomUUID());
+    const guard = writeGuard({ pid: process.ppid, processStart: startOf(process.ppid) }, 60_000);
     const err = thrownBy(() => take(file));
-    expect(err).toBeInstanceOf(KestrelBootError);
-    expect(err instanceof KestrelBootError ? err.code : undefined).toBe("instance-locked");
+    expect(err instanceof KestrelBootError ? err.code : err).toBe("instance-locked");
+    const reason = err instanceof KestrelBootError ? err.reason : "";
+    expect(reason).toContain(`pid ${process.ppid}`);
+    expect(reason).toContain(guard);
     expect(readRecord()).toEqual(foreign);
+    expect(existsSync(guard)).toBe(true);
+  }, 20_000);
+
+  it("clears at once a takeover marker that a process on this host left behind when it died", () => {
+    const stale = new Date(Date.now() - 120_000).toISOString();
+    writeRecord({ startedAt: stale, heartbeatAt: stale });
+    const guard = writeGuard({ pid: deadPid() });
+    const began = performance.now();
+    take(file);
+    expect(performance.now() - began).toBeLessThan(1_000);
+    expect(readRecord().pid).toBe(process.pid);
+    expect(existsSync(guard)).toBe(false);
+  });
+
+  it("removes its lock file on release although a process on this host died holding the takeover marker", () => {
+    const lock = take(file);
+    const guard = writeGuard({ pid: deadPid() });
+    lock.release();
+    expect(existsSync(instanceLockFile(file))).toBe(false);
+    expect(existsSync(guard)).toBe(false);
   });
 
   it("clears a takeover marker left behind by a process that died while taking over", () => {
