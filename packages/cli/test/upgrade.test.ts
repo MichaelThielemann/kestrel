@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { runUpgradeCli } from "@michaelthielemann/kestrel-upgrade/plugin";
+import { PLUGIN_API_VERSION, runUpgradeCli } from "@michaelthielemann/kestrel-upgrade/plugin";
 import type { UpgradeReport } from "@michaelthielemann/kestrel-upgrade";
 import type { CheckReport } from "../src/commands/check.ts";
 import { CLI_DIR, REPO, removeDir, runCli, tempDir } from "./harness.ts";
@@ -90,7 +90,7 @@ describe("host plugin discovery", { timeout: 60_000 }, () => {
     expect(check.code).toBe(0);
     const checked = boundaryCast<CheckReport>(JSON.parse(check.stdout), "json");
     expect(checked.plugins).toEqual([{ package: "example-host", version: "3.0.0", kind: "example-host" }]);
-    expect(checked.host).toEqual([{ code: "example-host-check", severity: "warning", owner: "example-host", reason: "checked by the host, api 5" }]);
+    expect(checked.host).toEqual([{ code: "example-host-check", severity: "warning", owner: "example-host", reason: `checked by the host, api ${PLUGIN_API_VERSION}` }]);
     const human = await runCli(["check", "--root", dir]);
     expect(human.stdout).toContain("plugins: example-host 3.0.0");
   });
