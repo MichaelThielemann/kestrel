@@ -76,12 +76,12 @@ rewriting (see site-default), versioning.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `content.validate:<arg>` | Validate a <arg> payload | – | – | { locale?: "de" \| "en" } | – | 400 validation failed | – | yes |
-| `content.create:<arg>` | Create a <arg> | – | `result` | { locale?: "de" \| "en" } | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, … } | 400 validation failed; 409 a document with that id already exists | – | yes |
-| `content.set:<arg>` | Replace the <arg> document | – | `result` | { locale?: "de" \| "en" } | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, … } | 400 validation failed | – | yes |
+| `content.validate:<arg>` | Validate a <arg> payload | – | – | { locale?: "de" \| "en" } ?locale: "de" \| "en" | – | 400 validation failed | – | yes |
+| `content.create:<arg>` | Create a <arg> | – | `result` | { locale?: "de" \| "en" } ?locale: "de" \| "en" | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, … } | 400 validation failed; 409 a document with that id already exists | – | yes |
+| `content.set:<arg>` | Replace the <arg> document | – | `result` | { locale?: "de" \| "en" } ?locale: "de" \| "en" | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, … } | 400 validation failed | – | yes |
 | `content.get:<arg>` | One <arg> document | `params.id` | `result` | ?locale: "de" \| "en" | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, … } | 400 unknown locale; 404 not found | – | yes |
 | `content.list:<arg>` | List <arg> | – | `result` | ?locale: "de" \| "en", limit: integer, offset: integer, sort: string | { items: object[], total: number, … } | 400 invalid limit, offset, sort or locale | – | yes |
-| `content.update:<arg>` | Update a <arg> | `params.id` | `result` | { locale?: "de" \| "en" } | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, … } | 400 validation failed; 404 not found | – | yes |
+| `content.update:<arg>` | Update a <arg> | `params.id` | `result` | { locale?: "de" \| "en" } ?locale: "de" \| "en" | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, … } | 400 validation failed; 404 not found | – | yes |
 | `content.remove:<arg>` | Delete a <arg> | `params.id` | `result` | – | { ok: boolean, … } | 400 missing id | – | yes |
 | `content.describeModel` | The content model: locales, default locale and every type with its fields | – | `result` | – | { locales?: string[], defaultLocale?: string, types: object, … } | – | – | yes |
 | `content.removeTranslation:<arg>` | Remove one translation of a <arg> (locale from the route or ?locale=); the document stays in its other locales | `params.id` | `result` | ?locale: "de" \| "en" | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, … } | 400 unknown or missing locale; 404 document or translation not found; 409 last translation – remove the document | – | yes |

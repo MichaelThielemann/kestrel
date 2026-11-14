@@ -84,7 +84,10 @@ without Nuxt: [`../examples/h3`](../examples/h3).
   `application/*+json`), and so are responses; exceptions: file downloads (raw bytes) and multipart
   uploads. A non-empty body of any other type, or without a type, is refused with `415 UNSUPPORTED`
   before a pipeline runs.
-- **Query parameters** land in the payload just like body fields (`?locale=en&limit=10`).
+- **Query parameters** land in the payload just like body fields (`?locale=en&limit=10`), with one
+  exception: a query parameter that names a member of a step's body schema (`?roles=admin`,
+  `?dry=true`) answers `400 VALIDATION`, so that a field the body schema checks reaches the step
+  only through the body. `locale` on a write may be sent in either place.
 - **Every step validates its input.** Before a step runs, the body is checked against the
   step's declared JSON Schema and the declared query parameters against their types (query
   strings are read as `integer`/`number`/`boolean`/arrays where the declaration says so:
@@ -337,7 +340,9 @@ identical paths.
 | DELETE | `/pages/:id` | – | `{ ok: true, _events }`; 409 if it still has subpages, or if other documents reference it, e.g. `pages/<id> is referenced by pages/<id2> (hero)` (no 409 on `PATCH`, only on `DELETE`) |
 
 `sort` is a field name, a leading `-` means descending; an unknown field → 400 (`unknown sort field
-…`). `limit` and `offset` must be integers (`limit` ≥ 1, `offset` ≥ 0); an invalid value or a
+…`), and so is a field an anonymous caller does not receive: a caller kept to a field grant sorts
+only by a field it receives whole, or by `id`, `createdAt` and `updatedAt`, even where the answer
+leaves the two timestamps out. A name such as `constructor` is an unknown field. `limit` and `offset` must be integers (`limit` ≥ 1, `offset` ≥ 0); an invalid value or a
 `limit` above the ceiling (`maxLimit` in the `content/default` config, default 200) → 400. Without
 `limit`, the list returns at most `defaultLimit` items (`content/default` config, default `maxLimit`);
 `total` counts every match, so page through with `offset`. Write calls need `pages.write`, deletion needs `pages.delete`
@@ -864,7 +869,8 @@ replication (point-in-time recovery).
 | GET | `/admin/migrations` | – | `{ applied: [{ id, appliedAt, documents, durationMs }], pending: [{ id, collection }] }` – ledger in chronological order, pending in config order |
 | POST | `/admin/migrations/apply` | `{ dry?: true }` | applies pending migrations, or previews with `dry`, see below |
 
-**POST `/admin/migrations/apply`** — body `{ dry?: true }`.
+**POST `/admin/migrations/apply`** — body `{ dry?: true }`. `dry` belongs in the body: `?dry=true` in the
+query answers `400 VALIDATION` instead of applying the migrations.
 
 - Without `dry`: `{ applied: [LedgerEntry] }` (empty array if nothing was pending).
 - With `dry: true`: `{ dry: true, changes: [{ id, documents }] }` — counts affected documents,

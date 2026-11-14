@@ -186,8 +186,16 @@ function checkTerminalOutput(step: ResolvedStep, after: Context): void {
   }
 }
 
+function bodyMembersInQuery(description: ResolvedStep["description"], ctx: Context): SchemaProblem[] {
+  const members = isRecord(description.input) && isRecord(description.input.properties) ? description.input.properties : undefined;
+  if (members === undefined) return [];
+  return Object.keys(ctx.query)
+    .filter((key) => Object.hasOwn(members, key) && !(description.query !== undefined && Object.hasOwn(description.query, key)))
+    .map((key) => ({ path: `$.${key}`, message: "is a body member and must not be sent in the query" }));
+}
+
 function inputProblems(description: ResolvedStep["description"], ctx: Context): SchemaProblem[] {
-  const problems: SchemaProblem[] = description.input === undefined ? [] : validateSchema(description.input, ctx.body);
+  const problems: SchemaProblem[] = description.input === undefined ? [] : [...bodyMembersInQuery(description, ctx), ...validateSchema(description.input, ctx.body)];
   const query = description.query;
   if (query !== undefined) {
     const coerced = coerceQuery(query, ctx.query);

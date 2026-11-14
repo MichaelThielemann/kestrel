@@ -332,6 +332,43 @@ describe("runPipeline payload validation", () => {
     expect((await run({ limit: "abc" })).details).toEqual({ problems: [{ path: "$.limit", message: "expected integer, got string" }] });
   });
 
+  it("fails a run whose query carries a key the input schema describes and the step does not declare as a query key", async () => {
+    const { logger } = collectingLogger();
+    let ran = false;
+    const spy: Step = async (ctx: Context) => { ran = true; return ok({ ...ctx, result: "ran" }); };
+    const res = await runPipeline({ name: "p", steps: [step(spy)] }, { trigger: http, body: {}, query: { title: "x" }, payload: { title: "x" } }, logger);
+    expect(res).toMatchObject({ status: 400, code: "VALIDATION", step: "content.create" });
+    expect(res.details).toMatchObject({ problems: [{ path: "$.title", message: "is a body member and must not be sent in the query" }, expect.anything()] });
+    expect(ran).toBe(false);
+  });
+
+  it("refuses such a query key even when the body carries the same member", async () => {
+    const { logger } = collectingLogger();
+    const res = await runPipeline({ name: "p", steps: [step(pass)] }, { trigger: http, body: { title: "a" }, query: { title: "b" }, payload: { title: "a" } }, logger);
+    expect(res).toMatchObject({ status: 400, code: "VALIDATION" });
+  });
+
+  it("lets a key the step declares as a query key through even when the input schema describes it too", async () => {
+    const { logger } = collectingLogger();
+    const both = { ...typed, input: { type: "object", properties: { limit: { type: "integer" } }, additionalProperties: false } };
+    const res = await runPipeline({ name: "p", steps: [{ name: "content.create", description: both, fn: pass }] }, { trigger: http, body: {}, query: { limit: "2" }, payload: { limit: "2" } }, logger);
+    expect(res).toMatchObject({ status: 200, result: "ran" });
+  });
+
+  it("does not look at query keys the input schema does not describe, nor at Object.prototype names", async () => {
+    const { logger } = collectingLogger();
+    const query = Object.fromEntries([["_", "1"], ["role", "admin"], ["constructor", "x"], ["__proto__", "y"]]);
+    const res = await runPipeline({ name: "p", steps: [step(pass)] }, { trigger: http, body: { title: "x" }, query, payload: { title: "x" } }, logger);
+    expect(res).toMatchObject({ status: 200, result: "ran" });
+  });
+
+  it("does not apply the query rule to a step whose input schema has no properties", async () => {
+    const { logger } = collectingLogger();
+    const open = { ...typed, input: { type: "object", additionalProperties: true } };
+    const res = await runPipeline({ name: "p", steps: [{ name: "content.create", description: open, fn: pass }] }, { trigger: http, body: {}, query: { anything: "1" }, payload: { anything: "1" } }, logger);
+    expect(res).toMatchObject({ status: 200 });
+  });
+
   it("validates the payload as body for triggers without an HTTP split and skips steps without schemas", async () => {
     const { logger } = collectingLogger();
     const bare = { name: "content.create", description: writesResult, fn: pass };

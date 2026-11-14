@@ -265,6 +265,17 @@ describe("migrations/default steps via runPipeline", () => {
     expect(result.code).toBe("VALIDATION");
   });
 
+  it("apply refuses dry in the query as VALIDATION and applies nothing", async () => {
+    const migration: Migration = { id: "m1", collection: "pages", up: (c) => ({ ...c.document, title: "X" }) };
+    const { instance, content } = await boot([migration], { mode: "off" });
+    const created = expectOk(await content.create("pages", { slug: "a", title: "A", status: "draft" }));
+    const apply = definePipeline({ name: "apply-query-dry", steps: ["migrations.apply"] });
+    const result = await runPipeline(apply, { query: { dry: "true" }, payload: { dry: "true" }, body: {} }, { modules: [{ module, instance }] });
+    expect(result).toMatchObject({ status: 400, code: "VALIDATION" });
+    expect(boundaryCast<{ pending: unknown[] }>(expectOk(await instance.list()), "host").pending).toHaveLength(1);
+    expect(expectOk(await content.get("pages", created.id))).toMatchObject({ title: "A" });
+  });
+
   it("apply rejects an unknown body key as VALIDATION", async () => {
     const { instance } = await boot([{ id: "m1", collection: "pages", up: () => null }], { mode: "off" });
     const apply = definePipeline({ name: "apply-extra-key", steps: ["migrations.apply"] });

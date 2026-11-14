@@ -3031,7 +3031,7 @@
     "/admin/migrations/apply": {
       "post": {
         "operationId": "applyMigrations",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission migrations.manage → Apply every pending migration; payload.dry === true reports the changes without writing",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission migrations.manage → Apply every pending migration; body.dry === true reports the changes without writing",
         "tags": [
           "admin"
         ],
@@ -8200,7 +8200,7 @@
     "/media": {
       "get": {
         "operationId": "listMedia",
-        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.read → List media, newest first; anonymous callers may only fetch by ids → Add available, variants[], variantCounts, focus and framing to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, a hidden item lists no variants and is not available, and framing.ratios has one entry per ratio of the cover sizes → Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.read → List media, newest first; anonymous callers may only fetch by ids → Add available, variants[], variantCounts, focus and framing to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed, a hidden item lists no variants and is not available, and framing.ratios has one entry per ratio of the cover sizes → Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one; a caller kept to a grant may sort only by a field it names whole or by id, createdAt and updatedAt",
         "tags": [
           "media"
         ],
@@ -8242,7 +8242,8 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "field name, prefix - for descending"
             }
           },
           {
@@ -12388,7 +12389,7 @@
     "/pages": {
       "get": {
         "operationId": "listPages",
-        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.read → List pages → Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.read → List pages → Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one; a caller kept to a grant may sort only by a field it names whole or by id, createdAt and updatedAt",
         "tags": [
           "pages"
         ],
@@ -14089,7 +14090,20 @@
           "content.set:redirects",
           "redirects.export"
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "de",
+                "en"
+              ]
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "ok",
@@ -14547,7 +14561,20 @@
           "events.emit:settings.updated",
           "events.relay"
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "de",
+                "en"
+              ]
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "ok",

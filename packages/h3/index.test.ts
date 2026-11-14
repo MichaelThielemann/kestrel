@@ -27,6 +27,7 @@ const store = defineModule({
   },
   steps: (db) => ({
     echo: async (ctx: Context) => ok({ ...ctx, result: { payload: ctx.payload, params: ctx.params, ip: ctx.ip ?? null, auth: ctx.headers.authorization ?? null } }),
+    save: async (ctx: Context) => ok({ ...ctx, result: { role: ctx.payload.role ?? null } }),
     fail: async (ctx: Context) => ctx.fail(customFailure("TEAPOT", 418, "teapot", { details: { pot: true } })),
     greet: async (ctx: Context) => ok({ ...ctx, responseHeaders: { "set-cookie": "greeting=hello; HttpOnly; Path=/" }, responseCookies: ["visit=1; HttpOnly; Path=/"], result: { ok: true } }),
     upload: async (ctx: Context) => {
@@ -43,6 +44,7 @@ const store = defineModule({
   }),
   describe: () => ({
     echo: { summary: "Echoes payload, params, ip and the authorization header.", reads: ["payload", "params", "ip", "headers.authorization"], writes: ["result"], output: { type: "object" } },
+    save: { summary: "Answers the role of the payload.", reads: ["payload.role?"], writes: ["result"], input: { type: "object", properties: { role: { type: "string" } }, additionalProperties: false }, output: { type: "object" } },
     fail: { summary: "Always fails with a teapot error.", reads: [], writes: [] },
     greet: { summary: "Sets two cookies on the response.", reads: [], writes: ["responseHeaders", "responseCookies", "result"], output: { type: "object" } },
     upload: { summary: "Stores an uploaded file.", reads: ["files", "payload.note"], writes: ["result"], output: { type: "object", properties: { filename: { type: "string" }, size: { type: "number" } }, required: ["filename", "size"] } },
@@ -55,6 +57,7 @@ const config = {
   triggers: [
     { http: "GET /echo/:id", pipeline: "echo" },
     { http: "POST /echo", pipeline: "echo" },
+    { http: "POST /save", pipeline: "save" },
     { http: "GET /fail", pipeline: "fail" },
     { http: "POST /greet", pipeline: "greet" },
     { http: "POST /files", pipeline: "upload" },
@@ -65,6 +68,7 @@ const config = {
 };
 const pipelines = [
   definePipeline({ name: "echo", steps: ["store.echo"] }),
+  definePipeline({ name: "save", steps: ["store.save"] }),
   definePipeline({ name: "fail", steps: ["store.fail"] }),
   definePipeline({ name: "greet", steps: ["store.greet"] }),
   definePipeline({ name: "upload", steps: ["store.upload"] }),
@@ -108,6 +112,18 @@ describe("kestrel-h3", () => {
     }
     expect(await rawGet(base, "/site/.well-known/x")).toBe(200);
     expect(await rawGet(base, "/echo/1?next=/../x")).toBe(200);
+  });
+
+  it("answers 400 to a member of the input schema sent in the query and keeps a body member and an unrelated query key working", async () => {
+    const base = await serve();
+    const post = (query: string, body: unknown) => fetch(`${base}/save${query}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const refused = await post("?role=admin", {});
+    expect(refused.status).toBe(400);
+    expect(await jsonBody<{ code: string }>(refused)).toMatchObject({ code: "VALIDATION" });
+    expect((await post("?role=admin", { role: "viewer" })).status).toBe(400);
+    const accepted = await post("?_=1", { role: "viewer" });
+    expect(accepted.status).toBe(200);
+    expect(await jsonBody<{ role: string }>(accepted)).toMatchObject({ role: "viewer" });
   });
 
   it("tells a wrapping handler which pipeline the request was routed to", async () => {

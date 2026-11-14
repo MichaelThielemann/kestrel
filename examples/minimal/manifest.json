@@ -9189,6 +9189,15 @@
           },
           "additionalProperties": false
         },
+        "query": {
+          "locale": {
+            "type": "string",
+            "enum": [
+              "de",
+              "en"
+            ]
+          }
+        },
         "errors": {
           "400": "validation failed"
         },
@@ -9217,6 +9226,15 @@
             }
           },
           "additionalProperties": false
+        },
+        "query": {
+          "locale": {
+            "type": "string",
+            "enum": [
+              "de",
+              "en"
+            ]
+          }
         },
         "output": {
           "type": "object",
@@ -9280,6 +9298,15 @@
             }
           },
           "additionalProperties": false
+        },
+        "query": {
+          "locale": {
+            "type": "string",
+            "enum": [
+              "de",
+              "en"
+            ]
+          }
         },
         "output": {
           "type": "object",
@@ -9491,6 +9518,15 @@
             }
           },
           "additionalProperties": false
+        },
+        "query": {
+          "locale": {
+            "type": "string",
+            "enum": [
+              "de",
+              "en"
+            ]
+          }
         },
         "output": {
           "type": "object",
@@ -11569,7 +11605,7 @@
       "module": "migrations/default",
       "factory": false,
       "description": {
-        "summary": "Apply every pending migration; payload.dry === true reports the changes without writing",
+        "summary": "Apply every pending migration; body.dry === true reports the changes without writing",
         "reads": [],
         "writes": [
           "result"
@@ -13910,7 +13946,7 @@
           "name": "migrations.apply",
           "module": "migrations/default",
           "description": {
-            "summary": "Apply every pending migration; payload.dry === true reports the changes without writing",
+            "summary": "Apply every pending migration; body.dry === true reports the changes without writing",
             "reads": [],
             "writes": [
               "result"
@@ -14889,6 +14925,15 @@
                 "title",
                 "status"
               ]
+            },
+            "query": {
+              "locale": {
+                "type": "string",
+                "enum": [
+                  "de",
+                  "en"
+                ]
+              }
             },
             "output": {
               "type": "object",
@@ -21162,14 +21207,21 @@
           "name": "authz.fields",
           "module": "authz/roles",
           "description": {
-            "summary": "Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
+            "summary": "Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one; a caller kept to a grant may sort only by a field it names whole or by id, createdAt and updatedAt",
             "reads": [
               "identity?",
-              "result?"
+              "result?",
+              "payload.sort?"
             ],
             "writes": [
               "result?"
             ],
+            "query": {
+              "sort": {
+                "type": "string",
+                "description": "field name, prefix - for descending"
+              }
+            },
             "errors": {
               "403": "no field grant on media for a caller without an identity or a configured role"
             },
@@ -21826,14 +21878,21 @@
           "name": "authz.fields",
           "module": "authz/roles",
           "description": {
-            "summary": "Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
+            "summary": "Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one; a caller kept to a grant may sort only by a field it names whole or by id, createdAt and updatedAt",
             "reads": [
               "identity?",
-              "result?"
+              "result?",
+              "payload.sort?"
             ],
             "writes": [
               "result?"
             ],
+            "query": {
+              "sort": {
+                "type": "string",
+                "description": "field name, prefix - for descending"
+              }
+            },
             "errors": {
               "403": "no field grant on pages for a caller without an identity or a configured role"
             },
@@ -27999,6 +28058,15 @@
               },
               "additionalProperties": false
             },
+            "query": {
+              "locale": {
+                "type": "string",
+                "enum": [
+                  "de",
+                  "en"
+                ]
+              }
+            },
             "output": {
               "type": "object",
               "properties": {
@@ -30608,6 +30676,15 @@
               },
               "additionalProperties": false
             },
+            "query": {
+              "locale": {
+                "type": "string",
+                "enum": [
+                  "de",
+                  "en"
+                ]
+              }
+            },
             "output": {
               "type": "object",
               "properties": {
@@ -30810,6 +30887,15 @@
               "required": [
                 "title"
               ]
+            },
+            "query": {
+              "locale": {
+                "type": "string",
+                "enum": [
+                  "de",
+                  "en"
+                ]
+              }
             },
             "output": {
               "type": "object",
@@ -32327,6 +32413,15 @@
                 }
               },
               "additionalProperties": false
+            },
+            "query": {
+              "locale": {
+                "type": "string",
+                "enum": [
+                  "de",
+                  "en"
+                ]
+              }
             },
             "output": {
               "type": "object",

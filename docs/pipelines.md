@@ -188,6 +188,11 @@ checks that the pipeline's declared output fits it. A path reaches into an item 
 `provenance.origin`, `variants[].path` — and a map or a free-form value (`_translations`, a `json`
 field) is granted whole.
 
+A list answer is ordered before it is cut, so the step also checks the request's `sort`: a caller
+kept to a grant may sort only by a member the grant names whole or by `id`, `createdAt` and
+`updatedAt`; any other name answers `400 VALIDATION`, which keeps the order of a list from showing
+what the grant withholds. A caller whose roles have no grant for the resource sorts by anything.
+
 Boot fails for a pipeline an anonymous caller reaches over HTTP that does not end with the step, for
 a resource without an anonymous grant and for a grant naming a field no pipeline declares, so a field
 the grant does not name — one a module adds later included — never reaches a visitor. An answer a
@@ -263,8 +268,10 @@ event that no pipeline emits through an `events.emit:<name>` step and no module 
 its `emits` — the symptom of a typo like `auth.logedIn`, whose listener pipeline would
 otherwise never run; an event emitted from a contract method instead of a pipeline
 (`migrations.applied`) is covered by the module's `emits`. An endpoint has no logic of its
-own, it only starts a pipeline with the body as `payload` and the route parameters as
-`params`. JSON bodies land in `payload`,
+own, it only starts a pipeline with the query parameters and the body as `payload` (a body
+member wins over a query parameter of the same name; [Payload Validation](#payload-validation)
+refuses a query parameter that names a member of a step's body schema) and the route parameters
+as `params`. JSON bodies land in `payload`,
 `multipart/form-data` puts text fields in `payload` and files in `files`
 (`http.maxBodyBytes`, default 10 MB, otherwise 413: a declared `Content-Length` over the limit is
 refused before any byte of the body is read, and a body without one stops being read the moment it
@@ -608,6 +615,12 @@ match the step's own declaration never reaches the step:
   explicitly; `false` is the rule, `true` only for steps that deliberately accept open objects
   (a consumer document in `persistence.createOne`, the field a consumer JSON schema governs in
   `validate.check`). Body values are never converted.
+- A query parameter whose name is a member of `input.properties` is refused (`VALIDATION`,
+  `$.<name>`: "is a body member and must not be sent in the query") unless the step lists the
+  same name in `query`. `ctx.payload` merges the query with the body, so without this rule
+  `?roles=admin` and an empty body would give a step the value its `input` never checked. The
+  step then sees a body member only where the body sent it. Query parameters that `input` does
+  not describe stay unchecked, as below.
 - Query parameters arrive as strings (repeated keys as string arrays). For the check the runner
   builds a coerced copy of the declared keys only: `"10"` → `10` for `integer`/`number`,
   `"true"`/`"false"` → boolean, a single string → `[string]` for an `array`; text that does not

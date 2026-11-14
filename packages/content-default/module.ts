@@ -136,9 +136,9 @@ function describeContent(content: ContentInstance) {
   };
 
   return {
-    validate: (arg: string) => ({ summary: `Validate a ${typeOf(arg)} payload`, reads: [], writes: [], input: writeSchema(typeOf(arg), "create"), errors: { 400: "validation failed" }, atomicSafe: true }),
-    create: (arg: string) => ({ summary: `Create a ${typeOf(arg)}`, reads: [], writes: ["result"], input: writeSchema(typeOf(arg), "create"), output: docSchema(typeOf(arg)), errors: { 400: "validation failed", 409: "a document with that id already exists" }, atomicSafe: true }),
-    set: (arg: string) => ({ summary: `Replace the ${typeOf(arg)} document`, reads: [], writes: ["result"], input: writeSchema(typeOf(arg), "create"), output: docSchema(typeOf(arg)), errors: { 400: "validation failed" }, atomicSafe: true }),
+    validate: (arg: string) => ({ summary: `Validate a ${typeOf(arg)} payload`, reads: [], writes: [], input: writeSchema(typeOf(arg), "create"), query: localeQuery(), errors: { 400: "validation failed" }, atomicSafe: true }),
+    create: (arg: string) => ({ summary: `Create a ${typeOf(arg)}`, reads: [], writes: ["result"], input: writeSchema(typeOf(arg), "create"), query: localeQuery(), output: docSchema(typeOf(arg)), errors: { 400: "validation failed", 409: "a document with that id already exists" }, atomicSafe: true }),
+    set: (arg: string) => ({ summary: `Replace the ${typeOf(arg)} document`, reads: [], writes: ["result"], input: writeSchema(typeOf(arg), "create"), query: localeQuery(), output: docSchema(typeOf(arg)), errors: { 400: "validation failed" }, atomicSafe: true }),
     get: (arg: string) => ({
       summary: `One ${typeOf(arg)} document`,
       reads: model.types[typeOf(arg)]?.kind === "single" ? [] : ["params.id"],
@@ -157,7 +157,7 @@ function describeContent(content: ContentInstance) {
       errors: { 400: "invalid limit, offset, sort or locale" },
       atomicSafe: true,
     }),
-    update: (arg: string) => ({ summary: `Update a ${typeOf(arg)}`, reads: ["params.id"], writes: ["result"], input: writeSchema(typeOf(arg), "update"), output: docSchema(typeOf(arg)), errors: { 400: "validation failed", 404: "not found" }, atomicSafe: true }),
+    update: (arg: string) => ({ summary: `Update a ${typeOf(arg)}`, reads: ["params.id"], writes: ["result"], input: writeSchema(typeOf(arg), "update"), query: localeQuery(), output: docSchema(typeOf(arg)), errors: { 400: "validation failed", 404: "not found" }, atomicSafe: true }),
     remove: (arg: string) => ({ summary: `Delete a ${typeOf(arg)}`, reads: ["params.id"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }, errors: { 400: "missing id" }, atomicSafe: true }),
     removeTranslation: (arg: string) => ({
       summary: `Remove one translation of a ${typeOf(arg)} (locale from the route or ?locale=); the document stays in its other locales`,

@@ -59,7 +59,7 @@ export default defineModule({
     },
 
     apply: async (ctx: Context) => {
-      const result = await m.apply(ctx.payload.dry === true ? { dry: true } : {});
+      const result = await m.apply(ctx.body.dry === true ? { dry: true } : {});
       if (isErr(result)) return ctx.fail(result.error);
       return ok({ ...ctx, result: result.value });
     },
@@ -73,7 +73,7 @@ export default defineModule({
       output: { type: "object", properties: { applied: { type: "array", items: LEDGER_SCHEMA }, pending: { type: "array", items: PENDING_SCHEMA } }, required: ["applied", "pending"] },
     },
     apply: {
-      summary: "Apply every pending migration; payload.dry === true reports the changes without writing",
+      summary: "Apply every pending migration; body.dry === true reports the changes without writing",
       reads: [],
       writes: ["result"],
       input: { type: "object", properties: { dry: { type: "boolean" } }, additionalProperties: false },
