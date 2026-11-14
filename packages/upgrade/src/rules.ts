@@ -13,6 +13,7 @@ import { contractHelperImportsRule } from "./ruleContractHelpers.ts";
 import { DELIVERY_INDEX_RULES } from "./ruleDeliveryIndexes.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
 import { fieldGrantRules } from "./ruleFieldGrants.ts";
+import { HARDENING_RULES } from "./ruleHardening.ts";
 import { INFO_RULES } from "./ruleInfo.ts";
 import { mediaRules } from "./ruleMedia.ts";
 import { kestrelBinariesRule } from "./ruleBinaries.ts";
@@ -207,6 +208,7 @@ export const DEFAULT_RULES: readonly Rule[] = [
   ...fieldGrantRules,
   ...SITE_PATH_RULES,
   ...DELIVERY_INDEX_RULES,
+  ...HARDENING_RULES,
   ...INFO_RULES,
 ];
 

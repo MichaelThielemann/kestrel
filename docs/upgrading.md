@@ -367,6 +367,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`pipelines/images-resume-cron`](#pipelines-images-resume-cron) | source | manual (warning) | `images-default` configured with no cron-triggered `images.resume` |
 | [`pipelines/media-delete-order`](#pipelines-media-delete-order) | source | auto (warning) / none (info) | an images cleanup step running before the media delete it follows from, or a folder delete not raising `media.deleted` |
 | [`runtime/authz-anonymous-floor`](#runtime-authz-anonymous-floor) | source | none (info) | `authz-roles` with a non-empty `anonymous` |
+| [`authz/anonymous-read-only`](#authz-anonymous-read-only) | load | manual (error) | an `authz-roles` `anonymous` entry that is not a `<name>.read` permission |
 | [`pipelines/field-step`](#pipelines-field-step) | boot | ask (no default) | a pipeline anonymous callers reach without `authz.fields` at its end, or without an anonymous field grant |
 | [`authz/field-grant-unknown`](#authz-field-grant-unknown) | boot | manual | a field grant or an `authz.fields` step that does not fit the declared output |
 | [`responses/anonymous-fields`](#responses-anonymous-fields) | load | none (info) | an HTTP pipeline anonymous callers reach and the members they stop receiving |
@@ -389,6 +390,9 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`runtime/restore-freshness`](#runtime-restore-freshness) | load | none (info) | `restoreOnStart` left on for `replication-sqlite`/`backup-blobstore` |
 | [`runtime/single-process`](#runtime-single-process) | load | none (info) | a `persistence-sqlite`, `replication-sqlite` or `backup-blobstore` entry, each of which takes the instance lock on its database file |
 | [`http/trusted-proxies`](#http-trusted-proxies) | load | none (info) | `http.trustProxy` or `http.trustedHeader` without `http.trustedProxies` |
+| [`pipelines/query-body-member`](#pipelines-query-body-member) | source | manual (warning) / none (info) | a step reading a member of its own input schema from the query without declaring it, and an HTTP pipeline running `migrations.apply` |
+| [`runtime/sort-field-grant`](#runtime-sort-field-grant) | load | none (info) | an HTTP pipeline running `content.list` or `media.list` |
+| [`runtime/user-cleanup-guard`](#runtime-user-cleanup-guard) | load | manual (warning) | an HTTP route running `audit.anonymize` or `revisions.reassignAuthor` without `authn.requireAbsentUser` before it |
 | [`delivery/dependents`](#delivery-dependents) | source | none (info) | `delivery-static` publishing on events without marking dependent outputs |
 | [`delivery/export-llms`](#delivery-export-llms) | load | auto / manual | a pipeline file naming the removed `delivery.exportLlms` |
 | [`delivery/site-url`](#delivery-site-url) | load | auto / manual | `delivery-static`'s `llms.siteUrl`, moved to a top-level `siteUrl` |
@@ -616,6 +620,16 @@ read; manual otherwise. A separate, info-only finding fires when a pipeline runs
 `anonymous` grants, in `authz.require`, `can` and `describePipelineAccess` — a signed-in caller
 refused something an anonymous visitor could do before is served now.
 
+
+#### authz-anonymous-read-only
+`authz-roles`' `anonymous` list takes only read permissions, `<name>.read` such as `pages.read` or
+`media.read`. A wildcard (`"*"`, `"pages.*"`) or a permission that writes, manages or lists
+(`pages.write`, `users.manage`, `media.list`) fails boot and names the entry. The permissions in
+`anonymous` are held by every caller, signed in or not, so a broad entry there is a grant to the
+whole internet. Move the entry to a role in `roles`, and keep in `anonymous` only what a visitor
+without a session may read. The finding lists every entry that is refused and is always manual,
+because dropping an entry changes who can do what.
+
 #### pipelines-field-step
 Every pipeline an anonymous caller reaches over HTTP must end with `authz.fields:<resource>?shape=<shape>`,
 and `authz-roles`' `anonymousFields` must grant fields of that resource, or boot fails. The rule takes
@@ -841,6 +855,48 @@ proxy that connects from another address — another host, a container network �
 request is attributed to the proxy's address (one rate-limit key for all clients, and an allowlist
 decides on the proxy), and the server logs `forwarding header from <peer> ignored` once per peer and
 hour. List the proxy's address or network in `http.trustedProxies`.
+
+
+#### pipelines-query-body-member
+A request's query and body are merged into one payload, but a step's `input` schema checks only the
+body. From 6.0.0 the runner answers `400 VALIDATION` (`details.problems` names the key) when the query
+carries a key that is a member of the step's `input` schema, before the step runs, unless the step lists
+that key in the `query` of its `describe()` entry. `?roles=admin` on a request with an empty body no
+longer reaches `authn.createUser`, and `POST /admin/migrations/apply?dry=true` no longer applies the
+migrations, because `dry` is a body flag. `content.create`, `content.set`, `content.update` and
+`content.validate` declare `locale`, which stays valid in the query; a key the schema does not describe
+is still ignored.
+
+The rule reads the steps of the project's own modules: a step run by an HTTP pipeline whose source reads a
+member of its `input` schema through `ctx.query` and does not declare it in `query` gets a warning. Fix it
+by declaring the key in `describe().query`, or by reading it from the body and sending it there. It only
+sees the explicit `ctx.query` reads; a step that reads `ctx.payload.<member>` is refused the same way
+for a client that sends the member in the query. A second, informational finding names an HTTP pipeline
+that runs `migrations.apply`: send `dry` in the JSON body.
+
+#### runtime-sort-field-grant
+A list can be ordered by a field its caller never receives, which shows the order of what the field
+holds. From 6.0.0, a pipeline ending with `authz.fields:<resource>?shape=list` answers `400 VALIDATION`
+to a caller whose grant does not name the `sort` field whole: a hidden field, a member the grant names
+only in part, a name that is no member. `id`, `createdAt` and `updatedAt` stay sortable for every
+caller, and a caller whose roles have no field grant for the resource sorts by anything. Independent of
+grants, `content.list` answers `400` to a sort that names something that is no field of the type, such
+as `constructor` or `toString`. The finding names each HTTP pipeline running `content.list` or
+`media.list`; it cannot see the sort values your clients send. Check them, and add each field a public list
+is sorted by to the grant of the callers who sort by it.
+
+#### runtime-user-cleanup-guard
+`audit.anonymize` clears every trace of one user id from the audit log, and `revisions.reassignAuthor`
+rewrites the author of every revision of one id. Both act on whatever id they are given. An admin route
+that repeats one of them after a failed cleanup, such as
+`POST /admin/users/:id/audit/anonymize`, must run `authn.requireAbsentUser` before it: the step answers
+`409 CONFLICT` while `params.id` names a user, active or not, and `400` for an id that is not a UUID,
+the form of every `authn-multi` user id, so the route cannot be aimed at an account that still exists.
+Emit an event after the repair and record it with `audit.recordActor`, which keeps the caller but not
+the id, so a run of the route leaves a trace of who ran it. The rule names an HTTP route running either
+step without the guard before it. It is manual: add the step, then emit and record the event as in the
+`examples/minimal` pipelines `retryAnonymizeAuditUser` and `retryReassignRevisionAuthor`. A pipeline
+started only by an event, such as the one on `user.deleted`, is not named.
 
 #### delivery-dependents
 `delivery-static` publishes on events, but no pipeline runs `delivery.markDependents:<type>`, no cron runs

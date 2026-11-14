@@ -900,6 +900,17 @@ Net changes since 5.8.2.
 
 ### Added
 
+- `kestrel upgrade` checks the stricter request and permission rules of 6.0.0 (the manual steps are in
+  `docs/upgrading.md` § Rule reference):
+  - `authz/anonymous-read-only` (error, manual) names every entry of `authz-roles`' `anonymous` that is not a
+    `<name>.read` permission, the entries boot now refuses.
+  - `pipelines/query-body-member` (warning, manual) names a step of the project's own modules that reads a
+    member of its `input` schema through `ctx.query` without declaring it in `describe().query`, and an
+    info finding names an HTTP pipeline running `migrations.apply`, whose `dry` is a body flag.
+  - `runtime/sort-field-grant` (info) names each HTTP pipeline running `content.list` or `media.list`, where
+    `sort` is now restricted to the fields the caller's grant names, and a name that is no field answers 400.
+  - `runtime/user-cleanup-guard` (warning, manual) names an HTTP route running `audit.anonymize` or
+    `revisions.reassignAuthor` without `authn.requireAbsentUser` before it.
 - `contracts`: `helpers/html-allowlist` holds the one allowlist for HTML shown to visitors: the lists
   `HTML_ALLOWED_TAGS`, `HTML_ALLOWED_ATTRIBUTES`, `HTML_ALLOWED_SCHEMES`, `HTML_IMG_SCHEMES`, the pattern
   `HTML_ID_PATTERN`, `isAllowedHtmlUrl(tag, attribute, value)` and `normalizeHtmlAttributes(tag, attributes)`,
