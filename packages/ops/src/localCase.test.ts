@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHarness, PREFIXES, type Harness } from "./harness.fixture.ts";
@@ -18,6 +19,16 @@ vi.mock("node:fs", async (importOriginal) => {
     existsSync: (path: fs.PathLike) => actual.existsSync(path) || (filesystem.caseInsensitive && sameName(path)),
   };
 });
+
+function temporaryDirectoryIgnoresCase(): boolean {
+  const dir = fs.mkdtempSync(join(tmpdir(), "kestrel-ops-case-probe-"));
+  try {
+    fs.writeFileSync(join(dir, "probe-a"), "");
+    return fs.existsSync(join(dir, "probe-A"));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 async function backupWithCaseTwins(h: Harness): Promise<string> {
   await h.app.start();
@@ -45,13 +56,13 @@ describe("restore --to local --with-media and keys that differ only in case", ()
       expect(copied.code).toBe(1);
       expect(copied.stderr).toContain(`${PREFIXES.media}Team/photo.png`);
       expect(copied.stderr).toContain(`${PREFIXES.media}team/photo.png`);
-      expect(fs.readdirSync(out)).toEqual([]);
+      expect(fs.existsSync(out)).toBe(false);
     } finally {
       await h.dispose();
     }
   });
 
-  it("writes both on a case-sensitive file system", async () => {
+  it.skipIf(temporaryDirectoryIgnoresCase())("writes both on a case-sensitive file system", async () => {
     const h = createHarness({ store: memoryStore(new MemoryBucket("case-twins-sensitive")) });
     try {
       const id = await backupWithCaseTwins(h);

@@ -310,8 +310,14 @@ function caseTwins(blobs: readonly BlobEntry[]): Array<[string, string]> {
   return twins;
 }
 
+function nearestExisting(dir: string): string {
+  let at = dir;
+  while (!existsSync(at) && dirname(at) !== at) at = dirname(at);
+  return at;
+}
+
 function ignoresCase(dir: string): boolean {
-  const probe = join(dir, `.kestrel-ops-case-${hex(4)}-a`);
+  const probe = join(nearestExisting(dir), `.kestrel-ops-case-${hex(4)}-a`);
   writeFileSync(probe, "", { flag: "wx", mode: 0o600 });
   try {
     return existsSync(`${probe.slice(0, -1)}A`);
@@ -320,18 +326,20 @@ function ignoresCase(dir: string): boolean {
   }
 }
 
-/** Writes a backup's database (or the newest replica generation) to `<dir>/kestrel.db`, sessions removed unless kept, optionally with the originals under `<dir>/blobs/` after the `confirm` answer; refused before anything is written when originals whose keys differ only in case meet a directory that does not tell them apart; a run that fails removes the files it wrote. */
+/** Writes a backup's database (or the newest replica generation; an unfinished placement on top is named and skipped) to `<dir>/kestrel.db`, sessions removed unless kept, optionally with the originals under `<dir>/blobs/` after the `confirm` answer; refused before anything is written when originals whose keys differ only in case meet a directory that does not tell them apart; no directory is created before the answer, and a run that fails removes the files and directories it created. */
 export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptions): Promise<{ file: string; sessionsDeleted: number; originals: number }> {
   const dir = resolve(options.dir);
   const file = join(dir, "kestrel.db");
   if (options.withMedia && options.backupId === null) throw new OpsError("--with-media needs --backup <id>", 2, "--with-media");
   if (existsSync(file)) throw new OpsError(`${file} exists; choose an empty directory`, 1, file);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
   const source = ctx.workspace.path("local-source.db");
   let blobs: BlobEntry[] = [];
   if (options.backupId === null) {
-    const newest = (await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).at(-1);
-    if (!newest) throw new OpsError(`the replica under ${ctx.env.app.replicaPrefix} has no generation`, 1, ctx.env.app.replicaPrefix);
+    const gens = await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll);
+    const unfinished = await unfinishedPlacements(ctx, gens);
+    for (const name of unfinished) ctx.out.warn(`generation ${name} is an unfinished placement of a restore that failed (a snapshot without origin.json); the copy holds the generation before it`);
+    const newest = gens[gens.length - unfinished.length - 1];
+    if (!newest) throw new OpsError(`the replica under ${ctx.env.app.replicaPrefix} has no generation${unfinished.length > 0 ? " besides the unfinished placement" : ""}`, 1, ctx.env.app.replicaPrefix);
     await buildDatabase(ctx.app, ctx.env.app.replicaPrefix, await completeGeneration(ctx.app, ctx.env.app.replicaPrefix, newest, ctx.poll), source);
   } else {
     const manifest = await readManifest(ctx, options.backupId);
@@ -347,6 +355,7 @@ export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptio
     const bytes = blobs.reduce((n, b) => n + b.size, 0);
     await confirm(ctx.answers, "confirm", `download ${blobs.length} original(s), ${(bytes / 1024 / 1024).toFixed(1)} MiB, into ${dir}/blobs`);
   }
+  const created = existsSync(dir) ? null : (mkdirSync(dir, { recursive: true, mode: 0o700 }) ?? null);
   const written: string[] = [];
   try {
     closeSync(openSync(file, "wx", 0o600));
@@ -365,6 +374,7 @@ export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptio
     }
   } catch (cause) {
     for (const path of written) rmSync(path, { force: true });
+    if (created !== null) rmSync(created, { recursive: true, force: true });
     throw cause;
   }
   return { file, sessionsDeleted, originals: written.length - 1 };
