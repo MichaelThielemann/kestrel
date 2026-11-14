@@ -40,8 +40,12 @@ function parseTarget(arg: string): { type: string; fixed: Record<string, unknown
 }
 
 function payloadOf(ctx: Context): Record<string, unknown> {
-  const { locale: _locale, ...data } = ctx.payload;
-  void _locale;
+  const data: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(ctx.payload)) {
+    if (key === "locale") continue;
+    const queryOnly = Object.hasOwn(ctx.query, key) && !Object.hasOwn(ctx.body, key) && ctx.query[key] === value;
+    if (!queryOnly) data[key] = value;
+  }
   return data;
 }
 
