@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 // eslint-disable-next-line no-restricted-imports -- kestrel-ops is a tool, not a module; it reaches S3 through the admin client of the blobstore package it depends on
 import { createS3Admin, type S3Admin } from "@michaelthielemann/kestrel-blobstore-s3/admin";
 // eslint-disable-next-line no-restricted-imports -- kestrel-ops is a tool, not a module; it builds its S3 client with the options of the blobstore package it depends on
@@ -43,9 +43,10 @@ function unwrap<T>(what: string, result: Result<T, KestrelError>): T {
 }
 
 /**
- * An {@link ObjectStore} on an S3-compatible bucket below `config.prefix`. Listings, HEADs, server-side copies and
- * the server clock go through the admin client of `kestrel-blobstore-s3`; a copy is verified against the source's
- * size and ETag and refused when the source no longer has the listed ETag. Reads and writes of whole objects use the
+ * An {@link ObjectStore} on an S3-compatible bucket below `config.prefix`. Listings, HEADs, server-side copies to
+ * free keys and the server clock go through the admin client of `kestrel-blobstore-s3`; such a copy is verified
+ * against the source's size and ETag and refused when the source no longer has the listed ETag. A copy with
+ * `replace` is a single CopyObject request that never removes its target. Reads and writes of whole objects use the
  * same S3 client. Two stores copy server-side only within one bucket reached with the same credentials.
  */
 export function s3Store(config: S3StoreConfig): S3Store {
@@ -96,6 +97,17 @@ export function s3Store(config: S3StoreConfig): S3Store {
     async copy(sourceKey, key, copyOptions = {}) {
       const source = (copyOptions.from ?? store).locate(sourceKey);
       if (source.bucket !== config.bucket) throw new Error(`s3 store: cannot copy from bucket ${source.bucket} into ${config.bucket} on the server`);
+      if (copyOptions.replace === true) {
+        const copySource = `${source.bucket}/${source.key.split("/").map(encodeURIComponent).join("/")}`;
+        try {
+          await client.send(new CopyObjectCommand({ Bucket: config.bucket, Key: full(key), CopySource: copySource, MetadataDirective: "COPY", ...(copyOptions.ifMatch === undefined ? {} : { CopySourceIfMatch: `"${copyOptions.ifMatch}"` }) }));
+        } catch (cause) {
+          if (statusOf(cause) === 412 || nameOf(cause) === "PreconditionFailed") throw new PreconditionFailed(`${sourceKey} changed since it was listed`, { cause });
+          if (statusOf(cause) === 404 || nameOf(cause) === "NoSuchKey") throw new ObjectMissing(`${sourceKey} does not exist`, { cause });
+          throw cause;
+        }
+        return;
+      }
       unwrap(`copy ${sourceKey}`, await bucketAdmin.copy(source.key, full(key), copyOptions.ifMatch === undefined ? {} : { ifMatch: copyOptions.ifMatch }));
     },
     async delete(key) {

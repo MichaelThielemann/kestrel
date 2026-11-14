@@ -22,6 +22,8 @@ export interface CopyOptions {
   from?: ObjectStore;
   /** Copy only while the source still has this ETag; a store that cannot check it server-side is checked by a HEAD before the copy. */
   ifMatch?: string;
+  /** The key may hold an object the copy replaces: the copy is one request, a failure never removes the key, and the caller reads the result back. */
+  replace?: boolean;
 }
 
 /**
@@ -63,11 +65,12 @@ export class ObjectMissing extends Error {
 /**
  * Copies `sourceKey` of `from` to `key` of `to`, server-side when both are the same store, otherwise by reading the
  * bytes (conditional on `ifMatch`) and writing them with the source's Content-Type. Resolves to the bytes when it
- * read them, null after a server-side copy.
+ * read them, null after a server-side copy. `options.replace` marks a key that may hold an object already, see
+ * {@link CopyOptions.replace}.
  */
-export async function transfer(from: ObjectStore, sourceKey: string, to: ObjectStore, key: string, ifMatch?: string): Promise<Uint8Array | null> {
+export async function transfer(from: ObjectStore, sourceKey: string, to: ObjectStore, key: string, ifMatch?: string, options: { replace?: boolean } = {}): Promise<Uint8Array | null> {
   if (from.id === to.id) {
-    await to.copy(sourceKey, key, ifMatch === undefined ? { from } : { from, ifMatch });
+    await to.copy(sourceKey, key, { from, ...(ifMatch === undefined ? {} : { ifMatch }), ...(options.replace === true ? { replace: true } : {}) });
     return null;
   }
   const object = await from.read(sourceKey, ifMatch === undefined ? {} : { ifMatch });

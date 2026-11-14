@@ -191,7 +191,8 @@ is listed until two listings agree.
    every original under the media prefix and the delivery keys but no database (`db` is null in its
    manifest); `restore` refuses such a backup, and its `blobs.jsonl` and `site.jsonl` name the objects.
 4. Every original of the backup whose key is missing or holds other bytes is copied back. No original is
-   deleted; ones uploaded after the backup stay and are listed.
+   deleted; ones uploaded after the backup stay and are listed. A copy back over a key is a single CopyObject
+   request (or a write, across buckets) that never removes the key when it fails or reads back late.
 5. The delivery prefix is set to the backup's: keys that differ are written, then keys the backup does not
    know are removed. This and `backup prune` are the only places the tool deletes data.
    A key whose size matches but whose ETag is neither the recorded one nor the copy's (a store that encrypts

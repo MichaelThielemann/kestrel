@@ -84,7 +84,7 @@ async function restoreOriginals(ctx: OpsContext, blobs: readonly BlobEntry[], dr
     const current = live.get(entry.key) ?? (await ctx.app.head(entry.key));
     if (await holdsVersion(ctx, current, entry)) continue;
     restored.push(entry.key);
-    if (!dryRun) await transfer(ctx.backups, ctx.location + entry.object, ctx.app, entry.key);
+    if (!dryRun) await transfer(ctx.backups, ctx.location + entry.object, ctx.app, entry.key, undefined, { replace: true });
   }
   return restored;
 }
@@ -96,7 +96,7 @@ async function restoreDelivery(ctx: OpsContext, site: readonly SiteEntry[], dryR
   for (const entry of site) {
     if (await holdsVersion(ctx, live.get(entry.key), entry)) continue;
     written.push(entry.key);
-    if (!dryRun) await transfer(ctx.backups, ctx.location + entry.object, ctx.app, entry.key);
+    if (!dryRun) await transfer(ctx.backups, ctx.location + entry.object, ctx.app, entry.key, undefined, { replace: true });
   }
   if (!dryRun) for (const key of written) {
     const entry = wanted.get(key);
