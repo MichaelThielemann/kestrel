@@ -1,7 +1,7 @@
 # kestrel-target-cloudfoundry
 A target for `kestrel-ops` (and so for `kestrel status`, `kestrel backup` and `kestrel restore`) that stops,
-starts and describes one app in a Cloud Foundry space through the `cf` CLI. It is the only external program
-the target starts; `cf` must be on `PATH` and logged in.
+starts and describes one app in a Cloud Foundry space through the `cf` CLI. Besides `cf`, the target starts
+only the commands of `{ "command": [...] }` sources in `vars`; `cf` must be on `PATH` and logged in.
 
 ```
 pnpm add -D @michaelthielemann/kestrel-ops @michaelthielemann/kestrel-target-cloudfoundry
@@ -36,7 +36,7 @@ The `target` block of an environment in `kestrel.environments.json` names this p
 | `dir` | The directory of the deployed app's `package.json`, relative to the environments file (default `.`). The installed versions of its dependencies, and of `kestrel-replication-sqlite` and `kestrel` they bring along, are recorded in each backup and tell `kestrel-ops` whether the runtime seals its replica. Run the commands from a checkout of the deployed state. |
 | `readyUrl` | Optional. After an instance reports `RUNNING`, the target waits until this URL answers 200. |
 | `manifest` | Optional. A manifest that holds the app's entry, read by `applyManifest()`. |
-| `vars` | Where each `((name))` placeholder of the manifest gets its value: `{ "env": "NAME" }` or `{ "command": ["argv", "..."] }`, as for storage credentials. |
+| `vars` | Where each `((name))` placeholder of the manifest gets its value: `{ "env": "NAME" }` or `{ "command": ["argv", "..."] }`, as for storage credentials. A name consists of letters, digits, `_` and `-`; cf reads a dot as a field path. |
 
 ## Behaviour
 - **Status** reads the app's state, the desired instance count of its `web` process and the state of each
@@ -44,14 +44,19 @@ The `target` block of an environment in `kestrel.environments.json` names this p
   in any state but `DOWN`; an instance that is `STARTING` or `CRASHED` counts as running. An app scaled to more
   than one instance, or one with an active deployment (a rolling or canary push), ends every command with
   exit 1 before anything is stopped or started, a live backup included: two instances would write to the same
-  replica.
+  replica. A started app scaled to 0 instances ends with exit 1 as well, naming `cf scale <app> -i 1` and
+  `cf stop <app>`, and a stopped one scaled to 0 is not started: no instance would ever become ready.
 - **Stop** sends the stop action to the app and waits until it reads `stopped` with no instance; a status read
   that fails during the wait is repeated until the stop timeout (120 s). When the stop request or the wait
-  fails, the error says that the app may stay stopped and names `cf start` to start it again. **Start** sends
-  the start action; readiness is an instance in state `RUNNING`, and then `readyUrl` answering 200 when it is
-  set.
-- **Describe** records the app's guid, its current droplet, its newest revision (guid and version, or null)
-  and the names of its environment variables, never their values, next to the installed package versions.
+  fails, the error says that the app may stay stopped and names `cf start` to start it again. **Start**
+  repeats a failing status read for up to 30 s, then sends the start action; when cf answers that request
+  with an error but the app reads `STARTED` afterwards, the start counts as done. Readiness is an instance in
+  state `RUNNING`, and then `readyUrl` answering 200 when it is set; a failing read during that wait counts as
+  not ready yet and is repeated until the wait ends.
+- **Describe** records the app's guid, its current droplet (null only when the platform answers that the app
+  has none), its newest revision (guid and version, or null) and the names of its environment variables,
+  never their values, next to the installed package versions. A read that fails ends the description with
+  exit 1.
 - **Evidence** for a stop without a seal lists the app's recent stop and crash events and, from
   `cf logs --recent`, the lines that report a teardown or replication failure.
 - A backup or restore promotes a replica generation: an app instance starts on an empty disk and restores the
@@ -63,18 +68,22 @@ missing app or an expired cf session, which `cf target` does not reveal.
 
 ## Manifest and variables
 `applyManifest()` (an update step; the target refuses unless the app is stopped) reads the manifest as cf
-does, as YAML 1.1 with `<<` merge keys and `yes`/`no` booleans, and reduces it to its `version` and the app's
-resolved entry, so the other applications and blocks a shared manifest describes stay untouched. It runs
-`cf apply-manifest -f <manifest> --vars-file <vars>`. The values of the placeholders that entry uses are
-resolved from `vars`, written into a file only the current user can read (mode 0600, in a directory with mode
-0700) and removed when the call ends, also when it fails or the process exits during the call. No value is ever passed on a command line, and the
-target never runs `cf set-env`. A placeholder without a source in `vars`, or a manifest without the app, ends
-with exit 2 before cf runs. `setDroplet(guid)` makes a staged droplet current, also only while the app is
-stopped.
+does, as YAML 1.1 with `<<` merge keys and `yes`/`no` booleans, with unquoted dates and clock times such as
+`2026-11-14` and `03:00` kept as strings, and reduces it to its `version` and the app's resolved entry, so the
+other applications and blocks a shared manifest describes stay untouched. Placeholders are found as cf finds
+them, `((name))` and `((!name))`. It runs `cf apply-manifest -f <manifest> --vars-file <vars>`. The values of
+the placeholders that entry uses are resolved from `vars`, written into a file only the current user can read
+(mode 0600, in a directory with mode 0700) and removed when the call ends, also when it fails, the process
+exits or SIGINT, SIGTERM or SIGHUP arrives during the call. No value is ever passed on a command line, and the
+target never runs `cf set-env`. A placeholder without a source in `vars`, a placeholder with a dot (cf reads
+`((db.url))` as the field `url` of the variable `db`), an entry that sets `instances`, or the `instances` of
+its `web` process, to anything but 1, or a manifest without the app ends with exit 2 before cf runs.
+`setDroplet(guid)` makes a staged droplet current, also only while the app is stopped.
 
 ## API
 `createTarget(config, { root, clock })` is the factory `kestrel-ops` imports. `cloudFoundryTarget(config, deps,
-options)` builds the same target with another environment for cf (`env`) and other waiting intervals.
+options)` builds the same target with another environment for cf (`env`) and other waiting intervals
+(`pollMs`, `stopTimeoutMs`, `readTimeoutMs`).
 
 ## Testing
 The package's tests put a stub `cf` first on `PATH` that hands each call to a fake space in the test process,

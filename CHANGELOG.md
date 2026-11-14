@@ -1782,15 +1782,18 @@ Net changes since 5.8.2.
   Cloud Foundry space, through the `cf` CLI. It reads state and instances through the v3 API, recognises a
   stopped app only with no instance in any state but `DOWN`, and ends every command with exit 1 while the
   app is scaled to more than one instance or a deployment, such as a rolling push, is active, a live backup
-  included. It acts only while cf targets the configured org and space and never names another app, so a
+  included, and while a started app is scaled to 0 instances. It acts only while cf targets the configured org and space and never names another app, so a
   static web server next to it in the same manifest is never touched; stop, start and the droplet change go
   to the app's guid through the v3 API, and `cf apply-manifest` and `cf logs` run only after `cf target` and
-  the app's guid were read again. A stop waits through failed status reads until its timeout and, when it
-  fails, says that the app may stay stopped. A backup records the app's guid, droplet, newest revision and
-  the names, never the values, of its environment variables. `applyManifest()` reads the manifest as YAML
-  1.1 with merge keys, as cf does, and applies only its version and the app's resolved entry through
-  `cf apply-manifest --vars-file`, with the values in a 0600 file removed afterwards, also on failure or
-  when the process exits; no value is passed on a command line and `cf set-env` is never used. cf runs with
+  the app's guid were read again. A stop, a start and the readiness wait repeat failed status reads until
+  their timeout; a failed stop says that the app may stay stopped, and a start whose request failed counts
+  as done once the app reads started. A backup records the app's guid, droplet (null only when the app has
+  none), newest revision and the names, never the values, of its environment variables. `applyManifest()`
+  reads the manifest as YAML 1.1 with merge keys and with dates and clock times kept as strings, as cf does,
+  and applies only its version and the app's resolved entry through `cf apply-manifest --vars-file`, with
+  the values in a 0600 file removed afterwards, also on failure, on exit and on SIGINT, SIGTERM or SIGHUP; no
+  value is passed on a command line and `cf set-env` is never used. A placeholder without a source or with
+  a dot, or an entry that scales the web process to another count than 1, ends with exit 2 before cf runs. cf runs with
   colored and trace output switched off.
 
 ### Changed
