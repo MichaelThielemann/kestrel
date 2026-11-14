@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import { relative, sep } from "node:path";
 import { effectiveModuleConfig } from "@michaelthielemann/kestrel";
 import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
 import { instanceLockFile } from "@michaelthielemann/kestrel/instanceLock";
@@ -173,6 +175,23 @@ function takesNoLock(file: unknown): boolean {
   return typeof file === "string" && instanceLockFile(file) === undefined;
 }
 
+function startDirectory(): string {
+  try {
+    return realpathSync.native(process.cwd());
+  } catch {
+    return process.cwd();
+  }
+}
+
+function lockFileName(file: unknown): string {
+  if (typeof file !== "string") return "<file>.instance";
+  if (!file.startsWith("file:")) return `${file}.instance`;
+  const lock = instanceLockFile(file);
+  if (lock === undefined) return "<file>.instance";
+  const start = startDirectory();
+  return start !== sep && lock.startsWith(`${start}${sep}`) ? relative(start, lock) : lock;
+}
+
 /** `runtime/single-process`: persistence-sqlite, replication-sqlite and backup-blobstore take an instance lock on their database file at setup, so a second process on the same file fails boot with `instance-locked`. */
 export const singleProcessRule: Rule = {
   id: "runtime/single-process",
@@ -184,7 +203,7 @@ export const singleProcessRule: Rule = {
       const file = isRecord(config) ? config.file : undefined;
       if (isRecord(config) && config.allowConcurrentProcesses === true) continue;
       if (takesNoLock(file)) continue;
-      const lockFile = typeof file === "string" ? `${file}.instance` : "<file>.instance";
+      const lockFile = lockFileName(file);
       findings.push(infoFinding(`runtime/single-process:${entry.use}`, "runtime/single-process", `${entry.use} takes an instance lock on its database file at setup: a sidecar ${lockFile} next to the database, never a row inside it; a second process on the same file fails boot with instance-locked, naming the process that holds the lock`, "run one process per database file and stop the old process before the new one starts; a lock left by a killed process is taken over 60 s after its last heartbeat. Set allowConcurrentProcesses: true only where several processes share the file on purpose", { module: entry.use }, upgradingDocs("runtime-single-process")));
     }
     return findings;

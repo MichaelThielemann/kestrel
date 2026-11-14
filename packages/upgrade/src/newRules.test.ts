@@ -747,7 +747,16 @@ describe("info rules", () => {
 
   it("runtime/single-process still names a database file given as a SQLite URI", async () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "file:./data/kestrel.db?cache=shared" } }] });
-    expect(await singleProcessRule.check(contextFor(p))).toHaveLength(1);
+    const findings = await singleProcessRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain("a sidecar data/kestrel.db.instance next to the database");
+    expect(findings[0]?.message).not.toContain("cache=shared");
+  });
+
+  it("runtime/single-process names the sidecar of an absolute SQLite URI by the path in it", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-replication-sqlite", config: { file: "file:///srv/site/kestrel.db?mode=rwc" } }] });
+    const findings = await singleProcessRule.check(contextFor(p));
+    expect(findings[0]?.message).toContain("a sidecar /srv/site/kestrel.db.instance next to the database");
   });
 
   const publishing = {

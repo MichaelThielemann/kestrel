@@ -777,8 +777,8 @@ this boot while a restore point exists, if `restoreOnStart` is on (the default).
 
 #### runtime-single-process
 `persistence-sqlite`, `replication-sqlite` and `backup-blobstore` take an instance lock on their
-database file at setup. The lock is a sidecar `<file>.instance` next to the database, never a row
-inside it, so it does not travel with a replica, a snapshot or a backup. A second process that starts
+database file at setup. The lock is a sidecar `<file>.instance` next to the database (for a SQLite
+`file:` URI, the file in its path, without the query), never a row inside it, so it does not travel with a replica, a snapshot or a backup. A second process that starts
 on the same file fails boot with `instance-locked`, naming the host, PID and start time of the
 process that holds the lock. A deploy that starts the new process before the old one has stopped
 fails the same way; stop the old process first. A lock left behind by a killed process is taken over
