@@ -93,7 +93,8 @@ without Nuxt: [`../examples/h3`](../examples/h3).
   strings are read as `integer`/`number`/`boolean`/arrays where the declaration says so:
   `?limit=10` passes, `?limit=abc` fails). Undeclared body fields are rejected by the steps that
   declare a closed schema (most of them). Query parameters that neither the step's `query` nor its
-  body schema names are ignored; one the body schema names answers 400, as above. A violation
+  body schema names are ignored (the content write steps leave such a key, say a cache buster `?_=1`, out of
+  the document); one the body schema names answers 400, as above. A violation
   answers `400 VALIDATION` with `step` and `details.problems: [{ path: "$.field", message }]`
   — the same shape `validate.check` uses — before anything is written. The check runs after
   authentication and authorization, so a missing login still answers 401.

@@ -871,12 +871,14 @@ Net changes since 5.8.2.
   `anonymous may hold only read permissions such as "pages.read"` and the path of the entry. Grant a
   wildcard or a write to a role instead.
 - **A query parameter that names a member of a step's body schema answers `400 VALIDATION`.** The payload
-  merges the query with the body, but a step's `input` schema only checked the body, so `?roles=admin` with
-  an empty body gave `authn.createUser` a value its schema never saw, and `POST /admin/migrations/apply?dry=true`
+  merges the query with the body, but a step's `input` schema only checked the body, so `?roles=admin&roles=admin`
+  gave `authn.updateUser` (with an empty body) or `authn.createUser` (next to the credentials) roles its schema never
+  saw, and `POST /admin/migrations/apply?dry=true`
   applied the migrations for real because `dry` is a body flag. The runner now refuses such a parameter before the
   step runs (`details.problems` names it) unless the step lists the same name in `describe().query`;
   `content.create`, `content.set`, `content.update` and `content.validate` do for `locale`, which stays valid in the
-  query. A parameter the body schema does not describe is still ignored. A custom step whose `input` and query use
+  query. A parameter the body schema does not describe is still ignored; the four content steps
+  leave such a key (`?_=1`) out of the document. A custom step whose `input` and query use
   the same name declares it in `query`; `migrations.apply` reads `dry` from `ctx.body`.
 - `sanitize-svg`: **an attribute holding a `url()` that does not point to a `#fragment` of the same file
   is removed** (`fill="url(http://…)"`, `filter`, `mask`, `clip-path`, `marker-*`, a `url()` with quotes or
