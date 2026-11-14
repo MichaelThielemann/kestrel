@@ -657,6 +657,31 @@ describe("acquireInstanceLock", () => {
     expect(lock.health()).toEqual({ ok: true });
   });
 
+  it("reports the lock as lost when its file is gone at a heartbeat that comes more than the TTL after the last one", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-03-01T10:00:00.000Z"));
+    const lock = take(file, { ttlMs: 3_000, heartbeatMs: 1_000 });
+    vi.setSystemTime(new Date("2026-03-01T10:00:05.000Z"));
+    rmSync(lockFile(file));
+    vi.advanceTimersByTime(1_000);
+    const health = lock.health();
+    expect(health).toMatchObject({ ok: false, restartRequired: true });
+    expect(health.ok ? "" : health.reason).toContain("not renewed");
+    expect(existsSync(lockFile(file))).toBe(false);
+  });
+
+  it("judges a lapsed heartbeat by the longer TTL that the lock file records", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-03-01T10:00:00.000Z"));
+    writeRecord({ ...onThisHost, pid: process.pid, processStart: ownProcessStart(), ttlMs: 60_000 });
+    const lock = take(file, { ttlMs: 3_000, heartbeatMs: 1_000 });
+    vi.setSystemTime(new Date("2026-03-01T10:00:05.000Z"));
+    rmSync(lockFile(file));
+    vi.advanceTimersByTime(1_000);
+    expect(lock.health()).toEqual({ ok: true });
+    expect(existsSync(lockFile(file))).toBe(true);
+  });
+
   it("does not throw from release() when the lock file cannot be removed", () => {
     const lock = take(file);
     chmodSync(dir, 0o555);

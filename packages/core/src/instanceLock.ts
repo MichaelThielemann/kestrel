@@ -34,8 +34,10 @@ export interface InstanceLock {
   release(): void;
   /**
    * The lock's state, synchronous and without I/O. `ok: false` with `restartRequired: true` once a
-   * heartbeat found the lock file owned by another instance: this process no longer holds the
-   * database alone and has to restart.
+   * heartbeat found the lock file owned by another instance, or found it gone after the lock had
+   * not been renewed for longer than its TTL, so that another process may have taken it over and
+   * released it in between: this process no longer holds the database alone and has to restart.
+   * A lock file that disappears within the TTL is written anew.
    */
   health(): ModuleHealth;
 }
@@ -69,6 +71,8 @@ interface Holder {
   record: LockRecord;
   token: string;
   ttlMs: number;
+  leaseMs: number;
+  renewedAt: number;
   refs: number;
   timer: ReturnType<typeof setInterval> | undefined;
   onExit: () => void;
@@ -355,7 +359,7 @@ function renewed(record: LockRecord, token: string, ttlMs: number): LockRecord {
 }
 
 function hold(lockPath: string, record: LockRecord, token: string, ttlMs: number, heartbeatMs: number): Holder {
-  const holder: Holder = { lockPath, record, token, ttlMs, refs: 0, timer: undefined, onExit: () => drop(holder), health: { ok: true } };
+  const holder: Holder = { lockPath, record, token, ttlMs, leaseMs: record.ttlMs, renewedAt: Date.now(), refs: 0, timer: undefined, onExit: () => drop(holder), health: { ok: true } };
   holder.timer = setInterval(() => beat(holder), heartbeatMs);
   holder.timer.unref();
   process.on("exit", holder.onExit);
@@ -369,7 +373,11 @@ function beat(holder: Holder): void {
       const seen = readLock(holder.lockPath);
       if (seen.kind === "unreadable") return;
       if (seen.kind === "held" && seen.record.instanceId !== holder.record.instanceId) {
-        lose(holder, seen.record);
+        lose(holder, `was taken over by host "${seen.record.host}", pid ${seen.record.pid} (started ${seen.record.startedAt})`);
+        return;
+      }
+      if (seen.kind === "absent" && Date.now() - holder.renewedAt > holder.leaseMs) {
+        lose(holder, `was not renewed for longer than its TTL of ${holder.leaseMs} ms and is gone, so another process may have taken it over in between`);
         return;
       }
       const next = renewed(seen.kind === "held" ? seen.record : { ...holder.record, threads: {} }, holder.token, holder.ttlMs);
@@ -378,6 +386,8 @@ function beat(holder: Holder): void {
       if (outcome === BUSY) return;
       if (outcome === true || outcome === "replaced") {
         holder.health = { ok: true };
+        holder.leaseMs = next.ttlMs;
+        holder.renewedAt = Date.parse(next.heartbeatAt);
         return;
       }
     }
@@ -386,12 +396,12 @@ function beat(holder: Holder): void {
   }
 }
 
-function lose(holder: Holder, foreign: LockRecord): void {
+function lose(holder: Holder, what: string): void {
   stop(holder);
   holder.health = {
     ok: false,
     restartRequired: true,
-    reason: `the instance lock ${holder.lockPath} was taken over by host "${foreign.host}", pid ${foreign.pid} (started ${foreign.startedAt}); this process no longer holds the database alone`,
+    reason: `the instance lock ${holder.lockPath} ${what}; this process no longer holds the database alone`,
   };
 }
 
