@@ -143,7 +143,7 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
     const effective = split.locale === "" ? undefined : split.locale;
     const claim = table.table.claim(split.locale, split.tail);
     const answered = await unobserved(async (): Promise<Result<{ candidate: string | null; doc: ContentDocument | null }, SiteError>> => {
-      let holder = claim.strong?.valid === true ? claim.strong : undefined;
+      let holder = claim.strong?.valid === true && (claim.strong.live || Object.keys(rules.filter).length === 0) ? claim.strong : undefined;
       if (holder) {
         const passes = await satisfiesFilter(content, holder.type, holder.docId, readLocale, rules.filter);
         if (isErr(passes)) return err(transientOnly(passes.error));
@@ -190,13 +190,11 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
     return pathOfTail(table.format, tail, locale, rules.prefixPrimary);
   }
 
-  async function linkedPathRouted(table: SitePaths, t: string, id: string, locale: string, rules: Rules): Promise<Result<string | null, SiteError>> {
+  function linkedPathRouted(table: SitePaths, t: string, id: string, locale: string, rules: Rules): string | null {
     const row = table.table.row(t, id, locale);
-    if (!row || row.tail === null || !row.valid) return ok(null);
-    const passes = await unobserved(() => satisfiesFilter(content, t, id, locale === "" ? undefined : locale, rules.filter));
-    if (isErr(passes)) return err(transientOnly(passes.error));
-    if (!passes.value) return ok(null);
-    return ok(pathOfTail(table.format, row.tail, locale, rules.prefixPrimary));
+    if (!row || row.tail === null || !row.valid) return null;
+    if (Object.keys(rules.filter).length > 0 && !row.live) return null;
+    return pathOfTail(table.format, row.tail, locale, rules.prefixPrimary);
   }
 
   return {
@@ -242,9 +240,7 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
         let path: string | null = null;
         if (model.types[t]) {
           if (paths?.route(t)) {
-            const linked = await linkedPathRouted(paths, t, id, locale ?? "", rules);
-            if (isErr(linked)) return linked;
-            path = linked.value;
+            path = linkedPathRouted(paths, t, id, locale ?? "", rules);
           } else {
             const viewResult = await unobserved(() => publishedLocale(content, t, id, locale, rules.filter, { fallback: false, translations: false }));
             if (isErr(viewResult)) return err(transientOnly(viewResult.error));
