@@ -42,6 +42,16 @@ function isSvg(contentType: string): boolean {
   return contentType.split(";", 1)[0]?.trim().toLowerCase() === SVG;
 }
 
+const SVG_NAMESPACE = /\sxmlns[ \t\n\r]*=[ \t\n\r]*(["'])http:\/\/www\.w3\.org\/2000\/svg\1/;
+
+function rootInSvgNamespace(data: Uint8Array): boolean {
+  const text = new TextDecoder("utf-8").decode(data);
+  const start = text.indexOf("<svg");
+  if (start === -1 || /<[A-Za-z]/.test(text.slice(0, start)) || !/[ \t\n\r/>]/.test(text.charAt(start + 4))) return false;
+  const end = text.indexOf(">", start);
+  return end !== -1 && SVG_NAMESPACE.test(text.slice(start, end));
+}
+
 function offlineDeps(root: string) {
   return {
     get(contract: { name: string }): never {
@@ -59,6 +69,7 @@ function offlineDeps(root: string) {
  * function the media storage migration cleans each 5.x SVG with. The first module entry whose
  * module registers the step is used; its `setup()` gets no contract, so a module that needs one
  * is `broken`, as is one whose config schema or config start-up would refuse. Without such an entry there is no sanitizer.
+ * The sanitizer refuses a file the step answers with a root element outside the SVG namespace.
  */
 export async function projectSvgSanitizer(root: string, modules: readonly ConfiguredModule[]): Promise<ProjectSvgSanitizer> {
   const problems: string[] = [];
@@ -94,6 +105,7 @@ export async function projectSvgSanitizer(root: string, modules: readonly Config
         if (isErr(result)) return err(result.error.message);
         const files = result.value.files;
         if (files.length !== 1 || !isSvg(files[0]!.contentType)) return err(`${SANITIZE_SVG_STEP} did not answer one SVG`);
+        if (!rootInSvgNamespace(files[0]!.data)) return err(`${SANITIZE_SVG_STEP} answered an SVG whose root element is not in the SVG namespace (xmlns="http://www.w3.org/2000/svg"), which no browser shows as an image`);
         return ok(files[0]!.data);
       } catch (thrown) {
         return err(`${SANITIZE_SVG_STEP} threw: ${messageOf(thrown)}`);

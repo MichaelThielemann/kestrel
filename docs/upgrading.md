@@ -224,17 +224,19 @@ project, the same step and module config a new upload goes through, set up offli
 entry in `kestrel.config.ts` (or the host plugin) that registers it. The cleaned file becomes
 `<id>/<stem>.svg`, typed `image/svg+xml` and marked as sanitised like an upload; the item keeps its
 id, so every page, setting and document that uses it still does, its size and sha256 are those of
-the cleaned file, and its `updatedAt` is the time of the run, so `media.export:<dir>` writes the cleaned
-file over a 5.x export of it. The 5.x original stays under its old key. `migrate --plan` and the report count
-these items as `svgSanitized`, and a note names the module entry whose step cleaned them. Publish the
-site again after the update (step 5), so that the public copies and the exported pages use the new
-names.
+the cleaned file, and its `updatedAt` is the time of the run, so `media.export:<dir>` writes the
+cleaned file over a 5.x export of it. The 5.x original stays under its old key. `migrate --plan` and
+the report count these items as `svgSanitized`, and a note names the module entry whose step cleaned
+them. Publish the site again after the update (step 5), so that the public copies and the exported
+pages use the new names.
 
 An SVG that cannot be cleaned becomes `<id>/<stem>-svg.bin`, and 6.0.0 serves it, and writes its
 public copy, as `application/octet-stream`: its URL answers `200`, but an `<img>` or a CSS background
 no longer shows it. That happens when `sanitize.svg` refuses the file (markup without an `<svg>` root,
-a file above its `maxBytes`), when its original is missing, and for every 5.x SVG when no module of
-the project registers `sanitize.svg`, which the report says in a note.
+a file above its `maxBytes`), when the cleaned file's root element is not in the SVG namespace (an
+SVG that declares the namespace through an entity of its DOCTYPE, which the cleaning removes, as
+some older drawing programs export it), when its original is missing, and for every 5.x SVG when no
+module of the project registers `sanitize.svg`, which the report says in a note.
 
 - `migrate --plan` names each such item with the reason, such as "is an SVG that sanitize.svg
   refuses (invalid svg: …)", and counts them as `svgDemoted`; check that list before the update.

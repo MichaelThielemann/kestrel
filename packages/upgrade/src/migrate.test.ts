@@ -560,6 +560,25 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
     expect(rows(copy.db, `SELECT key, svgSanitized FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([{ key: `media/${SVG_ITEM}/mark-svg.bin`, svgSanitized: null }]);
   });
 
+  it("serves a 5.x SVG as a download and names it when its namespace comes from a DOCTYPE entity the cleaning removes", async () => {
+    const copy = fixtureCopy();
+    writeFileSync(
+      join(copy.blobs, "media", "mark.svg"),
+      [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd" [',
+        '  <!ENTITY ns_svg "http://www.w3.org/2000/svg">',
+        "]>",
+        '<svg version="1.1" xmlns="&ns_svg;" width="2" height="2"><rect width="2" height="2" fill="#c00"/></svg>',
+        "",
+      ].join("\n"),
+    );
+    const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(run.code, run.errors).toBe(0);
+    expect(run.out).toMatch(/media\/mark\.svg is an SVG that sanitize\.svg refuses \(.*not in the SVG namespace.*\): it is kept as mark-svg\.bin/);
+    expect(rows(copy.db, `SELECT key, svgSanitized FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([{ key: `media/${SVG_ITEM}/mark-svg.bin`, svgSanitized: null }]);
+  });
+
   it("serves every 5.x SVG as a download when no module of the project registers sanitize.svg, and says so", async () => {
     const copy = fixtureCopy();
     const project = projectOf(copy, []);
