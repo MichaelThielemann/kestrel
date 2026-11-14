@@ -2,12 +2,13 @@ import { existsSync } from "node:fs";
 import { z } from "zod";
 import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Manifest } from "@michaelthielemann/kestrel";
 import { first, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { applyPendingRestore, createReplicationSqlite, listSealedReplica, markerKey, readOriginNonce, restoreFromBlobs, unplacedNewerGenerations, type Applied, type Config, type GenerationMarker, type Replication, type ReplicaListing } from "./impl.ts";
-import { checkSkippedRestore, markRestoredThisBoot, reportedRestoreAt } from "./restoreFreshness.ts";
+import { applyPendingRestore, createReplicationSqlite, listSealedReplica, markerKey, readOrigin, restoreFromBlobs, unplacedNewerGenerations, type Config, type GenerationMarker, type PlacedRestore, type Replication, type ReplicaListing, type ReplicationOptions } from "./impl.ts";
+import { checkSkippedRestore, markRestoredThisBoot, reportedRestoreAt, unacknowledgedRestore } from "./restoreFreshness.ts";
 
 export const configSchema = z
   .object({
@@ -23,7 +24,7 @@ export const configSchema = z
 
 const POINT = { type: "object", properties: { generation: { type: "string" }, at: { type: "number" }, kind: { type: "string", enum: ["snapshot", "wal"] }, key: { type: "string" } }, required: ["generation", "at", "kind", "key"] };
 
-type ReplicationInstance = Replication & { logger: Logger; reportedRestoreAt: () => number | null };
+type ReplicationInstance = Replication & { logger: Logger; reportedRestoreAt: () => number | null; reportRuns: Set<string> | null };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -46,6 +47,11 @@ interface StartListing {
   at: number;
 }
 
+interface MissingFileRestore {
+  listedBefore: StartListing;
+  placed?: PlacedRestore;
+}
+
 function placedWithoutSnapshotError(file: string, prefix: string, generations: readonly string[]): string {
   const generation = generations.at(-1) ?? "";
   return `replication/sqlite: refusing to restore ${file} from the replica: repeated listings show origin.json in generation ${generation} under ${prefix}gen/, but no snapshot.db in it, and it sorts after the newest generation with a snapshot. The blobstore lists new keys late, or the placement wrote origin.json before its snapshot and did not finish. Start again once the listing shows ${prefix}gen/${generation}/snapshot.db; if the placement did not finish, move ${prefix}gen/${generation}/ out of ${prefix}gen/.`;
@@ -66,12 +72,12 @@ async function confirmedUnplaced(blobs: Blobstore, prefix: string, listing: Repl
   return unplacedNewerGenerations(listing);
 }
 
-async function restoreMissingFile(config: Config, blobs: Blobstore, logger: Logger, bootStartedAt: number): Promise<StartListing> {
+async function restoreMissingFile(config: Config, blobs: Blobstore, logger: Logger, bootStartedAt: number): Promise<MissingFileRestore> {
   const at = Date.now();
   const listed = await listSealedReplica(blobs, config.prefix);
   if (isErr(listed)) throw new Error(listed.error.message, { cause: listed.error });
   const { listing, generation: newest, segments, missing, withoutSnapshot } = listed.value;
-  const startListing = { keys: listing.points.map((p) => p.key), at };
+  const startListing = { listedBefore: { keys: listing.points.map((p) => p.key), at } };
   if (withoutSnapshot.length > 0) throw new Error(placedWithoutSnapshotError(config.file, config.prefix, withoutSnapshot));
   const unplaced = await confirmedUnplaced(blobs, config.prefix, listing);
   if (unplaced.newest !== null && unplaced.generations.length > 0) throw new Error(unplacedGenerationsError(config.file, config.prefix, unplaced.newest, unplaced.generations));
@@ -82,14 +88,14 @@ async function restoreMissingFile(config: Config, blobs: Blobstore, logger: Logg
     throw new Error(restored.error.message, { cause: restored.error });
   }
   const { generation } = restored.value;
-  const nonce = await readOriginNonce(blobs, config.prefix, generation);
-  if (isErr(nonce) && nonce.error.code === "NOT_FOUND") {
+  const origin = await readOrigin(blobs, config.prefix, generation);
+  if (isErr(origin) && origin.error.code === "NOT_FOUND") {
     markRestoredThisBoot(config.file, bootStartedAt);
     return startListing;
   }
-  if (isErr(nonce)) {
+  if (isErr(origin)) {
     markRestoredThisBoot(config.file, bootStartedAt, true);
-    logWarn(logger, "replication/sqlite: restored from a generation that may carry origin.json but could not read that file, so the restore is reported and no applied.json acknowledges it", { file: config.file, generation, error: nonce.error.message });
+    logWarn(logger, "replication/sqlite: restored from a generation that may carry origin.json but could not read that file, so the restore is reported and no applied.json acknowledges it", { file: config.file, generation, error: origin.error.message });
     return startListing;
   }
   const acknowledged = await blobs.get(markerKey(config.prefix, generation, "applied"));
@@ -98,12 +104,14 @@ async function restoreMissingFile(config: Config, blobs: Blobstore, logger: Logg
     logger.info("replication/sqlite: restored from a generation placed with origin.json that an earlier start already reported", { file: config.file, generation });
     return startListing;
   }
-  markRestoredThisBoot(config.file, bootStartedAt, true);
-  const applied: Applied = { generation, nonce: nonce.value, restoredAt: bootStartedAt };
-  const written = await blobs.put(markerKey(config.prefix, generation, "applied"), new TextEncoder().encode(JSON.stringify(applied)), { contentType: "application/json" });
-  if (isErr(written)) logWarn(logger, "replication/sqlite: could not write applied.json; the next start that restores this generation reports the restore again", { file: config.file, generation, error: written.error.message });
-  else logger.info("replication/sqlite: restored from a generation placed with origin.json and reported the restore", { file: config.file, generation, nonce: nonce.value });
-  return startListing;
+  const placed: PlacedRestore = { applied: { generation, nonce: origin.value.nonce, restoredAt: bootStartedAt }, origin: origin.value.content };
+  markRestoredThisBoot(config.file, bootStartedAt, true, placed);
+  logger.info("replication/sqlite: restored from a generation placed with origin.json and reported the restore", { file: config.file, generation, nonce: origin.value.nonce });
+  return { ...startListing, placed };
+}
+
+function readsReport(manifest: Manifest): boolean {
+  return manifest.pipelines.some((pipeline) => pipeline.steps.some((step) => step.module === "replication/sqlite" && step.name.endsWith(".checkRestored")));
 }
 
 export default defineModule({
@@ -117,12 +125,35 @@ export default defineModule({
     const blobs = deps.get(BLOBSTORE);
     const bootStartedAt = deps.bootStartedAt ?? Date.now();
     const restoredFromMarker = applyPendingRestore(config.file, () => markRestoredThisBoot(config.file, bootStartedAt, true));
-    let listedBefore: StartListing | undefined;
+    let restore: MissingFileRestore | undefined;
     if (config.restoreOnStart) {
-      if (!existsSync(config.file)) listedBefore = await restoreMissingFile(config, blobs, deps.logger, bootStartedAt);
+      if (!existsSync(config.file)) restore = await restoreMissingFile(config, blobs, deps.logger, bootStartedAt);
       else if (!restoredFromMarker) await checkSkippedRestore(config, blobs, deps.logger, bootStartedAt);
     }
-    return { ...createReplicationSqlite(config, blobs, Date.now, { logger: deps.logger, ...(listedBefore === undefined ? {} : { listedBefore }) }), logger: deps.logger, reportedRestoreAt: () => reportedRestoreAt(config.file) };
+    const placed = restore === undefined ? unacknowledgedRestore(config.file) : (restore.placed ?? null);
+    const options: ReplicationOptions = { logger: deps.logger };
+    if (restore !== undefined) options.listedBefore = restore.listedBefore;
+    if (placed !== null) {
+      options.placedRestore = placed;
+      options.onAcknowledged = () => {
+        if (unacknowledgedRestore(config.file)?.applied.generation === placed.applied.generation) markRestoredThisBoot(config.file, placed.applied.restoredAt, true);
+      };
+    }
+    return { ...createReplicationSqlite(config, blobs, Date.now, options), logger: deps.logger, reportedRestoreAt: () => reportedRestoreAt(config.file), reportRuns: placed === null ? null : new Set<string>() };
+  },
+
+  attach(replication, kestrel) {
+    const runs = replication.reportRuns;
+    if (runs === null) return;
+    if (!readsReport(kestrel.describe())) {
+      replication.restoreHandled();
+      return;
+    }
+    return kestrel.observe({
+      runEnd(event) {
+        if (runs.delete(event.runId) && event.outcome === "ok") replication.restoreHandled();
+      },
+    });
   },
 
   health: (r) => r.health(),
@@ -140,6 +171,7 @@ export default defineModule({
   steps: (replication) => ({
     checkRestored: async (ctx: Context) => {
       const previous = isRecord(ctx.result) ? ctx.result : {};
+      replication.reportRuns?.add(ctx.runId);
       return ok({ ...ctx, result: { ...previous, _databaseRestoredAt: replication.reportedRestoreAt() } });
     },
     sync: async (ctx: Context) => {

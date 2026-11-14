@@ -105,7 +105,7 @@ describe("replication-sqlite and backup-blobstore configured on the same file", 
 
       const [first] = await run();
       expect(existsSync(file)).toBe(true);
-      expect(blobs.calls.filter((c) => c.startsWith("get:"))).toHaveLength(1);
+      expect(blobs.calls.filter((c) => c.startsWith("get:") && !c.endsWith(".json"))).toHaveLength(1);
       if ("close" in first) first.close();
     });
   }

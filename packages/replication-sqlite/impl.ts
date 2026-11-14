@@ -34,6 +34,18 @@ export interface ReplicationOptions {
    * instance's first listing, except the WAL segments stamped after the instance was created.
    */
   listedBefore?: { keys: Iterable<string>; at: number };
+  /** The restore from a generation placed with `origin.json` that the start reported and that no `applied.json` acknowledges yet. */
+  placedRestore?: PlacedRestore;
+  /** Called once every `applied.json` of {@link ReplicationOptions.placedRestore} is written. */
+  onAcknowledged?: () => void;
+}
+
+/** A reported restore from a generation placed with `origin.json`, waiting for its `applied.json`. */
+export interface PlacedRestore {
+  /** What `applied.json` holds once it is written. */
+  applied: Applied;
+  /** The content of the generation's `origin.json`, copied into every generation this process starts before it writes `applied.json`. */
+  origin: string;
 }
 
 export interface Point {
@@ -113,6 +125,12 @@ export interface Replication {
   close(): void;
   /** Synchronous, no I/O: reports a prepared restore informationally, since the instance keeps serving until a host restarts it to apply it. */
   health(): ModuleHealth;
+  /**
+   * Says that the reported restore of {@link ReplicationOptions.placedRestore} has been acted on: the next sync that
+   * starts afterwards and succeeds writes its `applied.json`, into the placed generation and into every generation
+   * this process started meanwhile. Does nothing without a placed restore.
+   */
+  restoreHandled(): void;
 }
 
 const pad = (n: number, w: number): string => String(n).padStart(w, "0");
@@ -150,17 +168,24 @@ export function unplacedNewerGenerations(listing: ReplicaListing): { newest: str
   return { newest, generations: newest === null ? [] : generations.filter((g) => g > newest) };
 }
 
-/** Reads the `nonce` of a generation's `origin.json`: null when the file holds none or is not JSON, `NOT_FOUND` when the file is missing. */
-export async function readOriginNonce(blobs: Blobstore, prefix: string, generation: string): Promise<Result<string | null, BlobstoreError | KestrelError<"NOT_FOUND">>> {
+/** Reads a generation's `origin.json`: its content and `nonce`, null when the file holds none or is not JSON; `NOT_FOUND` when the file is missing. */
+export async function readOrigin(blobs: Blobstore, prefix: string, generation: string): Promise<Result<{ content: string; nonce: string | null }, BlobstoreError | KestrelError<"NOT_FOUND">>> {
   const blob = await blobs.get(markerKey(prefix, generation, "origin"));
   if (isErr(blob)) return blob;
   if (blob.value === null) return err(failure("NOT_FOUND", `replication/sqlite: ${markerKey(prefix, generation, "origin")} is missing`));
+  const content = new TextDecoder().decode(blob.value);
   try {
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(blob.value));
-    return ok(typeof parsed === "object" && parsed !== null && "nonce" in parsed && typeof parsed.nonce === "string" ? parsed.nonce : null);
+    const parsed: unknown = JSON.parse(content);
+    return ok({ content, nonce: typeof parsed === "object" && parsed !== null && "nonce" in parsed && typeof parsed.nonce === "string" ? parsed.nonce : null });
   } catch {
-    return ok(null);
+    return ok({ content, nonce: null });
   }
+}
+
+/** Reads the `nonce` of a generation's `origin.json`: null when the file holds none or is not JSON, `NOT_FOUND` when the file is missing. */
+export async function readOriginNonce(blobs: Blobstore, prefix: string, generation: string): Promise<Result<string | null, BlobstoreError | KestrelError<"NOT_FOUND">>> {
+  const origin = await readOrigin(blobs, prefix, generation);
+  return isErr(origin) ? origin : ok(origin.value.nonce);
 }
 
 export function restoreMarker(file: string): string {
@@ -371,6 +396,9 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   const since = options.listedBefore?.at ?? startedAt;
   let otherWriter: { key: string; seenAt: number } | null = null;
   let sealedAs: (Seal & { generation: string }) | null = null;
+  let placedRestore = options.placedRestore ?? null;
+  let handled = false;
+  const unacknowledged: string[] = placedRestore ? [placedRestore.applied.generation] : [];
 
   const walBytes = (): number => (existsSync(walFile) ? statSync(walFile).size : 0);
   const walContentBytes = (): number => {
@@ -427,7 +455,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     known ??= new Set(listing.points.filter((p) => p.kind === "snapshot" || p.at <= since).map((p) => p.key));
     if (otherWriter !== null) return;
     const baseline = known;
-    const found = listing.points.find((p) => !own.has(p.generation) && !baseline.has(p.key) && listing.markers.get(p.generation)?.has("origin") !== true && (p.kind === "snapshot" || p.at > since));
+    const found = listing.points.find((p) => !own.has(p.generation) && !baseline.has(p.key) && !(TIME_ONLY.test(p.generation) && listing.markers.get(p.generation)?.has("origin") === true) && (p.kind === "snapshot" || p.at > since));
     if (!found) return;
     otherWriter = { key: found.key, seenAt: now() };
     logWarn(logger, "replication/sqlite: another process writes to this replica; only one process may replicate a database to a prefix", { key: found.key, generation: found.generation });
@@ -450,6 +478,14 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     own.add(gen);
     const put = await blobs.put(`${config.prefix}gen/${gen}/snapshot.db`, data, { contentType: "application/vnd.sqlite3" });
     if (isErr(put)) return put;
+    if (placedRestore) {
+      const carried = await blobs.put(markerKey(config.prefix, gen, "origin"), new TextEncoder().encode(placedRestore.origin), { contentType: "application/json" });
+      if (isErr(carried)) {
+        await blobs.remove(`${config.prefix}gen/${gen}/snapshot.db`);
+        return carried;
+      }
+      unacknowledged.push(gen);
+    }
     generation = gen;
     seq = 0;
     cursor = wal ? { ...wal.at, frame: wal.frames, checksum: wal.checksum } : null;
@@ -590,8 +626,27 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     return ok(removed);
   };
 
+  const acknowledge = async (): Promise<void> => {
+    const placed = placedRestore;
+    if (placed === null) return;
+    const content = new TextEncoder().encode(JSON.stringify(placed.applied));
+    while (unacknowledged.length > 0) {
+      const next = unacknowledged[0] ?? "";
+      const put = await blobs.put(markerKey(config.prefix, next, "applied"), content, { contentType: "application/json" });
+      if (isErr(put)) {
+        logWarn(logger, "replication/sqlite: could not write applied.json for the reported restore; the next sync tries again", { generation: next, error: put.error.message });
+        return;
+      }
+      unacknowledged.shift();
+    }
+    placedRestore = null;
+    logger.info("replication/sqlite: acknowledged the reported restore from a generation placed with origin.json", { generation: placed.applied.generation, nonce: placed.applied.nonce });
+    options.onAcknowledged?.();
+  };
+
   const runSync = async (run: { started: boolean }): Promise<Result<{ generation: string; shippedBytes: number; frames: number; checkpointed: boolean; pruned: number }, BlobstoreError>> => {
     run.started = true;
+    const acknowledging = placedRestore !== null && handled;
     if (generation === null) {
       const listing = await listReplica(blobs, config.prefix);
       if (isErr(listing)) return listing;
@@ -618,6 +673,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     }
     const pruned = await prune();
     if (isErr(pruned)) return pruned;
+    if (acknowledging) await acknowledge();
     lastSyncAt = t;
     if (generation === null) throw new Error("replication/sqlite: sync ended without a generation");
     return ok({ generation, shippedBytes, frames, checkpointed, pruned: pruned.value });
@@ -689,6 +745,9 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       if (restorePrepared) notes.push("replication/sqlite: a restore is prepared; restart the process to apply it");
       if (otherWriter !== null) notes.push(`replication/sqlite: another process writes to this replica (${otherWriter.key}, seen ${new Date(otherWriter.seenAt).toISOString()}); stop it, then run replication.snapshot here so the next restore starts from this process's data`);
       return notes.length === 0 ? { ok: true } : { ok: true, note: notes.join("; ") };
+    },
+    restoreHandled() {
+      handled = true;
     },
     close() {
       closed = true;

@@ -642,6 +642,104 @@ describe("replication/sqlite generation order, seal and other writers", () => {
   });
 });
 
+describe("replication/sqlite acknowledgement of a placed restore", () => {
+  const placedRestore = { applied: { generation: "20260101T000000Z", nonce: "nonce-1", restoredAt: 7 }, origin: JSON.stringify({ kind: "restore", source: "backup-1", requestedAt: "2026-01-01T00:00:00Z", nonce: "nonce-1" }) };
+
+  function start(blobs: ReturnType<typeof fakeBlobs>, clock: Clock, extra: { onAcknowledged?: () => void; logger?: Logger } = {}): ReturnType<typeof setup> & { replication: Replication } {
+    const base = setup({}, { blobs, clock });
+    base.repl.close();
+    open.splice(open.indexOf(base.repl), 1);
+    const replication = createReplicationSqlite(base.config, blobs, clock.now, { placedRestore, ...extra });
+    open.push(replication);
+    return { ...base, replication };
+  }
+
+  const keysOf = (blobs: ReturnType<typeof fakeBlobs>, name: string): string[] => [...blobs.blobs.keys()].filter((key) => key.endsWith(`/${name}`)).sort();
+
+  it("copies origin.json into every generation it starts before the acknowledgement, writes applied.json into those and the placed generation, and copies nothing after it", async () => {
+    const blobs = fakeBlobs();
+    const clock = manualClock();
+    let acknowledged = 0;
+    const { replication, insert } = start(blobs, clock, { onAcknowledged: () => { acknowledged += 1; } });
+    insert(1);
+    const first = expectOk(await replication.sync()).generation;
+    clock.advance(1_000);
+    const second = expectOk(await replication.snapshot()).generation;
+    expect(keysOf(blobs, "origin.json")).toEqual([`replica/gen/${first}/origin.json`, `replica/gen/${second}/origin.json`]);
+    expect(new TextDecoder().decode(blobs.blobs.get(`replica/gen/${first}/origin.json`)?.data)).toBe(placedRestore.origin);
+    expect(keysOf(blobs, "applied.json")).toEqual([]);
+
+    replication.restoreHandled();
+    clock.advance(1_000);
+    expectOk(await replication.sync());
+    expect(keysOf(blobs, "applied.json")).toEqual([`replica/gen/${first}/applied.json`, `replica/gen/${second}/applied.json`, "replica/gen/20260101T000000Z/applied.json"].sort());
+    expect(JSON.parse(new TextDecoder().decode(blobs.blobs.get("replica/gen/20260101T000000Z/applied.json")?.data))).toEqual(placedRestore.applied);
+    expect(acknowledged).toBe(1);
+
+    clock.advance(1_000);
+    const third = expectOk(await replication.snapshot()).generation;
+    expectOk(await replication.sync());
+    expect(blobs.blobs.has(`replica/gen/${third}/origin.json`)).toBe(false);
+    expect(acknowledged).toBe(1);
+  });
+
+  it("writes at the next sync only the applied.json files that a failed sync could not write", async () => {
+    const blobs = fakeBlobs();
+    const clock = manualClock();
+    const { replication, insert } = start(blobs, clock);
+    insert(1);
+    const own = expectOk(await replication.sync()).generation;
+    replication.restoreHandled();
+    const written: string[] = [];
+    const put = blobs.put.bind(blobs);
+    let failing = true;
+    blobs.put = async (key, data, options) => {
+      if (key.endsWith("/applied.json") && key.includes(own) && failing) {
+        failing = false;
+        return err(failure("TRANSIENT", "fakeBlobs: injected TRANSIENT"));
+      }
+      if (key.endsWith("/applied.json")) written.push(key);
+      return put(key, data, options);
+    };
+    expectOk(await replication.sync());
+    expect(written).toEqual(["replica/gen/20260101T000000Z/applied.json"]);
+    expectOk(await replication.sync());
+    expect(written).toEqual(["replica/gen/20260101T000000Z/applied.json", `replica/gen/${own}/applied.json`]);
+    expectOk(await replication.sync());
+    expect(written).toHaveLength(2);
+  });
+
+  it("removes the snapshot of a generation whose copy of origin.json could not be written, and fails the sync", async () => {
+    const blobs = fakeBlobs();
+    const clock = manualClock();
+    const { replication, insert } = start(blobs, clock);
+    insert(1);
+    const put = blobs.put.bind(blobs);
+    blobs.put = async (key, data, options) => (key.endsWith("/origin.json") ? err(failure("TRANSIENT", "fakeBlobs: injected TRANSIENT")) : put(key, data, options));
+    expectErr(await replication.sync(), "TRANSIENT");
+    expect(keysOf(blobs, "snapshot.db")).toEqual([]);
+    expect((await replication.status()).generation).toBeNull();
+  });
+
+  it("notes another process that writes into a generation carrying a copy of origin.json", async () => {
+    const blobs = fakeBlobs();
+    const clock = manualClock();
+    const log: string[] = [];
+    const first = setup({}, { blobs, clock, logger: { ...silentLogger, warn: (message) => log.push(message) } });
+    first.insert(1);
+    expectOk(await first.repl.sync());
+    clock.advance(5_000);
+    const second = start(blobs, clock);
+    second.insert(1);
+    expectOk(await second.replication.sync());
+    clock.advance(5_000);
+    first.insert(1);
+    expectOk(await first.repl.sync());
+    expect(first.repl.health()).toEqual({ ok: true, note: expect.stringContaining("another process writes to this replica") as unknown });
+    expect(log).toHaveLength(1);
+  });
+});
+
 describe("replication/sqlite listing against the seal", () => {
   function sealedReplica(): { blobs: ReturnType<typeof fakeBlobs>; generation: string } {
     const blobs = fakeBlobs();

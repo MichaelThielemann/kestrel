@@ -84,7 +84,9 @@ unknown `generation`, is `Err(NOT_FOUND)`; an unparsable `at` in the payload is 
 `<file>.restore-marker`), so both modules can point at the same database without clashing. When
 either module restores the file, it writes `<file>.restored-at` next to it:
 `{ "restoredAtBootStartedAt": <epoch ms this boot started> }`, plus `"reported": true` when the
-restored file can be older than what was derived from the database before it. The sidecar is written
+restored file can be older than what was derived from the database before it. This module adds
+`"placed": { "generation", "nonce", "origin" }` while a restore from a placed generation waits for its
+`applied.json` (see [Replica layout](#replica-layout)), so a later start on the same file writes it. The sidecar is written
 atomically, before the restored file is moved into place, so a boot that stops in between applies the
 restore again on the next start. The other module, if
 configured on the same file, recognizes a matching boot as "this boot already restored the file" and
@@ -94,7 +96,8 @@ sidecar.
 `replication.checkRestored` tells the rest of a pipeline about the latest reported restore of the
 database file: it adds `_databaseRestoredAt` to the result, the start of the boot that restored it, or
 `null` when the sidecar records none. A prepared restore is reported (`replication.prepareRestore`, or
-`backup.restore`), and so is backup-blobstore's restore of a missing file. The value stays the same in
+`backup.restore`), and so are backup-blobstore's restore of a missing file and this module's rebuild of
+a missing file from a generation placed with `origin.json`. The value stays the same in
 every later boot until the next restore, so a step that keeps output derived from the database stores
 the last value it acted on and treats any other one as a restore; a boot that stops before acting on it
 leaves it to the next one. The member is a shared convention: `backup.checkRestored` writes the same
@@ -125,8 +128,8 @@ version; it is not a contract. Every key belongs to one generation and lives und
 | `snapshot.db` | the snapshot that starts the generation | the database file with the committed WAL frames applied, in the live file's page layout |
 | `wal/<lineage>-<seq>-<time>.wal` | every sync and checkpoint | a WAL header and the committed frames after the previous segment; `lineage` (6 digits) counts the WAL resets seen by the process, `seq` (6 digits) numbers the generation's segments from `000000`, `time` is when the segment was shipped |
 | `sealed.json` | teardown, once | `{ "lineage", "lastFrame", "segments", "at" }` |
-| `origin.json` | whoever placed the generation | `{ "kind": "restore" \| "upgrade", "source", "requestedAt", "nonce" }`; this module reads only `nonce` |
-| `applied.json` | the start that restored from a generation with `origin.json` | `{ "generation", "nonce", "restoredAt" }` |
+| `origin.json` | whoever placed the generation; a copy, by a process that restored from it, in every generation it starts before writing `applied.json` | `{ "kind": "restore" \| "upgrade", "source", "requestedAt", "nonce" }`; this module reads only `nonce` |
+| `applied.json` | the process that restored from a generation with `origin.json`, once the restore was acted on | `{ "generation", "nonce", "restoredAt" }` |
 
 Times in names are UTC, `YYYYMMDDTHHMMSSZ`. A generation is named either by such a time alone, as
 5.x releases name every generation, or by the time, a hyphen, 12 hex digits of the same time in
@@ -157,13 +160,24 @@ and restore it too. Whether a generation carries `origin.json` or `applied.json`
 the blobstore, not from a listing, which can show a new key late. Before `setup()` rebuilds a missing
 file, it lists the replica again, as it does for a seal, while a generation that sorts after the newest
 snapshot shows `origin.json` but no `snapshot.db`, and refuses to start when the listing still shows
-none; the error names the generation. When `restoreOnStart`
-rebuilds the missing file from that generation, the restore is reported: `replication.checkRestored`
-answers the start of this boot, and the module writes `applied.json` with the generation, the `nonce`
-of `origin.json` (or `null` when it holds none) and that boot start, so the tool can tell that the
-process restored exactly what it placed. A later start that restores the same generation finds
-`applied.json` and does not report the restore again; when writing it failed, the next start reports
-the restore once more, which renders delivered output once more and changes nothing else.
+none; the error names the generation.
+
+When `restoreOnStart` rebuilds the missing file from a generation with `origin.json` and without
+`applied.json`, the restore is reported: `replication.checkRestored` answers the start of this boot. The
+module acknowledges it with `applied.json`, holding the generation, the `nonce` of `origin.json` (or
+`null` when it holds none) and that boot start, so the tool can tell that the process restored exactly
+what it placed. It writes it only once the report was acted on, at the end of the first successful
+`replication.sync` that starts after a pipeline run that went through `replication.checkRestored` ended
+without failure; when no pipeline of the instance runs that step, at the end of the first successful
+sync. Until then every generation the process starts, by a sync, `replication.snapshot` or the first
+snapshot at teardown, carries a copy of `origin.json`, and the acknowledgement writes `applied.json`
+into each of them as well as into the placed generation. A start that stops before, with or without
+teardown, therefore leaves the restore reported to the next start that restores from the replica, and
+the `<file>.restored-at` sidecar hands the acknowledgement to the next start on a persistent disk. A
+start that restores a generation with `applied.json` does not report the restore again. Should a copy
+remain without `applied.json`, a later start that restores it reports the restore once more and writes
+its own `applied.json` there, which renders delivered output once more and changes nothing else; a tool
+that looks for its `nonce` finds it in that generation then.
 
 **Generations of unknown origin.** Before it rebuilds a missing file, `setup()` refuses to start when a
 generation named by its time alone, without `origin.json`, sorts after the newest generation that is
@@ -176,11 +190,12 @@ restores its newest generation as before.
 
 **Another writer.** Only one process may replicate a database to a prefix. Every sync lists the
 replica and compares it with a first listing: the one `setup()` made to rebuild a missing file, or else
-the process's first sync. When a listing shows a key that this process did not write, in a generation
-without `origin.json`, and that is a snapshot the first listing did not show or a WAL segment shipped
-after it, the module logs a warning and `health()` answers `{ ok: true, note }` naming the key
-until the process restarts. A WAL segment counts by the time in its key, so the last frames an older
-process ships into the generation this one restored from are noticed even before the first sync. Health stays ok on purpose: a failing readiness probe gets the process
+the process's first sync. When a listing shows a key that this process did not write, outside a
+generation placed by a tool (named by its time alone, with `origin.json`), and that is a snapshot the
+first listing did not show or a WAL segment shipped after it, the module logs a warning and `health()`
+answers `{ ok: true, note }` naming the key until the process restarts. A WAL segment counts by the time
+in its key, so the last frames an older process ships into the generation this one restored from are
+noticed even before the first sync. Health stays ok on purpose: a failing readiness probe gets the process
 restarted, and the restart would restore from the other process's generation. Stop the other process,
 then run `replication.snapshot` in this one, so that the next restore starts from its data. This is
 detection, not a lock: it relies on clocks within seconds of each other and on listings that show new

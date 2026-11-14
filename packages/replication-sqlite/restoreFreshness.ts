@@ -4,7 +4,7 @@ import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr } from "@michaelthielemann/kestrel/result";
-import type { Config } from "./impl.ts";
+import type { Config, PlacedRestore } from "./impl.ts";
 
 interface FileTimes {
   birthtimeNs: bigint;
@@ -19,6 +19,7 @@ function readFileTimes(file: string): FileTimes {
 interface RestoreSidecarContent {
   restoredAtBootStartedAt: number;
   reported?: true;
+  placed?: { generation: string; nonce: string | null; origin: string };
 }
 
 /**
@@ -68,9 +69,14 @@ export function restoreSidecar(file: string): string {
   return `${file}.restored-at`;
 }
 
-/** Writes the `restoreSidecar` atomically and durably (temporary file, fsync, rename); `reported` when `reportedRestoreAt` should answer this restore. */
-export function markRestoredThisBoot(file: string, bootStartedAt: number, reported = false): void {
+/**
+ * Writes the `restoreSidecar` atomically and durably (temporary file, fsync, rename); `reported` when
+ * `reportedRestoreAt` should answer this restore, `placed` for a reported restore from a generation placed with
+ * `origin.json` that no `applied.json` acknowledges yet.
+ */
+export function markRestoredThisBoot(file: string, bootStartedAt: number, reported = false, placed?: PlacedRestore): void {
   const content: RestoreSidecarContent = reported ? { restoredAtBootStartedAt: bootStartedAt, reported } : { restoredAtBootStartedAt: bootStartedAt };
+  if (reported && placed) content.placed = { generation: placed.applied.generation, nonce: placed.applied.nonce, origin: placed.origin };
   const sidecar = restoreSidecar(file);
   const temporary = `${sidecar}.tmp`;
   const fd = openSync(temporary, "w");
@@ -96,6 +102,15 @@ function readSidecar(file: string): Partial<RestoreSidecarContent> {
 
 function restoredThisBoot(file: string, bootStartedAt: number): boolean {
   return readSidecar(file).restoredAtBootStartedAt === bootStartedAt;
+}
+
+/** The reported restore from a placed generation that the `restoreSidecar` of `file` records as not acknowledged yet, or null. */
+export function unacknowledgedRestore(file: string): PlacedRestore | null {
+  const record = readSidecar(file);
+  const placed = record.placed;
+  if (record.reported !== true || typeof record.restoredAtBootStartedAt !== "number" || typeof placed !== "object" || placed === null) return null;
+  if (typeof placed.generation !== "string" || typeof placed.origin !== "string" || (placed.nonce !== null && typeof placed.nonce !== "string")) return null;
+  return { applied: { generation: placed.generation, nonce: placed.nonce, restoredAt: record.restoredAtBootStartedAt }, origin: placed.origin };
 }
 
 /** The start (epoch ms) of the boot that wrote the latest reported restore of `file`, as its `restoreSidecar` records it; `null` when the sidecar records none. */

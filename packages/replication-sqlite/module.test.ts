@@ -7,7 +7,8 @@ import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Step } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
-import type { Deps } from "@michaelthielemann/kestrel/defineModule";
+import type { Manifest, RunEndEvent, RunObserver } from "@michaelthielemann/kestrel";
+import type { Deps, Introspection } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
@@ -270,6 +271,28 @@ async function databaseRestoredAt(instance: Replication): Promise<unknown> {
 
 const sixGeneration = (stamp: string, order: number): string => `${stamp}-${order.toString(16).padStart(12, "0")}${"5a".repeat(16)}`;
 
+function introspection(pipelines: readonly (readonly string[])[]): Introspection & { runEnd(runId: string, outcome: RunEndEvent["outcome"]): void } {
+  const observers = new Set<RunObserver>();
+  const manifest: Pick<Manifest, "pipelines"> = { pipelines: pipelines.map((steps, i) => ({ name: `pipeline-${i}`, steps: steps.map((name) => ({ spec: name, name, module: name.startsWith("replication.") ? "replication/sqlite" : "test", description: { summary: name, reads: [], writes: [] } })) })) };
+  return {
+    describe: () => boundaryCast<Manifest>(manifest, "host"),
+    observe(observer) {
+      observers.add(observer);
+      return () => observers.delete(observer);
+    },
+    health: () => ({ ok: true, restartRequired: false, modules: [] }),
+    runEnd(runId, outcome) {
+      for (const observer of observers) observer.runEnd?.({ runId, pipeline: "pipeline-0", trigger: { kind: "http", name: "test" }, at: Date.now(), ms: 1, status: outcome === "ok" ? 200 : 500, outcome });
+    },
+  };
+}
+
+async function checkRestoredRun(instance: Replication): Promise<{ runId: string; restoredAt: unknown }> {
+  const run = await runPipeline(definePipeline({ name: "checkRestored", steps: ["replication.checkRestored"] }), {}, { modules: [{ module, instance }] });
+  expect(run.status).toBe(200);
+  return { runId: run.runId, restoredAt: boundaryCast<Record<string, unknown>>(run.result, "host")._databaseRestoredAt };
+}
+
 function listingLate(blobs: ReturnType<typeof fakeBlobs>, hidden: readonly string[], listings: number): ReturnType<typeof fakeBlobs> & { lists: () => number } {
   let lists = 0;
   return {
@@ -338,16 +361,109 @@ describe("replication/sqlite teardown seal", () => {
 });
 
 describe("replication/sqlite restore from a placed generation", () => {
-  it("reports a restore from a generation placed with origin.json and acknowledges it with applied.json naming the generation and nonce", async () => {
+  it("reports a restore from a generation placed with origin.json and acknowledges it with applied.json naming the generation and nonce once a sync followed the run that read the report", async () => {
     const file = join(freshDir(), "live.db");
     const blobs = fakeBlobs();
     place(blobs, "20260101T000000Z", 1, null);
     place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
     const { instance, bootStartedAt } = await startOn(file, blobs);
     open.push(instance);
+    const kestrel = introspection([["replication.checkRestored", "test.render"]]);
+    module.attach!(instance, kestrel);
     expect(rowsIn(file)).toBe(2);
-    expect(await databaseRestoredAt(instance)).toBe(bootStartedAt);
+    const run = await checkRestoredRun(instance);
+    expect(run.restoredAt).toBe(bootStartedAt);
+    expect((await instance.sync()).ok).toBe(true);
+    expect(blobs.blobs.has("replica/gen/20260102T000000Z/applied.json")).toBe(false);
+
+    kestrel.runEnd(run.runId, "ok");
+    const synced = await instance.sync();
+    if (!synced.ok) throw new Error("expected a sync");
+    const applied = { generation: "20260102T000000Z", nonce: "nonce-1", restoredAt: bootStartedAt };
+    expect(readJson(blobs, "replica/gen/20260102T000000Z/applied.json")).toEqual(applied);
+    expect(readJson(blobs, `replica/gen/${synced.value.generation}/origin.json`)).toMatchObject({ nonce: "nonce-1" });
+    expect(readJson(blobs, `replica/gen/${synced.value.generation}/applied.json`)).toEqual(applied);
+    expect(JSON.parse(readFileSync(`${file}.restored-at`, "utf8"))).toEqual({ restoredAtBootStartedAt: bootStartedAt, reported: true });
+  });
+
+  it("leaves the restore from a placed generation reported to the next start when the process stops before a run handled the report", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    const first = await startOn(file, blobs);
+    module.attach!(first.instance, introspection([["replication.checkRestored"]]));
+    expect((await first.instance.sync()).ok).toBe(true);
+    first.instance.close();
+    expect([...blobs.blobs.keys()].filter((key) => key.endsWith("/applied.json"))).toEqual([]);
+
+    removeDatabase(file);
+    const second = await startOn(file, blobs);
+    open.push(second.instance);
+    expect(rowsIn(file)).toBe(2);
+    expect(await databaseRestoredAt(second.instance)).toBe(second.bootStartedAt);
+  });
+
+  it("leaves the restore from a placed generation reported to the next start when teardown seals a first snapshot of what the process committed before the report was handled", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    const first = await startOn(file, blobs);
+    const app = new DatabaseSync(file);
+    app.prepare("INSERT INTO t (v) VALUES ('migrated')").run();
+    app.close();
+    await module.teardown!(first.instance);
+    expect([...blobs.blobs.keys()].filter((key) => key.endsWith("/sealed.json"))).toHaveLength(1);
+
+    removeDatabase(file);
+    const second = await startOn(file, blobs);
+    open.push(second.instance);
+    expect(rowsIn(file)).toBe(3);
+    expect(await databaseRestoredAt(second.instance)).toBe(second.bootStartedAt);
+  });
+
+  it("does not acknowledge the restore while the run that read the report failed", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    const first = await startOn(file, blobs);
+    const kestrel = introspection([["replication.checkRestored", "test.render"]]);
+    module.attach!(first.instance, kestrel);
+    kestrel.runEnd((await checkRestoredRun(first.instance)).runId, "fail");
+    expect((await first.instance.sync()).ok).toBe(true);
+    first.instance.close();
+    expect([...blobs.blobs.keys()].filter((key) => key.endsWith("/applied.json"))).toEqual([]);
+
+    removeDatabase(file);
+    const second = await startOn(file, blobs);
+    open.push(second.instance);
+    expect(await databaseRestoredAt(second.instance)).toBe(second.bootStartedAt);
+  });
+
+  it("acknowledges the restore at the first sync when no pipeline reads the report", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    const { instance, bootStartedAt } = await startOn(file, blobs);
+    open.push(instance);
+    module.attach!(instance, introspection([["replication.sync"]]));
+    expect((await instance.sync()).ok).toBe(true);
     expect(readJson(blobs, "replica/gen/20260102T000000Z/applied.json")).toEqual({ generation: "20260102T000000Z", nonce: "nonce-1", restoredAt: bootStartedAt });
+  });
+
+  it("acknowledges the restore in a later start on the same file when the start that restored it stopped first", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    const first = await startOn(file, blobs);
+    first.instance.close();
+
+    const second = await startOn(file, blobs);
+    open.push(second.instance);
+    expect(await databaseRestoredAt(second.instance)).toBe(first.bootStartedAt);
+    module.attach!(second.instance, introspection([]));
+    expect((await second.instance.sync()).ok).toBe(true);
+    expect(readJson(blobs, "replica/gen/20260102T000000Z/applied.json")).toEqual({ generation: "20260102T000000Z", nonce: "nonce-1", restoredAt: first.bootStartedAt });
+    expect(JSON.parse(readFileSync(`${file}.restored-at`, "utf8"))).toEqual({ restoredAtBootStartedAt: first.bootStartedAt, reported: true });
   });
 
   it("reports the placed generation again only while no applied.json acknowledges it", async () => {
@@ -355,7 +471,11 @@ describe("replication/sqlite restore from a placed generation", () => {
     const blobs = fakeBlobs();
     place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
     const first = await startOn(file, blobs);
+    module.attach!(first.instance, introspection([]));
+    const synced = await first.instance.sync();
+    if (!synced.ok) throw new Error("expected a sync");
     first.instance.close();
+    for (const key of [...blobs.blobs.keys()]) if (key.includes(synced.value.generation)) blobs.blobs.delete(key);
 
     removeDatabase(file);
     const acknowledged = await startOn(file, blobs);
@@ -367,7 +487,6 @@ describe("replication/sqlite restore from a placed generation", () => {
     const unacknowledged = await startOn(file, blobs);
     open.push(unacknowledged.instance);
     expect(await databaseRestoredAt(unacknowledged.instance)).toBe(unacknowledged.bootStartedAt);
-    expect(readJson(blobs, "replica/gen/20260102T000000Z/applied.json")).toEqual({ generation: "20260102T000000Z", nonce: "nonce-1", restoredAt: unacknowledged.bootStartedAt });
   });
 
   it("reports a restore from a placed generation whose origin.json the listing does not show yet", async () => {
@@ -441,6 +560,8 @@ describe("replication/sqlite restore from a placed generation", () => {
     place(blobs, "20260102T000000Z", 1, {});
     const { instance, bootStartedAt } = await startOn(file, blobs);
     open.push(instance);
+    module.attach!(instance, introspection([]));
+    expect((await instance.sync()).ok).toBe(true);
     expect(readJson(blobs, "replica/gen/20260102T000000Z/applied.json")).toEqual({ generation: "20260102T000000Z", nonce: null, restoredAt: bootStartedAt });
   });
 });
