@@ -54,6 +54,25 @@ describe("runDataStep: data/redirect-reserved-paths", () => {
     expect(found[0]?.message).not.toContain("/administration");
   });
 
+  it("names a stored wildcard rule that can match a reserved path, including a catch-all", async () => {
+    const root = await projectWithRedirects({});
+    const file = join(dir, "kestrel.db");
+    await storeRules(file, [
+      { from: "/**", to: "https://new.example.org/$1" },
+      { from: "/*", to: "/blog/$1" },
+      { from: "/*/feed", to: "/rss/$1" },
+      { from: "/blog/*", to: "/artikel/$1" },
+      { from: "/news/**", to: "/n/$1" },
+    ]);
+    const result = await runDataStep(file, root);
+    const found = result.report?.findings.filter((f) => f.rule === "data/redirect-reserved-paths") ?? [];
+    expect(found).toHaveLength(1);
+    expect(found[0]?.message).toContain("3 stored redirect rule(s)");
+    expect(found[0]?.message).toContain("/**, /*, /*/feed");
+    expect(found[0]?.message).not.toContain("/blog/*");
+    expect(found[0]?.message).not.toContain("/news/**");
+  });
+
   it("follows the configured reserved paths and collection", async () => {
     const root = await projectWithRedirects({ type: "forwards", reservedPaths: ["/shop"] });
     const file = join(dir, "kestrel.db");

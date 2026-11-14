@@ -759,7 +759,8 @@ Net changes since 5.8.2.
   (`/admin`, `/admin/x`, `/*/login`; `/administration` stays allowed) with `VALIDATION` and the row.
   A rule already stored under such a path is left out of `redirects.json`, `redirects.lookup` and
   `redirects.render` and logged. Set `reservedPaths` to the mounts of your own project. `kestrel
-  upgrade data`'s `data/redirect-reserved-paths` lists the stored rules an upgrade would leave out.
+  upgrade data`'s `data/redirect-reserved-paths` lists the stored rules an upgrade would leave out, wildcard sources
+  such as `/**` included.
 - The two admin routes that repeat a user's cleanup, `POST /admin/users/:id/revisions/reassign` and
   `POST /admin/users/:id/audit/anonymize`, answer 409 `CONFLICT` while `:id` still names a user,
   active or not, so they can no longer rewrite the revisions or erase the audit trail of an existing
@@ -1813,8 +1814,8 @@ Net changes since 5.8.2.
   read once it passes the limit, instead of being buffered whole before the check. The core server
   also answers 413 to an oversized `Content-Length` up front. Both use the new export
   `readRequestBody`.
-- `kestrel upgrade`: the scratch copy of a git project applies the same filters as the copy of a project
-  without git. A tracked `.env*` file, database file or file over 10 MB no longer lands in the
+- `kestrel upgrade`: the scratch copy of a git project applies the same secret, database and size filters
+  as the copy of a project without git. A tracked `.env*` file, database file or file over 10 MB no longer lands in the
   temporary directory, a file name with non-ASCII characters is copied, and a file that git lists but
   the working tree no longer has no longer stops the run.
 

@@ -19,12 +19,28 @@ function canonical(from: string): string {
   return `/${from.trim().replace(/^\/+/, "").replace(/\/+$/, "")}`;
 }
 
-function reservedBy(from: string, reservedPaths: readonly string[]): string | undefined {
-  const path = canonical(from);
-  return reservedPaths.find((reserved) => path === reserved || path.startsWith(`${reserved}/`));
+function segmentPattern(segment: string): string {
+  return segment.replace(/[.+?^${}()|[\]\\-]/g, "\\$&").split("*").join("[^/]+");
 }
 
-/** The stored redirect rules whose source lies at or below a reserved path: publishing leaves them out from 6.0.0 on. `config` is the project's `redirects-default` config, `undefined` without the module. */
+function matchesReserved(path: string, reserved: string): boolean {
+  const pattern = path.split("/").slice(1);
+  for (const [i, wanted] of reserved.split("/").slice(1).entries()) {
+    const segment = pattern[i];
+    if (segment === undefined) return false;
+    const deep = segment.indexOf("**");
+    if (deep !== -1) return new RegExp(`^${segmentPattern(segment.slice(0, deep))}`).test(wanted);
+    if (!new RegExp(`^${segmentPattern(segment)}$`).test(wanted)) return false;
+  }
+  return true;
+}
+
+function reservedBy(from: string, reservedPaths: readonly string[]): string | undefined {
+  const path = canonical(from);
+  return reservedPaths.find((reserved) => matchesReserved(path, reserved));
+}
+
+/** The stored redirect rules whose source can match a reserved path, wildcards included: publishing leaves them out from 6.0.0 on. `config` is the project's `redirects-default` config, `undefined` without the module. */
 export async function redirectReservedPathFindings(db: Persistence, config: unknown): Promise<Finding[]> {
   if (config === undefined) return [];
   const settings = isRecord(config) ? config : {};
@@ -53,7 +69,7 @@ export async function redirectReservedPathFindings(db: Persistence, config: unkn
         severity: "warning",
         tier: "data",
         where: { path: collection },
-        message: `${hits.length} stored redirect rule(s) have a source at or below a reserved path (${shown}${hits.length > SHOWN ? `, and ${hits.length - SHOWN} more` : ""}); redirects-default refuses such a source in 6.0.0 and leaves a stored one out of the published list`,
+        message: `${hits.length} stored redirect rule(s) have a source that can match a reserved path (${shown}${hits.length > SHOWN ? `, and ${hits.length - SHOWN} more` : ""}); redirects-default refuses such a source in 6.0.0 and leaves a stored one out of the published list`,
         suggestion: `remove or move these rules in the redirect editor; reservedPaths of redirects-default (${reservedPaths.join(", ")}) names what it keeps`,
         fix: { kind: "manual" },
         docs: upgradingDocs("data-redirect-reserved-paths"),
