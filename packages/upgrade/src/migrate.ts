@@ -2,7 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
-import { isErr } from "@michaelthielemann/kestrel/result";
+import { err, isErr, type Result } from "@michaelthielemann/kestrel/result";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { runShapeMigrations, type ModuleRun } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
@@ -80,6 +80,15 @@ async function blobstoreOf(root: string): Promise<BlobstoreFilesystemModule | un
   return isRecord(mod) && typeof mod.createBlobstoreFilesystem === "function" ? boundaryCast<BlobstoreFilesystemModule>(mod, "host") : undefined;
 }
 
+async function guarded<T>(task: () => Promise<Result<T, { message: string }>>): Promise<Result<T, string>> {
+  try {
+    const result = await task();
+    return isErr(result) ? err(result.error.message) : result;
+  } catch (thrown) {
+    return err(thrown instanceof Error ? thrown.message : String(thrown));
+  }
+}
+
 function finished(run: ModuleRun): boolean {
   return run.state === "current" || run.state === "recorded" || run.state === "migrated" || run.state === "unrecorded";
 }
@@ -115,8 +124,8 @@ export async function runMigrateStep(options: MigrateStepOptions): Promise<Migra
   try {
     const stores: { db: Persistence; blobs: Blobstore } = { db: opened, blobs: filesystem.createBlobstoreFilesystem({ root: blobsDir }) };
     const { db, blobs } = options.wrap === undefined ? stores : options.wrap(stores);
-    const run = await runShapeMigrations({ storages, db, blobs, apply: options.plan !== true, blobWrites: true, ...(options.answers === undefined ? {} : { answers: options.answers }), ...(options.now === undefined ? {} : { now: options.now }) });
-    if (isErr(run)) return { exitCode: 2, error: `${run.error.message}; nothing that ran before this is undone, so running migrate again continues from here` };
+    const run = await guarded(() => runShapeMigrations({ storages, db, blobs, apply: options.plan !== true, blobWrites: true, ...(options.answers === undefined ? {} : { answers: options.answers }), ...(options.now === undefined ? {} : { now: options.now }) }));
+    if (isErr(run)) return { exitCode: 2, error: `${run.error}; nothing that ran before this is undone, so running migrate again continues from here` };
     const report: MigrateReport = { schema: 1, tool: { name: "kestrel-upgrade", version: toolVersion() }, command: "migrate", db: dbFile, blobsDir, applied: options.plan !== true, modules: run.value.modules, notes };
     return { exitCode: run.value.modules.every(finished) ? 0 : 1, report };
   } finally {

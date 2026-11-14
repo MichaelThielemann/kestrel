@@ -214,6 +214,27 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
     expect(state(copy)).toEqual(expected);
   });
 
+  it("answers exit code 2 and how to continue when the blob store throws, and a later run finishes the conversion", async () => {
+    const clean = fixtureCopy();
+    expect((await runMigrateStep({ dbFile: clean.db, blobsDir: clean.blobs, root: PROJECT, now: () => NOW })).exitCode).toBe(0);
+    const expected = state(clean);
+    const copy = fixtureCopy();
+    const throwing = (blobs: Blobstore): Blobstore =>
+      new Proxy(blobs, {
+        get(target, prop) {
+          if (prop === "put") return () => Promise.reject(Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" }));
+          const value: unknown = Reflect.get(target, prop, target);
+          return typeof value === "function" ? boundaryCast<(...args: unknown[]) => unknown>(value, "host").bind(target) : value;
+        },
+      });
+    const stopped = await runMigrateStep({ dbFile: copy.db, blobsDir: copy.blobs, root: PROJECT, now: () => NOW, wrap: (s) => ({ db: s.db, blobs: throwing(s.blobs) }) });
+    expect(stopped.exitCode).toBe(2);
+    expect(stopped.error).toContain("ENOSPC: no space left on device");
+    expect(stopped.error).toContain("running migrate again continues from here");
+    expect((await runMigrateStep({ dbFile: copy.db, blobsDir: copy.blobs, root: PROJECT, now: () => NOW })).exitCode).toBe(0);
+    expect(state(copy)).toEqual(expected);
+  });
+
   it("moves an item whose original is missing to the trash when the answer says so", async () => {
     const copy = fixtureCopy();
     const answers = join(copy.dir, "answers.json");
