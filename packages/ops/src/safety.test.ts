@@ -102,7 +102,7 @@ describe("source", () => {
     expect(hits).toEqual([]);
   });
 
-  it("spawns no external binary besides the configured app command", () => {
+  it("spawns no external binary besides the configured app command and credential commands", () => {
     const spawning = readdirSync(SRC)
       .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && !f.endsWith(".fixture.ts"))
       .filter((f) => readFileSync(join(SRC, f), "utf8").includes('from "node:child_process"'));

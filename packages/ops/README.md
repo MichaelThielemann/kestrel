@@ -13,8 +13,9 @@ node .kestrel-ops/run.mjs status --env prod
 node .kestrel-ops/run.mjs backup create --kind scheduled --env prod
 ```
 
-Requires Node 22.18 or later. The only external program it starts is the app command of a `local`
-target; other targets come as their own packages.
+Requires Node 22.18 or later. The only external programs it starts are the app command of a `local`
+target and the commands of `{ "command": [...] }` credential sources, each without a shell; other targets
+come as their own packages.
 
 ## Commands
 
