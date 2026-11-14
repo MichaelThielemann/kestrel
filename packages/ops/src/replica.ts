@@ -200,19 +200,28 @@ export function checkPromotable(status: TargetStatus, skewMs: number): void {
 }
 
 /**
+ * The name a promotion gives its generation: server time rounded up to the next whole second and at least one second
+ * after the newest of `existing`. Refuses when the newest generation is stamped more than {@link MAX_SKEW_MS} after
+ * `serverNow`, since the app could only start once the store's time passed the new name.
+ */
+export function promotionName(existing: readonly Generation[], serverNow: number): { generation: string; at: number } {
+  const newest = existing.at(-1);
+  if (newest && newest.at - serverNow > MAX_SKEW_MS) throw new OpsError(`refusing to promote: generation ${newest.name} is stamped ${Math.round((newest.at - serverNow) / 1000)} s after the store's time (limit ${MAX_SKEW_MS / 1000} s); a runtime whose clock ran ahead wrote it`, 1, `gen/${newest.name}`);
+  const floor = newest ? newest.at + 1000 : 0;
+  const at = Math.ceil(Math.max(serverNow, floor) / 1000) * 1000;
+  return { generation: stamp(at), at };
+}
+
+/**
  * Makes `database` the newest replica generation, so the next start of the stopped target restores it. Refuses
  * unless the target is stopped with no instance and the local clock is within {@link MAX_SKEW_MS} of the server's.
- * The generation is named by server time rounded up to the next whole second and at least one second after the
- * newest existing one, a plain time name that every runtime lists; it is listed until it is the newest in
+ * The generation gets the plain time name of {@link promotionName}, which every runtime lists; it is listed until it is the newest in
  * consecutive listings and read back to check its hash and integrity.
  */
 export async function promote(input: PromoteInput): Promise<Promoted> {
   checkPromotable(await input.target.status(), input.skewMs);
   const existing = await stableGenerations(input.store, input.prefix, input.poll);
-  const newest = existing.at(-1);
-  const floor = newest ? newest.at + 1000 : 0;
-  const at = Math.ceil(Math.max(input.serverNow(), floor) / 1000) * 1000;
-  const generation = stamp(at);
+  const { generation, at } = promotionName(existing, input.serverNow());
   if (existing.some((g) => g.name.startsWith(generation))) throw new OpsError(`refusing to promote: generation ${generation} already exists`, 1, generation);
   const work = mkdtempSync(join(tmpdir(), "kestrel-ops-promote-"));
   try {

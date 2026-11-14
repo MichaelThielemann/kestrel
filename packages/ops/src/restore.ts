@@ -5,7 +5,7 @@ import { runtimeVersion, startTarget, stopTarget, type OpsContext } from "./cont
 import { OpsError } from "./errors.ts";
 import { fromJsonl, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
-import { acknowledgement, buildDatabase, checkPromotable, promote, sealOf, stableGenerations, type Acknowledgement, type Promoted, type SealReport } from "./replica.ts";
+import { acknowledgement, buildDatabase, checkPromotable, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Promoted, type SealReport } from "./replica.ts";
 import { appClock } from "./serverTime.ts";
 import { deleteSessions, hasAccessChanges, integrityCheck, lossReport, sha256, vacuumInto, type LossReport } from "./sqlite.ts";
 import { listMap, stableList, transfer, type ObjectInfo } from "./store.ts";
@@ -195,7 +195,10 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   }
 
   const clock = ctx.target.transport === "promote" ? await appClock(ctx) : null;
-  if (clock !== null) checkPromotable(await ctx.target.status(), clock.skewMs);
+  if (clock !== null) {
+    checkPromotable(await ctx.target.status(), clock.skewMs);
+    promotionName(await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll), clock.now());
+  }
   else if (!ctx.target.installDatabase) throw new OpsError("the target can take neither a promoted generation nor a database file", 2, "target");
 
   let safetyBackup: string | null = null;

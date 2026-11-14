@@ -68,15 +68,25 @@ describe("promote", () => {
     expect(promoted.nonce).toMatch(/^[0-9a-f]{32}$/);
   });
 
-  it("sorts after every existing generation, also one stamped ten minutes in the future", async () => {
+  it("sorts after every existing generation, also one stamped up to 30 s after the store's time", async () => {
     const bucket = new MemoryBucket("f");
     const store = memoryStore(bucket);
-    const future = stamp(Date.parse("2026-11-14T12:10:00Z"));
-    await store.put(`database/gen/${future}-00019a8b5c2e${"0".repeat(32)}/snapshot.db`, new Uint8Array([1]));
+    const ahead = stamp(Date.parse("2026-11-14T12:00:20Z"));
+    await store.put(`database/gen/${ahead}-00019a8b5c2e${"0".repeat(32)}/snapshot.db`, new Uint8Array([1]));
     await store.put(`database/gen/20261114T115959Z/snapshot.db`, new Uint8Array([1]));
     const promoted = await promote(input(bucket));
-    expect(promoted.generation).toBe("20261114T121001Z");
+    expect(promoted.generation).toBe("20261114T120021Z");
     expect((await listGenerations(store, "database/")).at(-1)?.name).toBe(promoted.generation);
+  });
+
+  it("refuses, naming it, a generation stamped more than 30 s after the store's time, and writes nothing", async () => {
+    const bucket = new MemoryBucket("f2");
+    const store = memoryStore(bucket);
+    const future = stamp(Date.parse("2026-11-14T12:10:00Z"));
+    await store.put(`database/gen/${future}/snapshot.db`, new Uint8Array([1]));
+    const writes = bucket.writes.length;
+    await expect(promote(input(bucket))).rejects.toThrow(`generation ${future} is stamped 600 s after the store's time`);
+    expect(bucket.writes.length).toBe(writes);
   });
 
   it("uploads a single file without -wal that reads back with the same hash and passes integrity_check", async () => {
