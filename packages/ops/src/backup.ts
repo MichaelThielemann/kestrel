@@ -7,7 +7,7 @@ import { openRuns, listRuns } from "./journal.ts";
 import { heldLocks } from "./lock.ts";
 import { BACKUP_KINDS, backupId, fromJsonl, jsonBytes, keys, parseBackupId, parseJson, toJsonl, type BackupKind, type BlobEntry, type DerivedEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
-import { buildDatabase, SEALING_MAJOR, sealOf, stableGenerations, type SealReport } from "./replica.ts";
+import { buildDatabase, completeGeneration, SEALING_MAJOR, sealOf, stableGenerations, type SealReport } from "./replica.ts";
 import { integrityCheck, referencedBlobs, sha256, sha256File, tableCounts, vacuumInto } from "./sqlite.ts";
 import { ObjectMissing, PreconditionFailed, listMap, stableList, transfer, type ObjectInfo, type ObjectStore } from "./store.ts";
 
@@ -136,7 +136,8 @@ async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: Exclud
     const gens = await stableGenerations(ctx.app, app.replicaPrefix, ctx.poll);
     const newest = gens.at(-1);
     if (!newest) throw new OpsError(`the replica under ${app.replicaPrefix} has no generation`, 1, app.replicaPrefix);
-    seal = { state: "live", generation: newest.name, lastFrameAt: newest.lastFrameAt, seal: null, runtime: runtimeVersion(facts), listed: newest };
+    const listed = await completeGeneration(ctx.app, app.replicaPrefix, newest, ctx.poll);
+    seal = { state: "live", generation: newest.name, lastFrameAt: listed.lastFrameAt, seal: null, runtime: runtimeVersion(facts), listed };
   }
   let dbFile: string | null = null;
   let db: Manifest["db"] = null;

@@ -5,7 +5,7 @@ import { runtimeVersion, startTarget, stopTarget, type OpsContext } from "./cont
 import { OpsError } from "./errors.ts";
 import { fromJsonl, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
-import { acknowledgement, buildDatabase, checkPromotable, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Promoted, type SealReport } from "./replica.ts";
+import { acknowledgement, buildDatabase, checkPromotable, completeGeneration, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Promoted, type SealReport } from "./replica.ts";
 import { appClock } from "./serverTime.ts";
 import { deleteSessions, hasAccessChanges, integrityCheck, lossReport, sha256, vacuumInto, type LossReport } from "./sqlite.ts";
 import { listMap, stableList, transfer, type ObjectInfo } from "./store.ts";
@@ -263,7 +263,7 @@ export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptio
   if (options.backupId === null) {
     const newest = (await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).at(-1);
     if (!newest) throw new OpsError(`the replica under ${ctx.env.app.replicaPrefix} has no generation`, 1, ctx.env.app.replicaPrefix);
-    await buildDatabase(ctx.app, ctx.env.app.replicaPrefix, newest, source);
+    await buildDatabase(ctx.app, ctx.env.app.replicaPrefix, await completeGeneration(ctx.app, ctx.env.app.replicaPrefix, newest, ctx.poll), source);
   } else {
     const manifest = await readManifest(ctx, options.backupId);
     if (manifest === null) throw new OpsError(`backup ${options.backupId} does not exist or is incomplete`, 1, options.backupId);

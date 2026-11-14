@@ -109,9 +109,12 @@ export function blobstoreOf(store: ObjectStore): Blobstore {
 
 /**
  * Rebuilds the database of `generation` from its snapshot and exactly the segments that listing shows into `outFile`,
- * which passes `quick_check`. A later listing that lags behind cannot drop a segment.
+ * which passes `quick_check`. A later listing that lags behind cannot drop a segment; a listing with a gap in its
+ * segment numbers is refused.
  */
 export async function buildDatabase(store: ObjectStore, prefix: string, generation: Generation, outFile: string): Promise<{ generation: string; at: number }> {
+  const gap = missingSegments(generation, numbered(generation));
+  if (gap.length > 0) throw new OpsError(gapMessage(generation, gap), 1, `${prefix}gen/${generation.name}`);
   const listed = [generation.snapshot, ...generation.segments].filter((info): info is ObjectInfo => info !== null).map((info) => ({ key: info.key, size: info.size }));
   const blobs: Blobstore = { ...blobstoreOf(store), list: async () => ok(listed) };
   const result = await restoreFromBlobs(blobs, prefix, { generation: generation.name }, outFile);
@@ -158,12 +161,37 @@ function isSeal(value: unknown): value is Seal {
 
 const segmentSeq = (info: ObjectInfo): number => Number(SEGMENT.exec(info.key.slice(info.key.lastIndexOf("/wal/") + 1))?.[1]);
 
-const missingSegments = (generation: Generation, segments: number): number => {
+const missingSegments = (generation: Generation, segments: number): number[] => {
   const seen = new Set(generation.segments.map(segmentSeq));
-  let missing = 0;
-  for (let seq = 0; seq < segments; seq++) if (!seen.has(seq)) missing += 1;
+  const missing: number[] = [];
+  for (let seq = 0; seq < segments; seq++) if (!seen.has(seq)) missing.push(seq);
   return missing;
 };
+
+const numbered = (generation: Generation): number => Math.max(-1, ...generation.segments.map(segmentSeq)) + 1;
+
+const gapMessage = (generation: Generation, missing: readonly number[]): string => `generation ${generation.name} lacks segment${missing.length > 1 ? "s" : ""} ${missing.join(", ")} of the ${numbered(generation)} its listing numbers`;
+
+async function listUntilComplete(store: ObjectStore, prefix: string, generation: Generation, segments: (listed: Generation) => number, refuse: (missing: number[], listings: number, listed: Generation) => string, poll: PollOptions): Promise<Generation> {
+  const sleep = poll.sleep ?? defaultSleep;
+  let listed = generation;
+  for (let i = 0; ; i++) {
+    const missing = missingSegments(listed, segments(listed));
+    if (missing.length === 0) return listed;
+    if (i >= (poll.attempts ?? 30)) throw new OpsError(refuse(missing, i, listed), 1, `${prefix}gen/${generation.name}`);
+    await sleep(poll.delayMs ?? 1000);
+    listed = (await listGenerations(store, prefix)).find((g) => g.name === generation.name) ?? listed;
+  }
+}
+
+/**
+ * Lists `generation` again until its segment numbers run without a gap from 0 to the highest it shows, since a
+ * runtime numbers them consecutively and a listing may show a later segment before an earlier one; refuses, naming
+ * the missing numbers, when they do not within `poll.attempts` listings.
+ */
+export function completeGeneration(store: ObjectStore, prefix: string, generation: Generation, poll: PollOptions = {}): Promise<Generation> {
+  return listUntilComplete(store, prefix, generation, numbered, (missing, listings, listed) => `${gapMessage(listed, missing)} after ${listings} listings`, poll);
+}
 
 /**
  * Classifies the newest generation of a stopped replica. A valid `sealed.json`, read from the store whether or not
@@ -177,15 +205,10 @@ export async function sealOf(store: ObjectStore, prefix: string, generation: Gen
   const seal: unknown = data === null ? null : parseJson(data);
   if (!isSeal(seal)) {
     const major = majorOf(runtime);
-    return { generation: generation.name, lastFrameAt: generation.lastFrameAt, runtime, state: major === null ? "unknown" : major < SEALING_MAJOR ? "unsupported" : "unsealed", seal: null, listed: generation };
+    const listed = await completeGeneration(store, prefix, generation, poll);
+    return { generation: generation.name, lastFrameAt: listed.lastFrameAt, runtime, state: major === null ? "unknown" : major < SEALING_MAJOR ? "unsupported" : "unsealed", seal: null, listed };
   }
-  const sleep = poll.sleep ?? defaultSleep;
-  let listed = generation;
-  for (let i = 0; missingSegments(listed, seal.segments) > 0; i++) {
-    if (i >= (poll.attempts ?? 30)) throw new OpsError(`generation ${generation.name} is sealed with ${seal.segments} segment(s), the listing shows ${seal.segments - missingSegments(listed, seal.segments)} after ${i} listings`, 1, `${prefix}gen/${generation.name}`);
-    await sleep(poll.delayMs ?? 1000);
-    listed = (await listGenerations(store, prefix)).find((g) => g.name === generation.name) ?? listed;
-  }
+  const listed = await listUntilComplete(store, prefix, generation, () => seal.segments, (missing, listings) => `generation ${generation.name} is sealed with ${seal.segments} segment(s), the listing shows ${seal.segments - missing.length} after ${listings} listings`, poll);
   return { generation: generation.name, lastFrameAt: listed.lastFrameAt, runtime, state: "sealed", seal, listed };
 }
 

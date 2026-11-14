@@ -131,7 +131,9 @@ reports, once a listing shows every WAL segment the seal counts, and builds the 
 listing that keeps lacking one stops the backup with exit 1. Without it the backup reads `unsealed` (the process stopped without teardown, so frames written after
 its last sync may be missing), `unsupported` for a runtime before 6, or `unknown` when the target cannot tell
 the runtime version. All three show the time of the last shipped segment and need the answer
-`unsealed-stop`. A backup of a running app reads `live`. The `local` target reads the runtime version from
+`unsealed-stop`. A backup of a running app reads `live`. A runtime numbers the segments of a generation
+consecutively, so whatever the seal, a listing that shows a later segment without an earlier one is listed
+again, and a gap that stays stops the backup or restore with exit 1, naming the missing number. The `local` target reads the runtime version from
 the packages the app resolves, also when it gets `replication-sqlite` through another package.
 
 Verification works only from what the backup location holds: it downloads `db.sqlite`, compares its sha256

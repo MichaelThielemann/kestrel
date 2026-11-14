@@ -136,6 +136,74 @@ describe("segment numbers", () => {
     if (!listed) throw new Error("a generation expected");
     expect((await sealOf(store, prefix, listed, "6.0.0", fast)).state).toBe("sealed");
   });
+
+  for (const runtime of ["5.8.1", "6.0.0", null]) {
+    it(`refuses a generation without a seal whose listing keeps lacking a segment between others, runtime ${runtime ?? "unknown"}`, async () => {
+      const store = memoryStore(new MemoryBucket(`gap-${runtime ?? "unknown"}`));
+      await store.put(`database/gen/${gen}/snapshot.db`, new Uint8Array([1]));
+      await store.put(segment(0), new Uint8Array([2]));
+      await store.put(segment(2), new Uint8Array([4]));
+      const [listed] = await listGenerations(store, "database/");
+      if (!listed) throw new Error("a generation expected");
+      await expect(sealOf(store, "database/", listed, runtime, fast)).rejects.toThrow(`generation ${gen} lacks segment 1 of the 3 its listing numbers`);
+    });
+  }
+
+  it("lists a generation without a seal again until a segment between others shows", async () => {
+    const bucket = new MemoryBucket("gap-lag");
+    const store = memoryStore(bucket);
+    await store.put(`database/gen/${gen}/snapshot.db`, new Uint8Array([1]));
+    for (const seq of [0, 1, 2]) await store.put(segment(seq), new Uint8Array([seq + 2]));
+    hide(bucket, segment(1), 3);
+    const [listed] = await listGenerations(store, "database/");
+    if (!listed) throw new Error("a generation expected");
+    expect(listed.segments).toHaveLength(2);
+    const report = await sealOf(store, "database/", listed, "5.8.1", fast);
+    expect(report.state).toBe("unsupported");
+    expect(report.listed.segments.map((s) => s.key)).toEqual([segment(0), segment(1), segment(2)]);
+  });
+
+  it("does not rebuild a generation from a listing that lacks a segment between others", async () => {
+    const store = memoryStore(new MemoryBucket("gap-build"));
+    await store.put(`database/gen/${gen}/snapshot.db`, new Uint8Array([1]));
+    await store.put(segment(0), new Uint8Array([2]));
+    await store.put(segment(2), new Uint8Array([4]));
+    const [listed] = await listGenerations(store, "database/");
+    if (!listed) throw new Error("a generation expected");
+    const dir = mkdtempSync(join(tmpdir(), "kestrel-ops-gap-"));
+    try {
+      await expect(buildDatabase(store, "database/", listed, join(dir, "built.db"))).rejects.toThrow(`generation ${gen} lacks segment 1 of the 3 its listing numbers`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  for (const mode of [["--freeze"], []]) {
+    it(`refuses a ${mode.length > 0 ? "frozen" : "live"} backup of a 5.8.1 replica whose newest generation lacks a segment between others`, async () => {
+      const bucket = new MemoryBucket(`gap-backup-${mode.length}`);
+      const store = memoryStore(bucket);
+      const h = createHarness({ store, runtime: "5.8.1" });
+      try {
+        await h.app.start();
+        await h.app.seed();
+        h.app.run(`INSERT INTO authn_users VALUES ('u3', 'writer', 'hash-3', '["editor"]', 1, 1)`);
+        await h.app.sync();
+        h.app.run(`INSERT INTO pages VALUES ('late', 'Late', 'shipped last')`);
+        await h.app.sync();
+        const newest = (await listGenerations(store, PREFIXES.replica)).at(-1);
+        const segments = newest?.segments ?? [];
+        const middle = segments.at(-2);
+        if (segments.length < 2 || !middle) throw new Error("a generation with two segments expected");
+        bucket.objects.delete(middle.key);
+        const backup = await h.run(["backup", "create", ...mode, "--yes", "--answers", h.answers({ "unsealed-stop": "accept" })]);
+        expect(backup.code).toBe(1);
+        expect(backup.stderr).toContain(`lacks segment ${segments.length - 2} of the ${segments.length} its listing numbers`);
+        expect([...bucket.objects.keys()].some((key) => key.endsWith("/manifest.json"))).toBe(false);
+      } finally {
+        await h.dispose();
+      }
+    });
+  }
 });
 
 describe("local target", () => {
