@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import type { ModuleHealth } from "./defineModule.ts";
+import { boundaryCast } from "./cast.ts";
 import { KestrelBootError } from "./errors.ts";
 
 /** Options for {@link acquireInstanceLock}. */
@@ -32,6 +33,7 @@ export interface InstanceLock {
 interface LockRecord {
   instanceId: string;
   pid: number;
+  pidNamespace: string;
   host: string;
   startedAt: string;
   heartbeatAt: string;
@@ -54,13 +56,33 @@ const DEFAULT_HEARTBEAT_MS = 10_000;
 const ATTEMPTS = 20;
 const RETRY_PAUSE_MS = 20;
 const GUARD_STALE_MS = 5_000;
+const SAME_PROCESS_SLACK_MS = 1_000;
+const HOLDERS_KEY = Symbol.for("kestrel.instanceLocks");
 
-const holders = new Map<string, Holder>();
+const holders = sharedHolders();
+const PID_NAMESPACE = pidNamespace();
+const PROCESS_STARTED_AT = Date.now() - process.uptime() * 1000;
 
 const UNLOCKED: InstanceLock = {
   release() {},
   health: () => ({ ok: true }),
 };
+
+function sharedHolders(): Map<string, Holder> {
+  const existing: unknown = Reflect.get(globalThis, HOLDERS_KEY);
+  if (existing instanceof Map) return boundaryCast<Map<string, Holder>>(existing, "host");
+  const created = new Map<string, Holder>();
+  Reflect.set(globalThis, HOLDERS_KEY, created);
+  return created;
+}
+
+function pidNamespace(): string {
+  try {
+    return readlinkSync("/proc/self/ns/pid");
+  } catch {
+    return "";
+  }
+}
 
 /**
  * The lock file for a database file: the file's real path with `.instance` appended, resolved
@@ -77,13 +99,19 @@ export function instanceLockFile(file: string): string {
  * file next to the database (see {@link instanceLockFile}), never a row inside it, so it cannot
  * travel with a replica, snapshot or restore. `:memory:` takes no lock.
  *
- * A lock is taken over when its heartbeat is older than `ttlMs`, when it was written on this host
- * by a process that no longer runs, or when it carries this process's PID but an instance id this
- * process does not hold (a container restarted under the same PID). Any other lock makes the call
- * throw a `KestrelBootError` with code `instance-locked` naming that process's host, PID and start
- * time and the `optOut` setting. Several holders in one process share one lock; the last of them
- * to call `release()` deletes the lock file. The heartbeat runs on a timer that does not keep
- * the process alive.
+ * A lock is taken over when its heartbeat is older than `ttlMs`. A lock written on this host in
+ * this PID namespace is also taken over at once when its process no longer runs, or when it
+ * carries this process's PID and a start time earlier than this process's own (a container
+ * restarted under the same PID). A lock from another PID namespace, such as another container
+ * with the same hostname, is judged by its heartbeat alone. Any other lock makes the call throw a
+ * `KestrelBootError` with code `instance-locked` naming that process's host, PID and start time
+ * and the `optOut` setting; `module` should be the calling module's name so that boot reports
+ * that code.
+ *
+ * Several holders in one process share one lock, also across copies of this module and across
+ * worker threads; the options of the first holder in a thread apply. The last holder in a thread
+ * to call `release()` deletes the lock file, and a holder in another thread writes it again with
+ * its next heartbeat. The heartbeat runs on a timer that does not keep the process alive.
  */
 export function acquireInstanceLock(file: string, opts: InstanceLockOptions): InstanceLock {
   if (file === MEMORY) return UNLOCKED;
@@ -122,13 +150,15 @@ function take(file: string, lockPath: string, opts: InstanceLockOptions): Holder
   const ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
   mkdirSync(dirname(lockPath), { recursive: true });
   const now = new Date().toISOString();
-  const record: LockRecord = { instanceId: randomUUID(), pid: process.pid, host: hostname(), startedAt: now, heartbeatAt: now };
+  const record: LockRecord = { instanceId: randomUUID(), pid: process.pid, pidNamespace: PID_NAMESPACE, host: hostname(), startedAt: now, heartbeatAt: now };
   const content = JSON.stringify(record);
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     if (createExclusive(lockPath, content)) return hold(lockPath, record, opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
     const seen = readLock(lockPath);
     if (seen.kind === "absent") continue;
-    if (!isStale(seen, ttlMs)) throw new KestrelBootError(opts.module, refusal(file, lockPath, seen, ttlMs, opts.optOut ?? DEFAULT_OPT_OUT), "instance-locked");
+    const verdict = judge(seen, ttlMs);
+    if (verdict === "taken") throw new KestrelBootError(opts.module, refusal(file, lockPath, seen, ttlMs, opts.optOut ?? DEFAULT_OPT_OUT), "instance-locked");
+    if (verdict === "this-process" && seen.kind === "held") return hold(lockPath, { ...seen.record }, opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
     const outcome = guarded(lockPath, () => replaceIf(lockPath, seen.raw, content));
     if (outcome === "replaced" && ownedBy(lockPath, record.instanceId)) return hold(lockPath, record, opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
     if (outcome === BUSY) pause(RETRY_PAUSE_MS);
@@ -294,12 +324,13 @@ function readLock(lockPath: string): Seen {
   }
 }
 
-function isStale(seen: Exclude<Seen, { kind: "absent" }>, ttlMs: number): boolean {
-  if (seen.kind === "unreadable") return Date.now() - seen.mtimeMs > ttlMs;
+function judge(seen: Exclude<Seen, { kind: "absent" }>, ttlMs: number): "stale" | "this-process" | "taken" {
+  if (seen.kind === "unreadable") return Date.now() - seen.mtimeMs > ttlMs ? "stale" : "taken";
   const { record } = seen;
-  if (!(Date.now() - Date.parse(record.heartbeatAt) <= ttlMs)) return true;
-  if (record.host !== hostname()) return false;
-  return record.pid === process.pid || !isAlive(record.pid);
+  if (!(Date.now() - Date.parse(record.heartbeatAt) <= ttlMs)) return "stale";
+  if (record.host !== hostname() || record.pidNamespace !== PID_NAMESPACE) return "taken";
+  if (record.pid === process.pid) return Date.parse(record.startedAt) < PROCESS_STARTED_AT - SAME_PROCESS_SLACK_MS ? "stale" : "this-process";
+  return isAlive(record.pid) ? "taken" : "stale";
 }
 
 function refusal(file: string, lockPath: string, seen: Exclude<Seen, { kind: "absent" }>, ttlMs: number, optOut: string): string {
@@ -328,11 +359,11 @@ function parseRecord(raw: string): LockRecord | undefined {
     return undefined;
   }
   if (typeof value !== "object" || value === null) return undefined;
-  if (!("instanceId" in value && "pid" in value && "host" in value && "startedAt" in value && "heartbeatAt" in value)) return undefined;
-  const { instanceId, pid, host, startedAt, heartbeatAt } = value;
-  if (typeof instanceId !== "string" || typeof host !== "string" || typeof startedAt !== "string" || typeof heartbeatAt !== "string") return undefined;
-  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0 || Number.isNaN(Date.parse(heartbeatAt))) return undefined;
-  return { instanceId, pid, host, startedAt, heartbeatAt };
+  if (!("instanceId" in value && "pid" in value && "pidNamespace" in value && "host" in value && "startedAt" in value && "heartbeatAt" in value)) return undefined;
+  const { instanceId, pid, pidNamespace, host, startedAt, heartbeatAt } = value;
+  if (typeof instanceId !== "string" || typeof pidNamespace !== "string" || typeof host !== "string" || typeof startedAt !== "string" || typeof heartbeatAt !== "string") return undefined;
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0 || Number.isNaN(Date.parse(startedAt)) || Number.isNaN(Date.parse(heartbeatAt))) return undefined;
+  return { instanceId, pid, pidNamespace, host, startedAt, heartbeatAt };
 }
 
 function errorCode(err: unknown): unknown {

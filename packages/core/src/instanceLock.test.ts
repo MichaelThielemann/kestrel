@@ -1,8 +1,9 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
+import { Worker } from "node:worker_threads";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KestrelBootError } from "./errors.ts";
 import { acquireInstanceLock, instanceLockFile, type InstanceLock } from "./instanceLock.ts";
@@ -10,9 +11,24 @@ import { acquireInstanceLock, instanceLockFile, type InstanceLock } from "./inst
 interface LockRecord {
   instanceId: string;
   pid: number;
+  pidNamespace: string;
   host: string;
   startedAt: string;
   heartbeatAt: string;
+}
+
+function ownPidNamespace(): string {
+  try {
+    return readlinkSync("/proc/self/ns/pid");
+  } catch {
+    return "";
+  }
+}
+
+const FOREIGN_PID_NAMESPACE = "pid:[4026530001]";
+
+function beforeThisProcess(): string {
+  return new Date(Date.now() - process.uptime() * 1000 - 60_000).toISOString();
 }
 
 const LOCK_MODULE = new URL("./instanceLock.ts", import.meta.url).href;
@@ -31,12 +47,12 @@ function take(path: string, opts: Partial<Parameters<typeof acquireInstanceLock>
 function readRecord(): LockRecord {
   const parsed: unknown = JSON.parse(readFileSync(instanceLockFile(file), "utf8"));
   if (typeof parsed !== "object" || parsed === null) throw new Error("lock file is not an object");
-  return { ...{ instanceId: "", pid: 0, host: "", startedAt: "", heartbeatAt: "" }, ...parsed };
+  return { ...{ instanceId: "", pid: 0, pidNamespace: "", host: "", startedAt: "", heartbeatAt: "" }, ...parsed };
 }
 
 function writeRecord(record: Partial<LockRecord>): LockRecord {
   const now = new Date().toISOString();
-  const full: LockRecord = { instanceId: randomUUID(), pid: 4242, host: "other-host", startedAt: now, heartbeatAt: now, ...record };
+  const full: LockRecord = { instanceId: randomUUID(), pid: 4242, pidNamespace: ownPidNamespace(), host: "other-host", startedAt: now, heartbeatAt: now, ...record };
   writeFileSync(instanceLockFile(file), JSON.stringify(full));
   return full;
 }
@@ -84,10 +100,11 @@ describe("instanceLockFile", () => {
 });
 
 describe("acquireInstanceLock", () => {
-  it("writes a sidecar next to the database with instance id, pid, host, start time and heartbeat", () => {
+  it("writes a sidecar next to the database with instance id, pid, pid namespace, host, start time and heartbeat", () => {
     take(file);
     const record = readRecord();
     expect(record.pid).toBe(process.pid);
+    expect(record.pidNamespace).toBe(ownPidNamespace());
     expect(record.host).toBe(hostname());
     expect(record.instanceId).toMatch(/^[0-9a-f-]{36}$/);
     expect(Number.isNaN(Date.parse(record.startedAt))).toBe(false);
@@ -186,10 +203,67 @@ describe("acquireInstanceLock", () => {
     expect(readRecord().pid).toBe(process.pid);
   });
 
-  it("takes over at once a lock with this process's pid but another instance id on the same host", () => {
-    const foreign = writeRecord({ host: hostname(), pid: process.pid });
+  it("takes over at once a lock with this process's pid and pid namespace that was written before this process started", () => {
+    const foreign = writeRecord({ host: hostname(), pid: process.pid, startedAt: beforeThisProcess() });
     take(file);
     expect(readRecord().instanceId).not.toBe(foreign.instanceId);
+    expect(readRecord().pid).toBe(process.pid);
+  });
+
+  it("shares a lock that another thread of this process holds instead of taking it over", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    const sibling = writeRecord({ host: hostname(), pid: process.pid });
+    const lock = take(file);
+    expect(readRecord().instanceId).toBe(sibling.instanceId);
+    vi.advanceTimersByTime(10_000);
+    expect(lock.health()).toEqual({ ok: true });
+    expect(readRecord().instanceId).toBe(sibling.instanceId);
+  });
+
+  it("refuses a fresh lock of a process on this host in another pid namespace, even when no process here has its pid", () => {
+    writeRecord({ host: hostname(), pid: deadPid(), pidNamespace: FOREIGN_PID_NAMESPACE });
+    const err = thrownBy(() => take(file));
+    expect(err).toBeInstanceOf(KestrelBootError);
+    expect(err instanceof KestrelBootError ? err.code : undefined).toBe("instance-locked");
+  });
+
+  it("refuses a fresh lock that carries this process's pid from another pid namespace on this host", () => {
+    writeRecord({ host: hostname(), pid: process.pid, pidNamespace: FOREIGN_PID_NAMESPACE, startedAt: beforeThisProcess() });
+    expect(thrownBy(() => take(file))).toBeInstanceOf(KestrelBootError);
+  });
+
+  it("takes over a lock from another pid namespace on this host once its heartbeat is older than the TTL", () => {
+    const stale = new Date(Date.now() - 120_000).toISOString();
+    writeRecord({ host: hostname(), pid: process.pid, pidNamespace: FOREIGN_PID_NAMESPACE, startedAt: stale, heartbeatAt: stale });
+    take(file);
+    expect(readRecord().pidNamespace).toBe(ownPidNamespace());
+  });
+
+  it("shares the lock with a worker thread of this process, and neither reports a takeover", async () => {
+    const main = take(file, { heartbeatMs: 25 });
+    const script = join(dir, `worker-${randomUUID()}.mjs`);
+    writeFileSync(
+      script,
+      [
+        "import { parentPort, workerData } from \"node:worker_threads\";",
+        `const { acquireInstanceLock } = await import(${JSON.stringify(LOCK_MODULE)});`,
+        "const lock = acquireInstanceLock(workerData, { module: \"store/sqlite\", heartbeatMs: 25 });",
+        "setTimeout(() => {",
+        "  parentPort.postMessage(lock.health());",
+        "  lock.release();",
+        "}, 200);",
+      ].join("\n"),
+    );
+    const worker = new Worker(script, { workerData: file });
+    const workerHealth = await new Promise<unknown>((resolve, reject) => {
+      worker.once("message", resolve);
+      worker.once("error", reject);
+    });
+    await worker.terminate();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(workerHealth).toEqual({ ok: true });
+    expect(main.health()).toEqual({ ok: true });
+    expect(readRecord().pid).toBe(process.pid);
   });
 
   it("refuses an unreadable lock file that was written within the TTL", () => {
@@ -392,6 +466,32 @@ describe("acquireInstanceLock across processes", () => {
       else child.once("exit", () => resolve());
     });
   }
+
+  it("is shared by two copies of the module loaded into one process", () => {
+    const script = join(dir, `copies-${randomUUID()}.mjs`);
+    writeFileSync(
+      script,
+      [
+        `const a = await import(${JSON.stringify(`${LOCK_MODULE}?copy=a`)});`,
+        `const b = await import(${JSON.stringify(`${LOCK_MODULE}?copy=b`)});`,
+        "import { existsSync } from \"node:fs\";",
+        "const [file] = process.argv.slice(2);",
+        "const first = a.acquireInstanceLock(file, { module: \"store/sqlite\", heartbeatMs: 25 });",
+        "const second = b.acquireInstanceLock(file, { module: \"store/sqlite\", heartbeatMs: 25 });",
+        "setTimeout(() => {",
+        "  const health = [first.health(), second.health()];",
+        "  first.release();",
+        "  const afterFirst = existsSync(a.instanceLockFile(file));",
+        "  second.release();",
+        "  const afterSecond = existsSync(a.instanceLockFile(file));",
+        "  process.stdout.write(JSON.stringify({ health, afterFirst, afterSecond }));",
+        "}, 200);",
+      ].join("\n"),
+    );
+    const run = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", script, file], { encoding: "utf8", timeout: 15_000 });
+    expect(run.stderr).toBe("");
+    expect(JSON.parse(run.stdout)).toEqual({ health: [{ ok: true }, { ok: true }], afterFirst: true, afterSecond: false });
+  });
 
   it("lets a new process take the lock at once after the holder was killed with SIGKILL", async () => {
     const holder = start(childScript(), 0);
