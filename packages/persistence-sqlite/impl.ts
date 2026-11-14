@@ -301,7 +301,7 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
     for (const field of Object.keys(fields)) fieldType(collection, field);
     const id = givenId ?? randomUUID();
     const columns = ["id", ...Object.keys(schema)];
-    const values: SqlValue[] = [id, ...Object.entries(schema).map(([f, def]) => encode(def.type, fields[f]))];
+    const values: SqlValue[] = [id, ...Object.entries(schema).map(([f, def]) => encode(def.type, Object.hasOwn(fields, f) ? fields[f] : undefined))];
     const inserted = run(() => prepare(`INSERT INTO ${quote(collection, "collection")} (${columns.map((c) => quote(c, "field")).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`).run(...values));
     if (isErr(inserted)) {
       if (inserted.error.code !== "CONFLICT" || inserted.error.details?.field !== "id") return inserted;

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import type { Document, Filter, Persistence } from "./persistence.ts";
+import type { Document, Filter, Persistence, Schema } from "./persistence.ts";
 import { expectErr, expectOk } from "./testing/result.ts";
 
 interface Thing extends Document {
@@ -234,6 +234,17 @@ export function persistenceContractTests(make: () => Promise<Persistence>) {
       await expect(db.findMany("things", { toString: 1 })).rejects.toThrow(/unknown field "toString"/);
       await expect(db.findMany("things", { hasOwnProperty: { eq: 1 } })).rejects.toThrow(/unknown field "hasOwnProperty"/);
       await expect(db.createOne("things", { name: "x", valueOf: 1 })).rejects.toThrow(/unknown field "valueOf"/);
+    });
+
+    it("stores null for an omitted field named like an Object.prototype member", async () => {
+      const schema: Schema = {};
+      schema["valueOf"] = "boolean";
+      schema["constructor"] = "string";
+      schema["toString"] = "json";
+      expectOk(await db.ensureCollection("shadowed", schema));
+      const created = expectOk(await db.createOne("shadowed", { id: "1" }));
+      expect(created).toEqual({ id: "1", valueOf: null, constructor: null, toString: null });
+      expect(expectOk(await db.findMany("shadowed", { valueOf: true })).items).toEqual([]);
     });
 
     it("findMany sorts null fields first ascending and last descending", async () => {
