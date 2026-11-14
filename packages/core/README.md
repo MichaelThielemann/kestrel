@@ -66,13 +66,11 @@ travels with a replica, snapshot or restore. A lock whose heartbeat (every 10 s)
 365 days; the lock file records the holder's, and the longer of that and the caller's applies) is taken over,
 and so is one whose process on the same machine and in the same PID namespace is gone. On Linux that is judged by
 PID and process start time; on macOS and Windows by the PID alone, so a lock whose PID went to a new process waits for
-the TTL. "The same machine" means the same Linux boot id, or the same hostname where the system has none. A lock that
-was written under this hostname with another boot id, as a restart of the machine leaves it, is taken over at once
-when its last heartbeat lies more than a third of its TTL before the machine started by the wall clock. Any other
+the TTL. "The same machine" means the same Linux boot id, or the same hostname where the system has none. Any other
 lock makes `acquireInstanceLock` throw a `KestrelBootError` with code `instance-locked` at once, naming the holder's
 host, PID and start time and the time from which the lock is taken over. That includes a lock from another PID
-namespace, such as the previous run of a container restarted after its process was killed, and a lock whose machine
-restarted within a third of the TTL (20 s) after its last heartbeat: the boot fails until 60 s after that heartbeat, so a restart policy has
+namespace, such as the previous run of a container restarted after its process was killed, and a lock written on this
+machine before it restarted: the boot fails until the TTL after that lock's last heartbeat, so a restart policy has
 to keep retrying for longer than the TTL. Only when the kernel gave a restarted container's new namespace the old
 one's id is its lock judged by PID and start time and taken over at once. A process that exits on its own, through `process.exit()`
 or an uncaught exception gives up the lock of its main thread on exit, and a worker thread that ends on its own gives
