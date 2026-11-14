@@ -66,6 +66,32 @@ describe("sanitizeSvg", () => {
       }
     });
 
+    it("removes an image reference that names its target as a string or through an image function", () => {
+      for (const value of [
+        "image-set('http://evil.example/a.png' 1x)",
+        'image-set("http://evil.example/a.png" 1x)',
+        "-webkit-image-set('http://evil.example/a.png' 1x)",
+        "IMAGE-SET('http://evil.example/a.png' 1x)",
+        "image-set ( 'http://evil.example/a.png' 1x)",
+        "cross-fade('http://evil.example/a.png', url(#g), 50%)",
+        "image('http://evil.example/a.png')",
+        "element(#g)",
+        "src('http://evil.example/a.png')",
+        "url(#g) 'http://evil.example/a.png'",
+      ]) {
+        for (const attribute of ["mask", "clip-path", "filter", "marker-start", "fill", "stroke"]) {
+          const out = sanitizeSvg(wrap(`${attribute}="${value.replace(/"/g, "&quot;")}"`));
+          expect(out, `${attribute}: ${value}`).not.toContain("evil.example");
+          expect(out, `${attribute}: ${value}`).not.toContain(`${attribute}=`);
+        }
+      }
+    });
+
+    it("keeps a font-family list that quotes a family name", () => {
+      const out = sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg"><text font-family="\'Helvetica Neue\', Arial">x</text></svg>');
+      expect(out).toContain("font-family=");
+    });
+
     it("keeps drawing attributes that carry no url()", () => {
       const out = sanitizeSvg(wrap('fill="red" stroke="#0a0a0a" stroke-width="2" transform="translate(1 2)" d="M0 0L5 5"'));
       for (const kept of ['fill="red"', 'stroke="#0a0a0a"', 'stroke-width="2"', 'transform="translate(1 2)"', 'd="M0 0L5 5"']) expect(out).toContain(kept);

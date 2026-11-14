@@ -114,16 +114,21 @@ const HREF_ATTRIBUTES = new Set(["href", "xlink:href"]);
 
 const URL_FUNCTION = /url\s*\(\s*["']?\s*(.?)/gi;
 
-function referencesOtherDocument(value: string): boolean {
+const FRAGMENT_URL = /url\s*\(\s*(["']?)\s*#[^)"'\s]*\1\s*\)/gi;
+const IMAGE_FUNCTION = /(?:image-set|cross-fade|element|image|src)\s*\(/i;
+
+function referencesOtherDocument(name: string, value: string): boolean {
   for (const match of value.matchAll(URL_FUNCTION)) if (match[1] !== "#") return true;
-  return false;
+  if (name === "font-family") return false;
+  const rest = value.replace(FRAGMENT_URL, "");
+  return /["']/.test(rest) || IMAGE_FUNCTION.test(rest) || value.includes("\\");
 }
 
 function dropExternalReferences(tagName: string, attribs: sanitizeHtml.Attributes): sanitizeHtml.Tag {
   const attribs2: sanitizeHtml.Attributes = {};
   for (const [name, value] of Object.entries(attribs)) {
     if (HREF_ATTRIBUTES.has(name) && !value.startsWith("#")) continue;
-    if (!HREF_ATTRIBUTES.has(name) && (referencesOtherDocument(value) || (name !== "font-family" && value.includes("\\")))) continue;
+    if (!HREF_ATTRIBUTES.has(name) && referencesOtherDocument(name, value)) continue;
     attribs2[name] = value;
   }
   return { tagName, attribs: attribs2 };
