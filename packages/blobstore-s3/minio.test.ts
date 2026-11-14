@@ -132,12 +132,19 @@ describe.skipIf(!endpoint)("blobstore/s3 against MinIO", () => {
       const etag = expectOk(await admin.head("src.txt"))?.etag ?? "";
       const copied = expectOk(await admin.copy("src.txt", "objects/dst.txt", { ifMatch: etag }));
       expect(copied.size).toBe(bytes.byteLength);
+      expect(copied.etag).toBe(expectOk(await admin.head("objects/dst.txt"))?.etag);
       expect(Array.from(expectOk(await store.get("objects/dst.txt")) ?? [])).toEqual(Array.from(bytes));
       expect(await contentTypeOf(prefix, "objects/dst.txt")).toBe("text/plain");
       expectOk(await store.put("src.txt", new TextEncoder().encode("changed source"), { contentType: "text/plain" }));
       expectErr(await admin.copy("src.txt", "objects/stale.txt", { ifMatch: etag }), "PRECONDITION_FAILED");
       expect(expectOk(await store.get("objects/stale.txt"))).toBeNull();
       expectErr(await admin.copy("absent.txt", "objects/x.txt"), "NOT_FOUND");
+    });
+
+    it("throws for a bucket that does not exist instead of reporting a missing key", async () => {
+      const admin = createS3Admin({ ...baseConfig, bucket: "kestrel-no-such-bucket", prefix: "" }, client);
+      await expect(admin.head("k")).rejects.toThrow(/bucket/);
+      await expect(admin.copy("k", "d")).rejects.toThrow(/bucket/);
     });
 
     it("reads a server time close to the local clock and leaves no probe object", async () => {

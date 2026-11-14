@@ -1,4 +1,4 @@
-import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
@@ -16,6 +16,8 @@ interface StoredObject {
 interface FakeBehaviour {
   ignoreConditions?: boolean;
   notImplementedConditions?: boolean;
+  refuseAllConditions?: boolean;
+  missingBucket?: boolean;
   listingLag?: number;
   staleHeadsAfterOverwrite?: number;
   truncateCopyTo?: number;
@@ -51,12 +53,17 @@ function fakeS3(behaviour: FakeBehaviour = {}) {
   function conditional(headers: Array<string | undefined>): boolean {
     if (!headers.some((header) => header !== undefined)) return false;
     if (behaviour.notImplementedConditions === true) throw httpError("NotImplemented", 501);
+    if (behaviour.refuseAllConditions === true) throw httpError("PreconditionFailed", 412);
     return behaviour.ignoreConditions !== true;
   }
 
   const client: S3AdminLike = {
     async send(command) {
       sent.push(command);
+      if (behaviour.missingBucket === true) {
+        throw command instanceof HeadObjectCommand || command instanceof HeadBucketCommand ? httpError("NotFound", 404) : httpError("NoSuchBucket", 404);
+      }
+      if (command instanceof HeadBucketCommand) return {};
       if (command instanceof PutObjectCommand) {
         const key = command.input.Key ?? "";
         const { IfNoneMatch, IfMatch } = command.input;
@@ -109,7 +116,7 @@ function fakeS3(behaviour: FakeBehaviour = {}) {
         if (conditional([CopySourceIfMatch]) && CopySourceIfMatch !== undefined && CopySourceIfMatch !== object.etag) throw httpError("PreconditionFailed", 412);
         const data = behaviour.truncateCopyTo === undefined ? object.data : object.data.slice(0, behaviour.truncateCopyTo);
         store(command.input.Key ?? "", data);
-        return {};
+        return { CopyObjectResult: { ETag: objects.get(command.input.Key ?? "")?.etag } };
       }
       throw new Error("unexpected command");
     },
@@ -259,7 +266,8 @@ describe("blobstore/s3 admin: copy", () => {
     };
     s3.put("src", 6);
     const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
-    expectErr(await admin.copy("src", "dst", { ifMatch: stale }), "PRECONDITION_FAILED");
+    const error = expectErr(await admin.copy("src", "dst", { ifMatch: stale }), "PRECONDITION_FAILED");
+    expect(error.details).toEqual({ expectedEtag: stale, foundEtag: null, reason: "store-refused", destinationWritten: false });
     expect(s3.objects.has("dst")).toBe(false);
   });
 
@@ -269,7 +277,8 @@ describe("blobstore/s3 admin: copy", () => {
     const stale = normalizeEtag(s3.etagOf("src"));
     s3.put("src", 6);
     const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
-    expectErr(await admin.copy("src", "dst", { ifMatch: stale }), "PRECONDITION_FAILED");
+    const error = expectErr(await admin.copy("src", "dst", { ifMatch: stale }), "PRECONDITION_FAILED");
+    expect(error.details).toMatchObject({ expectedEtag: stale, foundEtag: normalizeEtag(s3.etagOf("src")), reason: "source-changed", destinationWritten: false });
     expect(s3.objects.has("dst")).toBe(false);
   });
 
@@ -284,7 +293,99 @@ describe("blobstore/s3 admin: copy", () => {
       return result;
     };
     const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
-    expectErr(await admin.copy("src", "dst", { ifMatch: expected }), "PRECONDITION_FAILED");
+    const error = expectErr(await admin.copy("src", "dst", { ifMatch: expected }), "PRECONDITION_FAILED");
+    expect(error.details).toMatchObject({ reason: "source-changed", destinationWritten: true, destinationRemoved: true });
+    expect(s3.objects.has("dst")).toBe(false);
+  });
+
+  it.each([["the same size", "BBBB"], ["another size", "BBBBBB"]])("removes a destination written from a source rewritten just before the copy, with %s", async (_label, rewritten) => {
+    const s3 = fakeS3({ ignoreConditions: true });
+    s3.put("src", "AAAA");
+    const expected = normalizeEtag(s3.etagOf("src"));
+    const original = s3.client.send.bind(s3.client);
+    s3.client.send = async (command) => {
+      if (command instanceof CopyObjectCommand) s3.put("src", rewritten);
+      return original(command);
+    };
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    const error = expectErr(await admin.copy("src", "objects/src", { ifMatch: expected }), "PRECONDITION_FAILED");
+    expect(error.details).toMatchObject({ expectedEtag: expected, reason: "source-changed", destinationWritten: true, destinationRemoved: true });
+    expect(s3.objects.has("objects/src")).toBe(false);
+  });
+
+  it("reports a destination it could not remove after a source rewritten during the copy", async () => {
+    const s3 = fakeS3({ ignoreConditions: true });
+    s3.put("src", "AAAA");
+    const expected = normalizeEtag(s3.etagOf("src"));
+    const original = s3.client.send.bind(s3.client);
+    s3.client.send = async (command) => {
+      if (command instanceof CopyObjectCommand) s3.put("src", "BBBB");
+      if (command instanceof DeleteObjectCommand) throw httpError("AccessDenied", 403);
+      return original(command);
+    };
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    const error = expectErr(await admin.copy("src", "dst", { ifMatch: expected }), "PRECONDITION_FAILED");
+    expect(error.details).toMatchObject({ destinationWritten: true, destinationRemoved: false });
+    expect(s3.objects.has("dst")).toBe(true);
+  });
+
+  it("reports a source deleted during the copy without a found ETag and removes the destination", async () => {
+    const s3 = fakeS3({ ignoreConditions: true });
+    s3.put("src", "AAAA");
+    const expected = normalizeEtag(s3.etagOf("src"));
+    const original = s3.client.send.bind(s3.client);
+    s3.client.send = async (command) => {
+      const result = await original(command);
+      if (command instanceof CopyObjectCommand) s3.objects.delete("src");
+      return result;
+    };
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    const error = expectErr(await admin.copy("src", "dst", { ifMatch: expected }), "PRECONDITION_FAILED");
+    expect(error.details).toMatchObject({ foundEtag: null, reason: "source-missing", destinationRemoved: true });
+    expect(s3.objects.has("dst")).toBe(false);
+  });
+
+  it("removes a destination that does not carry the source's size", async () => {
+    const s3 = fakeS3({ truncateCopyTo: 4 });
+    s3.put("src", 10);
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    const error = expectErr(await admin.copy("src", "dst"), "VERIFY_FAILED");
+    expect(error.details).toMatchObject({ destinationRemoved: true });
+    expect(s3.objects.has("dst")).toBe(false);
+  });
+
+  it("waits out a stale read of the same size and reports the ETag of the new destination", async () => {
+    const s3 = fakeS3({ staleHeadsAfterOverwrite: 2 });
+    s3.put("dst", "OLDX");
+    const oldEtag = normalizeEtag(s3.etagOf("dst"));
+    s3.put("src", "NEWX");
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    const copied = expectOk(await admin.copy("src", "dst"));
+    expect(copied.etag).not.toBe(oldEtag);
+    expect(copied.etag).toBe(normalizeEtag(s3.etagOf("dst")));
+  });
+
+  it("gives up on a stale destination of the same size beyond the verification attempts", async () => {
+    const s3 = fakeS3({ staleHeadsAfterOverwrite: 50 });
+    s3.put("dst", "OLDX");
+    s3.put("src", "NEWX");
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, { ...fastOptions, verifyAttempts: 3 });
+    expectErr(await admin.copy("src", "dst"), "VERIFY_FAILED");
+  });
+
+  it("answers a missing bucket by throwing instead of reporting a missing key", async () => {
+    const admin = createS3Admin({ bucket: "typo", prefix: "" }, fakeS3({ missingBucket: true }).client, fastOptions);
+    await expect(admin.head("k")).rejects.toThrow(/bucket/);
+    await expect(admin.copy("k", "d")).rejects.toThrow(/bucket/);
+  });
+
+  it("still answers Ok(null) and NOT_FOUND for a missing key in an existing bucket", async () => {
+    const s3 = fakeS3();
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    expect(expectOk(await admin.head("nope"))).toBeNull();
+    expect(expectOk(await admin.head("still-nope"))).toBeNull();
+    expectErr(await admin.copy("nope", "dst"), "NOT_FOUND");
+    expect(s3.sent.filter((sent) => sent instanceof HeadBucketCommand).length).toBe(1);
   });
 
   it("falls back to its own checks when the store answers 501 to the conditional header", async () => {
@@ -383,6 +484,27 @@ describe("blobstore/s3 admin: probeCapabilities", () => {
     }
   });
 
+  it("reports a store that refuses every conditional request as unsupported, since a matching condition is refused too", async () => {
+    const s3 = fakeS3({ refuseAllConditions: true });
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    const probed = expectOk(await admin.probeCapabilities());
+    for (const capability of [probed.conditionalCreate, probed.conditionalOverwrite, probed.copySourceIfMatch]) {
+      expect(capability).toMatchObject({ supported: false, outcome: "always-refused" });
+    }
+    expect(s3.objects.size).toBe(0);
+  });
+
+  it("confirms each capability with a condition the store must accept", async () => {
+    const s3 = fakeS3();
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    expectOk(await admin.probeCapabilities());
+    const puts = s3.sent.filter((sent): sent is PutObjectCommand => sent instanceof PutObjectCommand);
+    const copies = s3.sent.filter((sent): sent is CopyObjectCommand => sent instanceof CopyObjectCommand);
+    expect(puts.filter((put) => put.input.IfNoneMatch === "*").length).toBe(2);
+    expect(puts.filter((put) => put.input.IfMatch !== undefined && !put.input.IfMatch.includes("no-such-etag")).length).toBe(1);
+    expect(copies.filter((copy) => copy.input.CopySourceIfMatch !== undefined && !copy.input.CopySourceIfMatch.includes("no-such-etag")).length).toBe(1);
+  });
+
   it("reports an unexpected refusal as unsupported with the error name", async () => {
     const s3 = fakeS3();
     const original = s3.client.send.bind(s3.client);
@@ -409,6 +531,43 @@ describe("blobstore/s3 admin: probeCapabilities", () => {
   it("answers TRANSIENT when the store cannot be reached and lets a denied write throw", async () => {
     expectErr(await createS3Admin({ bucket: "b", prefix: "" }, failingS3(httpError("SlowDown", 503)), fastOptions).probeCapabilities(), "TRANSIENT");
     await expect(createS3Admin({ bucket: "b", prefix: "" }, failingS3(httpError("AccessDenied", 403)), fastOptions).probeCapabilities()).rejects.toThrow(/AccessDenied/);
+  });
+});
+
+describe("blobstore/s3 admin: cleanup of scratch objects", () => {
+  const denyDeletes = (s3: ReturnType<typeof fakeS3>, error: Error): void => {
+    const original = s3.client.send.bind(s3.client);
+    s3.client.send = async (command) => {
+      if (command instanceof DeleteObjectCommand) throw error;
+      return original(command);
+    };
+  };
+
+  it("lets a denied delete of the clock probe throw, since the probe object would stay in the bucket", async () => {
+    const s3 = fakeS3();
+    denyDeletes(s3, httpError("AccessDenied", 403));
+    await expect(createS3Admin({ bucket: "b", prefix: "media/" }, s3.client, fastOptions).serverTime()).rejects.toThrow(/AccessDenied/);
+  });
+
+  it("lets a denied delete of the capability probe objects throw", async () => {
+    const s3 = fakeS3();
+    denyDeletes(s3, httpError("AccessDenied", 403));
+    await expect(createS3Admin({ bucket: "b", prefix: "media/" }, s3.client, fastOptions).probeCapabilities()).rejects.toThrow(/AccessDenied/);
+  });
+
+  it("ignores a transient failure to delete a probe object", async () => {
+    const s3 = fakeS3();
+    denyDeletes(s3, httpError("ServiceUnavailable", 503));
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    expectOk(await admin.serverTime());
+    expectOk(await admin.probeCapabilities());
+  });
+
+  it("keeps the original error when the probe fails and the cleanup is denied as well", async () => {
+    const s3 = fakeS3({ listingLag: 50 });
+    denyDeletes(s3, httpError("AccessDenied", 403));
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, { ...fastOptions, observeAttempts: 2 });
+    expectErr(await admin.serverTime(), "TRANSIENT");
   });
 });
 
