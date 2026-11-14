@@ -56,6 +56,7 @@ export const configSchema = z
       .prefault({}),
     pipelinesDir: z.string().default("./pipelines"),
     shutdownTimeoutMs: z.number().int().nonnegative().default(30_000),
+    stepLog: z.enum(["all", "errors", "off"]).default("all"),
   })
   .strict();
 

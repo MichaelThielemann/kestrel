@@ -18,3 +18,20 @@ describe("configSchema defaults", () => {
     expect(configSchema.parse({ modules: [], triggers: [], http: null }).http).toBeNull();
   });
 });
+
+describe("configSchema stepLog", () => {
+  it("defaults to all", () => {
+    expect(configSchema.parse({ modules: [], triggers: [] }).stepLog).toBe("all");
+  });
+
+  it("accepts all, errors and off", () => {
+    for (const stepLog of ["all", "errors", "off"] as const) {
+      expect(configSchema.parse({ modules: [], triggers: [], stepLog }).stepLog).toBe(stepLog);
+    }
+  });
+
+  it("rejects sampled and any other value", () => {
+    expect(configSchema.safeParse({ modules: [], triggers: [], stepLog: "sampled" }).success).toBe(false);
+    expect(configSchema.safeParse({ modules: [], triggers: [], stepLog: true }).success).toBe(false);
+  });
+});

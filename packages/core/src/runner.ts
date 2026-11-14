@@ -40,6 +40,8 @@ export interface RunPipelineOptions {
   validateOutput?: boolean;
   /** Wraps an atomic group in one all-or-nothing scope; absent when no loaded module provides one, in which case no pipeline has a group (boot guarantees it). */
   atomicScope?: AtomicScope;
+  /** Which step outcomes reach `logger.step`: `"all"` (the default) every one, `"errors"` every outcome but `ok`, `"off"` none. The observer and the error lines for a thrown step or a failure with a cause are the same in every mode. */
+  stepLog?: "all" | "errors" | "off";
 }
 
 export interface RunTracker {
@@ -224,20 +226,23 @@ async function runStep(
   observer: RunObserver,
   validateOutput: boolean,
   descriptionsSoFar: StepDescription[],
+  stepLog: NonNullable<RunPipelineOptions["stepLog"]>,
 ): Promise<StepOutcome> {
   const started = performance.now();
   const stepEvent: StepStartEvent = { runId, pipeline: pipelineName, step: step.name, at: Date.now() };
   observer.stepStart?.(stepEvent);
   const log = (outcome: StepLog["outcome"], status: number) => {
     const ms = elapsed(started);
-    logger.step({
-      runId,
-      ...(parentRunId === undefined ? {} : { parentRunId }),
-      pipeline: pipelineName,
-      step: step.name,
-      ms,
-      outcome,
-    });
+    if (stepLog === "all" || (stepLog === "errors" && outcome !== "ok")) {
+      logger.step({
+        runId,
+        ...(parentRunId === undefined ? {} : { parentRunId }),
+        pipeline: pipelineName,
+        step: step.name,
+        ms,
+        outcome,
+      });
+    }
     observer.stepEnd?.({ ...stepEvent, ms, status, outcome });
   };
   const problems = inputProblems(step.description, ctx);
@@ -353,7 +358,7 @@ export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInpu
     return result;
   };
   const runOne = (step: ResolvedStep, currentCtx: Context): Promise<StepOutcome> =>
-    runStep(step, currentCtx, pipeline.name, runId, input.parentRunId, logger, observer, options.validateOutput === true, descriptionsSoFar);
+    runStep(step, currentCtx, pipeline.name, runId, input.parentRunId, logger, observer, options.validateOutput === true, descriptionsSoFar, options.stepLog ?? "all");
   const takeOutcome = (outcome: { kind: "err" | "throw"; result: RunResult; thrownMessage?: string }): RunResult => {
     if (outcome.kind === "throw") {
       thrown = true;

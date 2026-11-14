@@ -114,7 +114,8 @@ describe("runPipeline", () => {
   });
 
   it("offers serving callers no option that puts a thrown step's message into the answer", () => {
-    expectTypeOf<keyof RunPipelineOptions>().toEqualTypeOf<"validateOutput" | "atomicScope">();
+    expectTypeOf<keyof RunPipelineOptions>().toEqualTypeOf<"validateOutput" | "atomicScope" | "stepLog">();
+    expectTypeOf<RunPipelineOptions["stepLog"]>().toEqualTypeOf<"all" | "errors" | "off" | undefined>();
   });
 
   it("logs the message and the stack of an unexpected throw under the answer's runId", async () => {
@@ -593,5 +594,51 @@ describe("createRunTracker", () => {
     await expect(tracker.track(async () => { throw new Error("boom"); })).rejects.toThrow("boom");
     expect(tracker.active()).toBe(0);
     expect(await tracker.drain(0)).toBe(true);
+  });
+});
+
+describe("runPipeline stepLog", () => {
+  const validated = { summary: "test", reads: [], writes: [], input: { type: "object", properties: { a: { type: "string" } }, required: ["a"] } };
+  const pipelines = {
+    ok: { name: "ok", steps: [{ name: "pass", description, fn: async (ctx: Context) => ok(ctx) }] },
+    notFound: { name: "notFound", steps: [{ name: "find", description, fn: async (ctx: Context) => ctx.fail({ code: "NOT_FOUND", status: 404, message: "gone", retryable: false, cause: new Error("lookup missed") }) }] },
+    validation: { name: "validation", steps: [{ name: "check", description: validated, fn: async (ctx: Context) => ok(ctx) }] },
+    thrown: { name: "thrown", steps: [{ name: "boom", description, fn: async () => { throw new Error("broken"); } }] },
+  };
+
+  async function runAll(stepLog?: "all" | "errors" | "off") {
+    const steps: string[] = [];
+    const errors: string[] = [];
+    const ends: string[] = [];
+    const logger: Logger = { step: (e) => steps.push(`${e.pipeline} ${e.step} ${e.outcome}`), info() {}, error: (m) => errors.push(m) };
+    const observer: RunObserver = { stepEnd: (e) => ends.push(`${e.pipeline} ${e.step} ${e.status} ${e.outcome}`) };
+    const options: RunPipelineOptions = stepLog === undefined ? {} : { stepLog };
+    for (const pipeline of Object.values(pipelines)) await runPipeline(pipeline, input, logger, observer, options);
+    return { steps, errors, ends };
+  }
+
+  it("logs every step by default and with all", async () => {
+    const expected = ["ok pass ok", "notFound find fail(NOT_FOUND)", "validation check fail(VALIDATION)", "thrown boom error"];
+    expect((await runAll()).steps).toEqual(expected);
+    expect((await runAll("all")).steps).toEqual(expected);
+  });
+
+  it("with errors logs every step whose outcome is not ok", async () => {
+    expect((await runAll("errors")).steps).toEqual(["notFound find fail(NOT_FOUND)", "validation check fail(VALIDATION)", "thrown boom error"]);
+  });
+
+  it("with off logs no step", async () => {
+    expect((await runAll("off")).steps).toEqual([]);
+  });
+
+  it("leaves the observer's step ends and the error lines for a cause and a throw the same in every mode", async () => {
+    const reference = await runAll("all");
+    expect(reference.ends).toEqual(["ok pass 200 ok", "notFound find 404 fail(NOT_FOUND)", "validation check 400 fail(VALIDATION)", "thrown boom 500 error"]);
+    expect(reference.errors).toEqual(['pipeline "notFound" step "find" failed with a cause', 'pipeline "thrown" step "boom" threw']);
+    for (const mode of ["errors", "off"] as const) {
+      const { ends, errors } = await runAll(mode);
+      expect(ends).toEqual(reference.ends);
+      expect(errors).toEqual(reference.errors);
+    }
   });
 });
