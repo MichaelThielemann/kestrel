@@ -113,7 +113,21 @@ describe("local target", () => {
     }
   });
 
-  it.skipIf(process.platform !== "linux")("ignores a pid file whose process started at another time than the one it recorded", async () => {
+  it("reports unknown and sends no signal to a pid whose recorded start time is missing", async () => {
+    const other = await foreign();
+    try {
+      const target = await localTarget({ dir: "app", database: "kestrel.db", command: [process.execPath, "server.mjs"], disk: "persistent" }, { root, clock: Date.now });
+      writeFileSync(join(root, "app", ".kestrel-ops.pid"), JSON.stringify({ pid: other.pid, started: null }));
+      expect(await target.status()).toEqual({ state: "unknown", instances: 1 });
+      await expect(target.stop()).rejects.toThrow(/cannot tell whether pid \d+ .* is the app/);
+      await new Promise((done) => setTimeout(done, 100));
+      expect(other.alive()).toBe(true);
+    } finally {
+      other.end();
+    }
+  });
+
+  it("ignores a pid file whose process started at another time than the one it recorded", async () => {
     const other = await foreign();
     try {
       const target = await localTarget({ dir: "app", database: "kestrel.db", command: [process.execPath, "server.mjs"], disk: "persistent" }, { root, clock: Date.now });

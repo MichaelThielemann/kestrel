@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { uptime } from "node:os";
@@ -102,7 +102,12 @@ function startedAt(pid: number): string | null {
     const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
     return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? null;
   } catch {
-    return null;
+    try {
+      const out = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", env: { PATH: process.env.PATH ?? "/bin:/usr/bin", LC_ALL: "C" }, stdio: ["ignore", "pipe", "ignore"], timeout: 5000 }).trim();
+      return out === "" ? null : `ps ${out}`;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -143,9 +148,9 @@ function installedPackages(dir: string): Record<string, string> {
 
 /**
  * A target that runs the app as a background process group on this machine; its pid, with the process's start
- * time where the system tells it, lives in `.kestrel-ops.pid` in `dir`. A pid file older than the last boot, or
- * whose process started at another time, names no app; a pid that belongs to another user reads as `unknown` and is
- * never signalled.
+ * time from `/proc` or `ps`, lives in `.kestrel-ops.pid` in `dir`. A pid file older than the last boot, or whose
+ * process started at another time, names no app; a pid that belongs to another user, or whose start time is missing
+ * on either side, reads as `unknown` and is never signalled.
  */
 export const localTarget: TargetFactory = (raw, deps) => {
   const config = parseLocal(raw);
@@ -166,14 +171,15 @@ export const localTarget: TargetFactory = (raw, deps) => {
     const started: unknown = typeof value === "number" ? null : Reflect.get(Object(value), "started");
     return typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? { pid, started: typeof started === "string" ? started : null } : null;
   };
-  const running = (): { pid: number; state: "alive" | "foreign" } | null => {
+  const running = (): { pid: number; state: "alive" | "foreign" | "unverified" } | null => {
     const recorded = readPid();
     if (recorded === null) return null;
     const state = liveness(recorded.pid);
     if (state === "gone") return null;
+    if (state === "foreign") return { pid: recorded.pid, state };
     const now = startedAt(recorded.pid);
-    if (recorded.started !== null && now !== null && now !== recorded.started) return null;
-    return { pid: recorded.pid, state };
+    if (recorded.started === null || now === null) return { pid: recorded.pid, state: "unverified" };
+    return now === recorded.started ? { pid: recorded.pid, state } : null;
   };
   const target: Target = {
     transport: config.disk === "ephemeral" ? "promote" : "file",
@@ -187,6 +193,7 @@ export const localTarget: TargetFactory = (raw, deps) => {
     async stop() {
       const app = running();
       if (app?.state === "foreign") throw new OpsError(`pid ${app.pid} in ${pidFile} belongs to another user; stop the app as that user`, 1, "target");
+      if (app?.state === "unverified") throw new OpsError(`cannot tell whether pid ${app.pid} in ${pidFile} is the app: the start time of that process is unknown; stop the app yourself and remove ${pidFile}`, 1, "target");
       if (app !== null) {
         signalGroup(app.pid, "SIGTERM");
         for (let waited = 0; liveness(app.pid) !== "gone"; waited += 100) {
