@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import dns from "node:dns";
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
@@ -130,6 +130,27 @@ describe("kestrel upgrade migrate: arguments and refusals", () => {
     expect(run.code).toBe(2);
     expect(run.errors).toContain("did not pass PRAGMA quick_check");
     expect(files(copy.blobs)).toEqual(before);
+  });
+
+  it("says that the directory of a sound database needs room and write access when SQLite cannot open it, without calling the copy inconsistent", async () => {
+    const copy = fixtureCopy();
+    const sealed = join(copy.dir, "sealed");
+    mkdirSync(sealed);
+    const db = join(sealed, "kestrel.db");
+    copyFileSync(copy.db, db);
+    chmodSync(sealed, 0o555);
+    try {
+      const before = files(copy.blobs);
+      const run = await cli(["migrate", "--root", PROJECT, "--db", db, "--blobs-dir", copy.blobs]);
+      expect(run.code).toBe(2);
+      expect(run.errors).toContain("could not be opened");
+      expect(run.errors).toContain("free space and write access");
+      expect(run.errors).not.toContain("did not pass PRAGMA quick_check");
+      expect(run.errors).not.toContain("take a consistent copy");
+      expect(files(copy.blobs)).toEqual(before);
+    } finally {
+      chmodSync(sealed, 0o755);
+    }
   });
 
   it("refuses a missing blob directory", async () => {
@@ -360,6 +381,37 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
     expect(files(copy.blobs)).toEqual(before);
     expect(rows(copy.db, "SELECT id, key, filename, size, checksum, status FROM media_items ORDER BY id")).toEqual(rows(pristine.db, "SELECT id, key, filename, size, checksum, status FROM media_items ORDER BY id"));
     expect(tableRows(copy.db, "kestrel_storage_versions")).toEqual([]);
+  });
+
+  it("refuses a --blobs-dir under which no original is found also when the answers say keep or trash, and converts nothing", async () => {
+    const copy = fixtureCopy();
+    const pristine = fixtureCopy();
+    const before = files(copy.blobs);
+    for (const answer of ["keep", "trash"]) {
+      const answers = join(copy.dir, `${answer}.json`);
+      writeFileSync(answers, JSON.stringify({ [MISSING_ORIGINAL]: answer }));
+      for (const blobsDir of [join(copy.blobs, "media"), join(copy.dir, "empty")]) {
+        mkdirSync(blobsDir, { recursive: true });
+        const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", blobsDir, "--answers", answers]);
+        expect(run.code, `${answer} ${blobsDir}`).toBe(2);
+        expect(run.errors, `${answer} ${blobsDir}`).toContain("7 of 7 item(s) of media/default have no original");
+        expect(run.errors, `${answer} ${blobsDir}`).toContain("none of the originals is there");
+        expect(run.errors, `${answer} ${blobsDir}`).toContain("nothing was converted");
+      }
+    }
+    expect(files(copy.blobs)).toEqual(before);
+    expect(rows(copy.db, "SELECT id, key, filename, size, checksum, status FROM media_items ORDER BY id")).toEqual(rows(pristine.db, "SELECT id, key, filename, size, checksum, status FROM media_items ORDER BY id"));
+    expect(tableRows(copy.db, "kestrel_storage_versions")).toEqual([]);
+    expect(tableRows(copy.db, "media_legacy_keys")).toEqual([]);
+  });
+
+  it("names a --blobs-dir without any original in a plan also when the answers say keep", async () => {
+    const copy = fixtureCopy();
+    const empty = join(copy.dir, "empty");
+    mkdirSync(empty);
+    const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", empty, "--plan", "--answers", keepFile(copy)]);
+    expect(run.code).toBe(1);
+    expect(run.out).toContain("none of the originals is there");
   });
 
   it("names the missing originals in a plan and that applying needs an answer for them", async () => {

@@ -58,18 +58,29 @@ interface BlobstoreFilesystemModule {
   createBlobstoreFilesystem(config: { root: string }): Blobstore;
 }
 
-function quickCheck(file: string): string | undefined {
+const UNREADABLE_CODES = new Set([3, 5, 6, 8, 10, 13, 14]);
+
+function unreadable(thrown: unknown): boolean {
+  if (!isRecord(thrown)) return false;
+  if (typeof thrown.errcode === "number") return UNREADABLE_CODES.has(thrown.errcode & 0xff);
+  return thrown.code === "ENOSPC" || thrown.code === "EACCES" || thrown.code === "EPERM" || thrown.code === "EROFS";
+}
+
+type QuickCheck = { ok: true } | { ok: false; unreadable: boolean; reason: string };
+
+function quickCheck(file: string): QuickCheck {
+  const failed = (thrown: unknown): QuickCheck => ({ ok: false, unreadable: unreadable(thrown), reason: thrown instanceof Error ? thrown.message : String(thrown) });
   let db: DatabaseSync;
   try {
     db = new DatabaseSync(file, { readOnly: true });
-  } catch (err) {
-    return err instanceof Error ? err.message : String(err);
+  } catch (thrown) {
+    return failed(thrown);
   }
   try {
     const rows = boundaryCast<Array<Record<string, unknown>>>(db.prepare("PRAGMA quick_check").all(), "host");
-    return rows.length === 1 && Object.values(rows[0]!)[0] === "ok" ? undefined : "PRAGMA quick_check did not answer ok";
-  } catch (err) {
-    return err instanceof Error ? err.message : String(err);
+    return rows.length === 1 && Object.values(rows[0]!)[0] === "ok" ? { ok: true } : { ok: false, unreadable: false, reason: "PRAGMA quick_check did not answer ok" };
+  } catch (thrown) {
+    return failed(thrown);
   } finally {
     db.close();
   }
@@ -96,19 +107,34 @@ async function guarded<T>(task: () => Promise<Result<T, { message: string }>>): 
 
 const MISSING_ORIGINALS = { migration: "media-default:id-key-layout", question: "media-default:id-key-layout:missing-original" } as const;
 
-function missingOriginals(modules: readonly ModuleRun[], answers: Readonly<Record<string, string>> | undefined, blobsDir: string): string | undefined {
-  if (answers?.[MISSING_ORIGINALS.question] !== undefined) return undefined;
+function missingOriginals(modules: readonly ModuleRun[], answers: Readonly<Record<string, string>> | undefined, blobsDir: string, treeEmpty: boolean): string | undefined {
   for (const module of modules) {
     for (const migration of module.migrations) {
       const counts = migration.id === MISSING_ORIGINALS.migration ? migration.plan?.counts : undefined;
       const missing = counts?.missingOriginals ?? 0;
       if (counts === undefined || missing === 0) continue;
+      const nowhere = (counts.copies ?? 0) === 0 && treeEmpty;
+      if (answers?.[MISSING_ORIGINALS.question] !== undefined && !nowhere) continue;
       const examples = (migration.plan?.notes ?? []).filter((n) => n.reason.endsWith(" is missing")).slice(0, 3).map((n) => `${n.item} (${n.reason})`);
-      const nowhere = (counts.copies ?? 0) === 0 ? "; none of the originals is there, so --blobs-dir most likely names another directory than the root of the copied blob store" : "";
-      return `${missing} of ${counts.items ?? missing} item(s) of ${module.module} have no original under --blobs-dir "${blobsDir}", e.g. ${examples.join(", ")}${nowhere}; check that --blobs-dir is the copy of the directory the project's blobstore-filesystem root points at, and when the originals are gone for good, answer ${MISSING_ORIGINALS.question} in an --answers file: "keep" switches the items anyway and media.reconcile lists them, "trash" moves them to the trash`;
+      const head = `${missing} of ${counts.items ?? missing} item(s) of ${module.module} have no original under --blobs-dir "${blobsDir}", e.g. ${examples.join(", ")}`;
+      if (nowhere) return `${head}; none of the originals is there and the directory holds no blob under the media key prefix, so --blobs-dir most likely names another directory than the root of the copied blob store, such as one a level too deep; an answer to ${MISSING_ORIGINALS.question} does not cover this, so name the root of the copy`;
+      return `${head}; check that --blobs-dir is the copy of the directory the project's blobstore-filesystem root points at, and when the originals are gone for good, answer ${MISSING_ORIGINALS.question} in an --answers file: "keep" switches the items anyway and media.reconcile lists them, "trash" moves them to the trash`;
     }
   }
   return undefined;
+}
+
+async function holdsNothingUnder(blobs: Blobstore, prefix: string): Promise<boolean> {
+  try {
+    const listed = await blobs.list(prefix);
+    return !isErr(listed) && listed.value.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+function originalsNowhere(modules: readonly ModuleRun[]): boolean {
+  return modules.some((m) => m.migrations.some((r) => r.id === MISSING_ORIGINALS.migration && (r.plan?.counts.missingOriginals ?? 0) > 0 && (r.plan?.counts.copies ?? 0) === 0));
 }
 
 function finished(run: ModuleRun): boolean {
@@ -125,17 +151,21 @@ function finished(run: ModuleRun): boolean {
  * lock file another process left next to the copy does not stop the run. Nothing reaches the network.
  * Before it applies anything, a plan of the same run looks for items whose original is not under
  * `blobsDir`; unless `answers` answers `media-default:id-key-layout:missing-original`, such an item
- * stops the run with nothing converted, and a `plan` run names them in a note.
+ * stops the run with nothing converted, and a `plan` run names them in a note. When none of the
+ * originals is found and `blobsDir` holds no blob under the media key prefix, the run stops whatever
+ * the answers say. A database SQLite cannot open, such as one in a directory without free space or
+ * write access, is reported as such and not as a failed `quick_check`.
  * Exit code `0` when every module is in this release's shape, `1` when a migration is still pending
  * or the stored data is too old or too new, `2` when the run could not start, an original is missing
- * without an answer, or a migration failed or threw.
+ * without an answer, no original is found at all, or a migration failed or threw.
  */
 export async function runMigrateStep(options: MigrateStepOptions): Promise<MigrateStepResult> {
   const { dbFile, blobsDir, root } = options;
   if (!existsSync(dbFile) || !statSync(dbFile).isFile()) return { exitCode: 2, error: `--db "${dbFile}" is not a file` };
   if (!existsSync(blobsDir) || !statSync(blobsDir).isDirectory()) return { exitCode: 2, error: `--blobs-dir "${blobsDir}" is not a directory` };
-  const broken = quickCheck(dbFile);
-  if (broken !== undefined) return { exitCode: 2, error: `"${dbFile}" did not pass PRAGMA quick_check (${broken}); take a consistent copy ("sqlite3 <db> .backup <copy>", a replication snapshot) and run migrate on that` };
+  const checked = quickCheck(dbFile);
+  if (!checked.ok && checked.unreadable) return { exitCode: 2, error: `"${dbFile}" could not be opened (${checked.reason}); SQLite writes its -wal and -shm files next to the database, so give its directory free space and write access, then run migrate again; nothing was converted` };
+  if (!checked.ok) return { exitCode: 2, error: `"${dbFile}" did not pass PRAGMA quick_check (${checked.reason}); take a consistent copy ("sqlite3 <db> .backup <copy>", a replication snapshot) and run migrate on that` };
   const persistence = await persistenceOf(root);
   if (persistence === undefined) return { exitCode: 2, error: "the project's own @michaelthielemann/kestrel-persistence-sqlite could not be resolved; install the project's dependencies first" };
   const filesystem = await blobstoreOf(root);
@@ -147,6 +177,7 @@ export async function runMigrateStep(options: MigrateStepOptions): Promise<Migra
   if (configProblem !== undefined && options.mediaPrefix === undefined && storages.length > 0) {
     return { exitCode: 2, error: `${configProblem}; migrate needs the module config for the media key prefix, so make kestrel.config.ts load (with the environment it reads) or name the prefix with --media-prefix <prefix>; nothing was converted` };
   }
+  const convertsTo = mediaPrefix ?? "media/";
   const notes: string[] = [];
   if (mediaPrefix !== undefined) notes.push(`media/default converts to the key prefix "${mediaPrefix}" from ${configFrom}`);
   if (existsSync(`${dbFile}.instance`)) notes.push(`${dbFile}.instance exists: migrate neither takes nor honours the instance lock, so make sure no process uses this copy`);
@@ -158,13 +189,15 @@ export async function runMigrateStep(options: MigrateStepOptions): Promise<Migra
     if (options.plan !== true) {
       const preview = await guarded(() => runShapeMigrations({ ...shared, apply: false }));
       if (isErr(preview)) return { exitCode: 2, error: `${preview.error}; nothing was converted` };
-      const unanswered = missingOriginals(preview.value.modules, options.answers, blobsDir);
+      const treeEmpty = originalsNowhere(preview.value.modules) && (await holdsNothingUnder(stores.blobs, convertsTo));
+      const unanswered = missingOriginals(preview.value.modules, options.answers, blobsDir, treeEmpty);
       if (unanswered !== undefined) return { exitCode: 2, error: `${unanswered}; nothing was converted` };
     }
     const run = await guarded(() => runShapeMigrations({ ...shared, apply: options.plan !== true }));
     if (isErr(run)) return { exitCode: 2, error: `${run.error}; nothing that ran before this is undone, so running migrate again continues from here` };
     if (options.plan === true) {
-      const unanswered = missingOriginals(run.value.modules, options.answers, blobsDir);
+      const treeEmpty = originalsNowhere(run.value.modules) && (await holdsNothingUnder(stores.blobs, convertsTo));
+      const unanswered = missingOriginals(run.value.modules, options.answers, blobsDir, treeEmpty);
       if (unanswered !== undefined) notes.push(`${unanswered}; migrate without --plan refuses to convert anything until then`);
     }
     const report: MigrateReport = { schema: 1, tool: { name: "kestrel-upgrade", version: toolVersion() }, command: "migrate", db: dbFile, blobsDir, applied: options.plan !== true, modules: run.value.modules, notes };
