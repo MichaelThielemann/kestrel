@@ -262,8 +262,10 @@ prefix, outside the keys a runtime reads. `status` shows the same measurement. T
 consecutive listings, then read back, hashed and integrity-checked; the app starts once both the store's time
 and this machine's clock have reached the second after its name, since a runtime before 6 names the generation
 it starts by its own clock alone and would otherwise sort it before the promoted one. For the `local` target this
-machine's clock is the app's; a target on another machine is assumed to keep its clock within a second of the
-store's.
+machine's clock is the app's. A target on another machine whose clock runs further behind starts a generation
+that sorts before the promoted one; the restore then ends with exit 1, names both generations and asks to stop
+the app, correct its clock and restore again, since the app's next start would restore the promoted generation
+and drop what it wrote since.
 
 ## Questions
 | Id | Asked | `--yes` |

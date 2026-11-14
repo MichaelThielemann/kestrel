@@ -79,7 +79,11 @@ export class FiveEightApp implements Target {
   running = false;
   restoredFrom: string | null = null;
 
-  constructor(private readonly store: ObjectStore) {}
+  /** `clock` names the generation the app starts, as the app host's clock would; the default is this machine's clock. */
+  constructor(
+    private readonly store: ObjectStore,
+    private readonly clock: () => number = Date.now,
+  ) {}
 
   async describe(): Promise<TargetFacts> {
     return { kind: "fixture", packages: fixture.packages };
@@ -100,7 +104,7 @@ export class FiveEightApp implements Target {
     rmSync(this.file, { force: true });
     await buildDatabase(this.store, FIXTURE_REPLICA, await completeGeneration(this.store, FIXTURE_REPLICA, newest), this.file);
     this.restoredFrom = newest.name;
-    await snapshotOnlyGeneration(this.store, Date.now(), this.file);
+    await snapshotOnlyGeneration(this.store, this.clock(), this.file);
     this.running = true;
   }
 

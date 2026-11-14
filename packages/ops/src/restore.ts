@@ -291,20 +291,24 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
     await ctx.target.installDatabase(prepared);
     await ctx.journal.record("install-database", "done", {});
   }
+  const before = promoted === null ? null : new Set((await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).map((g) => g.name));
   await ctx.journal.record("start", "started", promoted === null ? {} : { generation: promoted.generation });
   await startTarget(ctx, () => {
     state.started = true;
   });
-  if (promoted !== null) {
+  if (promoted !== null && before !== null) {
+    let started: string[] | null = null;
     try {
       ack = await acknowledgement(ctx.app, ctx.env.app.replicaPrefix, promoted, ctx.poll);
-      const gens = await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll);
       ctx.out.info(ack === "applied" ? `the app reports the restore of ${promoted.generation}` : `the app did not acknowledge ${promoted.generation}; a runtime without restore reporting renders nothing again by itself`);
-      if (gens.at(-1)?.name === promoted.generation) ctx.out.warn("the app has not started its own generation yet");
+      started = (await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).map((g) => g.name).filter((name) => !before.has(name));
     } catch (cause) {
       ack = "unconfirmed";
       ctx.out.warn(`the restore is done and the app started again, but checking whether it acknowledged ${promoted.generation} failed: ${messageOf(cause)}`);
     }
+    const earlier = started?.find((name) => name < promoted.generation);
+    if (earlier !== undefined) throw new OpsError(`the app started generation ${earlier}, which sorts before the promoted generation ${promoted.generation}: the app's clock runs behind the store's, and its next start would restore ${promoted.generation} and drop everything written since; stop the app, correct its clock and restore again`, 1, "target");
+    if (started?.length === 0) ctx.out.warn("the app has not started its own generation yet");
   }
   await recordQuietly(ctx, "restore", "done", { backupId: manifest.id, safetyBackup, acknowledgement: ack });
   return { ...base, safetyBackup, sessionsDeleted, promoted, acknowledgement: ack };
