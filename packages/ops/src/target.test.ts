@@ -129,6 +129,25 @@ describe("status", () => {
     expect(await probeProtection(tool, null, LOCATION, "r3")).toBe("unknown");
   });
 
+  it("probes the protection in the separate backup bucket with the app's credentials", async () => {
+    const app = memoryStore(new MemoryBucket("app-protect"));
+    const backups = memoryStore(new MemoryBucket("backup-protect"));
+    const h = createHarness({ store: app });
+    h.editEnvironments((file) => {
+      const prod = file.environments.prod ?? {};
+      prod.backups = { prefix: LOCATION, storage: { bucket: "backup-protect" } };
+      prod.app = { ...(prod.app ?? {}), credentials: { accessKeyId: { env: "OPS_ACCESS_KEY" }, secretAccessKey: { env: "OPS_SECRET_KEY" } } };
+    });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const report = await h.run(["status", "--json"], { stores: (config) => (config.bucket === "backup-protect" ? backups : app) });
+      expect(report.json).toMatchObject({ protectedFromApp: "no", problems: ["the app's credentials can delete backups"] });
+    } finally {
+      await h.dispose();
+    }
+  });
+
   it("rejects a missing or invalid environments file and an unknown environment with exit 2", async () => {
     const h = createHarness({ store: memoryStore(new MemoryBucket("config")) });
     try {

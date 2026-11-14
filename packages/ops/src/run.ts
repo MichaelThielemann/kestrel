@@ -238,7 +238,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
       lock = await acquireLock(backups, ctx.location, runId, name, clock);
     }
     if (name === "status") {
-      const appStore = appCredentials === null ? null : stores(environment.storage, appCredentials, "app");
+      const appStore = appCredentials === null ? null : stores(backupStorage, appCredentials, "app");
       const report = await status(ctx, appStore);
       out.info(`${envName}: target ${report.target.state} (${report.target.instances} instance(s)), replica ${report.replica.newest ?? "empty"}${report.replica.sealed ? " sealed" : ""}, runtime ${report.replica.runtime ?? "unknown"}`);
       out.info(`backups: ${report.backups.length}, open runs: ${report.openRuns.length}, held locks: ${report.locks.length}, clock skew ${Math.round(report.clockSkewMs / 1000)} s, protected from the app: ${report.protectedFromApp}`);
