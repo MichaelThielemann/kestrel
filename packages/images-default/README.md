@@ -118,7 +118,7 @@ this module did not put there — and starts the sync job when a row still waits
 decides that an item is gone, or that a file has no owner, by reading that item's rows right before
 it removes anything, never from a list it read earlier; it pages through rows by id, so rows it
 removes on the way never make it skip others; and after writing a copy it reads the owner again and
-removes the copy when the item was deleted meanwhile. Serve the copy tree with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`, as
+removes the copy when the item was deleted meanwhile. Serve the copy tree with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; sandbox`, as
 the Node origin does; a placeholder holds the original's bytes under the variant's extension until the
 render replaces it. A render's copy takes its `Content-Type` from `publicFormOf` in
 `@michaelthielemann/kestrel-contracts/helpers/mediaType`; a placeholder, a retired path and `images.serve`'s

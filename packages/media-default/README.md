@@ -116,8 +116,8 @@ SVG uploads allowed by `allowedTypes`/`deniedTypes`, boot fails unless every pip
 `files`. An SVG stored without it — uploaded while `publicCopy` was off, through a pipeline without
 `sanitize.svg` — keeps its `.bin` name and `application/octet-stream` type after `publicCopy` is
 turned on, and every write of its copy logs a warning naming the row's id. Serve the copy tree with `X-Content-Type-Options: nosniff` and
-`Content-Security-Policy: sandbox`, as the Node origin does, so a host never guesses a type or runs
-a document from it. It pages through the items by id, so an item
+`Content-Security-Policy: default-src 'none'; sandbox`, as the Node origin does, so a host never
+guesses a type or runs a document from it, and no SVG in the tree can load a resource from anywhere. It pages through the items by id, so an item
 deleted or added during the run never makes it skip another, and re-reads an item after writing its
 copy and removes the copy again when the item was deleted meanwhile; an upload or a delete running at
 the same time therefore never leaves a deleted item's copy behind or costs a ready item its copy. It

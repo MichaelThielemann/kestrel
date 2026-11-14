@@ -24,6 +24,60 @@ describe("sanitizeSvg", () => {
     expect(out).toContain('href="#g1"');
   });
 
+  describe("url() references in presentation attributes", () => {
+    const wrap = (attributes: string) => `<svg xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g"><stop offset="0" stop-color="red"/></linearGradient></defs><rect width="10" height="10" ${attributes}/></svg>`;
+
+    it("removes a url() to another document from fill, stroke, clip-path, mask, filter and the marker attributes", () => {
+      for (const attribute of ["fill", "stroke", "clip-path", "mask", "filter", "marker-start", "marker-mid", "marker-end"]) {
+        const out = sanitizeSvg(wrap(`${attribute}="url(http://evil.example/x.svg#g)"`));
+        expect(out, attribute).not.toContain("evil.example");
+        expect(out, attribute).not.toContain(`${attribute}=`);
+        expect(out, attribute).toContain("<rect");
+      }
+    });
+
+    it("keeps a url() to a fragment of the same document, quoted or not", () => {
+      for (const value of ["url(#g)", "url('#g')", 'url("#g")', "url( #g )", "URL(#g)", "url(#g) red"]) {
+        expect(sanitizeSvg(wrap(`fill="${value.replace(/"/g, "&quot;")}"`)), value).toContain("fill=");
+      }
+    });
+
+    it("removes every form of a reference that leaves the document", () => {
+      for (const value of [
+        "url(//evil.example/x.svg#g)",
+        "url(/x.svg#g)",
+        "url(x.svg#g)",
+        "url('http://evil.example/x.svg#g')",
+        'url("https://evil.example/x.svg#g")',
+        "url( http://evil.example/x.svg )",
+        "URL(http://evil.example/x.svg)",
+        "url(data:image/svg+xml;base64,AAAA)",
+        "url(javascript:alert(1))",
+        "url(#g) url(http://evil.example/x.svg)",
+        "url()",
+        "url(http://evil.example/x.svg",
+        "u\\72l(http://evil.example/x.svg)",
+        "&#117;rl(http://evil.example/x.svg)",
+      ]) {
+        const out = sanitizeSvg(wrap(`fill="${value.replace(/"/g, "&quot;")}"`));
+        expect(out, value).not.toContain("evil.example");
+        expect(out, value).not.toContain("data:");
+        expect(out, value).not.toContain("fill=");
+      }
+    });
+
+    it("keeps drawing attributes that carry no url()", () => {
+      const out = sanitizeSvg(wrap('fill="red" stroke="#0a0a0a" stroke-width="2" transform="translate(1 2)" d="M0 0L5 5"'));
+      for (const kept of ['fill="red"', 'stroke="#0a0a0a"', 'stroke-width="2"', 'transform="translate(1 2)"', 'd="M0 0L5 5"']) expect(out).toContain(kept);
+    });
+
+    it("still drops the style attribute and the style element, which could carry a url()", () => {
+      const out = sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg"><style>rect{fill:url(http://evil.example/x.svg)}</style><rect width="1" height="1" style="fill:url(http://evil.example/x.svg)"/></svg>');
+      expect(out).not.toContain("evil.example");
+      expect(out).not.toContain("style");
+    });
+  });
+
   it("keeps viewBox and camelCase gradient/clipPath tags", () => {
     const svg = '<svg viewBox="0 0 10 10"><clipPath id="c1"><rect width="5" height="5"/></clipPath><linearGradient id="g1"><stop offset="0" stop-color="blue"/></linearGradient></svg>';
     const out = sanitizeSvg(svg);

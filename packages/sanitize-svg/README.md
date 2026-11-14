@@ -6,7 +6,10 @@ presentation attributes. Config: `maxBytes` (default 2 MiB). Step `sanitize.svg`
 files pass through untouched. A file counts as SVG when it is declared `image/svg+xml` or when it is
 declared as another image type (or PDF) and its bytes are SVG markup (`verifiedMediaType`). Removed:
 `<script>`, `<style>`, `<foreignObject>`, `<image>`, `on*` handlers, `animate*`/`set`, and any
-`href`/`xlink:href` that is not an internal `#...` reference. Inline delivery of sanitized SVGs
+`href`/`xlink:href` that is not an internal `#...` reference, and any attribute holding a `url(...)`
+that does not point to a `#fragment` of the same file (`fill="url(http://…)"` goes, `fill="url(#g)"`
+stays). Serve a sanitized SVG with `Content-Security-Policy: default-src 'none'; sandbox`, as the
+Node origin does, so that nothing in the file can load a resource. Inline delivery of sanitized SVGs
 still needs `image/svg+xml` in core's `http.inlineTypes` – and the other way round: that entry
 without this module (or another one registering `sanitize.svg`) fails the boot. `media-default`
 publishes an SVG as `image/svg+xml` only when this step ran before `media.upload` in the same
