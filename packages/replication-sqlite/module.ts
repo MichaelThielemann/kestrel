@@ -91,13 +91,13 @@ async function restoreMissingFile(config: Config, blobs: Blobstore, logger: Logg
     throw new Error(restored.error.message, { cause: restored.error });
   }
   const { generation } = restored.value;
-  const recorded = await recordRebuild(config, blobs, logger, bootStartedAt, generation);
+  const recorded = await recordRebuild(config, blobs, logger, bootStartedAt, generation, listing.markers.get(generation)?.has("applied") === true);
   for (const suffix of ["-wal", "-shm"]) rmSync(config.file + suffix, { force: true });
   renameSync(rebuilt, config.file);
   return recorded === undefined ? startListing : { ...startListing, placed: recorded };
 }
 
-async function recordRebuild(config: Config, blobs: Blobstore, logger: Logger, bootStartedAt: number, generation: string): Promise<PlacedRestore | undefined> {
+async function recordRebuild(config: Config, blobs: Blobstore, logger: Logger, bootStartedAt: number, generation: string, acknowledged: boolean): Promise<PlacedRestore | undefined> {
   const origin = await readOrigin(blobs, config.prefix, generation);
   if (isErr(origin) && origin.error.code === "NOT_FOUND") {
     markRestoredThisBoot(config.file, bootStartedAt);
@@ -108,8 +108,7 @@ async function recordRebuild(config: Config, blobs: Blobstore, logger: Logger, b
     logWarn(logger, "replication/sqlite: restored from a generation that may carry origin.json but could not read that file, so the restore is reported and no applied.json acknowledges it", { file: config.file, generation, error: origin.error.message });
     return undefined;
   }
-  const acknowledged = await blobs.get(markerKey(config.prefix, generation, "applied"));
-  if (!isErr(acknowledged) && acknowledged.value !== null) {
+  if (acknowledged) {
     markRestoredThisBoot(config.file, bootStartedAt);
     logger.info("replication/sqlite: restored from a generation placed with origin.json that an earlier start already reported", { file: config.file, generation });
     return undefined;

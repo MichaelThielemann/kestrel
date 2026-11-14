@@ -165,8 +165,10 @@ reader also has to know that the process that stopped wrote that generation.
 **Placed generations.** A tool that places a database into the replica while the process is stopped
 writes the snapshot into a new generation and then `origin.json`, last, which marks the placement as
 complete. Name it by its time alone, after every generation the replica lists, so that 5.x releases list
-and restore it too. Whether a generation carries `origin.json` or `applied.json`, the module reads from
-the blobstore, not from a listing, which can show a new key late. Before `setup()` rebuilds a missing
+and restore it too. Whether a generation carries `origin.json`, the module reads from the blobstore,
+not from a listing, which can show a new key late. Whether it carries `applied.json`, the module judges
+by the listing alone and never reads that key, since it writes the key itself and some blobstores answer
+a read late for a key that an earlier read found missing. Before `setup()` rebuilds a missing
 file, it lists the replica again, as it does for a seal, while a generation named by its time alone that
 sorts after the newest snapshot shows `origin.json` but no `snapshot.db`, and refuses to start when the
 listing still shows none; the error names the generation. A generation named with an order key that
@@ -185,10 +187,11 @@ snapshot at teardown, carries a copy of `origin.json`, and the acknowledgement w
 into each of them as well as into the placed generation. A start that stops before, with or without
 teardown, therefore leaves the restore reported to the next start that restores from the replica, and
 the `<file>.restored-at` sidecar hands the acknowledgement to the next start on a persistent disk. A
-start that restores a generation with `applied.json` does not report the restore again. Should a copy
-remain without `applied.json`, a later start that restores it reports the restore once more and writes
-its own `applied.json` there, which renders delivered output once more and changes nothing else; a tool
-that looks for its `nonce` finds it in that generation then.
+start that restores a generation whose listing shows `applied.json` does not report the restore again.
+Should a copy remain without `applied.json`, or a listing not show it yet, a later start that restores
+that generation reports the restore once more and writes its own `applied.json` there, with the same
+generation and `nonce`, which renders delivered output once more and changes nothing else; a tool that
+looks for its `nonce` finds it in that generation then.
 
 **Generations of unknown origin.** Before it rebuilds a missing file, `setup()` refuses to start when a
 generation named by its time alone, without `origin.json`, sorts after the newest generation that is

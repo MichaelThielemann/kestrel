@@ -307,6 +307,18 @@ function listingLate(blobs: ReturnType<typeof fakeBlobs>, hidden: readonly strin
   };
 }
 
+function readsOf<B extends Blobstore>(blobs: B): B & { keys: string[] } {
+  const keys: string[] = [];
+  return {
+    ...blobs,
+    keys,
+    async get(key) {
+      keys.push(key);
+      return blobs.get(key);
+    },
+  };
+}
+
 describe("replication/sqlite teardown seal", () => {
   it("ships the frames committed since the last sync and then seals the generation, with no prune or snapshot although both are due", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -537,15 +549,56 @@ describe("replication/sqlite restore from a placed generation", () => {
     expect(await databaseRestoredAt(instance)).toBe(bootStartedAt);
   });
 
-  it("does not report the restore again while the listing does not show the applied.json that acknowledges it", async () => {
+  it("never reads an applied.json while it restores from a placed generation and acknowledges the restore", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    const reads = readsOf(blobs);
+    const { instance, bootStartedAt } = await startOn(file, reads);
+    open.push(instance);
+    module.attach!(instance, introspection([]));
+    expect((await instance.sync()).ok).toBe(true);
+    expect(readJson(blobs, "replica/gen/20260102T000000Z/applied.json")).toEqual({ generation: "20260102T000000Z", nonce: "nonce-1", restoredAt: bootStartedAt });
+    expect(reads.keys.filter((key) => key.endsWith("/applied.json"))).toEqual([]);
+  });
+
+  it("reports the restore once more while the listing does not show the applied.json that acknowledges it", async () => {
     const file = join(freshDir(), "live.db");
     const blobs = fakeBlobs();
     place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
     blobs.blobs.set("replica/gen/20260102T000000Z/applied.json", { data: new TextEncoder().encode(JSON.stringify({ generation: "20260102T000000Z", nonce: "nonce-1", restoredAt: 1 })), contentType: "application/json" });
-    const late = listingLate(blobs, ["replica/gen/20260102T000000Z/applied.json"], 1);
-    const { instance } = await startOn(file, late);
+    const late = readsOf(listingLate(blobs, ["replica/gen/20260102T000000Z/applied.json"], 1));
+    const { instance, bootStartedAt } = await startOn(file, late);
+    open.push(instance);
+    expect(await databaseRestoredAt(instance)).toBe(bootStartedAt);
+    expect(late.keys.filter((key) => key.endsWith("/applied.json"))).toEqual([]);
+  });
+
+  it("neither reports the restore again nor writes applied.json when the listing shows it, whatever a read of it would answer", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    const applied = { generation: "20260102T000000Z", nonce: "nonce-1", restoredAt: 1 };
+    blobs.blobs.set("replica/gen/20260102T000000Z/applied.json", { data: new TextEncoder().encode(JSON.stringify(applied)), contentType: "application/json" });
+    const written: string[] = [];
+    const unreadable: Blobstore = {
+      ...blobs,
+      async get(key) {
+        return key.endsWith("/applied.json") ? err(failure("TRANSIENT", "applied.json unreadable")) : blobs.get(key);
+      },
+      async put(key, data, options) {
+        written.push(key);
+        return blobs.put(key, data, options);
+      },
+    };
+    const { instance } = await startOn(file, unreadable);
     open.push(instance);
     expect(await databaseRestoredAt(instance)).toBeNull();
+    module.attach!(instance, introspection([]));
+    instance.restoreHandled();
+    expect((await instance.sync()).ok).toBe(true);
+    expect(written.filter((key) => key.endsWith(".json"))).toEqual([]);
+    expect(readJson(blobs, "replica/gen/20260102T000000Z/applied.json")).toEqual(applied);
   });
 
   it("lists again while a generation with origin.json after the newest snapshot shows no snapshot.db yet, then restores from it", async () => {

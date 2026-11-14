@@ -763,20 +763,20 @@ Net changes since 5.8.2.
   stop that may have lost frames. A start that rebuilds the missing database lists the replica again, for
   up to five seconds, while the newest generation's listing lacks a WAL segment its seal names, or a newer
   generation named by its time alone shows `origin.json` without a snapshot, and refuses to start when it
-  still does. A tool that
-  places a database into the replica writes the snapshot and then `origin.json`; a start that rebuilds
-  the missing database from such a generation reports the restore through `replication.checkRestored`,
+  still does. A tool that places a database into the replica writes the snapshot and then `origin.json`;
+  a start that rebuilds the missing database from such a generation reports the restore through
+  `replication.checkRestored`,
   so `delivery.checkBuild` renders every output again. It rebuilds the file into `<file>.rebuilding` and
   renames it into place only after the `<file>.restored-at` sidecar records the restore, so a start that
   stops in between leaves the rebuild to the next one. Once a pipeline run through that step ended
   without failure, the first successful sync or teardown seal after it writes `applied.json` naming the
   generation and the `nonce` of `origin.json`; until then every generation the process starts carries a copy of
   `origin.json`, written ahead of its snapshot, so a start that stops earlier leaves the restore reported to
-  the next one. A start that
-  restores a generation with `applied.json` does not report the restore again. Whether a generation
-  carries `sealed.json`, `origin.json` or `applied.json` is read from the blobstore, not from a listing,
-  since teardown writes the last segment and the seal one after the other and a listing that shows new
-  keys late hides both. `./impl` exports `listReplica()`,
+  the next one. A start that restores a generation whose listing shows `applied.json` does not report the
+  restore again; one whose listing does not show it yet reports it once more. Whether a generation carries `sealed.json` or
+  `origin.json` is read from the blobstore, not from a listing, since teardown writes the last segment and
+  the seal one after the other and a listing that shows new keys late hides both; `applied.json`, which
+  the module writes itself, is never read. `./impl` exports `listReplica()`,
   `listSealedReplica()`, `markerKey()`, `readOrigin()`, `readOriginNonce()`,
   `unplacedNewerGenerations()` and the types `GenerationMarker`, `Seal`, `Origin`, `Applied`,
   `PlacedRestore`, `ReplicaListing` and `SealedListingOptions`; `restoreFromBlobs()` takes an optional
