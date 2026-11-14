@@ -125,6 +125,10 @@ export default defineModule({
     }
   },
 
+  quiesce: (instance) => {
+    instance.quiesce();
+  },
+
   teardown: async (instance) => {
     for (const off of instance.offs) off();
     await instance.stopWorker();

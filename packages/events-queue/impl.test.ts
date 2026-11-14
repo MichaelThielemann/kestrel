@@ -1642,3 +1642,198 @@ describe("events/queue retry: repeated requests during an outage", () => {
     expect(pending.map((r) => r.pipeline).sort()).toEqual(["p1", "p2"]);
   });
 });
+
+describe("events/queue quiesce", () => {
+  function gated() {
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let started = () => {};
+    const running = new Promise<void>((r) => {
+      started = r;
+    });
+    return { gate, release: () => release(), running, started: () => started() };
+  }
+
+  it("a tick after quiesce claims nothing, fans out nothing and does not touch the store, even once rows come due on the clock", async () => {
+    const { db, queue, clock, rows } = await make({ delayMs: { p1: 1000 } });
+    await queue.enqueue("x", { id: "unfanned" });
+    let runs = 0;
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      runs++;
+      return OK;
+    });
+    await queue.enqueue("x", { id: "delayed" });
+    queue.quiesce();
+    clock.t += 5000;
+    const reads = vi.spyOn(db, "findMany");
+    const writes = vi.spyOn(db, "updateMany");
+    expect(await queue.tick()).toBe(0);
+    expect(reads).not.toHaveBeenCalled();
+    expect(writes).not.toHaveBeenCalled();
+    expect(runs).toBe(0);
+    expect((await rows()).map((r) => [r.pipeline, r.state])).toEqual([[null, "pending"], ["p1", "pending"]]);
+  });
+
+  it("a lane tick after quiesce claims nothing", async () => {
+    const { queue, rows } = await make({ lanes: { pages: ["render"] } });
+    let runs = 0;
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      runs++;
+      return OK;
+    });
+    await queue.enqueue("x", {});
+    queue.quiesce();
+    expect(await queue.tickLane("pages")).toBe(0);
+    expect(runs).toBe(0);
+    expect(await rows()).toMatchObject([{ state: "pending", lockedBy: null }]);
+  });
+
+  it("the relay after quiesce claims nothing and reports its rows pending for the worker", async () => {
+    const { queue, rows } = await make();
+    let runs = 0;
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      runs++;
+      return OK;
+    });
+    await queue.enqueue("x", { runId: "run-1" });
+    queue.quiesce();
+    expect(await queue.relay("run-1")).toEqual({ status: "pending", pipelines: [{ event: "x", pipeline: "p1", status: "pending", attempts: 0, dead: false, error: null }] });
+    expect(runs).toBe(0);
+    expect(await rows()).toMatchObject([{ state: "pending", lockedAt: null, lockedBy: null }]);
+  });
+
+  it("a relay already delivering finishes its row and leaves the rest pending once quiesce comes", async () => {
+    const { queue, rows } = await make();
+    const first = gated();
+    const delivered: string[] = [];
+    queue.setDelivery([{ event: "x", pipeline: "p1" }, { event: "x", pipeline: "p2" }], async (pipeline) => {
+      delivered.push(pipeline);
+      first.started();
+      await first.gate;
+      return OK;
+    });
+    await queue.enqueue("x", { runId: "run-1" });
+    const relaying = queue.relay("run-1");
+    await first.running;
+    queue.quiesce();
+    first.release();
+    const report = await relaying;
+    expect(delivered).toEqual(["p1"]);
+    expect(report.pipelines.map((p) => [p.pipeline, p.status])).toEqual([["p1", "done"], ["p2", "pending"]]);
+    expect((await rows()).map((r) => [r.pipeline, r.state, r.lockedBy])).toEqual([["p1", "done", null], ["p2", "pending", null]]);
+  });
+
+  it("the row running when quiesce comes ends done; the rest of its claimed batch goes back to pending without a lock, with attempts and coalesceKey as before the claim", async () => {
+    const { db, queue, rows } = await make({ batch: 3 });
+    const first = gated();
+    const delivered: string[] = [];
+    queue.setDelivery([{ event: "a", pipeline: "pa" }, { event: "b", pipeline: "pb" }, { event: "c", pipeline: "pc" }], async (pipeline) => {
+      delivered.push(pipeline);
+      first.started();
+      await first.gate;
+      return OK;
+    });
+    await queue.enqueue("a", {});
+    await queue.enqueue("b", { coalesceKey: "k" });
+    await queue.enqueue("c", {});
+    const retried = expectOk(await db.findMany<QueueRow>(QUEUE, { pipeline: "pc" })).items[0]!;
+    expectOk(await db.updateOne<QueueRow>(QUEUE, retried.id, { attempts: 1 }));
+    const ticking = queue.tick();
+    await first.running;
+    queue.quiesce();
+    first.release();
+    expect(await ticking).toBe(1);
+    expect(delivered).toEqual(["pa"]);
+    expect((await rows()).map((r) => ({ pipeline: r.pipeline, state: r.state, attempts: r.attempts, lockedAt: r.lockedAt, lockedBy: r.lockedBy, coalesceKey: r.coalesceKey }))).toEqual([
+      { pipeline: "pa", state: "done", attempts: 0, lockedAt: null, lockedBy: null, coalesceKey: null },
+      { pipeline: "pb", state: "pending", attempts: 0, lockedAt: null, lockedBy: null, coalesceKey: "pb:k" },
+      { pipeline: "pc", state: "pending", attempts: 1, lockedAt: null, lockedBy: null, coalesceKey: null },
+    ]);
+  });
+
+  it("a released row whose coalesceKey another pending row took meanwhile goes back to pending without the key", async () => {
+    const { queue, rows } = await make({ batch: 2 });
+    const first = gated();
+    queue.setDelivery([{ event: "a", pipeline: "pa" }, { event: "b", pipeline: "pb" }], async () => {
+      first.started();
+      await first.gate;
+      return OK;
+    });
+    await queue.enqueue("a", {});
+    await queue.enqueue("b", { coalesceKey: "k" });
+    const ticking = queue.tick();
+    await first.running;
+    await queue.enqueue("b", { coalesceKey: "k", later: true });
+    queue.quiesce();
+    first.release();
+    await ticking;
+    const pb = (await rows()).filter((r) => r.pipeline === "pb");
+    expect(pb.map((r) => [r.state, r.coalesceKey, r.lockedBy])).toEqual([["pending", null, null], ["pending", "pb:k", null]]);
+  });
+
+  it("quiesce stops the worker's timers at once, and startWorker afterwards claims again", async () => {
+    const { queue, rows } = await make({ pollMs: 2 });
+    let runs = 0;
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      runs++;
+      return OK;
+    });
+    queue.startWorker();
+    queue.quiesce();
+    expect(queue.workerRunning()).toBe(false);
+    await queue.enqueue("x", {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(runs).toBe(0);
+    queue.startWorker();
+    await vi.waitFor(() => expect(runs).toBe(1));
+    expect(await rows()).toMatchObject([{ state: "done" }]);
+    await queue.stopWorker();
+  });
+
+  it("startWorker after quiesce and stopWorker claims again, and enqueue keeps writing rows meanwhile", async () => {
+    const { queue, rows } = await make({ lanes: { pages: ["render"] } });
+    const delivered: string[] = [];
+    queue.setDelivery([{ event: "x", pipeline: "p1" }, { event: "y", pipeline: "render" }], async (pipeline) => {
+      delivered.push(pipeline);
+      return OK;
+    });
+    queue.quiesce();
+    await queue.stopWorker();
+    await queue.enqueue("x", {});
+    await queue.enqueue("y", {});
+    expect((await rows()).map((r) => r.state)).toEqual(["pending", "pending"]);
+    queue.startWorker();
+    await vi.waitFor(() => expect(delivered.sort()).toEqual(["p1", "render"]));
+    await queue.stopWorker();
+  });
+
+  it("a second instance on the same store delivers what a quiesced one left pending", async () => {
+    const db = createFakePersistence();
+    const clock = { t: 1_000_000 };
+    const queueA = await createEventsQueue({ ...CONFIG, batch: 2 }, { db, logger: silentLogger, now: () => clock.t, instanceId: "a@host" });
+    const queueB = await createEventsQueue({ ...CONFIG, batch: 2 }, { db, logger: silentLogger, now: () => clock.t, instanceId: "b@host" });
+    const first = gated();
+    const deliveredBy: string[] = [];
+    queueA.setDelivery([{ event: "a", pipeline: "pa" }, { event: "b", pipeline: "pb" }], async (pipeline) => {
+      deliveredBy.push(`a:${pipeline}`);
+      first.started();
+      await first.gate;
+      return OK;
+    });
+    queueB.setDelivery([{ event: "a", pipeline: "pa" }, { event: "b", pipeline: "pb" }], async (pipeline) => {
+      deliveredBy.push(`b:${pipeline}`);
+      return OK;
+    });
+    await queueA.enqueue("a", {});
+    await queueA.enqueue("b", {});
+    const ticking = queueA.tick();
+    await first.running;
+    queueA.quiesce();
+    first.release();
+    await ticking;
+    expect(await queueB.tick()).toBe(1);
+    expect(deliveredBy).toEqual(["a:pa", "b:pb"]);
+  });
+});

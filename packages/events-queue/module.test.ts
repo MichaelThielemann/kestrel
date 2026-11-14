@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { boot, defineModule, definePipeline, KestrelBootError, silentLogger } from "@michaelthielemann/kestrel";
 import { EVENTS, type EventData } from "@michaelthielemann/kestrel-contracts/events";
@@ -802,5 +802,95 @@ describe("events/queue: atomicSafe is pinned", () => {
       const resolved = typeof description === "function" ? description("one") : description;
       expect(resolved.atomicSafe, `${name}.atomicSafe`).toBe(notAtomicSafe.has(name) ? undefined : true);
     }
+  });
+});
+
+describe("events/queue quiesces at the start of stop()", () => {
+  it("a row that comes due while stop() drains, in the main loop or a lane, never starts; a restart on the same store delivers it", async () => {
+    const db = createFakePersistence();
+    const persistence = defineModule({
+      name: "persistence/fake",
+      provides: [PERSISTENCE],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return db;
+      },
+    });
+    const bus = defineModule({
+      name: "events/fake",
+      provides: [EVENTS],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return createEventsInmemory();
+      },
+    });
+    const listened: string[] = [];
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const probe = defineModule({
+      name: "probe/test",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({
+        hold: async (ctx: Context) => {
+          await gate;
+          return ok(ctx);
+        },
+        listenMain: async (ctx: Context) => {
+          listened.push("main");
+          return ok(ctx);
+        },
+        listenLane: async (ctx: Context) => {
+          listened.push("lane");
+          return ok(ctx);
+        },
+      }),
+      describe: () => ({ hold: { summary: "h", reads: [], writes: [] }, listenMain: { summary: "m", reads: [], writes: [] }, listenLane: { summary: "l", reads: [], writes: [] } }),
+    });
+    const bootOnce = () =>
+      boot({
+        config: {
+          modules: [
+            { use: "./persistence.ts", config: {} },
+            { use: "./events.ts", config: {} },
+            { use: "@michaelthielemann/kestrel-events-queue", config: { pollMs: 2, relayMs: 0, lanes: { pages: ["onLane"] }, delayMs: { onMain: 30, onLane: 30 } } },
+            { use: "./probe.ts", config: {} },
+          ],
+          triggers: [{ event: "main.due", pipeline: "onMain" }, { event: "lane.due", pipeline: "onLane" }],
+          http: null,
+        },
+        modules: [persistence, bus, module, probe],
+        pipelines: [definePipeline({ name: "slow", steps: ["probe.hold"] }), definePipeline({ name: "onMain", steps: ["probe.listenMain"] }), definePipeline({ name: "onLane", steps: ["probe.listenLane"] })],
+        logger: silentLogger,
+      });
+
+    const first = await bootOnce();
+    await first.start();
+    const eventsBus = first.contracts.get(EVENTS);
+    await eventsBus.emit("main.due", {});
+    await eventsBus.emit("lane.due", {});
+    const running = first.run("slow", { trigger: { kind: "cron", name: "* * * * *" } });
+    const stopping = first.stop({ timeoutMs: 5_000 });
+    await new Promise((r) => setTimeout(r, 120));
+    expect(listened).toEqual([]);
+    release();
+    await running;
+    expect(await stopping).toEqual({ drained: true });
+    expect(listened).toEqual([]);
+    const left = expectOk(await db.findMany<QueueRow>(QUEUE, {}, { sort: { pipeline: "asc" } })).items;
+    expect(left.map((row) => [row.pipeline, row.state, row.lockedBy, row.attempts])).toEqual([["onLane", "pending", null, 0], ["onMain", "pending", null, 0]]);
+
+    const second = await bootOnce();
+    await second.start();
+    await vi.waitFor(() => expect([...listened].sort()).toEqual(["lane", "main"]));
+    await second.stop();
   });
 });

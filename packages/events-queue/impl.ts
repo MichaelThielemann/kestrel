@@ -101,7 +101,16 @@ export interface EventsQueue {
   tick(): Promise<number>;
   /** Claims and runs one due row of the named lane, first reclaiming that lane's own expired locks; single-flight per lane, the way `tick()` is single-flight for the main lane. */
   tickLane(name: string): Promise<number>;
+  /** Restarts the main loop and every lane loop this process knows of; lifts a {@link EventsQueue.quiesce}. */
   startWorker(): void;
+  /**
+   * Stops claiming, synchronously: the worker's timers are cleared, and from now on `tick()`,
+   * `tickLane()` and `relay()` claim no row, fan out nothing and scan for no lane. A row already
+   * running finishes; the rest of a batch the main loop claimed but has not started goes back to
+   * `pending`, unlocked, with its `attempts` and `coalesceKey` as before the claim. `enqueue` keeps
+   * writing rows. `startWorker()` claims again.
+   */
+  quiesce(): void;
   stopWorker(): Promise<void>;
   workerRunning(): boolean;
   /** Delivers the rows this run enqueued, in place of the worker, within `relayMs`. Never throws. */
@@ -122,6 +131,11 @@ export interface QueueDeps {
   logger: Logger;
   now?: () => number;
   instanceId?: string;
+}
+
+interface Claimed {
+  row: QueueRow;
+  heldKey: string | null;
 }
 
 const DAY_MS = 24 * 3600 * 1000;
@@ -199,6 +213,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
 
   let timer: NodeJS.Timeout | undefined;
   let running = false;
+  let quiesced = false;
   let generation = 0;
   let ticking: Promise<number> | undefined;
   let lastTickAt: number | null = null;
@@ -280,7 +295,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
   }
 
   async function fanOutUnfanned(): Promise<number> {
-    if (!delivery) return 0;
+    if (!delivery || quiesced) return 0;
     const stale = await db.findMany<QueueRow>(QUEUE, { pipeline: null, state: { in: ["pending", "running"] } }, { sort: { createdAt: "asc" }, limit: config.batch });
     if (isErr(stale)) {
       logger.error("events/queue: cannot list unfanned rows", { error: stale.error.message });
@@ -330,6 +345,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
   }
 
   async function runDiscoveryIfDue(): Promise<void> {
+    if (quiesced) return;
     const at = now();
     if (!discoveryDue && at - lastDiscoveryAt < DISCOVERY_INTERVAL_MS) return;
     discoveryDue = false;
@@ -343,29 +359,40 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     }
   }
 
-  async function claim(): Promise<QueueRow[]> {
-    if (!delivery) return [];
+  async function claim(): Promise<Claimed[]> {
+    if (!delivery || quiesced) return [];
     const at = now();
     await reclaimExpiredLocks({});
     const due = await db.findMany<QueueRow>(QUEUE, { state: "pending", pipeline: { ne: null }, lane: MAIN_LANE, availableAt: { lte: at } }, { sort: { availableAt: "asc", createdAt: "asc" }, limit: config.batch });
     if (isErr(due)) throw new Error(due.error.message);
-    const claimed: QueueRow[] = [];
+    const claimed: Claimed[] = [];
     for (const row of due.value.items) {
+      if (quiesced) break;
       const won = await db.updateMany<QueueRow>(QUEUE, { id: row.id, state: "pending" }, { state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null });
       if (isErr(won) || won.value !== 1) continue;
-      claimed.push({ ...row, state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null });
+      claimed.push({ row: { ...row, state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null }, heldKey: row.coalesceKey });
     }
     return claimed;
   }
 
-  async function claimLane(name: string): Promise<QueueRow | undefined> {
-    if (!delivery) return undefined;
+  async function release(claimed: readonly Claimed[]): Promise<void> {
+    for (const { row, heldKey } of claimed) {
+      const scope: Filter = { id: row.id, state: "running", lockedBy: instanceId, lockedAt: row.lockedAt };
+      const back = { state: "pending" as const, lockedAt: null, lockedBy: null };
+      let released = await db.updateMany<QueueRow>(QUEUE, scope, { ...back, coalesceKey: heldKey });
+      if (isErr(released) && heldKey !== null && isCoalesceConflict(released.error)) released = await db.updateMany<QueueRow>(QUEUE, scope, back);
+      if (isErr(released)) logger.error("events/queue: cannot hand back a claimed row on quiesce, it runs again once its lock expires", { id: row.id, error: released.error.message });
+    }
+  }
+
+  async function claimLane(name: string): Promise<Claimed | undefined> {
+    if (!delivery || quiesced) return undefined;
     const at = now();
     await reclaimExpiredLocks({ lane: name });
     const due = await db.findMany<QueueRow>(QUEUE, { state: "pending", lane: name, availableAt: { lte: at } }, { sort: { availableAt: "asc", createdAt: "asc" }, limit: 1 });
     if (isErr(due)) throw new Error(due.error.message);
     const row = due.value.items[0];
-    if (!row) return undefined;
+    if (!row || quiesced) return undefined;
     const won = await db.updateMany<QueueRow>(QUEUE, { id: row.id, state: "pending" }, { state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null });
     if (isErr(won)) {
       logger.error("events/queue: lane claim failed", { lane: name, id: row.id, error: won.error.message });
@@ -375,7 +402,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       laneContested.add(name);
       return undefined;
     }
-    return { ...row, state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null };
+    return { row: { ...row, state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null }, heldKey: row.coalesceKey };
   }
 
   async function clearStaleCoalesceKey(key: string): Promise<boolean> {
@@ -391,19 +418,32 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
   }
 
   async function tickOnce(): Promise<number> {
+    if (quiesced) return 0;
     lastTickAt = now();
     sweepPendingRelays();
     await fanOutUnfanned();
-    const rows = await claim();
-    for (const row of rows) await settle(row, await runRow(row));
+    const claimed = await claim();
+    let handled = 0;
+    for (const [index, { row }] of claimed.entries()) {
+      if (quiesced) {
+        await release(claimed.slice(index));
+        break;
+      }
+      await settle(row, await runRow(row));
+      handled++;
+    }
     await runDiscoveryIfDue();
-    return rows.length;
+    return handled;
   }
 
   async function tickLaneOnce(name: string): Promise<number> {
-    const row = await claimLane(name);
-    if (!row) return 0;
-    await settle(row, await runRow(row));
+    const claimed = await claimLane(name);
+    if (!claimed) return 0;
+    if (quiesced) {
+      await release([claimed]);
+      return 0;
+    }
+    await settle(claimed.row, await runRow(claimed.row));
     return 1;
   }
 
@@ -437,7 +477,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       }
       const pipelines: RelayEntry[] = [...entry.queued];
       for (const row of found.value.items) {
-        if (now() - relayStartedAt >= config.relayMs) {
+        if (quiesced || now() - relayStartedAt >= config.relayMs) {
           pipelines.push(pendingEntryOf(row));
           continue;
         }
@@ -448,6 +488,11 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
             continue;
           }
           const claimed: QueueRow = { ...row, state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null };
+          if (quiesced) {
+            await release([{ row: claimed, heldKey: row.coalesceKey }]);
+            pipelines.push(pendingEntryOf(row));
+            continue;
+          }
           const error = await runRow(claimed);
           const superseded = await settle(claimed, error);
           pipelines.push(relayEntryOf(row, error, superseded));
@@ -500,6 +545,14 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       void tick().then((handled) => schedule(gen, handled >= config.batch ? 0 : config.pollMs));
     }, delay);
     timer.unref();
+  }
+
+  function stopTimers(): void {
+    running = false;
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+    for (const t of laneTimers.values()) clearTimeout(t);
+    laneTimers.clear();
   }
 
   function scheduleLane(gen: number, name: string, delay: number): void {
@@ -613,6 +666,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     tick,
     tickLane,
     startWorker() {
+      quiesced = false;
       if (running) return;
       running = true;
       generation++;
@@ -620,12 +674,12 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       schedule(gen, 0);
       for (const name of knownLaneNames) scheduleLane(gen, name, 0);
     },
+    quiesce() {
+      quiesced = true;
+      stopTimers();
+    },
     async stopWorker() {
-      running = false;
-      if (timer) clearTimeout(timer);
-      timer = undefined;
-      for (const t of laneTimers.values()) clearTimeout(t);
-      laneTimers.clear();
+      stopTimers();
       if (ticking) await ticking;
       await Promise.all([...laneTicking.values()]);
     },
