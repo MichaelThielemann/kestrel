@@ -231,6 +231,8 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   const base: RestoreResult = { backupId: manifest.id, noop: false, loss, safetyBackup: null, sessionsDeleted: 0, originalsRestored: originals, newerOriginals, delivery, promoted: null, acknowledgement: null };
   if (loss?.identical === true && unchangedStore && current.unfinished.length === 0) {
     ctx.out.info("nothing differs from the backup apart from login sessions, which stay; starting the app again");
+    if (current.kind === "readable" && current.seal.state === "placed") await recordPlacement(ctx, current.seal.generation);
+    await ctx.journal.record("start", "started", current.kind === "readable" ? { generation: current.seal.generation } : {});
     await startTarget(ctx, () => {
       state.started = true;
     });

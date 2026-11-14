@@ -121,6 +121,46 @@ describe("a restore that stopped after it placed a complete generation", () => {
       await h.dispose();
     }
   });
+
+  it("asks about an unsealed stop when the app it started from that generation is killed before a generation of its own", async () => {
+    const bucket = new MemoryBucket("placed-noop-kill");
+    const failing = failingPuts(memoryStore(bucket));
+    const h = createHarness({ store: failing.store });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const backup = await h.run(["backup", "create", "--freeze", "--json"]);
+      expect(backup.code).toBe(0);
+      h.app.run(`UPDATE pages SET "body" = 'changed after the backup' WHERE "id" = 'home'`);
+      await h.app.export();
+      await h.app.sync();
+      const restoreArgs = ["restore", "--backup", String(backup.json.id), "--yes", "--answers", h.answers({ "access-changes": "accept" }), "--json"];
+      failing.failNext((key) => key.endsWith("-promote-done.json"));
+      expect((await h.run(restoreArgs)).code).toBe(1);
+      const placed = (await listGenerations(h.store, PREFIXES.replica)).at(-1)?.name ?? "";
+
+      h.app.failNextBoot = true;
+      const second = await h.run(restoreArgs);
+      expect(second.code).toBe(0);
+      expect(second.json).toMatchObject({ noop: true });
+      h.app.run(`INSERT INTO pages VALUES ('news', 'News', 'Not shipped')`);
+      h.app.kill();
+      for (const generation of await listGenerations(h.store, PREFIXES.replica)) {
+        if (generation.name <= placed) continue;
+        for (const key of [...bucket.objects.keys()]) if (key.startsWith(`${PREFIXES.replica}gen/${generation.name}/`)) bucket.objects.delete(key);
+      }
+      expect((await listGenerations(h.store, PREFIXES.replica)).at(-1)?.name).toBe(placed);
+
+      const frozen = await h.run(["backup", "create", "--freeze", "--yes", "--json"]);
+      expect(frozen.code).toBe(1);
+      expect(frozen.stderr).toContain('"unsealed-stop" needs an answer');
+      const accepted = await h.run(["backup", "create", "--freeze", "--yes", "--answers", h.answers({ "unsealed-stop": "accept" }), "--json"]);
+      expect(accepted.code).toBe(0);
+      expect(accepted.json).toMatchObject({ manifest: { source: { seal: "unsealed" } } });
+    } finally {
+      await h.dispose();
+    }
+  });
 });
 
 describe("a restore that fails after it changed the store", () => {
