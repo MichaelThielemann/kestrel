@@ -58,7 +58,7 @@ describe("restore and the store's clock", () => {
       const writesBefore = bucket.writes.length;
       const refused = await h.run(["restore", "--backup", String(backup.json.id), "--yes", "--answers", h.answers({ "access-changes": "accept" })], { poll: { delayMs: 5, attempts: 200, sleep } });
       expect(refused.code).toBe(1);
-      expect(refused.stderr).toContain(`generation ${future} is stamped`);
+      expect(refused.stderr).toMatch(new RegExp(`generation ${future}(-[0-9a-f]+)? is stamped`));
       expect(refused.stderr).not.toContain("the app stays stopped");
       expect(slept).toBeLessThan(60_000);
       const changed = bucket.writes.slice(writesBefore).filter((w) => !w.key.startsWith(LOCATION) && !w.key.startsWith(`${PREFIXES.replica}gen/`));
