@@ -1,7 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { ENVIRONMENTS_FILE } from "./environments.ts";
+import { ENVIRONMENTS_FILE, loadEnvironments } from "./environments.ts";
 import { OpsError } from "./errors.ts";
 import { packageDir } from "./packages.ts";
 import { sha256File } from "./sqlite.ts";
@@ -46,8 +46,9 @@ process.exitCode = await runOps(process.argv.slice(2), { cwd: fileURLToPath(dir)
 `;
 
 /**
- * Writes a self-contained `.kestrel-ops/` into `outDir`: `run.mjs`, the installed kestrel-ops with every package it
- * needs under `node_modules/`, the project's `kestrel.environments.json` and `bundle.json`. A deploy job then needs
+ * Writes a self-contained `.kestrel-ops/` into `outDir`: `run.mjs`, the installed kestrel-ops and the target adapter
+ * package of every environment, each with the packages it needs, under `node_modules/`, the project's
+ * `kestrel.environments.json` and `bundle.json`. A deploy job then needs
  * only Node and the bundle: `node .kestrel-ops/run.mjs status --env <name>`.
  */
 export function writeBundle(projectRoot: string, outDir: string, hostFacts: Record<string, unknown> = {}, clock: () => number = Date.now): { dir: string; packages: Record<string, string> } {
@@ -59,7 +60,9 @@ export function writeBundle(projectRoot: string, outDir: string, hostFacts: Reco
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, "node_modules"), { recursive: true });
   const packages: Record<string, string> = {};
-  const queue: Array<{ name: string; from: string; optional: boolean }> = [{ name: OPS_PACKAGE, from: projectRoot, optional: false }];
+  const adapters = new Set(Object.values(loadEnvironments(projectRoot)).map((env) => env.target.adapter));
+  adapters.delete("local");
+  const queue: Array<{ name: string; from: string; optional: boolean }> = [{ name: OPS_PACKAGE, from: projectRoot, optional: false }, ...[...adapters].map((name) => ({ name, from: projectRoot, optional: false }))];
   while (queue.length > 0) {
     const next = queue.shift();
     if (next === undefined || packages[next.name] !== undefined) continue;

@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -226,6 +227,48 @@ describe("bundle", () => {
       expect(JSON.parse(out)).toEqual({ cwd: `${dir}/`, found: true });
     } finally {
       rmSync(base, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("carries the target adapter package each environment names, with its dependencies, so the bundle resolves it without the project", () => {
+    const base = mkdtempSync(join(tmpdir(), "kestrel-ops-bundle-adapter-"));
+    const project = join(base, "project");
+    try {
+      const modules = join(project, "node_modules");
+      mkdirSync(join(modules, "@michaelthielemann"), { recursive: true });
+      symlinkSync(join(import.meta.dirname, ".."), join(modules, "@michaelthielemann", "kestrel-ops"));
+      const pkg = (name: string, deps: Record<string, string> = {}): void => {
+        mkdirSync(join(modules, name), { recursive: true });
+        writeFileSync(join(modules, name, "package.json"), JSON.stringify({ name, version: "1.2.3", type: "module", exports: "./index.mjs", dependencies: deps }));
+        writeFileSync(join(modules, name, "index.mjs"), "export const createTarget = () => ({});\n");
+      };
+      pkg("@example/some-target", { "example-target-helper": "1.0.0" });
+      pkg("example-target-helper");
+      writeFileSync(join(project, "package.json"), JSON.stringify({ name: "site", dependencies: { "@michaelthielemann/kestrel-ops": "5.8.1", "@example/some-target": "1.2.3" } }));
+      const environment = (adapter: string) => ({ target: { adapter }, storage: { bucket: "b" }, app: { replicaPrefix: "database/", mediaPrefix: "media/", deliveryPrefix: "www/" }, backups: { prefix: "kestrel-backups/" } });
+      writeFileSync(join(project, "kestrel.environments.json"), JSON.stringify({ environments: { prod: environment("@example/some-target"), dev: environment("local") } }));
+      const { dir, packages } = writeBundle(project, project, {}, () => 1);
+      expect(packages).toMatchObject({ "@example/some-target": "1.2.3", "example-target-helper": "1.2.3" });
+      const artifact = join(base, "artifact", ".kestrel-ops");
+      cpSync(dir, artifact, { recursive: true });
+      rmSync(project, { recursive: true, force: true });
+      const fromOps = createRequire(join(artifact, "node_modules", "@michaelthielemann", "kestrel-ops", "package.json"));
+      expect(fromOps.resolve("@example/some-target")).toBe(join(artifact, "node_modules", "@example", "some-target", "index.mjs"));
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("refuses with exit 2 to bundle an environment whose target adapter the project does not have installed", () => {
+    const project = mkdtempSync(join(tmpdir(), "kestrel-ops-bundle-missing-adapter-"));
+    try {
+      mkdirSync(join(project, "node_modules", "@michaelthielemann"), { recursive: true });
+      symlinkSync(join(import.meta.dirname, ".."), join(project, "node_modules", "@michaelthielemann", "kestrel-ops"));
+      writeFileSync(join(project, "package.json"), JSON.stringify({ name: "site" }));
+      writeFileSync(join(project, "kestrel.environments.json"), JSON.stringify({ environments: { prod: { target: { adapter: "@example/absent-target" }, storage: { bucket: "b" }, app: { replicaPrefix: "database/", mediaPrefix: "media/", deliveryPrefix: "www/" }, backups: { prefix: "kestrel-backups/" } } } }));
+      expect(() => writeBundle(project, project, {}, () => 1)).toThrow(expect.objectContaining({ exitCode: 2, message: expect.stringContaining("@example/absent-target") }));
+    } finally {
+      rmSync(project, { recursive: true, force: true });
     }
   }, 60_000);
 
