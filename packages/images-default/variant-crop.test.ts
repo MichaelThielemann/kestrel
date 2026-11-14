@@ -515,7 +515,7 @@ describe("images/default variants[].crop in images.attach", () => {
     for (const open of [first, images]) await open.close();
   });
 
-  it("keeps serving the listed crop at a pruned size whose row delete failed, lets syncPublic write it to the public copy, and retires the path on a retry", async () => {
+  it("keeps the listing, the origin and the public copy on the listed crop at a pruned size whose row delete failed, and retires the path on a retry", async () => {
     const w = await world();
     const full = await w.open([THUMB, SQUARE]);
     expectOk(await full.setFraming("m1", RIGHT_CROP));
@@ -537,6 +537,7 @@ describe("images/default variants[].crop in images.attach", () => {
     expect(pruned.ok).toBe(false);
     expect((await attached(small)).get("square")).toEqual(before);
     expect(await renderedBytes(small, "m1", "square.webp")).toEqual(rendered);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(rendered);
 
     expectOk(await small.syncPublic());
     expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(rendered);

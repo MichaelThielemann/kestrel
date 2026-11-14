@@ -1653,6 +1653,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(retired) && retired.error.code !== "CONFLICT") return retired;
     let wrote = false;
     const outcome = await (async (): Promise<Result<Variant, KestrelError>> => {
+      const dropped = await db.deleteOne(VARIANTS, variant.id);
+      if (isErr(dropped)) return dropped;
       if (config.publicCopy !== undefined) {
         const original = await loadOriginal(mediaId);
         if (isErr(original)) return original;
@@ -1662,8 +1664,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
           wrote = overwritten.value;
         }
       }
-      const dropped = await db.deleteOne(VARIANTS, variant.id);
-      if (isErr(dropped)) return dropped;
       const droppedBlob = await blobs.remove(variant.key);
       if (isErr(droppedBlob)) return droppedBlob;
       return ok(variant);
