@@ -64,6 +64,14 @@ describe("content/default module steps", () => {
     expect(res.result).toEqual(payload);
   });
 
+  it("validate and set accept a locale in the query, which the runner would refuse if the step did not declare it", async () => {
+    const { instance } = await boot();
+    const validated = await run(["content.validate:notes"], { body: { slug: "a", title: "A", status: "draft" }, query: { locale: "en" } }, instance);
+    expect(validated.status).toBe(200);
+    const set = await run(["content.set:settings"], { body: { title: "My Site" }, query: { locale: "en" } }, instance);
+    expect(set.status).toBe(200);
+  });
+
   it("create stores a document", async () => {
     const { instance } = await boot();
     const res = await run(["content.create:notes"], { body: { slug: "a", title: "A", status: "draft" } }, instance);

@@ -5,6 +5,7 @@ import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testin
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createContext, type Context } from "@michaelthielemann/kestrel/context";
 import type { KestrelError } from "@michaelthielemann/kestrel/errors";
+import { err, failure } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Result } from "@michaelthielemann/kestrel/result";
 import { createContentDefault, validateModel } from "./impl.ts";
 import module from "./module.ts";
@@ -51,6 +52,22 @@ describe("content/default", () => {
       const written = expectErr(await content.create("notes", Object.fromEntries([["text", "x"], [name, "y"]])), "VALIDATION");
       expect(written.details, name).toMatchObject({ fields: [{ field: name, message: "unknown field" }] });
     }
+  });
+
+  it("answers a type named like an Object.prototype member as unknown, and a filter on such a field as unknown", async () => {
+    const content = await createContentDefault({ types: { notes: { kind: "multi", fields: { text: "text" } } } }, createFakePersistence());
+    for (const name of ["constructor", "toString", "__proto__"]) {
+      await expect(content.list(name), name).rejects.toThrow(`unknown type "${name}"`);
+      await expect(content.get(name, "x"), name).rejects.toThrow(`unknown type "${name}"`);
+      await expect(content.list("notes", { [name]: "x" }), name).rejects.toThrow(`unknown field "${name}" in filter for "notes"`);
+    }
+  });
+
+  it("passes a persistence conflict on a column that is no declared field through unchanged", async () => {
+    const db = createFakePersistence();
+    const conflict = failure("CONFLICT", "duplicate", { details: { field: "constructor" } });
+    const content = await createContentDefault({ types: { notes: { kind: "multi", fields: { text: "text" } } } }, { ...db, createOne: async () => err(conflict) });
+    expect(expectErr(await content.create("notes", { text: "x" }), "CONFLICT")).toBe(conflict);
   });
 
   it("uses the injected clock for timestamps", async () => {

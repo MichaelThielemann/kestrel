@@ -142,6 +142,20 @@ describe("migrations/default steps", () => {
     expect(expectOk(await content.get("pages", created.id))?.title).toBe("A");
   });
 
+  it("apply reads dry from the body, not from a query parameter of the same name", async () => {
+    const migration: Migration = { id: "m1", collection: "pages", up: (c) => ({ ...c.document, title: "Changed" }) };
+    const { instance, content } = await boot([migration]);
+    const created = expectOk(await content.create("pages", { slug: "a", title: "A", status: "draft" }));
+
+    const result = boundaryCast<{ dry?: boolean; applied?: unknown[] }>(
+      expectOk(await stepOf(instance, "apply")(createContext({ trigger: { kind: "http", name: "t" }, body: {}, payload: { dry: true } }))).result,
+      "host",
+    );
+    expect(result.dry).toBeUndefined();
+    expect(result.applied).toHaveLength(1);
+    expect(expectOk(await content.get("pages", created.id))?.title).toBe("Changed");
+  });
+
   it("apply applies every pending migration and reports the ledger entries", async () => {
     const migration: Migration = { id: "m1", collection: "pages", up: (c) => ({ ...c.document, title: "Changed" }) };
     const { instance, content } = await boot([migration]);
