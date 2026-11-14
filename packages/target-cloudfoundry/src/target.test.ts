@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { OpsError } from "@michaelthielemann/kestrel-ops";
 import { cloudFoundryTarget, createTarget, type CloudFoundryOptions, type CloudFoundryTarget } from "./index.ts";
@@ -361,6 +363,24 @@ applications:
       expect(varsFile).not.toBe("");
       expect(existsSync(varsFile)).toBe(false);
       expect(readdirSync(tmpdir()).filter((name) => name.startsWith("kestrel-cf-vars-"))).toEqual(before);
+    });
+
+    it("removes the variables file when the process exits while cf apply-manifest runs", async () => {
+      const temp = join(root, "temp");
+      mkdirSync(temp);
+      const script = join(root, "exit-during-apply.mjs");
+      writeFileSync(script, `import { withManifestFiles } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "manifest.ts")).href)};
+await withManifestFiles("applications: []", { storage_secret: ${JSON.stringify(SECRET)} }, async (manifestFile) => {
+  process.stdout.write(manifestFile);
+  process.exit(143);
+});
+`);
+      const outcome = await new Promise<{ code: number | null; stdout: string }>((done) => {
+        execFile(process.execPath, ["--disable-warning=ExperimentalWarning", "--experimental-transform-types", script], { env: { ...process.env, TMPDIR: temp } }, (error, stdout) => done({ code: error === null ? 0 : typeof error.code === "number" ? error.code : null, stdout }));
+      });
+      expect(outcome.code).toBe(143);
+      expect(outcome.stdout.startsWith(temp)).toBe(true);
+      expect(readdirSync(temp)).toEqual([]);
     });
 
     it("refuses with exit 1 while the app runs", async () => {

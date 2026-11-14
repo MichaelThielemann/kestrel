@@ -1,5 +1,5 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
@@ -27,9 +27,11 @@ export function appManifest(file: string, app: string): { text: string; vars: st
   return { text, vars: [...new Set([...JSON.stringify(entry).matchAll(PLACEHOLDER)].map((m) => m[1] ?? ""))].sort() };
 }
 
-/** Writes the manifest and the variables into a directory only this user can read, hands both paths to `use` and removes the directory whatever happens. */
+/** Writes the manifest and the variables into a directory only this user can read, hands both paths to `use` and removes the directory when `use` settles or the process exits first. */
 export async function withManifestFiles<T>(manifest: string, vars: Record<string, string>, use: (manifestFile: string, varsFile: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(join(tmpdir(), "kestrel-cf-vars-"));
+  const removeOnExit = (): void => rmSync(dir, { recursive: true, force: true });
+  process.once("exit", removeOnExit);
   try {
     const manifestFile = join(dir, "manifest.yml");
     const varsFile = join(dir, "vars.yml");
@@ -37,6 +39,7 @@ export async function withManifestFiles<T>(manifest: string, vars: Record<string
     await writeFile(varsFile, JSON.stringify(vars), { mode: 0o600 });
     return await use(manifestFile, varsFile);
   } finally {
+    process.off("exit", removeOnExit);
     await rm(dir, { recursive: true, force: true });
   }
 }
