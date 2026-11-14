@@ -1258,3 +1258,69 @@ describe("GET /pages and GET /pages/:id never list a draft locale in _translatio
     }
   });
 });
+
+describe("the last-admin guard holds under concurrent requests", () => {
+  async function secondAdmin(kestrel: Instance, admin: Session): Promise<{ id: string; session: Session }> {
+    const created = await kestrel.run("createUser", { trigger, headers: bearer(admin.token), payload: { username: "ada", password: "long-enough", roles: ["admin"] } });
+    expect(created.status).toBe(200);
+    const { id } = boundaryCast<{ id: string }>(created.result, "json");
+    return { id, session: await login(kestrel, "ada", "long-enough") };
+  }
+
+  it("wraps the user-changing steps of updateUser, deactivateUser and deleteUser in an atomic group", async () => {
+    const loaded = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, p.steps]));
+    expect(loaded.get("updateUser")).toContainEqual({ atomic: ["authn.updateUser"] });
+    expect(loaded.get("deactivateUser")).toContainEqual({ atomic: ["authn.deactivateUser"] });
+    expect(loaded.get("deleteUser")).toContainEqual({ atomic: ["authn.deleteUser"] });
+  });
+
+  it("lets exactly one of two admins deactivate the other", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const first = await login(kestrel, "admin", "kestrel-demo");
+      const second = await secondAdmin(kestrel, first);
+      const [a, b] = await Promise.all([
+        kestrel.run("deactivateUser", { trigger, headers: bearer(first.token), params: { id: second.id } }),
+        kestrel.run("deactivateUser", { trigger, headers: bearer(second.session.token), params: { id: first.identity.id } }),
+      ]);
+      expect([a.status, b.status].sort()).toEqual([200, 409]);
+      expect([a.code, b.code].filter((code) => code !== undefined)).toEqual(["LAST_ADMIN"]);
+      const users = boundaryCast<{ active: boolean }[]>((await kestrel.run("listUsers", { trigger, headers: bearer(a.status === 200 ? first.token : second.session.token) })).result, "json");
+      expect(users.filter((user) => user.active)).toHaveLength(1);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("lets exactly one of two admins strip the other of the admin role", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const first = await login(kestrel, "admin", "kestrel-demo");
+      const second = await secondAdmin(kestrel, first);
+      const strip = { roles: ["editor"] };
+      const [a, b] = await Promise.all([
+        kestrel.run("updateUser", { trigger, headers: bearer(first.token), params: { id: second.id }, payload: strip, body: strip }),
+        kestrel.run("updateUser", { trigger, headers: bearer(second.session.token), params: { id: first.identity.id }, payload: strip, body: strip }),
+      ]);
+      expect([a.status, b.status].sort()).toEqual([200, 409]);
+      expect([a.code, b.code].filter((code) => code !== undefined)).toEqual(["LAST_ADMIN"]);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("lets exactly one of two admins delete the other", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const first = await login(kestrel, "admin", "kestrel-demo");
+      const second = await secondAdmin(kestrel, first);
+      const [a, b] = await Promise.all([
+        kestrel.run("deleteUser", { trigger, headers: bearer(first.token), params: { id: second.id } }),
+        kestrel.run("deleteUser", { trigger, headers: bearer(second.session.token), params: { id: first.identity.id } }),
+      ]);
+      expect([a.status, b.status].sort()).toEqual([200, 409]);
+    } finally {
+      await dispose();
+    }
+  });
+});

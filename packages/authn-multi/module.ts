@@ -286,6 +286,7 @@ export default defineModule({
       input: { type: "object", properties: { username: { type: "string" }, roles: { type: "array", items: { type: "string" } } }, additionalProperties: false },
       output: { type: "object", properties: { id: { type: "string" }, username: { type: "string" }, roles: { type: "array", items: { type: "string" } }, active: { type: "boolean" }, createdAt: { type: "number" } }, required: ["id", "username", "roles", "active", "createdAt"] },
       errors: { 400: "neither username nor roles given, or an empty one", 404: "user not found", 409: "username already exists (`CONFLICT`), or the last active admin would lose the admin permission (`LAST_ADMIN`)" },
+      atomicSafe: true,
     },
     deleteUser: {
       summary: "Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised",
@@ -326,6 +327,7 @@ export default defineModule({
       writes: ["result"],
       output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
       errors: { 400: "cannot deactivate yourself", 404: "user not found", 409: "the last active admin cannot be deactivated (`LAST_ADMIN`)" },
+      atomicSafe: true,
     },
     activateUser: {
       summary: "Activate a user",

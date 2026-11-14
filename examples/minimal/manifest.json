@@ -8694,7 +8694,8 @@
           "400": "neither username nor roles given, or an empty one",
           "404": "user not found",
           "409": "username already exists (`CONFLICT`), or the last active admin would lose the admin permission (`LAST_ADMIN`)"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -8875,7 +8876,8 @@
           "400": "cannot deactivate yourself",
           "404": "user not found",
           "409": "the last active admin cannot be deactivated (`LAST_ADMIN`)"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -15309,8 +15311,10 @@
               "400": "cannot deactivate yourself",
               "404": "user not found",
               "409": "the last active admin cannot be deactivated (`LAST_ADMIN`)"
-            }
-          }
+            },
+            "atomicSafe": true
+          },
+          "atomic": 1
         },
         {
           "spec": "events.emit:user.deactivated",
@@ -16644,7 +16648,8 @@
               "409": "the last active admin cannot be deleted (`LAST_ADMIN`)"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "events.emit:user.deleted?with=result",
@@ -32340,8 +32345,10 @@
               "400": "neither username nor roles given, or an empty one",
               "404": "user not found",
               "409": "username already exists (`CONFLICT`), or the last active admin would lose the admin permission (`LAST_ADMIN`)"
-            }
-          }
+            },
+            "atomicSafe": true
+          },
+          "atomic": 1
         },
         {
           "spec": "events.emit:user.updated",

@@ -289,7 +289,7 @@ describe("authn/multi: atomicSafe is pinned", () => {
   it("matches the shipped table", async () => {
     const { instance } = await boot();
     const describeMap = boundaryCast<Record<string, StepDescription | ((arg: string) => StepDescription)>>(module.describe!(instance), "host");
-    const expected: Record<string, boolean> = { verifyUser: true, deleteUser: true, requireUser: false, loadIdentity: false, login: false, logout: false };
+    const expected: Record<string, boolean> = { verifyUser: true, updateUser: true, deactivateUser: true, deleteUser: true, requireUser: false, loadIdentity: false, login: false, logout: false };
     for (const [name, expect_] of Object.entries(expected)) {
       const description = describeMap[name];
       const resolved = typeof description === "function" ? description("x") : description;
