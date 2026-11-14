@@ -193,6 +193,14 @@ function projectWith(config: string): string {
   return dir;
 }
 
+function projectWithoutConfig(): string {
+  const dir = mkdtempSync(join(tmpdir(), "kestrel-upgrade-migrate-project-"));
+  copies.push(dir);
+  copyFileSync(join(PROJECT, "package.json"), join(dir, "package.json"));
+  symlinkSync(join(PROJECT, "node_modules"), join(dir, "node_modules"), "dir");
+  return dir;
+}
+
 function failingConfigProject(): string {
   return projectWith(`import { defineConfig } from "@michaelthielemann/kestrel/defineConfig";
 if (process.env.KESTREL_MIGRATE_TEST_SETTING !== "on") throw new Error("KESTREL_MIGRATE_TEST_SETTING is not set");
@@ -264,6 +272,34 @@ export default defineConfig({ modules: ${FILES_PREFIX_MODULES} });
     expect(plan.code).toBe(1);
     expect(plan.out).toContain("migrate without --plan refuses to convert anything until then");
     expect(plan.out).not.toContain("no module of the project registers sanitize.svg");
+  });
+
+  it("stops before converting a store with a 5.x SVG when --root holds no kestrel.config.ts and no host plugin loads the project, also with --media-prefix, and names that in a plan", async () => {
+    const copy = fixtureCopy();
+    const before = files(copy.blobs);
+    const root = projectWithoutConfig();
+    for (const extra of [[], ["--media-prefix", "media/"]]) {
+      const run = await cli(["migrate", "--root", root, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy), ...extra]);
+      expect(run.code, extra.join(" ")).toBe(2);
+      expect(run.errors).toContain("1 5.x SVG(s) would be kept as a .bin download");
+      expect(run.errors).toContain("holds no kestrel.config.ts and no host plugin loads the project");
+      expect(run.errors).toContain("nothing was converted");
+      expect(files(copy.blobs)).toEqual(before);
+      expect(tableRows(copy.db, "kestrel_storage_versions")).toEqual([]);
+    }
+    const plan = await cli(["migrate", "--root", root, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy), "--plan"]);
+    expect(plan.code).toBe(1);
+    expect(plan.out).toContain("holds no kestrel.config.ts and no host plugin loads the project");
+    expect(plan.out).toContain("migrate without --plan refuses to convert anything until then");
+    expect(plan.out).not.toContain("no module of the project registers sanitize.svg");
+  });
+
+  it("converts a store without SVGs with the default prefix when --root holds no kestrel.config.ts", async () => {
+    const copy = fixtureCopy();
+    withoutSvg(copy);
+    const run = await cli(["migrate", "--root", projectWithoutConfig(), "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(run.code, run.errors).toBe(0);
+    expect(keysOf(copy).every((key) => key.startsWith("media/<id>/"))).toBe(true);
   });
 
   it("refuses a --media-prefix that media-default would not accept", async () => {

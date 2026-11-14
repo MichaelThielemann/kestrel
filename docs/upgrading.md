@@ -169,7 +169,7 @@ then `images-default:variant-slots`. The media prefix comes from `media-default`
 are not set, or an import only a host package resolves), the module configs come through the
 project's host plugin; when that does not load them either, `migrate` stops with exit code `2`,
 naming the error, before it converts anything. Without a `kestrel.config.ts` and without a host
-plugin the prefix is `media/`. The report names the prefix and where it came from. Each original is copied to its new key, checked against the item's size and sha256 (a
+plugin the prefix is `media/`, and a store that holds a 5.x SVG stops the run (see [SVG files](#svg-files)). The report names the prefix and where it came from. Each original is copied to its new key, checked against the item's size and sha256 (a
 difference is reported, and the item records those of the copy), and only then is the item
 switched to it. The duplicate variant rows of a slot are reduced to the newest finished one. Each
 module then gets a storage version row, which the start-up check of 6.0.0 reads.
@@ -254,7 +254,9 @@ copy: the one `.svg` file in the item's `<id>/` folder that no other item uses a
 - When the config does not load, or a module entry does not load and no other one registers
   `sanitize.svg`, `migrate` does not know whether the project would clean its SVGs. If the store
   holds a 5.x SVG, it stops with exit code `2` before it converts anything, and `migrate --plan` says
-  so in a note; make every module entry load and run it again. An entry without `config` is set up with `{}` and the defaults, as at start-up.
+  so in a note; make every module entry load and run it again. The same holds when `--root` has no
+  `kestrel.config.ts` and no host plugin loads the project, such as the root of a workspace whose
+  project lives in a subdirectory: name the directory that holds `kestrel.config.ts` with `--root`. An entry without `config` is set up with `{}` and the defaults, as at start-up.
 - Only a module whose name starts with `sanitize/` and whose `describe()` lists an `svg` step is set
   up. Another `sanitize/*` module, such as one with only an `html` step, is neither parsed nor set up.
   A `sanitize/*` module whose `describe()` cannot be read without its instance is set up to find

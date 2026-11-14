@@ -35,7 +35,9 @@ export interface UnresolvedStorage {
  * What {@link projectStorages} found. `configFrom` names where the module configs came from;
  * `configProblem` is set when the module configs could be loaded neither from `kestrel.config.ts` nor
  * through the project's host plugin although at least one of the two is there, so the storages were
- * built with the defaults. `mediaPrefix` is the key prefix the
+ * built with the defaults; `configMissing` is set when there is no `kestrel.config.ts` and no host plugin
+ * loads the project, so the storages were built with the defaults and the project's module entries are
+ * unknown. `mediaPrefix` is the key prefix the
  * media storage converts to, when the database holds media. `svgSanitizer` is set when
  * {@link ProjectStoragesOptions.sanitizeSvg} asked for it and the database holds media; the media
  * storage then cleans the 5.x SVGs with it when it has no `broken`.
@@ -45,6 +47,7 @@ export interface ProjectStorages {
   unresolved: UnresolvedStorage[];
   configFrom: string;
   configProblem?: string;
+  configMissing?: true;
   mediaPrefix?: string;
   svgSanitizer?: Omit<ProjectSvgSanitizer, "sanitize">;
 }
@@ -76,6 +79,7 @@ interface ModuleConfigs {
   modules: ConfiguredModule[];
   from: string;
   problem?: string;
+  missing?: true;
 }
 
 function messageOf(thrown: unknown): string {
@@ -135,7 +139,7 @@ async function moduleConfigs(root: string, plugins: readonly UpgradePlugin[]): P
     if (typeof fromPlugin !== "string") return fromPlugin;
     problems.push(fromPlugin);
   }
-  return problems.length === 0 ? { configs: new Map(), modules: [], from: "the defaults, without a kestrel.config.ts" } : { configs: new Map(), modules: [], from: "the defaults", problem: problems.join("; ") };
+  return problems.length === 0 ? { configs: new Map(), modules: [], from: "the defaults, without a kestrel.config.ts", missing: true } : { configs: new Map(), modules: [], from: "the defaults", problem: problems.join("; ") };
 }
 
 function storageFactory(mod: unknown): ((config: unknown, deps?: unknown) => ModuleStorage) | undefined {
@@ -152,7 +156,7 @@ function storageFactory(mod: unknown): ((config: unknown, deps?: unknown) => Mod
  */
 export async function projectStorages(root: string, dbFile: string, options: ProjectStoragesOptions = {}): Promise<ProjectStorages> {
   const tables = tablesOf(dbFile);
-  const { configs, modules, from, problem } = await moduleConfigs(root, options.plugins ?? []);
+  const { configs, modules, from, problem, missing } = await moduleConfigs(root, options.plugins ?? []);
   const storages: ModuleStorage[] = [];
   const unresolved: UnresolvedStorage[] = [];
   let mediaPrefix: string | undefined;
@@ -179,5 +183,5 @@ export async function projectStorages(root: string, dbFile: string, options: Pro
     }
     storages.push(factory(config));
   }
-  return { storages, unresolved, configFrom: options.mediaPrefix === undefined ? from : "--media-prefix", ...(problem === undefined ? {} : { configProblem: problem }), ...(mediaPrefix === undefined ? {} : { mediaPrefix }), ...(svgSanitizer === undefined ? {} : { svgSanitizer }) };
+  return { storages, unresolved, configFrom: options.mediaPrefix === undefined ? from : "--media-prefix", ...(problem === undefined ? {} : { configProblem: problem }), ...(missing === undefined ? {} : { configMissing: missing }), ...(mediaPrefix === undefined ? {} : { mediaPrefix }), ...(svgSanitizer === undefined ? {} : { svgSanitizer }) };
 }

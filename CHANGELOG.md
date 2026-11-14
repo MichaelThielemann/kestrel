@@ -957,7 +957,8 @@ Net changes since 5.8.2.
     every 5.x SVG of a project without that step, is kept as a `.bin` download and named. A module registering `sanitize.svg` that cannot be set up without other
     modules, whose config does not parse, or whose config schema boot refuses (an older `sanitize-svg`),
     stops the run with exit `2` before anything is converted, and so does a store with a 5.x SVG when
-    the config or a module entry does not load and no loaded entry registers `sanitize.svg`, also
+    the config or a module entry does not load and no loaded entry registers `sanitize.svg`, or when
+    `--root` holds no `kestrel.config.ts` and no host plugin loads the project, also
     with `--media-prefix`. A `sanitize/*` module whose `describe()` lists no `svg` step is neither
     parsed nor set up. `kestrel upgrade data` warns with `data/media-layout:config` in
     that case. It neither takes nor

@@ -174,19 +174,33 @@ function svgCounts(modules: readonly ModuleRun[]): Record<string, number> | unde
   return (layout?.outcome ?? layout?.plan)?.counts;
 }
 
-function unknownSanitizer(modules: readonly ModuleRun[], sanitizer: ProjectStorages["svgSanitizer"], configProblem: string | undefined): string | undefined {
-  const demoted = svgCounts(modules)?.svgDemoted ?? 0;
-  if (sanitizer?.from !== undefined || demoted === 0) return undefined;
-  const why = configProblem ?? (sanitizer?.unloaded === undefined ? undefined : `not every module entry could be loaded and checked offline: ${sanitizer.unloaded}`);
-  if (why === undefined) return undefined;
-  return `${demoted} 5.x SVG(s) would be kept as a .bin download, but ${why}, so migrate cannot tell whether a module of the project registers sanitize.svg and would clean them; make every module entry load (kestrel.config.ts with the environment it reads, and the project's dependencies installed) and run migrate again`;
+interface ProjectConfig {
+  root: string;
+  sanitizer: ProjectStorages["svgSanitizer"];
+  problem: string | undefined;
+  missing: boolean;
 }
 
-function svgNotes(modules: readonly ModuleRun[], sanitizer: ProjectStorages["svgSanitizer"], configProblem: string | undefined): string[] {
+function unknownSanitizer(modules: readonly ModuleRun[], project: ProjectConfig): string | undefined {
+  const demoted = svgCounts(modules)?.svgDemoted ?? 0;
+  const { sanitizer, problem } = project;
+  if (sanitizer?.from !== undefined || demoted === 0) return undefined;
+  const head = `${demoted} 5.x SVG(s) would be kept as a .bin download, but`;
+  const cannotTell = "so migrate cannot tell whether a module of the project registers sanitize.svg and would clean them";
+  if (problem === undefined && project.missing) {
+    return `${head} --root "${project.root}" holds no kestrel.config.ts and no host plugin loads the project, ${cannotTell}; name the project directory that holds kestrel.config.ts with --root and run migrate again`;
+  }
+  const why = problem ?? (sanitizer?.unloaded === undefined ? undefined : `not every module entry could be loaded and checked offline: ${sanitizer.unloaded}`);
+  if (why === undefined) return undefined;
+  return `${head} ${why}, ${cannotTell}; make every module entry load (kestrel.config.ts with the environment it reads, and the project's dependencies installed) and run migrate again`;
+}
+
+function svgNotes(modules: readonly ModuleRun[], project: ProjectConfig): string[] {
   const counts = svgCounts(modules);
+  const { sanitizer } = project;
   if (counts === undefined) return [];
   if (sanitizer?.from !== undefined && (counts.svgSanitized ?? 0) > 0) return [`media/default cleans each 5.x SVG with the sanitize.svg step of ${sanitizer.from} and keeps it an image`];
-  if (sanitizer?.from === undefined && (counts.svgDemoted ?? 0) > 0 && configProblem === undefined && sanitizer?.unloaded === undefined) {
+  if (sanitizer?.from === undefined && (counts.svgDemoted ?? 0) > 0 && project.problem === undefined && !project.missing && sanitizer?.unloaded === undefined) {
     return ["no module of the project registers sanitize.svg, so every 5.x SVG is kept as a .bin download"];
   }
   return [];
@@ -226,7 +240,7 @@ export async function runMigrateStep(options: MigrateStepOptions): Promise<Migra
   if (persistence === undefined) return { exitCode: 2, error: "the project's own @michaelthielemann/kestrel-persistence-sqlite could not be resolved; install the project's dependencies first" };
   const filesystem = await blobstoreOf(root);
   if (filesystem === undefined) return { exitCode: 2, error: "the project's own @michaelthielemann/kestrel-blobstore-filesystem could not be resolved; install the project's dependencies first" };
-  const { storages, unresolved, configFrom, configProblem, mediaPrefix, svgSanitizer } = await projectStorages(root, dbFile, { sanitizeSvg: true, ...(options.plugins === undefined ? {} : { plugins: options.plugins }), ...(options.mediaPrefix === undefined ? {} : { mediaPrefix: options.mediaPrefix }) });
+  const { storages, unresolved, configFrom, configProblem, configMissing, mediaPrefix, svgSanitizer } = await projectStorages(root, dbFile, { sanitizeSvg: true, ...(options.plugins === undefined ? {} : { plugins: options.plugins }), ...(options.mediaPrefix === undefined ? {} : { mediaPrefix: options.mediaPrefix }) });
   if (unresolved.length > 0) {
     return { exitCode: 2, error: unresolved.map((u) => `the database holds ${u.collections.join(", ")}, but ${u.package}/storage could not be loaded from the project; install the project's 6.x dependencies first`).join("; ") };
   }
@@ -236,6 +250,7 @@ export async function runMigrateStep(options: MigrateStepOptions): Promise<Migra
   if (svgSanitizer?.broken !== undefined) {
     return { exitCode: 2, error: `${svgSanitizer.from ?? "the module"} registers sanitize.svg, but ${svgSanitizer.broken}; nothing was converted` };
   }
+  const project: ProjectConfig = { root, sanitizer: svgSanitizer, problem: configProblem, missing: configMissing === true };
   const convertsTo = mediaPrefix ?? "media/";
   const notes: string[] = [];
   if (mediaPrefix !== undefined) notes.push(`media/default converts to the key prefix "${mediaPrefix}" from ${configFrom}`);
@@ -248,7 +263,7 @@ export async function runMigrateStep(options: MigrateStepOptions): Promise<Migra
     if (options.plan !== true) {
       const preview = await guarded(() => runShapeMigrations({ ...shared, apply: false }));
       if (isErr(preview)) return { exitCode: 2, error: `${preview.error}; nothing was converted` };
-      const unknown = unknownSanitizer(preview.value.modules, svgSanitizer, configProblem);
+      const unknown = unknownSanitizer(preview.value.modules, project);
       if (unknown !== undefined) return { exitCode: 2, error: `${unknown}; nothing was converted` };
       const nowhere = originalsNowhere(preview.value.modules) && (await holdsNothingUnder(stores.blobs, convertsTo));
       const checked = missingOriginals(preview.value.modules, options.answers, { blobsDir, prefix: convertsTo, nowhere, originalsGone: options.originalsGone === true });
@@ -262,10 +277,10 @@ export async function runMigrateStep(options: MigrateStepOptions): Promise<Migra
       const checked = missingOriginals(run.value.modules, options.answers, { blobsDir, prefix: convertsTo, nowhere, originalsGone: options.originalsGone === true });
       if (checked.stop !== undefined) notes.push(`${checked.stop}; migrate without --plan refuses to convert anything until then`);
       if (checked.note !== undefined) notes.push(checked.note);
-      const unknown = unknownSanitizer(run.value.modules, svgSanitizer, configProblem);
+      const unknown = unknownSanitizer(run.value.modules, project);
       if (unknown !== undefined) notes.push(`${unknown}; migrate without --plan refuses to convert anything until then`);
     }
-    notes.push(...svgNotes(run.value.modules, svgSanitizer, configProblem));
+    notes.push(...svgNotes(run.value.modules, project));
     const report: MigrateReport = { schema: 1, tool: { name: "kestrel-upgrade", version: toolVersion() }, command: "migrate", db: dbFile, blobsDir, applied: options.plan !== true, modules: run.value.modules, notes };
     return { exitCode: run.value.modules.every(finished) ? 0 : 1, report };
   } finally {
