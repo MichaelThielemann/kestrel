@@ -745,7 +745,10 @@ reported, and so is backup-blobstore's restore of a missing file under `restoreO
 back the last `backup.run` copy: on an ephemeral disk with that module, every start renders every
 output again. Such a restore also records the orphan removal above as done, so it never runs on a
 restored database. replication-sqlite's rebuild of a missing database file under `restoreOnStart`
-brings back the latest replica and is no restore here; after a stop without teardown, pages saved
+brings back the latest replica and is no restore here, unless the generation it rebuilds from was
+placed with `origin.json` (see
+[Replica layout](../packages/replication-sqlite/README.md#replica-layout)): that rebuild is reported as
+a restore. After any other rebuild that follows a stop without teardown, pages saved
 since the last `replication.sync` keep files the rebuilt rows do not know. A database file copied into
 place by hand is not detected either. After either one, run `delivery.markAll` for every delivered
 type, or restore through one of those steps. The files of pages created or moved after the backup stay
