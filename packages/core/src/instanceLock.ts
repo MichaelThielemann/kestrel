@@ -255,7 +255,7 @@ function databasePath(file: string): string | undefined {
   }
   path = decoded(path);
   const params = new URLSearchParams(query);
-  if (path === "" || path === MEMORY || params.get("mode") === "memory" || params.get("vfs") === "memdb") return undefined;
+  if (path === "" || path === MEMORY || params.getAll("mode").at(-1) === "memory" || params.getAll("vfs").at(-1) === "memdb") return undefined;
   return path;
 }
 

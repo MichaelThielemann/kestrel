@@ -192,6 +192,13 @@ describe("instanceLockFile", () => {
     }
   });
 
+  it("follows the last of repeated mode and vfs parameters in a file: URI, as SQLite does", () => {
+    expect(lockFile(`file:${file}?mode=memory&mode=rwc`)).toBe(`${file}.instance`);
+    expect(lockFile(`file:${file}?vfs=memdb&vfs=unix`)).toBe(`${file}.instance`);
+    expect(instanceLockFile(`file:${file}?mode=rwc&mode=memory`)).toBeUndefined();
+    expect(instanceLockFile(`file:${file}?vfs=unix&vfs=memdb`)).toBeUndefined();
+  });
+
   it("follows a symlinked directory whose target does not exist yet", () => {
     symlinkSync("missing", join(dir, "link"));
     expect(lockFile(join(dir, "link", "app.db"))).toBe(`${join(dir, "missing", "app.db")}.instance`);
