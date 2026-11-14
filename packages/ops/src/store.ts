@@ -1,3 +1,5 @@
+import type { PollOptions } from "./replica.ts";
+
 /** One object as a listing or HEAD reports it. `etag` is unquoted; `lastModified` is the server's clock in epoch milliseconds. */
 export interface ObjectInfo {
   key: string;
@@ -67,4 +69,22 @@ export async function listMap(store: ObjectStore, prefix: string): Promise<Map<s
 /** Strips the quotes S3 puts around an ETag. */
 export function unquote(etag: string | undefined): string {
   return (etag ?? "").replace(/^W\//, "").replace(/^"|"$/g, "");
+}
+
+/** Lists `prefix` until `agree` consecutive listings show the same keys and ETags, for a store whose listings may lag behind writes. */
+export async function stableList(store: ObjectStore, prefix: string, poll: PollOptions = {}): Promise<ObjectInfo[]> {
+  const agree = poll.agree ?? 2;
+  const sleep = poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+  let last = "";
+  let same = 0;
+  let listed: ObjectInfo[] = [];
+  for (let i = 0; i < (poll.attempts ?? 30); i++) {
+    listed = await store.list(prefix);
+    const now = listed.map((info) => `${info.key}:${info.etag}`).join(",");
+    same = now === last ? same + 1 : 1;
+    last = now;
+    if (same >= agree) return listed;
+    await sleep(poll.delayMs ?? 1000);
+  }
+  return listed;
 }

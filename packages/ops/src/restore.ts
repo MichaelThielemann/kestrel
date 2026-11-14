@@ -8,7 +8,7 @@ import { confirm } from "./questions.ts";
 import { acknowledgement, buildDatabase, promote, stableGenerations, type Acknowledgement, type Promoted } from "./replica.ts";
 import { serverClock } from "./serverTime.ts";
 import { deleteSessions, hasAccessChanges, integrityCheck, lossReport, sha256, vacuumInto, type LossReport } from "./sqlite.ts";
-import { listMap, transfer } from "./store.ts";
+import { listMap, stableList, transfer } from "./store.ts";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 
 /** Options of {@link restoreBackup}. */
@@ -69,7 +69,7 @@ async function restoreOriginals(ctx: OpsContext, blobs: readonly BlobEntry[], dr
 }
 
 async function restoreDelivery(ctx: OpsContext, site: readonly SiteEntry[], dryRun: boolean): Promise<{ written: string[]; removed: string[] }> {
-  const live = await listMap(ctx.app, ctx.env.app.deliveryPrefix);
+  const live = new Map((await stableList(ctx.app, ctx.env.app.deliveryPrefix, ctx.poll)).map((info) => [info.key, info]));
   const wanted = new Map(site.map((s) => [s.key, s]));
   const written: string[] = [];
   for (const entry of site) {

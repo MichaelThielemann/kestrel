@@ -4,11 +4,15 @@ import { keys, parseJson } from "./layout.ts";
 import { MemoryBucket, memoryStore } from "./memoryStore.ts";
 import { backupRestoreRoundTrip } from "./scenario.fixture.ts";
 
+describe("backup and restore against an in-memory store whose listings lag behind writes", () => {
+  backupRestoreRoundTrip(async () => memoryStore(new MemoryBucket("lagging", { listLag: 1 })));
+});
+
 describe("backup and restore against an in-memory store", () => {
   backupRestoreRoundTrip(async () => memoryStore(new MemoryBucket("round-trip")));
 
-  it("never overwrites a key of the backup location on any write path", async () => {
-    const bucket = new MemoryBucket("write-once");
+  it("never overwrites a key of the backup location on any write path, also when listings lag", async () => {
+    const bucket = new MemoryBucket("write-once", { listLag: 1 });
     const h = createHarness({ store: memoryStore(bucket) });
     try {
       await h.app.start();

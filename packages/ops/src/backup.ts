@@ -9,7 +9,7 @@ import { BACKUP_KINDS, backupId, fromJsonl, jsonBytes, keys, parseBackupId, pars
 import { confirm } from "./questions.ts";
 import { buildDatabase, sealOf, stableGenerations, type SealReport } from "./replica.ts";
 import { integrityCheck, referencedBlobs, sha256, sha256File, tableCounts, vacuumInto } from "./sqlite.ts";
-import { ObjectMissing, PreconditionFailed, listMap, transfer, type ObjectInfo, type ObjectStore } from "./store.ts";
+import { ObjectMissing, PreconditionFailed, listMap, stableList, transfer, type ObjectInfo, type ObjectStore } from "./store.ts";
 
 /** How a backup gets its database: from the replica of a running app, after stopping it, or from a stop the caller already made. */
 export type BackupMode = { kind: "live" } | { kind: "freeze" } | { kind: "stopped"; seal: SealReport; stoppedAt: number };
@@ -57,7 +57,7 @@ async function copyIntoObjects(ctx: OpsContext, info: ObjectInfo, existing: Map<
   let current: ObjectInfo | null = info;
   for (let attempt = 0; attempt < COPY_ATTEMPTS && current !== null; attempt++) {
     const object = ctx.location + keys.object(current.key, current.etag);
-    const known = existing.get(object);
+    const known = existing.get(object) ?? (await ctx.backups.head(object));
     if (known && known.size === current.size) return { entry: { key: current.key, size: current.size, etag: current.etag, object: keys.object(current.key, current.etag) }, copied: false };
     try {
       await transfer(ctx.app, current.key, ctx.backups, object, current.etag);
@@ -140,7 +140,7 @@ async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: { kind
     else blobs.push({ ...copied.entry, sha256: ref.sha256 });
   }
   const site: SiteEntry[] = [];
-  for (const info of await ctx.app.list(app.deliveryPrefix)) {
+  for (const info of await stableList(ctx.app, app.deliveryPrefix, ctx.poll)) {
     const copied = await copyIntoObjects(ctx, info, existing);
     if (copied !== null) site.push(copied.entry);
   }
@@ -223,7 +223,8 @@ export function sampleSize(total: number): number {
 /**
  * Verifies a backup from what the backup location holds: the database is read back, hashed and fully
  * integrity-checked, its rows are counted against the manifest, every referenced original and every delivery key has
- * its entry and an object of the recorded size, and a sample of originals hashes to the checksum of its row.
+ * its entry and an object of the recorded size, and a sample of originals hashes to the checksum of its row. An
+ * object the listing does not show yet is looked up by a HEAD before it counts as missing.
  */
 export async function verifyBackup(ctx: OpsContext, id: string): Promise<Verification> {
   const problems: Problem[] = [];
@@ -268,7 +269,9 @@ export async function verifyBackup(ctx: OpsContext, id: string): Promise<Verific
   for (const [list, kind] of [[blobs ?? [], "blobs"], [site ?? [], "site"]] as const) {
     for (const entry of list) {
       checked[kind] += 1;
-      const object = objects.get(ctx.location + entry.object);
+      const key = ctx.location + entry.object;
+      const object = objects.get(key) ?? (await ctx.backups.head(key));
+      if (object) objects.set(key, object);
       if (!object) problems.push({ element: entry.key, message: `backup object ${entry.object} is missing` });
       else if (object.size !== entry.size) problems.push({ element: entry.key, message: `backup object ${entry.object} has ${object.size} bytes, expected ${entry.size}` });
     }

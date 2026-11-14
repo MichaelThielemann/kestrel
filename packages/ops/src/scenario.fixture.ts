@@ -7,7 +7,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createHarness, LOCATION, PREFIXES, SECRETS } from "./harness.fixture.ts";
 import { fromJsonl, keys } from "./layout.ts";
 import type { BlobEntry, SiteEntry } from "./layout.ts";
-import type { ObjectStore } from "./store.ts";
+import { stableList, type ObjectStore } from "./store.ts";
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -76,7 +76,7 @@ export function backupRestoreRoundTrip(makeStore: () => Promise<ObjectStore>): v
       for (const entry of blobs) expect((await store.head(entry.key))?.etag, entry.key).toBe(entry.etag);
       expect(await store.head(newer)).not.toBeNull();
       const site = parseLines<SiteEntry>(await store.get(LOCATION + keys.site(id)));
-      const live = await store.list(PREFIXES.delivery);
+      const live = await stableList(store, PREFIXES.delivery, { delayMs: 5 });
       expect(live.map((i) => [i.key, i.etag, i.size])).toEqual(site.map((s) => [s.key, s.etag, s.size]));
       for (const entry of site) expect(new TextDecoder().decode((await store.get(entry.key)) ?? new Uint8Array())).toBe(new TextDecoder().decode((await store.get(LOCATION + entry.object)) ?? new Uint8Array()));
 

@@ -127,6 +127,9 @@ Verification works only from what the backup location holds: it downloads `db.sq
 with the manifest, runs a full `integrity_check`, counts the rows of every table, checks that every original
 a row references has an entry and an object of the recorded size and that every delivery key has one, and
 hashes a sample of originals (25 or 2 %, whichever is more, at most 200) against the checksum of their row.
+Listings may lag behind writes: an object the listing does not show yet is looked up with a HEAD before it
+counts as missing, a backup copies a key only after a HEAD found no object under it, and the delivery prefix
+is listed until two listings agree.
 
 ## Restore
 1. The backup is verified again, then the app is stopped and must report stopped with no instance.
