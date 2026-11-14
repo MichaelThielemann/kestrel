@@ -47,6 +47,7 @@ interface LockRecord {
   pid: number;
   pidNamespace: string;
   processStart: string;
+  clockStart: number;
   bootId: string;
   host: string;
   startedAt: string;
@@ -89,7 +90,7 @@ const ATTEMPTS = 20;
 const RETRY_PAUSE_MS = 20;
 const GUARD_STALE_MS = 5_000;
 const GUARD_WAIT_MS = GUARD_STALE_MS + 1_000;
-const SAME_PROCESS_SLACK_MS = 1_000;
+const CLOCK_SLACK_MS = 50;
 const MAX_LINK_HOPS = 40;
 const MAX_TIMER_MS = 2 ** 31 - 1;
 const HOLDERS_KEY = Symbol.for("kestrel.instanceLocks");
@@ -99,7 +100,7 @@ const PID_NAMESPACE = pidNamespace();
 const PROCESS_START = statOf("self")?.start ?? "";
 const PROC_SHOWS_PIDS = PROCESS_START !== "" && statOf(process.pid)?.start === PROCESS_START;
 const BOOT_ID = bootId();
-const PROCESS_STARTED_AT = Date.now() - process.uptime() * 1000;
+const CLOCK_START = Math.round(Number(process.hrtime.bigint()) / 1e6 - process.uptime() * 1000);
 
 const UNLOCKED: InstanceLock = {
   release() {},
@@ -305,6 +306,7 @@ function take(file: string, lockPath: string, opts: InstanceLockOptions, { ttlMs
       pid: process.pid,
       pidNamespace: PID_NAMESPACE,
       processStart: PROCESS_START,
+      clockStart: CLOCK_START,
       bootId: BOOT_ID,
       host: hostname(),
       startedAt: now,
@@ -592,9 +594,11 @@ function readLock(lockPath: string): Seen {
 function judge(seen: Exclude<Seen, { kind: "absent" }>, ttlMs: number): "stale" | "this-process" | "taken" {
   if (seen.kind === "unreadable") return Date.now() - seen.mtimeMs > ttlMs ? "stale" : "taken";
   const { record } = seen;
+  const here = sameKernel(record) && record.pidNamespace === PID_NAMESPACE;
+  if (here && record.pid === process.pid && sameProcess(record)) return "this-process";
   if (!(Date.now() - Date.parse(record.heartbeatAt) <= Math.max(ttlMs, record.ttlMs))) return "stale";
-  if (!sameKernel(record) || record.pidNamespace !== PID_NAMESPACE) return "taken";
-  if (record.pid === process.pid) return sameProcess(record) ? "this-process" : "stale";
+  if (!here) return "taken";
+  if (record.pid === process.pid) return "stale";
   return runs(record.pid, record.processStart) ? "taken" : "stale";
 }
 
@@ -605,7 +609,7 @@ function sameKernel(record: { bootId: string; host: string }): boolean {
 
 function sameProcess(record: LockRecord): boolean {
   if (PROCESS_START !== "" && record.processStart !== "") return record.processStart === PROCESS_START;
-  return Date.parse(record.startedAt) >= PROCESS_STARTED_AT - SAME_PROCESS_SLACK_MS;
+  return Math.abs(record.clockStart - CLOCK_START) <= CLOCK_SLACK_MS;
 }
 
 function refusal(file: string, lockPath: string, seen: Exclude<Seen, { kind: "absent" }>, ttlMs: number, optOut: string): string {
@@ -650,13 +654,13 @@ function parseRecord(raw: string): LockRecord | undefined {
     return undefined;
   }
   if (typeof value !== "object" || value === null) return undefined;
-  if (!("instanceId" in value && "pid" in value && "pidNamespace" in value && "processStart" in value && "bootId" in value && "host" in value && "startedAt" in value && "heartbeatAt" in value && "ttlMs" in value && "threads" in value)) return undefined;
-  const { instanceId, pid, pidNamespace, processStart, bootId, host, startedAt, heartbeatAt, ttlMs, threads } = value;
+  if (!("instanceId" in value && "pid" in value && "pidNamespace" in value && "processStart" in value && "clockStart" in value && "bootId" in value && "host" in value && "startedAt" in value && "heartbeatAt" in value && "ttlMs" in value && "threads" in value)) return undefined;
+  const { instanceId, pid, pidNamespace, processStart, clockStart, bootId, host, startedAt, heartbeatAt, ttlMs, threads } = value;
   if (typeof instanceId !== "string" || typeof pidNamespace !== "string" || typeof processStart !== "string" || typeof bootId !== "string" || typeof host !== "string") return undefined;
   if (typeof startedAt !== "string" || typeof heartbeatAt !== "string" || !isThreads(threads)) return undefined;
   if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0 || Number.isNaN(Date.parse(startedAt)) || Number.isNaN(Date.parse(heartbeatAt))) return undefined;
-  if (typeof ttlMs !== "number" || !Number.isFinite(ttlMs) || ttlMs <= 0) return undefined;
-  return { instanceId, pid, pidNamespace, processStart, bootId, host, startedAt, heartbeatAt, ttlMs, threads };
+  if (typeof ttlMs !== "number" || !Number.isFinite(ttlMs) || ttlMs <= 0 || typeof clockStart !== "number" || !Number.isFinite(clockStart)) return undefined;
+  return { instanceId, pid, pidNamespace, processStart, clockStart, bootId, host, startedAt, heartbeatAt, ttlMs, threads };
 }
 
 function isThreads(value: unknown): value is Record<string, string> {

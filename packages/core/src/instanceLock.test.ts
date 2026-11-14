@@ -420,6 +420,34 @@ describe("acquireInstanceLock", () => {
     expect(lock.health()).toEqual({ ok: true });
   });
 
+  it.runIf(ownProcessStart() !== "")("shares a lock of this process whose heartbeat is older than the TTL instead of taking it over", () => {
+    const stale = new Date(Date.now() - 120_000).toISOString();
+    const sibling = writeRecord({ ...onThisHost, pid: process.pid, processStart: ownProcessStart(), startedAt: stale, heartbeatAt: stale });
+    const lock = take(file);
+    expect(readRecord().instanceId).toBe(sibling.instanceId);
+    expect(Date.parse(readRecord().heartbeatAt)).toBeGreaterThan(Date.parse(stale));
+    expect(lock.health()).toEqual({ ok: true });
+  });
+
+  it("recognizes a lock of this process by its start on the monotonic clock when the lock records no process start time, whatever the wall clock says", () => {
+    const sibling = writeRecord({ ...onThisHost, pid: process.pid, processStart: "", clockStart: ownClockStart(), startedAt: beforeThisProcess() });
+    const lock = take(file);
+    expect(readRecord().instanceId).toBe(sibling.instanceId);
+    expect(lock.health()).toEqual({ ok: true });
+  });
+
+  it("takes over at once a lock with this process's pid but another start on the monotonic clock when the lock records no process start time", () => {
+    const foreign = writeRecord({ ...onThisHost, pid: process.pid, processStart: "", clockStart: ownClockStart() - 60_000 });
+    take(file);
+    expect(readRecord().instanceId).not.toBe(foreign.instanceId);
+    expect(readRecord().pid).toBe(process.pid);
+  });
+
+  it("records this process's start on the monotonic clock", () => {
+    take(file);
+    expect(Math.abs(readRecord().clockStart - ownClockStart())).toBeLessThanOrEqual(5);
+  });
+
   it("keeps the lock file on the last release in this thread while another thread of this process still holds it", () => {
     const sibling = writeRecord({ ...onThisHost, pid: process.pid, processStart: ownProcessStart() });
     take(file).release();
