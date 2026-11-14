@@ -18,8 +18,8 @@ loses power – pair it with `backup/blobstore` or `replication/sqlite` rather t
 
 **One process, one writer.** The module assumes it is the only process that opens `file`, and
 makes sure of it: before it opens the file, `setup()` takes the instance lock on it, the sidecar
-`<file>.instance` next to the database. A second *process* on the same file – a standalone
-`kestrel` CLI next to a running server, a second dev server, two containers on a shared volume –
+`<file>.instance` next to the database. A second *process* on the same file – a second
+`kestrel start` next to a running server, a second dev server, two containers on a shared volume –
 fails to boot with `instance-locked`, naming the host and PID of the process that holds the file
 for a readable lock (an unreadable lock file is named instead), and leaves the file as it is. Writes are only serialised inside one process, and restores swap the
 file before it is opened, so point each process at its own file, or route all writes through one
