@@ -297,9 +297,11 @@ Boot recognizes a `KestrelBootError` created by another copy of the core loaded 
 process as well; `isKestrelBootError` from `@michaelthielemann/kestrel` makes the same check.
 `instance-locked` is one such code: a module that keeps a second process off its database file
 throws it from `setup()` through `acquireInstanceLock` (`@michaelthielemann/kestrel/instanceLock`)
-when another process holds a lock on the file that has not expired. The reason names that
-process's host, PID and start time, the time from which the lock is taken over, and the module
-setting that allows several processes on purpose.
+when another process holds a lock on the file that has not expired. For a readable lock the reason
+names that process's host, PID and start time and the time from which the lock is taken over. A
+lock file that cannot be read is refused while it was written within the TTL, and the reason names
+the file and says so. In both cases the reason names the module setting that allows several
+processes on purpose.
 
 Module code that throws while boot registers or resolves steps is reported like any other problem.
 A module's `steps()` that throws is `steps-threw`, its `describe()` `describe-threw`, both naming
