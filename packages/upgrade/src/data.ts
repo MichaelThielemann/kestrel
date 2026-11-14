@@ -12,6 +12,7 @@ import { isErr } from "@michaelthielemann/kestrel/result";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { trackTempDir, untrackTempDir } from "./cleanup.ts";
+import { redirectReservedPathFindings } from "./dataRedirects.ts";
 import { isRecord } from "./guards.ts";
 import type { DataContentModel, DataRoute, UpgradePlugin } from "./plugin.ts";
 import { detectPlugin } from "./pluginRules.ts";
@@ -671,6 +672,7 @@ export async function runDataStep(dbFile: string, root: string, plugins: readonl
     let dataModelIssues: Finding[];
     let fromPlugin: Finding[];
     let translationSlugs: Finding[];
+    let redirectRules: Finding[];
     try {
       queued = await queueFindings(db);
       if (queued.error !== undefined) return { exitCode: 2, error: queued.error };
@@ -680,12 +682,13 @@ export async function runDataStep(dbFile: string, root: string, plugins: readonl
       counts = contentModel === undefined ? {} : await underscoreFieldCounts(copy, db, contentModel);
       mediaLayout = await mediaLayoutFindings(root, db);
       translationSlugs = await translationSlugFindings(db, contentModel);
+      redirectRules = await redirectReservedPathFindings(db, await moduleConfigOf(root, "redirects-default"));
       fromPlugin = await pluginDataFindings(db, root, plugin, contentModel);
     } finally {
       db.close();
     }
     const [siteMediaLeftovers, blobstoreTmpSuffix] = await Promise.all([siteMediaLeftoversFindings(root), blobstoreTmpSuffixFindings(root)]);
-    const findings = [...queued.findings, ...underscoreFieldFindings(counts), ...mediaLayout, ...translationSlugs, ...siteMediaLeftovers, ...blobstoreTmpSuffix, ...dataModelIssues, ...fromPlugin];
+    const findings = [...queued.findings, ...underscoreFieldFindings(counts), ...mediaLayout, ...translationSlugs, ...redirectRules, ...siteMediaLeftovers, ...blobstoreTmpSuffix, ...dataModelIssues, ...fromPlugin];
     const report: UpgradeReport = {
       schema: 1,
       tool: { name: "kestrel-upgrade", version: toolVersion() },
