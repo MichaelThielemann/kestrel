@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createHarness, LOCATION, PREFIXES, type Harness } from "./harness.fixture.ts";
 import { keys, parseJson, unstamp } from "./layout.ts";
@@ -315,6 +317,29 @@ describe("backup and restore against an in-memory store", () => {
       expect(restored.stderr).toContain(`backup ${id} failed verification`);
       expect(restored.stderr).toContain(`${file}: holds 1 entry`);
       expect(delivery()).toEqual(before);
+    } finally {
+      await h.dispose();
+    }
+  });
+
+  it("refuses a local copy with media of a backup whose blobs.jsonl was cut at a line boundary, naming blobs.jsonl, before it writes anything", async () => {
+    const bucket = new MemoryBucket("cut-blobs-local");
+    const h = createHarness({ store: memoryStore(bucket) });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const id = String((await h.run(["backup", "create", "--freeze", "--yes", "--json"])).json.id);
+      const key = `${LOCATION}backups/${id}/blobs.jsonl`;
+      const lines = new TextDecoder().decode(bucket.objects.get(key)?.data ?? new Uint8Array()).split("\n").filter((line) => line !== "");
+      expect(lines.length).toBeGreaterThan(1);
+      bucket.tamper(key, new TextEncoder().encode(`${lines[0] ?? ""}\n`));
+      const out = join(h.root, "copy");
+
+      const copied = await h.run(["restore", "--to", "local", out, "--backup", id, "--with-media", "--yes", "--json"]);
+      expect(copied.code).toBe(1);
+      expect(copied.stderr).toContain(`blobs.jsonl of backup ${id} holds 1 entry, the manifest counts ${lines.length}`);
+      expect(copied.json).toMatchObject({ ok: false, element: "blobs.jsonl" });
+      expect(existsSync(out)).toBe(false);
     } finally {
       await h.dispose();
     }

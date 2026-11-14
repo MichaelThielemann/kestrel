@@ -1,6 +1,6 @@
 import { closeSync, existsSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { acceptSeal, createBackup, readManifest, verifyBackup, type BackupMode } from "./backup.ts";
+import { acceptSeal, createBackup, entryCountMismatch, readManifest, verifyBackup, type BackupMode } from "./backup.ts";
 import { messageOf, recordQuietly, runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
 import { Interrupted } from "./interrupt.ts";
@@ -440,6 +440,7 @@ export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptio
     if (manifest === null) throw new OpsError(`backup ${options.backupId} does not exist or is incomplete`, 1, options.backupId);
     await downloadDb(ctx, manifest, source);
     blobs = await entries<BlobEntry>(ctx, ctx.location + keys.blobs(manifest.id));
+    if (options.withMedia && blobs.length !== manifest.blobs.count) throw new OpsError(`blobs.jsonl of backup ${manifest.id} ${entryCountMismatch(blobs.length, manifest.blobs.count)}, so the originals it lists are incomplete; the backup fails verification`, 1, "blobs.jsonl");
   }
   const sessionsDeleted = options.keepSessions ? 0 : deleteSessions(source);
   if (options.withMedia) {
