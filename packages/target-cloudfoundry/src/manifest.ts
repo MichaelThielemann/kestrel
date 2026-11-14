@@ -8,20 +8,23 @@ import { OpsError } from "@michaelthielemann/kestrel-ops";
 
 const PLACEHOLDER = /\(\(([A-Za-z0-9_.-]+)\)\)/g;
 
-/** The manifest reduced to the entry of `app`, as JSON (which every YAML reader takes), and the placeholder names it uses. */
+/**
+ * The manifest reduced to its `version` and the entry of `app`, as JSON (which every YAML reader takes), and the
+ * placeholder names that entry uses. It is read as YAML 1.1 with merge keys, as cf reads it.
+ */
 export function appManifest(file: string, app: string): { text: string; vars: string[] } {
   let doc: unknown;
   try {
-    doc = parse(readFileSync(file, "utf8"));
+    doc = parse(readFileSync(file, "utf8"), { version: "1.1", merge: true });
   } catch (cause) {
     throw new OpsError(`${file}: cannot read the manifest: ${cause instanceof Error ? cause.message : String(cause)}`, 2, "target");
   }
   const applications: unknown = Reflect.get(Object(doc), "applications");
   const entry: unknown = Array.isArray(applications) ? applications.find((a: unknown) => Reflect.get(Object(a), "name") === app) : undefined;
   if (entry === undefined) throw new OpsError(`${file} has no application named ${app}`, 2, "target");
-  const top: Record<string, unknown> = typeof doc === "object" && doc !== null ? Object.fromEntries(Object.entries(doc)) : {};
-  const text = JSON.stringify({ ...top, applications: [entry] }, null, 2);
-  return { text, vars: [...new Set([...text.matchAll(PLACEHOLDER)].map((m) => m[1] ?? ""))].sort() };
+  const version: unknown = Reflect.get(Object(doc), "version");
+  const text = JSON.stringify({ ...(version === undefined ? {} : { version }), applications: [entry] }, null, 2);
+  return { text, vars: [...new Set([...JSON.stringify(entry).matchAll(PLACEHOLDER)].map((m) => m[1] ?? ""))].sort() };
 }
 
 /** Writes the manifest and the variables into a directory only this user can read, hands both paths to `use` and removes the directory whatever happens. */

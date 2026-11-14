@@ -322,6 +322,33 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
       expect(cf.calls.some((argv) => argv[0] === "set-env")).toBe(false);
     });
 
+    it("resolves merge keys and YAML 1.1 booleans the way cf reads them, and keeps only the version and the app's resolved entry", async () => {
+      writeFileSync(join(root, "shared.yml"), `version: 1
+defaults: &defaults
+  memory: 1024M
+  buildpacks: [nodejs_buildpack]
+  env:
+    STORAGE_SECRET: ((storage_secret))
+web-defaults: &web
+  env:
+    UPSTREAM: ((upstream_host))
+applications:
+- name: site-web
+  <<: *web
+  memory: 64M
+- name: site-api
+  <<: *defaults
+  no-route: yes
+  random-route: no
+`);
+      const t = await target({ manifest: "shared.yml", vars: { storage_secret: { env: "APP_STORAGE_SECRET" } } }, { APP_STORAGE_SECRET: SECRET });
+      await t.applyManifest();
+      const [applied] = cf.applied;
+      if (applied === undefined) throw new Error("nothing applied");
+      expect(JSON.parse(applied.manifest)).toEqual({ version: 1, applications: [{ name: API.name, memory: "1024M", buildpacks: ["nodejs_buildpack"], env: { STORAGE_SECRET: "((storage_secret))" }, "no-route": true, "random-route": false }] });
+      expect(JSON.parse(applied.vars)).toEqual({ storage_secret: SECRET });
+    });
+
     it("removes the variables file also when cf apply-manifest fails, and ends with exit 1", async () => {
       cf.failures.set("apply-manifest", 1);
       const before = readdirSync(tmpdir()).filter((name) => name.startsWith("kestrel-cf-vars-"));
