@@ -32,15 +32,20 @@ stored longer list keeps the first 1000 and logs the rest as skipped.
 `reservedPaths` (default `["/admin", "/api", "/media"]`) lists path prefixes the application serves
 itself. A `from` that can match one of them, the path itself or anything below it, is refused with
 `Row N: "From" can match the reserved path /admin …`: that covers `/admin`, `/admin/x`, `/admin/*`, and
-also a wildcard such as `/*` or `/**/login` that reaches `/admin/login`. `/administration` shares
+also a wildcard such as `/*` or `/**/login` that reaches `/admin/login`. A wildcard in the first
+segment is refused even when the rest of the path is fixed: `/*/old-page`, the usual shape of a rule for
+every language prefix, can reach `/admin/old-page`, so write one rule per prefix (`/de/old-page`,
+`/en/old-page`). `/administration` shares
 characters with `/admin` but not a path segment, so it stays allowed. Entries are absolute paths without
 a trailing slash, as in `delivery-static`; pass the mounts of your own project, for instance the prefix
 the API sits under.
 
 A rule stored under a reserved path before the list was set, or after it grew, is not an error when
 publishing: `redirects.lookup`, `redirects.export` and `redirects.render` leave it out and log the row,
-like any other row they cannot honour. The same holds for an automatic redirect whose old path lies at a
-reserved path, for instance a page that moved away from `/admin`. The edge handler in `../../examples/nginx-njs` takes the same list
+like any other row they cannot honour. An automatic redirect whose old path lies at a reserved path, for
+instance a page that moved away from `/admin`, is left out as well: `redirects.export` and
+`redirects.render` log it, `redirects.lookup` answers without it and without a log line. It still
+appears in the list of automatic redirects, but never takes effect. The edge handler in `../../examples/nginx-njs` takes the same list
 in `RESERVED_PATHS` and never redirects those paths.
 
 ## Matching

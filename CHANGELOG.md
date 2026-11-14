@@ -757,8 +757,10 @@ Net changes since 5.8.2.
   config key `reservedPaths` (default `["/admin", "/api", "/media"]`) lists the prefixes; the editor
   refuses a `from` that equals, lies below or, through a wildcard, can match one of them
   (`/admin`, `/admin/x`, `/*/login`; `/administration` stays allowed) with `VALIDATION` and the row.
-  A rule already stored under such a path is left out of `redirects.json`, `redirects.lookup` and
-  `redirects.render` and logged, and so is an automatic redirect from a reserved path. Set `reservedPaths`
+  A rule whose first segment is a wildcard, such as `/*/old-page` for every language prefix, is
+  refused too; write one rule per prefix. A rule already stored under such a path is left out of
+  `redirects.json`, `redirects.lookup` and `redirects.render` and logged. An automatic redirect from a
+  reserved path is left out of the same three, but only `redirects.json` and `redirects.render` log it. Set `reservedPaths`
   to the mounts of your own project. `kestrel upgrade data`'s `data/redirect-reserved-paths` lists the
   stored rules and the stored automatic redirects an upgrade would leave out, wildcard sources such as
   `/**` included.
