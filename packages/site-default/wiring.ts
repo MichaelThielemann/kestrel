@@ -4,6 +4,7 @@ import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import type { RoutesConfig } from "./routes.ts";
 
 const WRITE = /^content\.(create|update|remove|removeTranslation):([^?]+)/;
+const FILTERED_READ = /^site\.(resolve|resolveLinks):([^?]+)(?:\?(.*))?$/;
 const READ = /^site\.(resolve|resolveLinks|route|attachPaths|previewPath|readTree):([^?]+)(?:\?(.*))?$/;
 
 /** Boot errors for a routed type whose model cannot carry a path. */
@@ -45,7 +46,14 @@ export function checkRoutedModel(config: RoutesConfig, model: ContentModel, logg
   if (problems.length > 0) throw new Error(`site/default: ${problems.join("; ")}`);
 }
 
-/** Boot errors for a pipeline that writes a routed type without keeping its paths, or reads one with rules that contradict its route. */
+function argumentOf(expected: unknown): string | undefined {
+  return typeof expected === "string" || typeof expected === "number" || typeof expected === "boolean" ? String(expected) : undefined;
+}
+
+/**
+ * Boot errors for a pipeline that writes a routed type without keeping its paths, reads one with rules that contradict its route,
+ * or resolves one without the route's `liveWhen` filter. A resolve step after `authn.requireUser` serves a signed-in preview and may stay unfiltered.
+ */
 export function checkPathWiring(manifest: ReturnType<Introspection["describe"]>, config: RoutesConfig): void {
   const problems: string[] = [];
   const routes = config.routes;
@@ -82,6 +90,17 @@ export function checkPathWiring(manifest: ReturnType<Introspection["describe"]>,
         const home = args.get("home");
         if (slugField !== null && slugField !== route.slugField) problems.push(`pipeline "${pipeline.name}": ${step.spec} names slugField "${slugField}", but routes.${readType}.slugField is "${route.slugField}"`);
         if (home !== null && home !== route.home) problems.push(`pipeline "${pipeline.name}": ${step.spec} names home "${home}", but routes.${readType}.home is ${route.home === null ? "unset" : `"${route.home}"`}`);
+      }
+      const filtered = FILTERED_READ.exec(step.spec);
+      const filteredRoute = filtered?.[2] === undefined ? undefined : routes[filtered[2]];
+      if (filtered && filteredRoute && !steps.slice(0, i).some((earlier) => earlier.spec === "authn.requireUser")) {
+        const args = new URLSearchParams(filtered[3] ?? "");
+        const missing = Object.entries(filteredRoute.liveWhen).flatMap(([field, expected]) => {
+          const wanted = argumentOf(expected);
+          const actual = args.get(field);
+          return actual === null || (wanted !== undefined && actual !== wanted) ? [wanted === undefined ? field : `${field}=${wanted}`] : [];
+        });
+        if (missing.length > 0) problems.push(`pipeline "${pipeline.name}": ${step.spec} must carry ${missing.join("&")}, the route's liveWhen, or it serves documents the route does not publish`);
       }
     });
   }
