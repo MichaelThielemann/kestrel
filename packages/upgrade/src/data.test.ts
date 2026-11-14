@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type * as FsPromises from "node:fs/promises";
@@ -8,12 +8,13 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createPersistenceSqlite } from "@michaelthielemann/kestrel-persistence-sqlite/impl";
-import { runDataStep } from "./data.ts";
+import { runDataStep, storageFindings } from "./data.ts";
 import { runUpgradeCli } from "./plugin.ts";
 import type { UpgradePlugin } from "./plugin.ts";
-import type { UpgradeReport } from "./report.ts";
+import type { Finding, UpgradeReport } from "./report.ts";
 
 const createdCopyDirs: string[] = [];
+const copiedFiles: string[] = [];
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof FsPromises>();
   return {
@@ -22,6 +23,10 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       const dir = await actual.mkdtemp(prefix);
       createdCopyDirs.push(dir);
       return dir;
+    },
+    copyFile: async (from: string, to: string, mode?: number) => {
+      copiedFiles.push(from);
+      return actual.copyFile(from, to, mode);
     },
   };
 });
@@ -59,6 +64,15 @@ async function contentProjectRoot(config: Record<string, unknown>): Promise<stri
   await writeFile(join(root, "package.json"), JSON.stringify({ name: "tmp", type: "module" }));
   await writeFile(join(root, "kestrel.config.ts"), `export default { modules: [{ use: "@michaelthielemann/kestrel-content-default", config: ${JSON.stringify(config)} }], triggers: [] };\n`);
   return root;
+}
+
+async function storageFindingFor(file: string, root: string): Promise<Finding | undefined> {
+  const db = createPersistenceSqlite({ file });
+  try {
+    return (await storageFindings(root, file, db)).find((f) => f.rule === "data/media-layout");
+  } finally {
+    db.close();
+  }
 }
 
 async function moduleProjectRoot(modules: Array<{ use: string; config?: unknown }>): Promise<string> {
@@ -130,6 +144,20 @@ describe("runDataStep", () => {
   it("refuses when the file does not exist", async () => {
     const result = await runDataStep(join(dir, "missing.db"), PROJECT_ROOT);
     expect(result.exitCode).toBe(2);
+  });
+
+  it("runs past a lock file another process left next to the database and never copies it", async () => {
+    const file = join(dir, "kestrel.db");
+    await makeDb(file, [{ id: "1", name: "page.created", pipeline: "publishPage", state: "done" }]);
+    const lock = JSON.stringify({ host: "another-host", pid: 4242, startedAt: Date.now(), heartbeatAt: Date.now(), ttlMs: 60_000 });
+    await writeFile(`${file}.instance`, lock);
+    copiedFiles.length = 0;
+    const result = await runDataStep(file, PROJECT_ROOT);
+    expect(result.exitCode).toBe(0);
+    expect(result.report?.findings).toEqual([]);
+    expect(copiedFiles).toContain(file);
+    expect(copiedFiles.filter((f) => f.endsWith(".instance"))).toEqual([]);
+    expect(readFileSync(`${file}.instance`, "utf8")).toBe(lock);
   });
 
   it("removes its own copy directory afterward, on success and on refusal", async () => {
@@ -427,50 +455,74 @@ describe("the data CLI command with a registered plugin", () => {
 });
 
 describe("runDataStep: data/media-layout", () => {
-  it("reports media_items rows whose key is off the <prefix><id>/<name> layout", async () => {
+  it("reports media stored in the 5.x key layout through media-default's own detector, naming the migration and the command", async () => {
     const root = await moduleProjectRoot([{ use: "@michaelthielemann/kestrel-media-default", config: { prefix: "media/" } }]);
     const file = join(dir, "kestrel.db");
     const db = createPersistenceSqlite({ file });
-    await db.ensureCollection("media_items", { key: "string" });
-    await db.createOne("media_items", { id: "m1", key: "media/m1/hero.jpg" });
-    await db.createOne("media_items", { id: "m2", key: "off-layout-key" });
+    await db.ensureCollection("media_items", { key: "string", folder: "string", filename: "string", contentType: "string", size: "number", status: "string" });
+    await db.createOne("media_items", { id: "m2", key: "media/gallery/hero.jpg", folder: "gallery", filename: "hero.jpg", contentType: "image/jpeg", size: 3, status: "ready" });
     db.close();
     const result = await runDataStep(file, root);
     expect(result.exitCode).toBe(1);
-    const finding = result.report?.findings.find((f) => f.rule === "data/media-layout" && f.where.path === "media_items");
-    expect(finding).toBeDefined();
-    expect(finding?.severity).toBe("error");
+    const finding = result.report?.findings.find((f) => f.rule === "data/media-layout");
+    expect(finding).toMatchObject({ id: "data/media-layout:media/default", severity: "error", where: { module: "media/default" } });
+    expect(finding?.message).toContain("media-default:id-key-layout");
     expect(finding?.message).toContain("m2");
-    expect(finding?.message).toContain("off-layout-key");
+    expect(finding?.message).toContain("kestrel upgrade migrate --db <file> --blobs-dir <dir>");
+    expect(finding?.message).not.toContain("empty");
   });
 
-  it("does not fire when every media_items key is canonical", async () => {
+  it("does not fire on media in the 6.0.0 layout", async () => {
     const root = await moduleProjectRoot([{ use: "@michaelthielemann/kestrel-media-default", config: { prefix: "media/" } }]);
     const file = join(dir, "kestrel.db");
     const db = createPersistenceSqlite({ file });
-    await db.ensureCollection("media_items", { key: "string" });
-    await db.createOne("media_items", { id: "m1", key: "media/m1/hero.jpg" });
+    await db.ensureCollection("media_items", { key: "string", folder: "string", filename: "string", location: "string", contentType: "string", size: "number", status: "string" });
+    await db.createOne("media_items", { id: "m1", key: "media/m1/hero.jpg", folder: "", filename: "hero.jpg", location: "hero.jpg", contentType: "image/jpeg", size: 3, status: "ready" });
     db.close();
     const result = await runDataStep(file, root);
-    expect(result.exitCode).toBe(0);
     expect(result.report?.findings.filter((f) => f.rule === "data/media-layout")).toEqual([]);
+    expect(result.exitCode).toBe(0);
   });
 
-  it("reports images_variants/images_retired rows with no slot, and stays quiet once every row has one", async () => {
+  it("reports images_variants rows with no slot through images-default's detector, and stays quiet once every row has one", async () => {
     const root = await moduleProjectRoot([{ use: "@michaelthielemann/kestrel-images-default", config: {} }]);
     const file = join(dir, "kestrel.db");
     const db = createPersistenceSqlite({ file });
-    await db.ensureCollection("images_variants", { slot: "string" });
-    await db.ensureCollection("images_retired", { slot: "string" });
-    await db.createOne("images_variants", { id: "v1", slot: null });
-    await db.createOne("images_retired", { id: "r1", slot: "m1/thumb" });
+    await db.ensureCollection("images_variants", { mediaId: "string", size: "string", slot: "string", state: "string" });
+    await db.ensureCollection("images_retired", { mediaId: "string", file: "string", slot: "string" });
+    await db.createOne("images_variants", { id: "v1", mediaId: "m1", size: "thumb", slot: null, state: "done" });
+    await db.createOne("images_retired", { id: "r1", mediaId: "m1", file: "thumb.png", slot: "m1/thumb" });
     db.close();
     const result = await runDataStep(file, root);
     expect(result.exitCode).toBe(1);
-    const variants = result.report?.findings.find((f) => f.rule === "data/media-layout" && f.where.path === "images_variants");
-    const retired = result.report?.findings.find((f) => f.rule === "data/media-layout" && f.where.path === "images_retired");
-    expect(variants?.message).toContain("1 row(s)");
-    expect(retired).toBeUndefined();
+    const finding = result.report?.findings.find((f) => f.rule === "data/media-layout");
+    expect(finding).toMatchObject({ id: "data/media-layout:images/default", severity: "error" });
+    expect(finding?.message).toContain("images-default:variant-slots (introduced in 6.0.0; 1 item(s)");
+
+    const slotted = createPersistenceSqlite({ file });
+    await slotted.ensureCollection("images_variants", { slot: "string" });
+    await slotted.updateOne("images_variants", "v1", { slot: "m1/thumb" });
+    slotted.close();
+    const clean = await runDataStep(file, root);
+    expect(clean.report?.findings.filter((f) => f.rule === "data/media-layout")).toEqual([]);
+  });
+
+  it("warns instead of guessing when the installed module has no storage export", async () => {
+    const root = await mkdtemp(join(tmpdir(), "kestrel-upgrade-data-bare-"));
+    projectRoots.push(root);
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "tmp", type: "module", dependencies: { "@michaelthielemann/kestrel-media-default": "5.8.1" } }));
+    const installed = join(root, "node_modules", "@michaelthielemann", "kestrel-media-default");
+    await mkdir(installed, { recursive: true });
+    await writeFile(join(installed, "package.json"), JSON.stringify({ name: "@michaelthielemann/kestrel-media-default", version: "5.8.1", type: "module", exports: { ".": "./index.js", "./impl": "./impl.js" } }));
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("media_items", { key: "string" });
+    await db.createOne("media_items", { id: "m2", key: "media/gallery/hero.jpg" });
+    db.close();
+    const finding = await storageFindingFor(file, root);
+    expect(finding).toMatchObject({ id: "data/media-layout:@michaelthielemann/kestrel-media-default", severity: "warning" });
+    expect(finding?.message).toContain("media_items");
+    expect(finding?.suggestion).toContain("install the 6.0.0 packages");
   });
 });
 

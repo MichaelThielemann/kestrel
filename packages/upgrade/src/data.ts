@@ -9,7 +9,10 @@ import { effectiveModuleConfig } from "@michaelthielemann/kestrel";
 import { loadConfig } from "@michaelthielemann/kestrel/load";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { isErr } from "@michaelthielemann/kestrel/result";
+import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import { OFFLINE_COMMAND, refusalOf, runShapeMigrations } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
+import { err, failure } from "@michaelthielemann/kestrel-contracts/errors";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { trackTempDir, untrackTempDir } from "./cleanup.ts";
 import { redirectReservedPathFindings } from "./dataRedirects.ts";
@@ -21,6 +24,7 @@ import type { Finding, UpgradeReport } from "./report.ts";
 import { summarize } from "./report.ts";
 import { hookFailedFinding, upgradingDocs } from "./ruleHelpers.ts";
 import { useToken } from "./useToken.ts";
+import { projectStorages } from "./storages.ts";
 import { toolVersion } from "./versions.ts";
 
 export interface DataStepResult {
@@ -498,71 +502,37 @@ async function moduleConfigOf(root: string, token: string): Promise<unknown> {
   }
 }
 
-function isCanonicalMediaKey(key: string, id: string, prefix: string): boolean {
-  const want = `${prefix}${id}/`;
-  return key.startsWith(want) && key.length > want.length && !key.slice(want.length).includes("/");
+const NO_BLOBS: Blobstore = {
+  put: async () => err(failure("TRANSIENT", "the data command reads no blob store")),
+  get: async () => err(failure("TRANSIENT", "the data command reads no blob store")),
+  remove: async () => err(failure("TRANSIENT", "the data command reads no blob store")),
+  move: async () => err(failure("TRANSIENT", "the data command reads no blob store")),
+  list: async () => err(failure("TRANSIENT", "the data command reads no blob store")),
+};
+
+function storageFinding(id: string, severity: Finding["severity"], module: string, message: string, suggestion: string): Finding {
+  return { id: `data/media-layout:${id}`, rule: "data/media-layout", severity, tier: "data", where: { module }, message, suggestion, fix: { kind: "none" }, docs: upgradingDocs("data-media-layout") };
 }
 
-interface MediaItemRow extends Document {
-  id: string;
-  key: string;
-}
-
-async function mediaItemsLayoutFindings(db: Persistence, prefix: string): Promise<Finding[]> {
-  try {
-    const ensured = await db.ensureCollection("media_items", { key: "string" });
-    if (isErr(ensured)) return [];
-    const rows = await db.findMany<MediaItemRow>("media_items", {}, { limit: 10_000 });
-    if (isErr(rows)) return [];
-    const offLayout = rows.value.items.filter((r) => !isCanonicalMediaKey(r.key, r.id, prefix));
-    if (offLayout.length === 0) return [];
-    return [
-      {
-        id: "data/media-layout:media_items",
-        rule: "data/media-layout",
-        severity: "error",
-        tier: "data",
-        where: { path: "media_items" },
-        message: `${offLayout.length} media_items row(s) use a blob key other than "${prefix}<id>/<name>" (first: ${offLayout[0]!.id} at "${offLayout[0]!.key}")`,
-        suggestion: "media-default's setup() refuses to start with these; start 6.0.0 with an empty media store, or migrate the blob keys to the new layout by hand before upgrading",
-        fix: { kind: "none" },
-        docs: upgradingDocs("data-media-layout"),
-      },
-    ];
-  } catch {
-    return [];
-  }
-}
-
-async function unslottedCollectionFinding(db: Persistence, collection: string): Promise<Finding | undefined> {
-  try {
-    const ensured = await db.ensureCollection(collection, { slot: "string" });
-    if (isErr(ensured)) return undefined;
-    const unslotted = await db.count(collection, { slot: { eq: null } });
-    if (isErr(unslotted) || unslotted.value === 0) return undefined;
-    return {
-      id: `data/media-layout:${collection}`,
-      rule: "data/media-layout",
-      severity: "error",
-      tier: "data",
-      where: { path: collection },
-      message: `${unslotted.value} row(s) in ${collection} have no slot; they were written before 6.0.0 and images-default's setup() refuses to start with any`,
-      suggestion: `start 6.0.0 with an empty "${collection}" collection`,
-      fix: { kind: "none" },
-      docs: upgradingDocs("data-media-layout"),
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-async function mediaLayoutFindings(root: string, db: Persistence): Promise<Finding[]> {
-  const mediaConfig = await moduleConfigOf(root, "media-default");
-  const prefix = isRecord(mediaConfig) && typeof mediaConfig.prefix === "string" ? mediaConfig.prefix : "media/";
-  const findings = await mediaItemsLayoutFindings(db, prefix);
-  for (const collection of ["images_variants", "images_retired"]) {
-    const finding = await unslottedCollectionFinding(db, collection);
-    if (finding !== undefined) findings.push(finding);
+/**
+ * `data/media-layout`: runs the `detect` of every storage migration of the modules whose collections
+ * `file` holds, taken from each module's own `./storage` export as the project at `root` has it
+ * installed, against `db` (a verified copy of `file`); nothing is applied and no version row is
+ * written. A module with data in an older shape, or with a stored version this release does not
+ * read, is an error naming the migration and the command that runs it.
+ */
+export async function storageFindings(root: string, file: string, db: Persistence): Promise<Finding[]> {
+  const { storages, unresolved } = await projectStorages(root, file);
+  const findings: Finding[] = unresolved.map((u) =>
+    storageFinding(u.package, "warning", u.package, `the database holds ${u.collections.join(", ")}, but the installed ${u.package} has no ./storage export, so the storage shape of its data was not checked`, "install the 6.0.0 packages, then run data again"),
+  );
+  if (storages.length === 0) return findings;
+  const run = await runShapeMigrations({ storages, db, blobs: NO_BLOBS, apply: false, plan: false, blobWrites: false });
+  if (isErr(run)) return [...findings, storageFinding("detect-failed", "warning", "", `the storage migrations could not detect the old shape: ${run.error.message}`, "run kestrel upgrade migrate --plan on a copy of the data to see what it would convert")];
+  for (const module of run.value.modules) {
+    const refusal = refusalOf(module, "check");
+    if (refusal === null) continue;
+    findings.push(storageFinding(module.module, "error", module.module, refusal, module.state === "pending" ? `stop the instance, copy the database and the blob store, and run \`${OFFLINE_COMMAND}\` on the copy before the first 6.0.0 start` : "restore the data that belongs to this release"));
   }
   return findings;
 }
@@ -680,7 +650,7 @@ export async function runDataStep(dbFile: string, root: string, plugins: readonl
       const { model: contentModel, issues } = await activeDataModel(root, plugin);
       dataModelIssues = [...loadIssuesAsFindings(detectIssues), ...issues];
       counts = contentModel === undefined ? {} : await underscoreFieldCounts(copy, db, contentModel);
-      mediaLayout = await mediaLayoutFindings(root, db);
+      mediaLayout = await storageFindings(root, copy, db);
       translationSlugs = await translationSlugFindings(db, contentModel);
       redirectRules = await redirectReservedPathFindings(db, await moduleConfigOf(root, "redirects-default"));
       fromPlugin = await pluginDataFindings(db, root, plugin, contentModel);
