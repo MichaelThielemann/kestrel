@@ -90,18 +90,17 @@ export class FakeCloudFoundry {
 
   async listen(): Promise<void> {
     const server = createServer((request, response) => {
-      let body = "";
-      request.on("data", (chunk: Buffer) => {
-        body += chunk.toString();
-      });
-      request.on("end", () => {
+      const answer = async (): Promise<Answer> => {
+        let body = "";
+        for await (const chunk of request) body += String(chunk);
         const parsed = boundaryCast<{ argv: string[]; color: string | null }>(JSON.parse(body), "json");
         this.calls.push(parsed.argv);
         this.colors.push(parsed.color);
-        this.handle(parsed.argv)
-          .catch((cause: unknown): Answer => fail(cause instanceof Error ? cause.message : String(cause)))
-          .then((answer) => response.end(JSON.stringify(answer)), () => response.end(JSON.stringify(fail("stub failure"))));
-      });
+        return this.handle(parsed.argv);
+      };
+      answer()
+        .catch((cause: unknown): Answer => fail(cause instanceof Error ? cause.message : String(cause)))
+        .then((result) => response.end(JSON.stringify(result)), () => response.end(JSON.stringify(fail("stub failure"))));
     });
     await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
     const address = server.address();

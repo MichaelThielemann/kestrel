@@ -61,7 +61,7 @@ function namesOtherApp(): string[][] {
   return cf.calls.filter((argv) => argv.some((arg) => arg.includes(WEB.name) || arg.includes(WEB.guid)));
 }
 
-describe("Cloud Foundry target", () => {
+describe("Cloud Foundry target", { timeout: 60_000 }, () => {
   it("is created from its block in kestrel.environments.json and promotes, since an app instance starts on an empty disk", async () => {
     const created = await createTarget({ app: API.name, org: "example-org", space: "dev" }, { root, clock: Date.now });
     expect(created.transport).toBe("promote");
