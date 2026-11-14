@@ -89,30 +89,36 @@ function assign(rows: readonly Row[], prefix: string): { pending: Assignment[]; 
   const needsWork = (row: Row): boolean => !inLayout(row) || (!holdsNoName(row) && row.location === null);
   const taken = new Set<string>();
   for (const row of rows) if (!needsWork(row) && row.location !== null) taken.add(row.location);
-  const pending: Assignment[] = [];
+  const assigned = new Map<string, Assignment>();
   const conflicts: MigrationNote[] = [];
   const ordered = [...rows.filter((r) => needsWork(r) && isReadyLike(r)), ...rows.filter((r) => needsWork(r) && !isReadyLike(r))];
-  for (const row of ordered) {
-    const folder = row.folder ?? "";
-    if (inLayout(row)) {
-      const name = urlNameOf(row.key);
-      const location = keyFor(folder, name);
-      if (taken.has(location)) {
-        conflicts.push({ item: row.id, reason: `its location ${location} is held by another item and its key cannot change` });
-        continue;
-      }
-      taken.add(location);
-      pending.push({ row, name, key: row.key, location });
+  const place = (row: Row, name: string): void => {
+    const location = isTrashed(row) ? null : keyFor(row.folder ?? "", name);
+    if (location !== null) taken.add(location);
+    assigned.set(row.id, { row, name, key: `${prefix}${row.id}/${name}`, location });
+  };
+  for (const row of ordered.filter(inLayout)) {
+    const name = urlNameOf(row.key);
+    const location = keyFor(row.folder ?? "", name);
+    if (taken.has(location)) {
+      conflicts.push({ item: row.id, reason: `its location ${location} is held by another item and its key cannot change` });
       continue;
     }
-    const base = nameOf(row);
-    let name = base;
-    if (!isTrashed(row)) {
-      for (let attempt = 2; taken.has(keyFor(folder, name)); attempt += 1) name = suffixedName(base, attempt);
-      taken.add(keyFor(folder, name));
-    }
-    pending.push({ row, name, key: `${prefix}${row.id}/${name}`, location: isTrashed(row) ? null : keyFor(folder, name) });
+    taken.add(location);
+    assigned.set(row.id, { row, name, key: row.key, location });
   }
+  const moving = ordered.filter((r) => !inLayout(r));
+  for (const row of moving) {
+    if (isTrashed(row) || !taken.has(keyFor(row.folder ?? "", nameOf(row)))) place(row, nameOf(row));
+  }
+  for (const row of moving) {
+    if (assigned.has(row.id)) continue;
+    const base = nameOf(row);
+    let name = suffixedName(base, 2);
+    for (let attempt = 3; taken.has(keyFor(row.folder ?? "", name)); attempt += 1) name = suffixedName(base, attempt);
+    place(row, name);
+  }
+  const pending = ordered.flatMap((row) => assigned.get(row.id) ?? []);
   return { pending, conflicts };
 }
 

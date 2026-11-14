@@ -346,6 +346,30 @@ describe("media-default storage: converting 5.x items to the id key layout", () 
     expect([row.key, row.size, row.checksum]).toEqual(["media/d4/report.pdf", copy.byteLength, sha(copy)]);
   });
 
+  it("keeps a name that was unique in its 5.x folder and gives the suffix to the item whose name collided", async () => {
+    const items: OldItem[] = [
+      { id: "a", folder: "x", filename: "photo.jpg", contentType: "image/jpeg", blob: "first photo" },
+      { id: "b", folder: "x", filename: "photo.JPG", contentType: "image/jpeg", blob: "second photo" },
+      { id: "c", folder: "x", filename: "photo-2.jpg", contentType: "image/jpeg", blob: "third photo" },
+    ];
+    const reference = await oldStore(items, false);
+    const counter = { writes: 0, crashAt: null };
+    expectOk(await migrate(counting(reference.db, DB_WRITES, counter), counting(reference.blobs, BLOB_WRITES, counter)));
+    const expected = await snapshot(reference.db, reference.blobs);
+    expect(expected.rows.map((r) => [r.id, r.key, r.location])).toEqual([
+      ["a", "media/a/photo.jpg", "x/photo.jpg"],
+      ["b", "media/b/photo-3.jpg", "x/photo-3.jpg"],
+      ["c", "media/c/photo-2.jpg", "x/photo-2.jpg"],
+    ]);
+    for (let crashAt = 1; crashAt <= counter.writes; crashAt += 1) {
+      const { db, blobs } = await oldStore(items, false);
+      const crashing = { writes: 0, crashAt };
+      await expect(migrate(counting(db, DB_WRITES, crashing), counting(blobs, BLOB_WRITES, crashing))).rejects.toBeInstanceOf(Crash);
+      expectOk(await migrate(db, blobs));
+      expect(await snapshot(db, blobs)).toEqual(expected);
+    }
+  });
+
   it("fails on a copy whose bytes differ from the original, keeps the 5.x key, and converts on a run whose copies are right", async () => {
     const { db, blobs } = await oldStore([{ id: "b2", folder: "events", filename: "photo.jpg", contentType: "image/jpeg", blob: "summer photo" }], false);
     for (const written of [bytes("summer"), bytes("winter photo")]) {
