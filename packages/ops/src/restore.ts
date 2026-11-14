@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { acceptSeal, createBackup, readManifest, verifyBackup, type BackupMode } from "./backup.ts";
 import { messageOf, recordQuietly, runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
-import { fromJsonl, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
+import { fromJsonl, hex, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
 import { recordPlacement, unfinishedPlacements } from "./placements.ts";
 import { acknowledgement, buildDatabase, checkPromotable, completeGeneration, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Promoted, type SealReport } from "./replica.ts";
@@ -292,7 +292,28 @@ export interface LocalRestoreOptions {
   keepSessions: boolean;
 }
 
-/** Writes a backup's database (or the newest replica generation) to `<dir>/kestrel.db`, sessions removed unless kept, optionally with the originals under `<dir>/blobs/` after the `confirm` answer; a run that fails removes the files it wrote. */
+function caseTwins(blobs: readonly BlobEntry[]): Array<[string, string]> {
+  const byFolded = new Map<string, string>();
+  const twins: Array<[string, string]> = [];
+  for (const { key } of blobs) {
+    const earlier = byFolded.get(key.toLowerCase());
+    if (earlier === undefined) byFolded.set(key.toLowerCase(), key);
+    else twins.push([earlier, key]);
+  }
+  return twins;
+}
+
+function ignoresCase(dir: string): boolean {
+  const probe = join(dir, `.kestrel-ops-case-${hex(4)}-a`);
+  writeFileSync(probe, "", { flag: "wx", mode: 0o600 });
+  try {
+    return existsSync(`${probe.slice(0, -1)}A`);
+  } finally {
+    rmSync(probe, { force: true });
+  }
+}
+
+/** Writes a backup's database (or the newest replica generation) to `<dir>/kestrel.db`, sessions removed unless kept, optionally with the originals under `<dir>/blobs/` after the `confirm` answer; refused before anything is written when originals whose keys differ only in case meet a directory that does not tell them apart; a run that fails removes the files it wrote. */
 export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptions): Promise<{ file: string; sessionsDeleted: number; originals: number }> {
   const dir = resolve(options.dir);
   const file = join(dir, "kestrel.db");
@@ -313,6 +334,9 @@ export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptio
   }
   const sessionsDeleted = options.keepSessions ? 0 : deleteSessions(source);
   if (options.withMedia) {
+    const twins = caseTwins(blobs);
+    const first = twins[0];
+    if (first !== undefined && ignoresCase(dir)) throw new OpsError(`${dir} does not tell apart names that differ only in case, and the backup holds originals whose keys do: ${twins.map((pair) => pair.join(" and ")).join("; ")}; restore them into a directory on a case-sensitive file system`, 1, first[0]);
     const bytes = blobs.reduce((n, b) => n + b.size, 0);
     await confirm(ctx.answers, "confirm", `download ${blobs.length} original(s), ${(bytes / 1024 / 1024).toFixed(1)} MiB, into ${dir}/blobs`);
   }

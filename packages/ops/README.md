@@ -28,7 +28,7 @@ come as their own packages.
 | `backup verify <id>` | Verifies a backup again from what the backup location holds and records the result next to it. Exit 1 names the failing part or key; an id the location holds nothing under is reported without writing anything. |
 | `backup prune [--dry-run]` | Removes backups beyond the retention of their kind and the objects nothing refers to any more. |
 | `restore --backup <id> [--no-safety-backup]` | Restores a backup over the environment. |
-| `restore --to local <dir> (--backup <id> \| --latest) [--with-media] [--keep-sessions]` | Writes a backup's database, or the newest replica generation, to `<dir>/kestrel.db` without login sessions; `--with-media` adds the originals under `<dir>/blobs/` after the `confirm` answer, asked before anything is written. Files are written with mode 0600, new directories with 0700; a run that fails removes the files it wrote. |
+| `restore --to local <dir> (--backup <id> \| --latest) [--with-media] [--keep-sessions]` | Writes a backup's database, or the newest replica generation, to `<dir>/kestrel.db` without login sessions; `--with-media` adds the originals under `<dir>/blobs/` after the `confirm` answer, asked before anything is written; when the backup holds originals whose keys differ only in case (as 5.x media keys can) and `<dir>` lies on a file system that does not tell such names apart (macOS by default), it refuses first, naming both keys. Files are written with mode 0600, new directories with 0700; a run that fails removes the files it wrote. |
 
 Every command takes `--env <name>` (optional when the file names one environment), `--json` (one JSON
 document on stdout, with a `schema` field such as `kestrel-ops/restore@1`), `--yes`, `--answers <file>`,
