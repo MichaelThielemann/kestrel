@@ -271,8 +271,10 @@ the app, correct its clock and restore again, since the app's next start would r
 and drop what it wrote since. A runtime before 6 writes that generation only at its first `replication.sync`,
 which a cron trigger runs up to a minute after the start, so the restore lists the replica again until a generation
 of the app appears, for at most 90 s after the start (`generationWaitMs` of `runOps`). When none appears in that
-time, the restore ends with exit 0 and `ownGeneration: null`, and its output says that the order is unconfirmed:
-once the app's generation appears, it must be the newest one, not the promoted generation. A runtime from 6 on
+time, or when listing the replica fails during the wait, the restore ends with exit 0 and `ownGeneration: null`,
+and its output says that the order is unconfirmed: once the app's generation appears, it must be the newest one,
+not the promoted generation. A signal during the wait ends the restore with exit 1 and `interrupted by <signal>`,
+and its output says both that the app was started again and that the order is unconfirmed. A runtime from 6 on
 names every generation after the ones it listed, so the restore does not wait for it.
 
 ## Questions

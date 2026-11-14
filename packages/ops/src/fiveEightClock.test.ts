@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MemoryBucket, memoryStore, type MemoryBucketOptions } from "./memoryStore.ts";
 import type { RunOptions } from "./run.ts";
+import type { ObjectStore } from "./store.ts";
 import { listGenerations } from "./replica.ts";
 import { copyFixtureDatabase, FiveEightApp, FIXTURE_REPLICA, fixtureProject, loadFixtureBlobs, snapshotOnlyGeneration, type FixtureRun } from "./upgradeFixture.fixture.ts";
 
@@ -148,5 +150,103 @@ describe("a restore onto a 5.8.1 app whose clock runs behind and whose own gener
     expect(restored.json).toMatchObject({ ok: true, ownGeneration: null });
     const gens = (await listGenerations(memoryStore(bucket), FIXTURE_REPLICA)).map((g) => g.name).filter((name) => !before.has(name));
     expect(gens).toEqual([promoted]);
+  }, 30_000);
+});
+
+const RESTORE_ANSWERS = { "unsealed-stop": "accept", "access-changes": "accept" };
+
+interface ChangedFixture {
+  bucket: MemoryBucket;
+  app: FiveEightApp;
+  project: ReturnType<typeof fixtureProject>;
+  restoreArgs: () => string[];
+}
+
+function changedAfterBackup(name: string, appClock: () => number, firstSyncAfterMs: number | null, cleanup: Array<() => void>): Promise<ChangedFixture> {
+  return changedAfterBackupIn(new MemoryBucket(name), appClock, firstSyncAfterMs, cleanup);
+}
+
+async function changedAfterBackupIn(bucket: MemoryBucket, appClock: () => number, firstSyncAfterMs: number | null, cleanup: Array<() => void>): Promise<ChangedFixture> {
+  loadFixtureBlobs(bucket);
+  const app = new FiveEightApp(memoryStore(bucket), appClock, firstSyncAfterMs);
+  const project = fixtureProject(bucket, () => app);
+  const work = mkdtempSync(join(tmpdir(), "kestrel-ops-changed-"));
+  cleanup.push(() => project.dispose(), () => app.dispose(), () => rmSync(work, { recursive: true, force: true }));
+  const backup = await project.run(["backup", "create", "--freeze", "--yes", "--answers", project.answers(RESTORE_ANSWERS), "--json"]);
+  expect(backup.code).toBe(0);
+  const changed = join(work, "changed.db");
+  copyFixtureDatabase(changed);
+  const db = new DatabaseSync(changed);
+  db.exec(`UPDATE pages SET "title__en" = 'Renamed after the backup' WHERE rowid = (SELECT min(rowid) FROM pages)`);
+  db.close();
+  await snapshotOnlyGeneration(memoryStore(bucket), Date.now() - 60_000, changed);
+  return { bucket, app, project, restoreArgs: () => ["restore", "--backup", String(backup.json.id), "--yes", "--answers", project.answers(RESTORE_ANSWERS), "--json"] };
+}
+
+function failingOnce(inner: ObjectStore, op: "list" | "put", match: (key: string) => boolean): { store: ObjectStore; arm: () => void } {
+  let armed = false;
+  const fail = (key: string): void => {
+    if (!armed || !match(key)) return;
+    armed = false;
+    throw new Error(`connection reset at ${key}`);
+  };
+  return {
+    store: {
+      ...inner,
+      list: async (prefix) => {
+        if (op === "list") fail(prefix);
+        return inner.list(prefix);
+      },
+      put: async (key, data, options) => {
+        if (op === "put") fail(key);
+        return inner.put(key, data, options);
+      },
+    },
+    arm: () => {
+      armed = true;
+    },
+  };
+}
+
+describe("a restore onto a 5.8.1 app whose clock runs behind, while it waits for the app's own generation", () => {
+  let cleanup: Array<() => void> = [];
+  afterEach(() => {
+    for (const run of cleanup.reverse()) run();
+    cleanup = [];
+  });
+
+  function afterStart(app: FiveEightApp, ms: number, action: () => void): void {
+    const start = app.start.bind(app);
+    app.start = async () => {
+      await start();
+      const timer = setTimeout(action, ms);
+      cleanup.push(() => clearTimeout(timer));
+    };
+  }
+
+  it("ends with exit 1 and interrupted by SIGINT when the signal arrives during the wait, and says the order is unconfirmed", async () => {
+    const { app, project, restoreArgs } = await changedAfterBackup("interrupted-wait-5.8.1", () => Date.now() - 10_000, 400, cleanup);
+    const signals = new EventEmitter();
+    afterStart(app, 150, () => signals.emit("SIGINT"));
+    const restored = await project.run(restoreArgs(), { signals, generationWaitMs: 5000 });
+    const promoted = app.restoredFrom ?? "";
+    expect(restored.code).toBe(1);
+    expect(restored.stderr).toContain("interrupted by SIGINT");
+    expect(restored.stderr).toContain("the restore changed the store and started the app again");
+    expect(restored.stderr).toContain(`whether its first one sorts after the promoted generation ${promoted} is unconfirmed`);
+    expect(restored.json).toMatchObject({ ok: false });
+  }, 30_000);
+
+  it("ends with exit 0 and says the order is unconfirmed when a listing fails during the wait", async () => {
+    const bucket = new MemoryBucket("failing-wait-5.8.1");
+    const failing = failingOnce(memoryStore(bucket), "list", (prefix) => prefix.startsWith(FIXTURE_REPLICA));
+    const { app, project, restoreArgs } = await changedAfterBackupIn(bucket, () => Date.now() - 10_000, 400, cleanup);
+    afterStart(app, 150, failing.arm);
+    const restored = await project.run(restoreArgs(), { stores: () => failing.store, generationWaitMs: 5000 });
+    const promoted = app.restoredFrom ?? "";
+    expect(restored.code).toBe(0);
+    expect(restored.stderr).toContain("connection reset");
+    expect(restored.stderr).toContain(`whether its first one sorts after the promoted generation ${promoted} is unconfirmed`);
+    expect(restored.json).toMatchObject({ ok: true, ownGeneration: null });
   }, 30_000);
 });

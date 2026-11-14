@@ -155,6 +155,10 @@ describe("backup and restore against an in-memory store", () => {
           if (prefix === `${PREFIXES.replica}gen/` && h.app.starts >= failFrom) throw new Error("connection reset");
           return inner.list(prefix);
         },
+        get: async (key) => {
+          if (key.endsWith("/applied.json") && h.app.starts >= failFrom) throw new Error("connection reset reading the acknowledgement");
+          return inner.get(key);
+        },
       },
     });
     try {
@@ -167,9 +171,10 @@ describe("backup and restore against an in-memory store", () => {
       const restored = await h.run(["restore", "--backup", String(backup.json.id), "--yes", "--answers", h.answers({ "access-changes": "accept" }), "--json"]);
       failFrom = Number.POSITIVE_INFINITY;
       expect(restored.stderr).not.toContain("the app stays stopped");
-      expect(restored.stderr).toContain("connection reset");
+      expect(restored.stderr).toContain("connection reset reading the acknowledgement");
+      expect(restored.stderr).toContain("looking for a generation of the app failed: connection reset");
       expect(restored.code).toBe(0);
-      expect(restored.json).toMatchObject({ acknowledgement: "unconfirmed" });
+      expect(restored.json).toMatchObject({ acknowledgement: "unconfirmed", ownGeneration: null });
       expect((await h.app.status()).state).toBe("started");
       expect(h.app.rows("pages")).toContainEqual({ id: "home", title: "Home", body: "Welcome" });
       const list = await h.run(["backup", "list"]);

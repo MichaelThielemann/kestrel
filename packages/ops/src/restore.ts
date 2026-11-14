@@ -8,7 +8,7 @@ import { fromJsonl, hex, keys, type BlobEntry, type Manifest, type SiteEntry } f
 import { confirm } from "./questions.ts";
 import { placedUnstarted, recordPlacement, unfinishedPlacements } from "./placements.ts";
 import { acknowledgement, buildDatabase, checkPromotable, completeGeneration, listGenerations, namesAfterListed, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Generation, type Promoted, type SealReport } from "./replica.ts";
-import { appClock } from "./serverTime.ts";
+import { appClock, type ServerClock } from "./serverTime.ts";
 import { deleteSessions, hasAccessChanges, integrityCheck, lossReport, sha256, vacuumInto, type LossReport } from "./sqlite.ts";
 import { listMap, stableList, transfer, type ObjectInfo } from "./store.ts";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -285,42 +285,78 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
         beforeWrite();
       } });
     await ctx.journal.record("promote", "done", { generation: promoted.generation, sha256: promoted.sha256 });
-    const sleep = ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
-    const startable = promoted.at + 1000;
-    const behind = (): number => startable - Math.min(clock.now(), ctx.clock());
-    while (behind() > 0) await sleep(Math.min(1000, behind()));
+    await waitUntilStartable(ctx, promoted.at, clock);
   } else {
     if (!ctx.target.installDatabase) throw new OpsError("the target can take neither a promoted generation nor a database file", 2, "target");
     beforeWrite();
     await ctx.target.installDatabase(prepared);
     await ctx.journal.record("install-database", "done", {});
   }
-  const before = promoted === null ? null : new Set((await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).map((g) => g.name));
-  const waitMs = namesAfterListed(runtimeVersion(await ctx.target.describe())) ? 0 : ctx.generationWaitMs;
+  const order = promoted === null ? null : await orderCheck(ctx, promoted.generation);
   await ctx.journal.record("start", "started", promoted === null ? {} : { generation: promoted.generation });
   await startTarget(ctx, () => {
     state.started = true;
   });
   const startedAt = ctx.clock();
   let own: string | null = null;
-  if (promoted !== null && before !== null) {
-    let started: string[] | null = null;
+  if (promoted !== null && order !== null) {
     try {
       ack = await acknowledgement(ctx.app, ctx.env.app.replicaPrefix, promoted, ctx.poll);
       ctx.out.info(ack === "applied" ? `the app reports the restore of ${promoted.generation}` : `the app did not acknowledge ${promoted.generation}; a runtime without restore reporting renders nothing again by itself`);
-      started = await startedGenerations(ctx, before, startedAt + waitMs, waitMs);
     } catch (cause) {
+      if (cause instanceof Interrupted) {
+        orderUnconfirmed(ctx, order, `checking whether the app acknowledged ${promoted.generation} failed: ${messageOf(cause)}`);
+        throw cause;
+      }
       ack = "unconfirmed";
       ctx.out.warn(`the restore is done and the app started again, but checking whether it acknowledged ${promoted.generation} failed: ${messageOf(cause)}`);
     }
-    const earlier = started?.find((name) => name < promoted.generation);
-    if (earlier !== undefined) throw new OpsError(`the app started generation ${earlier}, which sorts before the promoted generation ${promoted.generation}: the app's clock runs behind the store's, and its next start would restore ${promoted.generation} and drop everything written since; stop the app, correct its clock and restore again`, 1, "target");
-    own = started?.[0] ?? null;
-    if (started?.length === 0 && waitMs > 0) ctx.out.warn(`the app started no generation of its own within ${Math.ceil(waitMs / 1000)} s: whether its first one sorts after the promoted generation ${promoted.generation} is unconfirmed; a runtime before 6 writes it at its first replication.sync and names it by the app's clock, so once it appears, the newest generation under ${ctx.env.app.replicaPrefix} must be that one, not ${promoted.generation}`);
-    else if (started?.length === 0) ctx.out.warn("the app has not started its own generation yet");
+    own = await ownGeneration(ctx, order, startedAt);
   }
   await recordQuietly(ctx, "restore", "done", { backupId: manifest.id, safetyBackup, acknowledgement: ack, ownGeneration: own });
   return { ...base, safetyBackup, sessionsDeleted, promoted, acknowledgement: ack, ownGeneration: own };
+}
+
+async function waitUntilStartable(ctx: OpsContext, at: number, clock: ServerClock): Promise<void> {
+  const sleep = ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+  const startable = at + 1000;
+  const behind = (): number => startable - Math.min(clock.now(), ctx.clock());
+  while (behind() > 0) await sleep(Math.min(1000, behind()));
+}
+
+interface OrderCheck {
+  promoted: string;
+  before: ReadonlySet<string>;
+  waitMs: number;
+}
+
+async function orderCheck(ctx: OpsContext, promoted: string): Promise<OrderCheck> {
+  const before = new Set((await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).map((g) => g.name));
+  const waitMs = namesAfterListed(runtimeVersion(await ctx.target.describe())) ? 0 : ctx.generationWaitMs;
+  return { promoted, before, waitMs };
+}
+
+function orderUnconfirmed(ctx: OpsContext, order: OrderCheck, reason: string): void {
+  if (order.waitMs === 0) return;
+  ctx.out.warn(`${reason}: whether its first one sorts after the promoted generation ${order.promoted} is unconfirmed; a runtime before 6 writes it at its first replication.sync and names it by the app's clock, so once it appears, the newest generation under ${ctx.env.app.replicaPrefix} must be that one, not ${order.promoted}`);
+}
+
+async function ownGeneration(ctx: OpsContext, order: OrderCheck, startedAt: number): Promise<string | null> {
+  let started: string[];
+  try {
+    started = await startedGenerations(ctx, order.before, startedAt + order.waitMs, order.waitMs);
+  } catch (cause) {
+    const reason = `looking for a generation of the app failed: ${messageOf(cause)}`;
+    if (order.waitMs === 0 && !(cause instanceof Interrupted)) ctx.out.warn(reason);
+    orderUnconfirmed(ctx, order, reason);
+    if (cause instanceof Interrupted) throw cause;
+    return null;
+  }
+  const earlier = started.find((name) => name < order.promoted);
+  if (earlier !== undefined) throw new OpsError(`the app started generation ${earlier}, which sorts before the promoted generation ${order.promoted}: the app's clock runs behind the store's, and its next start would restore ${order.promoted} and drop everything written since; stop the app, correct its clock and restore again`, 1, "target");
+  if (started.length === 0 && order.waitMs > 0) orderUnconfirmed(ctx, order, `the app started no generation of its own within ${Math.ceil(order.waitMs / 1000)} s`);
+  else if (started.length === 0) ctx.out.warn("the app has not started its own generation yet");
+  return started[0] ?? null;
 }
 
 async function startedGenerations(ctx: OpsContext, before: ReadonlySet<string>, until: number, waitMs: number): Promise<string[]> {
