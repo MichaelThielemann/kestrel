@@ -1407,8 +1407,13 @@ describe("the retry routes act only on the id of a deleted user", () => {
       expect(reassign.status).toBe(200);
 
       const rows = await auditRows(capture);
-      expect(rows.filter((row) => row.event === "user.auditAnonymizeRetried")).toEqual([{ event: "user.auditAnonymizeRetried", identityId: admin.identity.id, params: { id: editor.id } }]);
-      expect(rows.filter((row) => row.event === "user.revisionsReassignRetried")).toEqual([{ event: "user.revisionsReassignRetried", identityId: admin.identity.id, params: { id: editor.id } }]);
+      expect(rows.filter((row) => row.event === "user.auditAnonymizeRetried")).toEqual([{ event: "user.auditAnonymizeRetried", identityId: admin.identity.id, params: {} }]);
+      expect(rows.filter((row) => row.event === "user.revisionsReassignRetried")).toEqual([{ event: "user.revisionsReassignRetried", identityId: admin.identity.id, params: {} }]);
+      expect(JSON.stringify(rows)).not.toContain(editor.id);
+
+      const again = await kestrel.run("retryAnonymizeAuditUser", { trigger, headers: bearer(admin.token), params: { id: editor.id } });
+      expect(again.status).toBe(200);
+      expect(JSON.stringify(await auditRows(capture))).not.toContain(editor.id);
     } finally {
       await dispose();
     }

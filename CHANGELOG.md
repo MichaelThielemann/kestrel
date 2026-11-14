@@ -768,7 +768,7 @@ Net changes since 5.8.2.
   `atomicSafe`; a project that exposes `revisions.reassignAuthor` or `audit.anonymize` on a route of
   its own should run it first. Each successful run raises `user.revisionsReassignRetried` or
   `user.auditAnonymizeRetried`, which `examples/minimal` records through an `auditUsers` pipeline, so
-  the log shows who ran the repair. Both routes now end in `events.relay`, so their responses carry `_events`.
+  the log shows who ran the repair without naming the deleted user. Both routes now end in `events.relay`, so their responses carry `_events`.
 
 ### Added
 
@@ -804,6 +804,9 @@ Net changes since 5.8.2.
   from (or else the first sync's listing) did not show, logs a warning and makes `health()` answer
   `{ ok: true, note }` until the process restarts. Health stays ok, so that a readiness probe does not
   restart the process into the other process's data.
+- `audit-persistence` has the step `audit.recordActor`: like `audit.record` it persists an event, but
+  only with the event, its time, the caller and the client address, leaving out the params and the id
+  that name whom the event was about.
 - `kestrel-h3`'s `createKestrelHandler` takes a `logger` and writes one `http` line per request
   with the fields of the core server's line (`runId`, `requestId`, `method`, `path`, `pipeline`,
   `status`, `ms`, `ip`). A request refused before its pipeline (unknown route, dot segment, body too

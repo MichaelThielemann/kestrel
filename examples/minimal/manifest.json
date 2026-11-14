@@ -3418,6 +3418,7 @@
       },
       "steps": [
         "audit.record",
+        "audit.recordActor",
         "audit.anonymize",
         "audit.prune"
       ],
@@ -12660,6 +12661,22 @@
       }
     },
     {
+      "name": "audit.recordActor",
+      "module": "audit/persistence",
+      "factory": false,
+      "description": {
+        "summary": "Persist an audit log entry for an emitted event with its caller and address but without its params and id, so it names no one the event was about",
+        "reads": [
+          "payload"
+        ],
+        "writes": [],
+        "input": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    {
       "name": "audit.anonymize",
       "module": "audit/persistence",
       "factory": false,
@@ -13903,11 +13920,11 @@
       "name": "auditUsers",
       "steps": [
         {
-          "spec": "audit.record",
-          "name": "audit.record",
+          "spec": "audit.recordActor",
+          "name": "audit.recordActor",
           "module": "audit/persistence",
           "description": {
-            "summary": "Persist an audit log entry for an emitted event",
+            "summary": "Persist an audit log entry for an emitted event with its caller and address but without its params and id, so it names no one the event was about",
             "reads": [
               "payload"
             ],

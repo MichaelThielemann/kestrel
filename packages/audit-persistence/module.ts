@@ -52,6 +52,11 @@ export default defineModule({
       if (isErr(recorded)) return ctx.fail(recorded.error);
       return ok(ctx);
     },
+    recordActor: async (ctx: Context) => {
+      const recorded = await audit.record({ ...entryFromEventData(ctx.payload), params: {} });
+      if (isErr(recorded)) return ctx.fail(recorded.error);
+      return ok(ctx);
+    },
     anonymize: async (ctx: Context) => {
       const id = userIdOf(ctx);
       if (id === null) return ctx.fail("VALIDATION", "audit.anonymize: no user id in params.id or the event payload");
@@ -69,6 +74,7 @@ export default defineModule({
 
   describe: () => ({
     record: { summary: "Persist an audit log entry for an emitted event", reads: ["payload"], writes: [], input: { type: "object", additionalProperties: true } },
+    recordActor: { summary: "Persist an audit log entry for an emitted event with its caller and address but without its params and id, so it names no one the event was about", reads: ["payload"], writes: [], input: { type: "object", additionalProperties: true } },
     anonymize: {
       summary: "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param naming them go, the event and its time stay",
       reads: ["params.id", "payload"],

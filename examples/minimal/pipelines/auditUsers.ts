@@ -2,5 +2,5 @@ import { definePipeline } from "../modules.ts";
 
 export default definePipeline({
   name: "auditUsers",
-  steps: ["audit.record"],
+  steps: ["audit.recordActor"],
 });

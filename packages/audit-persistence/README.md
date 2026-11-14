@@ -13,7 +13,8 @@ entry is never moved to another user: a login belongs to nobody else. Run it fro
 `user.deleted`; it is idempotent, so a failed run can simply be repeated from an admin route. That
 route must run `authn.requireAbsentUser` first: the step acts on whatever id it is given, so on an
 existing user it would erase their trail. Emit an event after the step and record it with
-`audit.record` to keep a trace of who ran the repair.
+`audit.recordActor`, which keeps the caller, the event and its time but not the params and id that name the
+user, to leave a trace of who ran the repair without undoing the anonymisation.
 
 **Security entries.** With `securityEvents` (default on) the module watches every HTTP run and records,
 without any pipeline: `auth.failed` when one of `failedSteps` failed (default: `authn.login`,
@@ -49,6 +50,7 @@ unavailable; it never fails otherwise.
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
 | `audit.record` | Persist an audit log entry for an emitted event | `payload` | – | object | – | – | – | no |
+| `audit.recordActor` | Persist an audit log entry for an emitted event with its caller and address but without its params and id, so it names no one the event was about | `payload` | – | object | – | – | – | no |
 | `audit.anonymize` | Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param naming them go, the event and its time stay | `params.id`, `payload` | `result` | object | { entries: number, … } | 400 no user id | – | no |
 | `audit.prune` | Remove every audit entry older than the configured `retentionDays` | – | `result` | – | { removed: number, … } | 400 no `retentionDays` configured | – | no |
 
@@ -56,7 +58,7 @@ Pipelines in `examples/minimal` using these steps:
 
 - **anonymizeAuditUser** (event user.deleted): **`audit.anonymize`**
 - **auditAuth** (event auth.loggedIn, event auth.loggedOut): **`audit.record`**
-- **auditUsers** (event user.auditAnonymizeRetried, event user.revisionsReassignRetried): **`audit.record`**
+- **auditUsers** (event user.auditAnonymizeRetried, event user.revisionsReassignRetried): **`audit.recordActor`**
 - **pruneAudit** (cron 45 3 * * *): **`audit.prune`**
 - **retryAnonymizeAuditUser** (POST /admin/users/:id/audit/anonymize): `authn.requireUser` → `authz.requireRole` → `authz.require:users.manage` → `authn.requireAbsentUser` → **`audit.anonymize`** → `events.emit:user.auditAnonymizeRetried` → `events.relay`
 

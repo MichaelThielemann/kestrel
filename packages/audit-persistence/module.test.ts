@@ -33,6 +33,7 @@ async function boot(config: Record<string, unknown> = {}): Promise<{ instance: A
 }
 
 const recordPipeline = definePipeline({ name: "record", steps: ["audit.record"] });
+const recordActorPipeline = definePipeline({ name: "recordActor", steps: ["audit.recordActor"] });
 const anonymizePipeline = definePipeline({ name: "anonymize", steps: ["audit.anonymize"] });
 const prunePipeline = definePipeline({ name: "prune", steps: ["audit.prune"] });
 
@@ -196,5 +197,17 @@ describe("audit/persistence entries from events", () => {
     await runPipeline(recordPipeline, { body: { eventId: "e9", event: "user.created", at: 5, identity: { id: "admin", claims: {} }, params: {}, id: "u9", ip: "192.0.2.1" } }, { modules: [{ module, instance }] });
     const [entry] = expectOk(await db.findMany<Record<string, unknown> & { id: string }>(COLLECTION, {})).items;
     expect(entry).toMatchObject({ event: "user.created", identityId: "admin", ip: "192.0.2.1", params: { id: "u9" } });
+  });
+});
+
+describe("audit/persistence recordActor", () => {
+  it("keeps the event, its time, the caller and the address but neither the params nor the id", async () => {
+    const { instance, db } = await boot();
+    const envelope = { eventId: "e7", event: "user.auditAnonymizeRetried", at: 7, identity: { id: "admin", claims: {} }, params: { id: "u7" }, id: "u7", ip: "192.0.2.7" };
+    const res = await runPipeline(recordActorPipeline, { body: envelope }, { modules: [{ module, instance }] });
+    expect(res.status).toBe(200);
+    const [entry] = expectOk(await db.findMany<Record<string, unknown> & { id: string }>(COLLECTION, {})).items;
+    expect(entry).toMatchObject({ eventId: "e7", event: "user.auditAnonymizeRetried", at: 7, identityId: "admin", ip: "192.0.2.7", params: {} });
+    expect(JSON.stringify(entry)).not.toContain("u7");
   });
 });

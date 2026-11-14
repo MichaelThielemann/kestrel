@@ -168,6 +168,7 @@ prefix).
 | `redirects.listAuto` | none |
 | `redirects.removeAuto` | none |
 | `audit.record` | none |
+| `audit.recordActor` | none |
 | `audit.anonymize` | none |
 | `audit.prune` | none |
 | `ratelimit.check` | none |
