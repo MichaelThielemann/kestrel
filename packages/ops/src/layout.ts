@@ -89,7 +89,7 @@ export interface DerivedEntry {
   etag: string;
 }
 
-/** How a backup knows the source database was complete: `sealed` (teardown wrote a seal), `placed` (a generation a restore placed with `origin.json` that no app started from yet, so its snapshot is the whole database), `unsealed` (no seal, e.g. a kill), `unsupported` (the runtime writes no seal), `unknown` (no seal, and the target cannot tell the runtime version), `live` (taken while the app ran), `unreadable` (the stopped replica could not be read, so the backup has no database). */
+/** How a backup knows the source database was complete: `sealed` (teardown wrote a seal), `placed` (a generation a restore placed with `origin.json` and started no app from, as its journal shows, so its snapshot is the whole database), `unsealed` (no seal, e.g. a kill), `unsupported` (the runtime writes no seal), `unknown` (no seal, and the target cannot tell the runtime version), `live` (taken while the app ran), `unreadable` (the stopped replica could not be read, so the backup has no database). */
 export type SealState = "sealed" | "placed" | "unsealed" | "unsupported" | "unknown" | "live" | "unreadable";
 
 /** `manifest.json`, written once after every other file of the backup. */

@@ -5,7 +5,7 @@ import { messageOf, recordQuietly, runtimeVersion, startTarget, stopTarget, type
 import { OpsError } from "./errors.ts";
 import { fromJsonl, hex, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
-import { recordPlacement, unfinishedPlacements } from "./placements.ts";
+import { placedUnstarted, recordPlacement, unfinishedPlacements } from "./placements.ts";
 import { acknowledgement, buildDatabase, checkPromotable, completeGeneration, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Promoted, type SealReport } from "./replica.ts";
 import { appClock } from "./serverTime.ts";
 import { deleteSessions, hasAccessChanges, integrityCheck, lossReport, sha256, vacuumInto, type LossReport } from "./sqlite.ts";
@@ -174,7 +174,7 @@ async function readCurrent(ctx: OpsContext, stoppedAt: number): Promise<Current>
     for (const name of unfinished) ctx.out.warn(`generation ${name} is an unfinished placement of an earlier restore (a snapshot without origin.json); this restore reads the generation before it and places a complete one after it`);
     const newest = gens[gens.length - unfinished.length - 1];
     if (!newest) return { kind: "unreadable", reason: `the replica under ${prefix} has no generation${unfinished.length > 0 ? " besides the unfinished placement" : ""}`, unfinished };
-    seal = await sealOf(ctx.app, prefix, newest, runtimeVersion(await ctx.target.describe()), ctx.poll);
+    seal = await sealOf(ctx.app, prefix, newest, runtimeVersion(await ctx.target.describe()), ctx.poll, (generation) => placedUnstarted(ctx, generation));
   } catch (cause) {
     if (cause instanceof OpsError) return { kind: "unreadable", reason: cause.message, unfinished };
     throw cause;
@@ -265,6 +265,7 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
     await ctx.target.installDatabase(prepared);
     await ctx.journal.record("install-database", "done", {});
   }
+  await ctx.journal.record("start", "started", promoted === null ? {} : { generation: promoted.generation });
   await startTarget(ctx, () => {
     state.started = true;
   });

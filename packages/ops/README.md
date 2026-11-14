@@ -159,9 +159,12 @@ reports, once a listing shows every WAL segment the seal counts, and builds the 
 listing that keeps lacking one stops the backup with exit 1. Without it the backup reads `unsealed` (the process stopped without teardown, so frames written after
 its last sync may be missing), `unsupported` for a runtime before 6, or `unknown` when the target cannot tell
 the runtime version. All three show the time of the last shipped segment and need the answer
-`unsealed-stop`. A newest generation that a restore promoted with `origin.json` and that holds neither a WAL
-segment nor `applied.json` reads `placed`: no app started from it, so its snapshot is the whole database and
-no answer is needed. A backup of a running app reads `live`. A runtime numbers the segments of a generation
+`unsealed-stop`. A newest generation reads `placed` when a restore of this environment recorded its placement,
+it has the plain time name of a promotion, holds `origin.json` but neither a WAL segment nor `applied.json`, and
+the journal of the restore that placed it shows no start of the app after the promotion: no app started from
+it, so its snapshot is the whole database and no answer is needed. A generation the app began itself, which
+carries a copy of `origin.json` until the restore is acknowledged, and a promoted generation the restore started
+the app from are `unsealed` after a kill like any other. A backup of a running app reads `live`. A runtime numbers the segments of a generation
 consecutively, so whatever the seal, a listing that shows a later segment without an earlier one is listed
 again, and a gap that stays stops the backup with exit 1, naming the missing number. The `local` target reads the runtime version from
 the packages the app resolves, also when it gets `replication-sqlite` through another package.

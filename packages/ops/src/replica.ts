@@ -204,27 +204,32 @@ export function completeGeneration(store: ObjectStore, prefix: string, generatio
   return listUntilComplete(store, prefix, generation, numbered, (missing, listings, listed) => `${gapMessage(listed, missing)} after ${listings} listings`, poll);
 }
 
-async function isPlacedOnly(store: ObjectStore, prefix: string, generation: Generation): Promise<boolean> {
-  if (generation.segments.length > 0) return false;
+const PLAIN_TIME_NAME = /^\d{8}T\d{6}Z$/;
+
+async function isPlacedOnly(store: ObjectStore, prefix: string, generation: Generation, placedUnstarted: ((generation: string) => Promise<boolean>) | undefined): Promise<boolean> {
+  if (placedUnstarted === undefined || !PLAIN_TIME_NAME.test(generation.name) || generation.segments.length > 0) return false;
   if (generation.files["origin.json"] === undefined && (await store.get(markerKey(prefix, generation.name, "origin"))) === null) return false;
-  return generation.files["applied.json"] === undefined && (await store.get(markerKey(prefix, generation.name, "applied"))) === null;
+  if (generation.files["applied.json"] !== undefined || (await store.get(markerKey(prefix, generation.name, "applied"))) !== null) return false;
+  return placedUnstarted(generation.name);
 }
 
 /**
  * Classifies the newest generation of a stopped replica. A valid `sealed.json`, read from the store whether or not
  * the listing shows it, makes it sealed whatever the runtime version; the replica is then listed again until it
  * shows every segment the seal counts, and refused when it does not within `poll.attempts` listings. Without a seal
- * it is placed when it carries `origin.json` but neither a WAL segment nor `applied.json` (no app started from it, so
- * its snapshot is the whole database); otherwise the generation is unsealed (a sealing runtime stopped without teardown), unsupported (a runtime before the sealing
- * major) or unknown (the target cannot tell the runtime version).
+ * it is placed when it has a plain time name, carries `origin.json` but neither a WAL segment nor `applied.json`, and
+ * `placedUnstarted` confirms that a restore placed it and started no app afterwards, so its snapshot is the whole
+ * database; without `placedUnstarted` no generation is placed. Otherwise the generation is unsealed (a sealing
+ * runtime stopped without teardown), unsupported (a runtime before the sealing major) or unknown (the target cannot
+ * tell the runtime version).
  */
-export async function sealOf(store: ObjectStore, prefix: string, generation: Generation, runtime: string | null, poll: PollOptions = {}): Promise<SealReport> {
+export async function sealOf(store: ObjectStore, prefix: string, generation: Generation, runtime: string | null, poll: PollOptions = {}, placedUnstarted?: (generation: string) => Promise<boolean>): Promise<SealReport> {
   const data = await store.get(markerKey(prefix, generation.name, "sealed"));
   const seal: unknown = data === null ? null : parseJsonOrNull(data);
   if (!isSeal(seal)) {
     const major = majorOf(runtime);
     const listed = await completeGeneration(store, prefix, generation, poll);
-    if (await isPlacedOnly(store, prefix, listed)) return { generation: generation.name, lastFrameAt: listed.lastFrameAt, runtime, state: "placed", seal: null, listed };
+    if (await isPlacedOnly(store, prefix, listed, placedUnstarted)) return { generation: generation.name, lastFrameAt: listed.lastFrameAt, runtime, state: "placed", seal: null, listed };
     return { generation: generation.name, lastFrameAt: listed.lastFrameAt, runtime, state: major === null ? "unknown" : major < SEALING_MAJOR ? "unsupported" : "unsealed", seal: null, listed };
   }
   const listed = await listUntilComplete(store, prefix, generation, () => seal.segments, (missing, listings) => `generation ${generation.name} is sealed with ${seal.segments} segment(s), the listing shows ${seal.segments - missing.length} after ${listings} listings`, poll);

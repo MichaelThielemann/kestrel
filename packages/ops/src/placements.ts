@@ -2,6 +2,7 @@ import type { OpsContext } from "./context.ts";
 import { jsonBytes, keys } from "./layout.ts";
 import { OpsError } from "./errors.ts";
 import { markerKey, type Generation } from "./replica.ts";
+import { stableList } from "./store.ts";
 
 /** Records in the backup location that this run places `generation`, before anything of it is written to the replica. */
 export async function recordPlacement(ctx: OpsContext, generation: string): Promise<void> {
@@ -33,6 +34,29 @@ export async function unfinishedPlacements(ctx: OpsContext, gens: readonly Gener
     unfinished.unshift(generation.name);
   }
   return unfinished;
+}
+
+const JOURNAL_KEY = /(\d{6})-(.+)-(?:started|done|failed|skipped)\.json$/;
+
+async function startedAfterPromote(ctx: OpsContext, runId: string): Promise<boolean> {
+  const steps = (await stableList(ctx.backups, `${ctx.location}runs/${runId}/`, ctx.poll)).flatMap((info) => {
+    const m = JOURNAL_KEY.exec(info.key);
+    return m ? [{ seq: Number(m[1]), step: m[2] ?? "" }] : [];
+  });
+  const promoted = Math.min(...steps.filter((entry) => entry.step === "promote").map((entry) => entry.seq));
+  return steps.some((entry) => entry.step === "start" && (!Number.isFinite(promoted) || entry.seq > promoted));
+}
+
+/**
+ * Whether a restore of this environment recorded the placement of `generation` and none of the runs that placed it
+ * started the app afterwards, as their journals show. Only then is a generation without segments the whole database.
+ */
+export async function placedUnstarted(ctx: OpsContext, generation: string): Promise<boolean> {
+  const base = `${ctx.location}placements/${ctx.envName}/${generation}/`;
+  const runs = (await stableList(ctx.backups, base, ctx.poll)).map((info) => info.key.slice(base.length)).filter((rest) => rest.endsWith(".json") && !rest.includes("/")).map((rest) => rest.slice(0, -".json".length));
+  if (runs.length === 0) return false;
+  for (const runId of runs) if (await startedAfterPromote(ctx, runId)) return false;
+  return true;
 }
 
 /** Refuses with a message naming the restore to run again when the newest generation is an unfinished placement. */

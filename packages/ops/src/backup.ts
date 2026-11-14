@@ -6,7 +6,7 @@ import { OpsError } from "./errors.ts";
 import { openRuns, listRuns } from "./journal.ts";
 import { heldLocks } from "./lock.ts";
 import { BACKUP_KINDS, backupId, fromJsonl, jsonBytes, keys, parseBackupId, parseJson, stamp, toJsonl, type BackupKind, type BlobEntry, type DerivedEntry, type Manifest, type SiteEntry } from "./layout.ts";
-import { refuseUnfinishedPlacement } from "./placements.ts";
+import { placedUnstarted, refuseUnfinishedPlacement } from "./placements.ts";
 import { confirm } from "./questions.ts";
 import { buildDatabase, completeGeneration, SEALING_MAJOR, sealOf, stableGenerations, type SealReport } from "./replica.ts";
 import { integrityCheck, referencedBlobs, sha256, sha256File, tableCounts, vacuumInto } from "./sqlite.ts";
@@ -64,7 +64,7 @@ export async function readSeal(ctx: OpsContext): Promise<SealReport> {
   const newest = gens.at(-1);
   if (!newest) throw new OpsError(`the replica under ${ctx.env.app.replicaPrefix} has no generation`, 1, ctx.env.app.replicaPrefix);
   await refuseUnfinishedPlacement(ctx, gens);
-  return sealOf(ctx.app, ctx.env.app.replicaPrefix, newest, runtimeVersion(await ctx.target.describe()), ctx.poll);
+  return sealOf(ctx.app, ctx.env.app.replicaPrefix, newest, runtimeVersion(await ctx.target.describe()), ctx.poll, (generation) => placedUnstarted(ctx, generation));
 }
 
 type CopiedEntry = { key: string; size: number; etag: string; object: string; objectEtag: string };
