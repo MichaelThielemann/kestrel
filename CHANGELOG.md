@@ -952,7 +952,7 @@ Net changes since 5.8.2.
     step, set up offline with its module config, and keeps its id and stays an image; one the step
     refuses or whose original is missing, and every 5.x SVG of a project without that step, is kept as a
     `.bin` download and named. A module registering `sanitize.svg` that cannot be set up without other
-    modules stops the run with exit `2` before anything is converted. `kestrel upgrade data` warns with `data/media-layout:config` in
+    modules, or whose config does not parse, stops the run with exit `2` before anything is converted. `kestrel upgrade data` warns with `data/media-layout:config` in
     that case. It neither takes nor
     honours the instance lock, so a lock file left next to the copy does not stop it. Exit `0` when
     every module is in this release's shape, `1` when a migration is still pending or the stored data

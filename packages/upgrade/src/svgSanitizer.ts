@@ -21,7 +21,7 @@ export interface ConfiguredModule {
 
 /**
  * What {@link projectSvgSanitizer} found: the sanitizer and the module entry it comes from. `broken`
- * says why the entry that registers `sanitize.svg` could not be set up offline; `unloaded` names the
+ * says why the entry that registers `sanitize.svg` could not be set up offline and what to change; `unloaded` names the
  * entries that did not load while no sanitizer was found among the others.
  */
 export interface ProjectSvgSanitizer {
@@ -71,13 +71,16 @@ export async function projectSvgSanitizer(root: string, modules: readonly Config
     }
     if (stepPrefix(definition.name) !== PREFIX || definition.steps === undefined) continue;
     const parsed = definition.configSchema.safeParse(entry.config);
-    if (!parsed.success) return { from: entry.use, broken: `its config does not parse: ${parsed.error.message}` };
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map((issue) => `${issue.path.length === 0 ? "the config" : issue.path.join(".")}: ${issue.message}`).join("; ");
+      return { from: entry.use, broken: `its config does not parse (${issues}), and kestrel would not set the module up with it either; correct the config of that module entry` };
+    }
     let step: Step | StepFactory | undefined;
     try {
       const instance = await definition.setup(parsed.data, offlineDeps(root));
       step = definition.steps(instance)[KEY];
     } catch (thrown) {
-      return { from: entry.use, broken: `it could not be set up offline: ${messageOf(thrown)}` };
+      return { from: entry.use, broken: `it could not be set up offline: ${messageOf(thrown)}; migrate cleans the 5.x SVGs with that step, so make it set up without other modules` };
     }
     if (step === undefined || isStepFactory(step)) continue;
     const run = step;

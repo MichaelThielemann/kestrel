@@ -82,9 +82,15 @@ function messageOf(thrown: unknown): string {
   return thrown instanceof Error ? thrown.message : String(thrown);
 }
 
-function byToken(modules: ReadonlyArray<Parameters<typeof effectiveModuleConfig>[0] & { use: string }>): Map<string, unknown> {
+type ModuleEntry = Parameters<typeof effectiveModuleConfig>[0] & { use: string };
+
+function setupConfig(entry: ModuleEntry): unknown {
+  return effectiveModuleConfig({ config: entry.config ?? {}, defaults: entry.defaults });
+}
+
+function byToken(modules: readonly ModuleEntry[]): Map<string, unknown> {
   const configs = new Map<string, unknown>();
-  for (const entry of modules) if (!configs.has(useToken(entry.use))) configs.set(useToken(entry.use), effectiveModuleConfig(entry));
+  for (const entry of modules) if (!configs.has(useToken(entry.use))) configs.set(useToken(entry.use), setupConfig(entry));
   return configs;
 }
 
@@ -96,7 +102,7 @@ async function pluginConfigs(root: string, plugin: UpgradePlugin): Promise<Modul
     const definitions = loaded.project.input.modules;
     const modules = loaded.project.input.config.modules.map((entry, i): ConfiguredModule => ({
       use: entry.use,
-      config: effectiveModuleConfig(entry),
+      config: setupConfig(entry),
       definition: async () => {
         const definition = definitions[i];
         if (definition === undefined) throw new Error(`the "${plugin.kind}" plugin loaded no module for ${entry.use}`);
@@ -117,7 +123,7 @@ async function moduleConfigs(root: string, plugins: readonly UpgradePlugin[]): P
   if (existsSync(file)) {
     try {
       const config = await loadConfig(file);
-      const modules = config.modules.map((entry): ConfiguredModule => ({ use: entry.use, config: effectiveModuleConfig(entry), definition: () => loadModule(root, entry) }));
+      const modules = config.modules.map((entry): ConfiguredModule => ({ use: entry.use, config: setupConfig(entry), definition: () => loadModule(root, entry) }));
       return { configs: byToken(config.modules), modules, from: "kestrel.config.ts" };
     } catch (thrown) {
       problems.push(`kestrel.config.ts could not be loaded: ${messageOf(thrown)}`);

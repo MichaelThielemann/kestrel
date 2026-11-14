@@ -223,7 +223,7 @@ export async function runMigrateStep(options: MigrateStepOptions): Promise<Migra
     return { exitCode: 2, error: `${configProblem}; migrate needs the module config for the media key prefix, so make kestrel.config.ts load (with the environment it reads) or name the prefix with --media-prefix <prefix>; nothing was converted` };
   }
   if (svgSanitizer?.broken !== undefined) {
-    return { exitCode: 2, error: `${svgSanitizer.from ?? "the module"} registers sanitize.svg, but ${svgSanitizer.broken}; migrate cleans the 5.x SVGs with that step, so make it set up without other modules; nothing was converted` };
+    return { exitCode: 2, error: `${svgSanitizer.from ?? "the module"} registers sanitize.svg, but ${svgSanitizer.broken}; nothing was converted` };
   }
   const convertsTo = mediaPrefix ?? "media/";
   const notes: string[] = [];

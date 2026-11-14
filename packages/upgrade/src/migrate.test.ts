@@ -99,7 +99,7 @@ async function cli(argv: string[], plugins: readonly UpgradePlugin[] = []): Prom
   return { code, out: out.join("\n"), errors: errors.join("\n") };
 }
 
-function projectOf(copy: Copy, extra: ReadonlyArray<{ use: string; config: Record<string, unknown> }>): string {
+function projectOf(copy: Copy, extra: ReadonlyArray<{ use: string; config?: Record<string, unknown> }>): string {
   const modules = [
     { use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: copy.blobs } },
     { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: copy.db } },
@@ -548,6 +548,38 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
     expect(run.code, run.errors).toBe(0);
     expect(run.out).toContain("media/mark.svg is an SVG that sanitize.svg refuses (svg exceeds 10 bytes)");
     expect(rows(copy.db, `SELECT key FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([{ key: `media/${SVG_ITEM}/mark-svg.bin` }]);
+  });
+
+  it("cleans the 5.x SVGs with the project's sanitize module also when its entry has no config", async () => {
+    const copy = fixtureCopy();
+    const project = projectOf(copy, [{ use: "@michaelthielemann/kestrel-sanitize-svg" }]);
+    const run = await cli(["migrate", "--root", project, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(run.code, run.errors).toBe(0);
+    expect(run.out).toContain("note: media/default cleans each 5.x SVG with the sanitize.svg step of @michaelthielemann/kestrel-sanitize-svg and keeps it an image");
+    expect(rows(copy.db, `SELECT key, svgSanitized FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([{ key: `media/${SVG_ITEM}/mark.svg`, svgSanitized: 1 }]);
+  });
+
+  it("cleans the 5.x SVGs with a sanitize module the host plugin lists without config", async () => {
+    const copy = fixtureCopy();
+    const sanitizer = boundaryCast<{ default: unknown }>(await importInstalled(PROJECT, "@michaelthielemann/kestrel-sanitize-svg"), "host").default;
+    const project = { kind: "test-host", configFile: "kestrel.config.ts", moduleFiles: new Map(), pipelineFiles: [], input: { config: { modules: [{ use: "@michaelthielemann/kestrel-sanitize-svg" }, { use: "@michaelthielemann/kestrel-media-default", config: {} }], triggers: [] }, modules: [sanitizer], pipelines: [] } };
+    const plugin: UpgradePlugin = { kind: "test-host", detect: () => true, load: () => Promise.resolve({ project: boundaryCast<LoadedProject>(project, "host"), issues: [] }) };
+    const run = await cli(["migrate", "--root", failingConfigProject(), "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)], [plugin]);
+    expect(run.code, run.errors).toBe(0);
+    expect(rows(copy.db, `SELECT key, svgSanitized FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([{ key: `media/${SVG_ITEM}/mark.svg`, svgSanitized: 1 }]);
+  });
+
+  it("stops before converting anything when the config of the module that registers sanitize.svg does not parse, and says so", async () => {
+    const copy = fixtureCopy();
+    const project = projectOf(copy, [{ use: "@michaelthielemann/kestrel-sanitize-svg", config: { maxBytes: "many" } }]);
+    const before = files(copy.blobs);
+    const run = await cli(["migrate", "--root", project, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(run.code).toBe(2);
+    expect(run.errors).toContain("@michaelthielemann/kestrel-sanitize-svg registers sanitize.svg, but its config does not parse");
+    expect(run.errors).toContain("correct the config of that module entry");
+    expect(run.errors).not.toContain("set up without other modules");
+    expect(run.errors).toContain("nothing was converted");
+    expect(files(copy.blobs)).toEqual(before);
   });
 
   it("stops before converting anything when the module that registers sanitize.svg cannot be set up offline", async () => {
