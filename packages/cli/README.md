@@ -2,8 +2,9 @@
 
 **What.** The `kestrel` command. It starts a Kestrel project, checks its boot without starting it,
 explains a pipeline or an event, prints the project's manifest, writes an OpenAPI document and runs
-the major-version upgrade assistant. The package installs the same program under two names,
-`kestrel` and `kestrel-cli`.
+the major-version upgrade assistant. With `@michaelthielemann/kestrel-ops` in the project it also
+reports, backs up and restores a deployed environment. The package installs the same program under
+two names, `kestrel` and `kestrel-cli`.
 
 **Install.** A backend project lists it in `dependencies`, next to `@michaelthielemann/kestrel`,
 because `kestrel` starts the production server:
@@ -26,6 +27,11 @@ kestrel manifest [--json] [--root <dir>] [--run-setup <use>]... [--no-plugins]
 kestrel openapi  [--out <file>] [--title <t>] [--version <v>] [--server <url>] [--mount <path>]
                  [--root <dir>] [--run-setup <use>]... [--no-plugins]
 kestrel upgrade  check|fix|data [options]
+kestrel status   [--env <name>] [--json]
+kestrel backup   create [--freeze] [--kind manual|scheduled|cutover] | list | verify <id> | prune [--dry-run]
+kestrel restore  --backup <id> [--no-safety-backup]
+kestrel restore  --to local <dir> (--backup <id> | --latest) [--with-media] [--keep-sessions]
+kestrel update   prepare|accept|rollback|status|resume|abort|cleanup
 kestrel help [<command>] | kestrel --help | kestrel --version
 ```
 
@@ -49,6 +55,20 @@ kestrel help [<command>] | kestrel --help | kestrel --version
   `--run-setup` names it, so it never opens the project's own database or files.
 - `upgrade` runs the upgrade assistant of `@michaelthielemann/kestrel-upgrade` with the rest of
   the arguments unchanged; see the repository's `docs/upgrading.md`.
+- `status`, `backup`, `restore` and `update` work on the environments `kestrel.environments.json`
+  describes, through `@michaelthielemann/kestrel-ops`: the state of the app, its replica and its
+  backups; verified backups of the database, the originals and the public output; a restore of one
+  of them, or of the database into a local directory; and the update assistant of the installed
+  kestrel-ops (exit `2` when it brings none, `3` when an update was rolled back). The CLI does not
+  depend on kestrel-ops, so installing the CLI brings no S3 client, and loads it only when one of
+  these commands runs. Add it, and the target package for where the app runs, to the project:
+
+  ```
+  pnpm add -D @michaelthielemann/kestrel-ops @michaelthielemann/kestrel-target-cloudfoundry
+  ```
+
+  Without it these commands print that hint and exit `2`. The kestrel-ops README documents the
+  environments file, the options and the questions a restore asks.
 
 To upgrade a project that still has the previous major installed, run the target version's CLI
 without installing it:

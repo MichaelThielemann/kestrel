@@ -1771,6 +1771,22 @@ Net changes since 5.8.2.
   of insights and audit, are unaffected in every mode, and the error lines for a thrown step or a
   failure with a cause are written as before. `runPipeline` from `@michaelthielemann/kestrel/runner`
   takes the same `stepLog` option.
+- `kestrel status`, `kestrel backup`, `kestrel restore` and `kestrel update` run the matching commands of
+  `@michaelthielemann/kestrel-ops` on the environments of `kestrel.environments.json`. The CLI does not
+  depend on kestrel-ops and loads it only when one of them runs, from the project first, then from next to
+  the CLI; without it they print how to install it and exit 2, and the other commands, `upgrade` included,
+  never load it or an S3 client. `update` answers 2 while the installed kestrel-ops brings no update
+  assistant; exit 3 is reserved for an update that was rolled back. `kestrel --help` lists the four
+  commands.
+- New package `@michaelthielemann/kestrel-target-cloudfoundry`: a `kestrel-ops` target for one app in a
+  Cloud Foundry space, through the `cf` CLI. It reads state and instances through the v3 API, recognises a
+  stopped app only with no instance in any state but `DOWN`, and ends every command with exit 1 while the
+  app is scaled to more than one instance or a deployment, such as a rolling push, is active. It acts only
+  while cf targets the configured org and space and never names another app, so a static web server next to
+  it in the same manifest is never touched. A backup records the app's guid, droplet and the names, never
+  the values, of its environment variables. `applyManifest()` applies only the app's own manifest entry
+  through `cf apply-manifest --vars-file`, with the values in a 0600 file removed afterwards, also on
+  failure; no value is passed on a command line and `cf set-env` is never used.
 
 ### Changed
 

@@ -1,6 +1,6 @@
 import { COMMAND_USAGE, USAGE, cliVersion } from "./usage.ts";
 
-const COMMANDS = new Set(["start", "check", "explain", "manifest", "openapi", "upgrade"]);
+const COMMANDS = new Set(["start", "check", "explain", "manifest", "openapi", "upgrade", "status", "backup", "restore", "update"]);
 const EXTENSION = import.meta.url.endsWith(".ts") ? ".ts" : ".js";
 
 interface CommandModule {

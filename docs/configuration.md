@@ -215,6 +215,11 @@ kestrel manifest [--json] [--root <dir>] [--run-setup <use>]... [--no-plugins]
 kestrel openapi  [--out <file>] [--title <t>] [--version <v>] [--server <url>] [--mount <path>]
                  [--root <dir>] [--run-setup <use>]... [--no-plugins]
 kestrel upgrade  check|fix|data [options]
+kestrel status   [--env <name>] [--json]
+kestrel backup   create [--freeze] [--kind manual|scheduled|cutover] | list | verify <id> | prune [--dry-run]
+kestrel restore  --backup <id> [--no-safety-backup]
+kestrel restore  --to local <dir> (--backup <id> | --latest) [--with-media] [--keep-sessions]
+kestrel update   prepare|accept|rollback|status|resume|abort|cleanup
 kestrel help [<command>] | kestrel --help | -h | kestrel --version | -v
 ```
 
@@ -268,6 +273,33 @@ checked.
 **`upgrade`** hands the rest of its arguments unchanged to `@michaelthielemann/kestrel-upgrade`; see
 [`upgrading.md`](upgrading.md).
 
+**`status`, `backup`, `restore`, `update`** work on a deployed environment, described in
+`kestrel.environments.json` in the current directory: its target (where the app runs), the bucket with its
+replica, originals and public output, and the backup location. They come from
+`@michaelthielemann/kestrel-ops`, which the CLI does not depend on and loads only when one of these commands
+runs, so neither it nor its S3 client is installed with the CLI and the other commands never load it. Add it
+to the project as a development dependency, with the target package the environments name, such as
+`@michaelthielemann/kestrel-target-cloudfoundry`:
+
+```
+pnpm add -D @michaelthielemann/kestrel-ops @michaelthielemann/kestrel-target-cloudfoundry
+```
+
+The CLI resolves it from the current directory first, then from where the CLI itself is installed; without
+it the command prints this hint and exits 2. The arguments go to kestrel-ops unchanged; its README
+documents each option, the questions a run asks and the `--json` documents. Every command takes
+`--env <name>` (optional when the file names one environment), `--json`, `--yes`, `--answers <file>`,
+`--keep` and `--break-lock`.
+
+- `status` reports the target's state, the newest replica generation and its seal, the backups, open runs,
+  held locks, the clock skew against the store, and whether the app's own credentials can delete backups.
+- `backup create` writes a backup of the database, every original the media rows reference and the public
+  output, then verifies it; `--freeze` stops the app for the copy and starts it again. `list`, `verify <id>`
+  and `prune` read, check again and remove backups.
+- `restore --backup <id>` restores a backup over the environment after a backup of the state it replaces;
+  `--to local <dir>` writes a backup's database, or the newest replica generation, into a directory.
+- `update` runs the update assistant of the installed kestrel-ops; one that has none answers with exit 2.
+
 **Host packages.** A project a host package loads in its own shape is inspected through that
 package's plugin. The package declares it in its own `package.json`:
 
@@ -284,14 +316,18 @@ both detect the project stop the command, naming both. `--no-plugins` loads no p
 built-in loader; an outdated or refused host package still stops the command. `start` never loads a plugin; on a boot failure it names the dependency that
 declares one. [`upgrading.md`](upgrading.md) § Registering a plugin has the details.
 
-| Command | 0 | 1 | 2 |
-|---|---|---|---|
-| `start` | clean shutdown | boot failure, shutdown deadline, fatal error | any argument; project core missing or another major |
-| `check` | nothing at or above `--fail-on` | a problem at or above `--fail-on`, `deps/host-outdated` | could not run |
-| `explain` | graph printed | — | bad arguments, unknown pipeline or event, could not run |
-| `manifest` | printed | — | could not run |
-| `openapi` | written | boot failure | bad arguments, a module outside the sandbox, could not run |
-| `upgrade` | nothing at or above `--fail-on` | a finding at or above `--fail-on` | could not run, a refused plugin, `fix --write` or `data` with an outdated host package |
+| Command | 0 | 1 | 2 | 3 |
+|---|---|---|---|---|
+| `start` | clean shutdown | boot failure, shutdown deadline, fatal error | any argument; project core missing or another major | — |
+| `check` | nothing at or above `--fail-on` | a problem at or above `--fail-on`, `deps/host-outdated` | could not run | — |
+| `explain` | graph printed | — | bad arguments, unknown pipeline or event, could not run | — |
+| `manifest` | printed | — | could not run | — |
+| `openapi` | written | boot failure | bad arguments, a module outside the sandbox, could not run | — |
+| `upgrade` | nothing at or above `--fail-on` | a finding at or above `--fail-on` | could not run, a refused plugin, `fix --write` or `data` with an outdated host package | — |
+| `status` | no problem found | a problem found, such as a target with more than one instance | kestrel-ops missing, bad arguments, invalid `kestrel.environments.json` | — |
+| `backup` | done | a check failed or a step was refused | kestrel-ops missing, bad arguments or configuration, a missing credential | — |
+| `restore` | done, or nothing to do | a check failed or a step was refused | kestrel-ops missing, bad arguments or configuration, a missing credential | — |
+| `update` | done | a check failed or a step was refused | kestrel-ops missing or without an update assistant, bad arguments or configuration | the update failed and was rolled back |
 
 "Could not run" means bad arguments, no `kestrel.config.ts` and no plugin that detects the project,
 the project's core missing or of another major, a refused plugin, or more than one detecting plugin.
