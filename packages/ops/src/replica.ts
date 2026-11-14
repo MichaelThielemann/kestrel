@@ -49,14 +49,6 @@ export async function listGenerations(store: ObjectStore, prefix: string): Promi
   return [...byName.values()].filter((g) => g.snapshot !== null).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
-/**
- * True for a generation a promotion began but did not finish: a plain time name with a snapshot but neither
- * `origin.json` nor WAL segments. A runtime that understands `origin.json` refuses to start from it.
- */
-export function isUnfinishedPlacement(generation: Generation): boolean {
-  return /^\d{8}T\d{6}Z$/.test(generation.name) && generation.segments.length === 0 && generation.files["origin.json"] === undefined;
-}
-
 const fingerprint = (gens: Generation[]): string => {
   const head = gens.at(-1);
   return head ? `${head.name}|${head.segments.map((s) => `${s.key}:${s.etag}`).join(",")}|${Object.keys(head.files).sort().join(",")}` : "";
@@ -130,6 +122,7 @@ export async function buildDatabase(store: ObjectStore, prefix: string, generati
   return result.value;
 }
 
+export { markerKey };
 export type { Applied, Origin, Seal };
 
 /** The seal check of a stopped replica. */
@@ -197,11 +190,18 @@ export function completeGeneration(store: ObjectStore, prefix: string, generatio
   return listUntilComplete(store, prefix, generation, numbered, (missing, listings, listed) => `${gapMessage(listed, missing)} after ${listings} listings`, poll);
 }
 
+async function isPlacedOnly(store: ObjectStore, prefix: string, generation: Generation): Promise<boolean> {
+  if (generation.segments.length > 0) return false;
+  if (generation.files["origin.json"] === undefined && (await store.get(markerKey(prefix, generation.name, "origin"))) === null) return false;
+  return generation.files["applied.json"] === undefined && (await store.get(markerKey(prefix, generation.name, "applied"))) === null;
+}
+
 /**
  * Classifies the newest generation of a stopped replica. A valid `sealed.json`, read from the store whether or not
  * the listing shows it, makes it sealed whatever the runtime version; the replica is then listed again until it
  * shows every segment the seal counts, and refused when it does not within `poll.attempts` listings. Without a seal
- * the generation is unsealed (a sealing runtime stopped without teardown), unsupported (a runtime before the sealing
+ * it is placed when it carries `origin.json` but neither a WAL segment nor `applied.json` (no app started from it, so
+ * its snapshot is the whole database); otherwise the generation is unsealed (a sealing runtime stopped without teardown), unsupported (a runtime before the sealing
  * major) or unknown (the target cannot tell the runtime version).
  */
 export async function sealOf(store: ObjectStore, prefix: string, generation: Generation, runtime: string | null, poll: PollOptions = {}): Promise<SealReport> {
@@ -210,6 +210,7 @@ export async function sealOf(store: ObjectStore, prefix: string, generation: Gen
   if (!isSeal(seal)) {
     const major = majorOf(runtime);
     const listed = await completeGeneration(store, prefix, generation, poll);
+    if (await isPlacedOnly(store, prefix, listed)) return { generation: generation.name, lastFrameAt: listed.lastFrameAt, runtime, state: "placed", seal: null, listed };
     return { generation: generation.name, lastFrameAt: listed.lastFrameAt, runtime, state: major === null ? "unknown" : major < SEALING_MAJOR ? "unsupported" : "unsealed", seal: null, listed };
   }
   const listed = await listUntilComplete(store, prefix, generation, () => seal.segments, (missing, listings) => `generation ${generation.name} is sealed with ${seal.segments} segment(s), the listing shows ${seal.segments - missing.length} after ${listings} listings`, poll);
@@ -230,6 +231,8 @@ export interface PromoteInput {
   skewMs: number;
   clock: () => number;
   poll?: PollOptions;
+  /** Called with the generation's name after every check passed and before anything of it is written. */
+  beforePlace?: (generation: string) => Promise<void>;
 }
 
 /** A promoted generation. */
@@ -284,6 +287,7 @@ export async function promote(input: PromoteInput): Promise<Promoted> {
     const bytes = new Uint8Array(readFileSync(copy));
     const origin: Origin = { ...input.origin, requestedAt: new Date(input.clock()).toISOString(), nonce: hex(16) };
     const base = `${input.prefix}gen/${generation}/`;
+    await input.beforePlace?.(generation);
     await input.store.put(`${base}snapshot.db`, bytes, { contentType: "application/vnd.sqlite3" });
     await input.store.put(markerKey(input.prefix, generation, "origin"), jsonBytes(origin), { contentType: "application/json" });
     const sleep = input.poll?.sleep ?? defaultSleep;

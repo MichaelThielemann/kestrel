@@ -5,7 +5,8 @@ import { messageOf, recordQuietly, runtimeVersion, startTarget, stopTarget, type
 import { OpsError } from "./errors.ts";
 import { fromJsonl, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
-import { acknowledgement, buildDatabase, checkPromotable, completeGeneration, isUnfinishedPlacement, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Promoted, type SealReport } from "./replica.ts";
+import { recordPlacement, unfinishedPlacements } from "./placements.ts";
+import { acknowledgement, buildDatabase, checkPromotable, completeGeneration, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Promoted, type SealReport } from "./replica.ts";
 import { appClock } from "./serverTime.ts";
 import { deleteSessions, hasAccessChanges, integrityCheck, lossReport, sha256, vacuumInto, type LossReport } from "./sqlite.ts";
 import { listMap, stableList, transfer, type ObjectInfo } from "./store.ts";
@@ -169,11 +170,9 @@ async function readCurrent(ctx: OpsContext, stoppedAt: number): Promise<Current>
   let seal: SealReport;
   try {
     const gens = await stableGenerations(ctx.app, prefix, ctx.poll);
-    let finished = gens.length;
-    while (finished > 0 && gens.slice(finished - 1, finished).every(isUnfinishedPlacement)) finished -= 1;
-    unfinished = gens.slice(finished).map((g) => g.name);
+    unfinished = await unfinishedPlacements(ctx, gens);
     for (const name of unfinished) ctx.out.warn(`generation ${name} is an unfinished placement of an earlier restore (a snapshot without origin.json); this restore reads the generation before it and places a complete one after it`);
-    const newest = gens[finished - 1];
+    const newest = gens[gens.length - unfinished.length - 1];
     if (!newest) return { kind: "unreadable", reason: `the replica under ${prefix} has no generation${unfinished.length > 0 ? " besides the unfinished placement" : ""}`, unfinished };
     seal = await sealOf(ctx.app, prefix, newest, runtimeVersion(await ctx.target.describe()), ctx.poll);
   } catch (cause) {
@@ -257,7 +256,7 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   let promoted: Promoted | null = null;
   let ack: Acknowledgement | null = null;
   if (clock !== null) {
-    promoted = await promote({ store: ctx.app, prefix: ctx.env.app.replicaPrefix, target: ctx.target, database: prepared, origin: { kind: "restore", source: manifest.id }, serverNow: clock.now, skewMs: clock.skewMs, clock: ctx.clock, poll: ctx.poll });
+    promoted = await promote({ store: ctx.app, prefix: ctx.env.app.replicaPrefix, target: ctx.target, database: prepared, origin: { kind: "restore", source: manifest.id }, serverNow: clock.now, skewMs: clock.skewMs, clock: ctx.clock, poll: ctx.poll, beforePlace: (generation) => recordPlacement(ctx, generation) });
     await ctx.journal.record("promote", "done", { generation: promoted.generation, sha256: promoted.sha256 });
     const sleep = ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
     while (clock.now() <= promoted.at) await sleep(Math.min(1000, promoted.at - clock.now() + 1));

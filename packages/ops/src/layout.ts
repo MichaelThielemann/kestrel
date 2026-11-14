@@ -60,6 +60,7 @@ export const keys = {
   lock: (runId: string, at: number, what: "start" | "beat" | "released") => `locks/${runId}/${stamp(at)}-${what}-${hex(2)}.json`,
   probe: (runId: string) => `probes/${runId}-${hex(4)}`,
   recent: (day: string, n: number) => `recent/${day}/${String(n).padStart(6, "0")}.json`,
+  placement: (env: string, generation: string, runId: string) => `placements/${env}/${generation}/${runId}.json`,
 };
 
 /** One authoritative original as `blobs.jsonl` records it. `object` is the backup copy's key in the backup location, `objectEtag` the ETag the store gave that copy. */
@@ -88,8 +89,8 @@ export interface DerivedEntry {
   etag: string;
 }
 
-/** How a backup knows the source database was complete: `sealed` (teardown wrote a seal), `unsealed` (no seal, e.g. a kill), `unsupported` (the runtime writes no seal), `unknown` (no seal, and the target cannot tell the runtime version), `live` (taken while the app ran), `unreadable` (the stopped replica could not be read, so the backup has no database). */
-export type SealState = "sealed" | "unsealed" | "unsupported" | "unknown" | "live" | "unreadable";
+/** How a backup knows the source database was complete: `sealed` (teardown wrote a seal), `placed` (a generation a restore placed with `origin.json` that no app started from yet, so its snapshot is the whole database), `unsealed` (no seal, e.g. a kill), `unsupported` (the runtime writes no seal), `unknown` (no seal, and the target cannot tell the runtime version), `live` (taken while the app ran), `unreadable` (the stopped replica could not be read, so the backup has no database). */
+export type SealState = "sealed" | "placed" | "unsealed" | "unsupported" | "unknown" | "live" | "unreadable";
 
 /** `manifest.json`, written once after every other file of the backup. */
 export interface Manifest {

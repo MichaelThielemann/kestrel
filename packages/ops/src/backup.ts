@@ -6,6 +6,7 @@ import { OpsError } from "./errors.ts";
 import { openRuns, listRuns } from "./journal.ts";
 import { heldLocks } from "./lock.ts";
 import { BACKUP_KINDS, backupId, fromJsonl, jsonBytes, keys, parseBackupId, parseJson, stamp, toJsonl, type BackupKind, type BlobEntry, type DerivedEntry, type Manifest, type SiteEntry } from "./layout.ts";
+import { refuseUnfinishedPlacement } from "./placements.ts";
 import { confirm } from "./questions.ts";
 import { buildDatabase, completeGeneration, SEALING_MAJOR, sealOf, stableGenerations, type SealReport } from "./replica.ts";
 import { integrityCheck, referencedBlobs, sha256, sha256File, tableCounts, vacuumInto } from "./sqlite.ts";
@@ -38,6 +39,10 @@ const COPY_ATTEMPTS = 3;
 /** Asks for the `unsealed-stop` answer when a stopped replica carries no seal, showing the evidence the target has. */
 export async function acceptSeal(ctx: OpsContext, seal: SealReport, stoppedAt: number): Promise<void> {
   if (seal.state === "sealed") return;
+  if (seal.state === "placed") {
+    ctx.out.info(`generation ${seal.generation} is a complete placement of an earlier restore that no app started from yet; its snapshot is the whole database`);
+    return;
+  }
   const evidence = (await ctx.target.stopEvidence?.()) ?? [];
   const lastFrame = new Date(seal.lastFrameAt).toISOString();
   const lines = [
@@ -58,6 +63,7 @@ export async function readSeal(ctx: OpsContext): Promise<SealReport> {
   const gens = await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll);
   const newest = gens.at(-1);
   if (!newest) throw new OpsError(`the replica under ${ctx.env.app.replicaPrefix} has no generation`, 1, ctx.env.app.replicaPrefix);
+  await refuseUnfinishedPlacement(ctx, gens);
   return sealOf(ctx.app, ctx.env.app.replicaPrefix, newest, runtimeVersion(await ctx.target.describe()), ctx.poll);
 }
 
@@ -146,6 +152,7 @@ async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: Exclud
     const gens = await stableGenerations(ctx.app, app.replicaPrefix, ctx.poll);
     const newest = gens.at(-1);
     if (!newest) throw new OpsError(`the replica under ${app.replicaPrefix} has no generation`, 1, app.replicaPrefix);
+    await refuseUnfinishedPlacement(ctx, gens);
     const listed = await completeGeneration(ctx.app, app.replicaPrefix, newest, ctx.poll);
     seal = { state: "live", generation: newest.name, lastFrameAt: listed.lastFrameAt, seal: null, runtime: runtimeVersion(facts), listed };
   }

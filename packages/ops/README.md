@@ -127,6 +127,7 @@ is the directory that holds `kestrel.environments.json`; in a bundle that is `.k
 <location>runs/<run>/…                    the journal, one object per step
 <location>locks/<run>/…                   the lock trace
 <location>recent/<yyyymmdd>/<n>.json      the id of each backup written that day, numbered from 0
+<location>placements/<env>/<generation>/<run>.json  a generation a restore began to promote
 ```
 
 The id reads `<env>-<yyyymmddThhmmssZ>-<kind>-<4 hex>`. Every key is written once and never overwritten: a
@@ -157,7 +158,9 @@ reports, once a listing shows every WAL segment the seal counts, and builds the 
 listing that keeps lacking one stops the backup with exit 1. Without it the backup reads `unsealed` (the process stopped without teardown, so frames written after
 its last sync may be missing), `unsupported` for a runtime before 6, or `unknown` when the target cannot tell
 the runtime version. All three show the time of the last shipped segment and need the answer
-`unsealed-stop`. A backup of a running app reads `live`. A runtime numbers the segments of a generation
+`unsealed-stop`. A newest generation that a restore promoted with `origin.json` and that holds neither a WAL
+segment nor `applied.json` reads `placed`: no app started from it, so its snapshot is the whole database and
+no answer is needed. A backup of a running app reads `live`. A runtime numbers the segments of a generation
 consecutively, so whatever the seal, a listing that shows a later segment without an earlier one is listed
 again, and a gap that stays stops the backup with exit 1, naming the missing number. The `local` target reads the runtime version from
 the packages the app resolves, also when it gets `replication-sqlite` through another package.
@@ -203,10 +206,16 @@ that instead: an app that does not become ready ends the restore with exit 1, wh
 app runs again, such as reading its acknowledgement or writing a journal entry, is a warning: the restore ends
 with exit 0, `unconfirmed` when the acknowledgement could not be read.
 
-A restore that stops between the snapshot and `origin.json` of its promotion leaves an unfinished placement:
-a plain time name with a snapshot and nothing else, which a runtime that understands `origin.json` refuses to
-start from. `status` names it as a problem. The next restore warns about it, reads the generation before it as
-the current state, never ends as a no-op while it is the newest, and promotes a complete generation after it.
+Before it writes the snapshot of its promotion, a restore records the generation under
+`<location>placements/<env>/`. A restore that stops between the snapshot and `origin.json` leaves an unfinished
+placement: a recorded generation with a snapshot and nothing else, which a runtime that understands
+`origin.json` refuses to start from. Only a recorded generation counts; one a runtime wrote, such as the
+generation holding only a snapshot that a 5.x runtime writes at every start and every `snapshotSeconds`, never
+does. `status` names an unfinished placement as a problem, and `backup create` refuses while it is the newest
+generation. The next restore warns about it, reads the generation before it as the current state, never ends as
+a no-op while it is the newest, and promotes a complete generation after it. A restore that stops after
+`origin.json` but before the app started leaves a complete placement (`placed`); the next run starts the app from
+it and ends as a no-op.
 
 ### Promotion
 A promoted generation is a `VACUUM INTO` copy without `-wal`, named `gen/<yyyymmddThhmmssZ>/snapshot.db` by

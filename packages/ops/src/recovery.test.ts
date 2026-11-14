@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createHarness, PREFIXES } from "./harness.fixture.ts";
+import { createHarness, LOCATION, PREFIXES } from "./harness.fixture.ts";
 import { MemoryBucket, memoryStore } from "./memoryStore.ts";
 import { listGenerations } from "./replica.ts";
 import type { ObjectStore } from "./store.ts";
@@ -72,6 +72,51 @@ describe("a restore that failed while it placed its generation", () => {
       const report = await h.run(["status"]);
       expect(report.code).toBe(1);
       expect(report.stderr).toMatch(/generation \d{8}T\d{6}Z is an unfinished placement/);
+    } finally {
+      await h.dispose();
+    }
+  });
+});
+
+describe("a backup over a restore that failed while it placed its generation", () => {
+  it("is refused, frozen or live, and names the restore to run again", async () => {
+    const { h, failNext, restoreArgs } = await seededWithChange("backup-over-half-placement");
+    try {
+      failNext((key) => key.startsWith(PREFIXES.replica) && key.endsWith("/origin.json"));
+      expect((await h.run(restoreArgs())).code).toBe(1);
+      const before = (await h.store.list(LOCATION)).filter((info) => info.key.endsWith("/manifest.json")).length;
+      for (const args of [["backup", "create", "--freeze", "--yes", "--answers", h.answers({ "unsealed-stop": "accept" })], ["backup", "create", "--yes"]]) {
+        const refused = await h.run(args);
+        expect(refused.code, args.join(" ")).toBe(1);
+        expect(refused.stderr).toMatch(/generation \d{8}T\d{6}Z is an unfinished placement of a restore that failed; run that restore again/);
+        expect(refused.stderr).not.toContain("stop went without teardown");
+      }
+      expect((await h.store.list(LOCATION)).filter((info) => info.key.endsWith("/manifest.json")).length).toBe(before);
+    } finally {
+      await h.dispose();
+    }
+  });
+});
+
+describe("a restore that stopped after it placed a complete generation", () => {
+  it("starts the app from that generation on the next run without asking about an unsealed stop", async () => {
+    const { h, failNext, restoreArgs } = await seededWithChange("placed-not-started");
+    try {
+      failNext((key) => key.endsWith("-promote-done.json"));
+      const first = await h.run(restoreArgs());
+      expect(first.code).toBe(1);
+      expect(first.stderr).toContain("the app stays stopped");
+      const placed = (await listGenerations(h.store, PREFIXES.replica)).at(-1);
+      expect(placed?.files["origin.json"]).toBeDefined();
+
+      const second = await h.run(restoreArgs());
+      expect(second.stderr).not.toContain("stop went without teardown");
+      expect(second.stderr).not.toContain("unsealed-stop");
+      expect(second.code).toBe(0);
+      expect(second.json).toMatchObject({ noop: true, safetyBackup: null });
+      expect((await h.app.status()).state).toBe("started");
+      expect(h.app.restoredFrom).toBe(placed?.name);
+      expect(h.app.rows("pages")).toContainEqual({ id: "home", title: "Home", body: "Welcome" });
     } finally {
       await h.dispose();
     }
