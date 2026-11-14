@@ -120,6 +120,24 @@ describe("seal with a segment count", () => {
   });
 });
 
+describe("segment numbers", () => {
+  const fast = { delayMs: 1, attempts: 20, sleep: async () => {} };
+  const gen = "20261114T120000Z";
+  const segment = (seq: number, prefix = "database/") => `${prefix}gen/${gen}/wal/000001-${String(seq).padStart(6, "0")}-20261114T12000${seq}Z.wal`;
+
+  it("counts the segments of a sealed generation under a replica prefix that itself holds /wal/", async () => {
+    const store = memoryStore(new MemoryBucket("seal-nested-prefix"));
+    const prefix = "site/wal/";
+    await store.put(`${prefix}gen/${gen}/snapshot.db`, new Uint8Array([1]));
+    await store.put(segment(0, prefix), new Uint8Array([2]));
+    await store.put(segment(1, prefix), new Uint8Array([3]));
+    await store.put(`${prefix}gen/${gen}/sealed.json`, jsonBytes({ lineage: 1, lastFrame: 9, segments: 2, at: 1 }));
+    const [listed] = await listGenerations(store, prefix);
+    if (!listed) throw new Error("a generation expected");
+    expect((await sealOf(store, prefix, listed, "6.0.0", fast)).state).toBe("sealed");
+  });
+});
+
 describe("local target", () => {
   it("finds the replication runtime an app gets through another package, also in a nested node_modules", async () => {
     const root = mkdtempSync(join(tmpdir(), "kestrel-ops-runtime-"));

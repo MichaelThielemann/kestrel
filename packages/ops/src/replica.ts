@@ -156,8 +156,10 @@ function isSeal(value: unknown): value is Seal {
   return typeof Reflect.get(value, "lastFrame") === "number" && typeof Reflect.get(value, "at") === "number" && typeof segments === "number" && Number.isSafeInteger(segments) && segments >= 0;
 }
 
+const segmentSeq = (info: ObjectInfo): number => Number(SEGMENT.exec(info.key.slice(info.key.lastIndexOf("/wal/") + 1))?.[1]);
+
 const missingSegments = (generation: Generation, segments: number): number => {
-  const seen = new Set(generation.segments.map((info) => Number(SEGMENT.exec(info.key.slice(info.key.indexOf("/wal/") + 1))?.[1])));
+  const seen = new Set(generation.segments.map(segmentSeq));
   let missing = 0;
   for (let seq = 0; seq < segments; seq++) if (!seen.has(seq)) missing += 1;
   return missing;
