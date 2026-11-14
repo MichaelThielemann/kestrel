@@ -8319,7 +8319,7 @@
             }
           },
           "400": {
-            "description": "invalid folder, unknown locale, invalid type, or limit above maxLimit",
+            "description": "a sort by a field the caller's grant does not name whole",
             "content": {
               "application/json": {
                 "schema": {
@@ -12466,7 +12466,7 @@
             }
           },
           "400": {
-            "description": "invalid limit, offset, sort or locale",
+            "description": "a sort by a field the caller's grant does not name whole",
             "content": {
               "application/json": {
                 "schema": {

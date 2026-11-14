@@ -152,7 +152,7 @@ export default defineModule({
         reads: ["identity?", "result?", "payload.sort?"],
         writes: ["result?"],
         query: { sort: { type: "string", description: "field name, prefix - for descending" } },
-        errors,
+        errors: { ...errors, 400: "a sort by a field the caller's grant does not name whole" },
         narrows,
       };
     },

@@ -21224,6 +21224,7 @@
               }
             },
             "errors": {
+              "400": "a sort by a field the caller's grant does not name whole",
               "403": "no field grant on media for a caller without an identity or a configured role"
             },
             "narrows": {
@@ -21895,6 +21896,7 @@
               }
             },
             "errors": {
+              "400": "a sort by a field the caller's grant does not name whole",
               "403": "no field grant on pages for a caller without an identity or a configured role"
             },
             "narrows": {

@@ -445,6 +445,14 @@ describe("authz/roles: authz.fields cuts the answer to the caller's field grant"
     await kestrel.stop();
   });
 
+  it("declares the 400 of a refused sort on the list shape only", async () => {
+    const kestrel = await bootRecords(grants);
+    const lastStep = (name: string) => kestrel.describe().pipelines.find((p) => p.name === name)?.steps.at(-1);
+    expect(Object.keys(lastStep("listRecords")?.description.errors ?? {})).toEqual(["400", "403"]);
+    expect(Object.keys(lastStep("getRecord")?.description.errors ?? {})).toEqual(["403"]);
+    await kestrel.stop();
+  });
+
   it("answers a signed-in caller without a configured role like an anonymous one, and 403 where anonymous callers have no grant", async () => {
     const kestrel = await bootRecords(grants);
     expect((await kestrel.run("getRecord", as("ghost"))).result).toEqual({ id: "r1", nested: { open: "o" } });
