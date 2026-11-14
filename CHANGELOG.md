@@ -765,7 +765,9 @@ Net changes since 5.8.2.
   generation shows `origin.json` without a snapshot, and refuses to start when it still does. A tool that
   places a database into the replica writes the snapshot and then `origin.json`; a start that rebuilds
   the missing database from such a generation reports the restore through `replication.checkRestored`,
-  so `delivery.checkBuild` renders every output again. Once a pipeline run through that step ended
+  so `delivery.checkBuild` renders every output again. It rebuilds the file into `<file>.rebuilding` and
+  renames it into place only after the `<file>.restored-at` sidecar records the restore, so a start that
+  stops in between leaves the rebuild to the next one. Once a pipeline run through that step ended
   without failure, the first successful sync or teardown seal after it writes `applied.json` naming the
   generation and the `nonce` of `origin.json`; until then every generation the process starts carries a copy of
   `origin.json`, so a start that stops earlier leaves the restore reported to the next one. A start that
@@ -774,9 +776,10 @@ Net changes since 5.8.2.
   since teardown writes the last segment and the seal one after the other and a listing that shows new
   keys late hides both. `./impl` exports `listReplica()`,
   `listSealedReplica()`, `markerKey()`, `readOrigin()`, `readOriginNonce()`,
-  `unplacedNewerGenerations()` and the types `Seal`, `Origin`, `Applied`, `PlacedRestore`,
-  `ReplicaListing` and `SealedListingOptions`; `ReplicationOptions` gains `listedBefore`,
-  `placedRestore` and `onAcknowledged`.
+  `unplacedNewerGenerations()` and the types `GenerationMarker`, `Seal`, `Origin`, `Applied`,
+  `PlacedRestore`, `ReplicaListing` and `SealedListingOptions`; `restoreFromBlobs()` takes an optional
+  fifth argument `listed`, the points of a listing already made, instead of listing again;
+  `ReplicationOptions` gains `listedBefore`, `placedRestore` and `onAcknowledged`.
 - `replication-sqlite` notices another process writing to the same replica: a snapshot or WAL segment it
   did not write, outside a generation placed with `origin.json`, that the listing the start restored
   from (or else the first sync's listing) did not show, logs a warning and makes `health()` answer
