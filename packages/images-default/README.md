@@ -342,7 +342,11 @@ different resolutions, and a `srcset` should combine only such entries: one that
 a different picture depending on the viewport and pixel density, and one that leaves out an
 interchangeable entry looks blurry on high-density screens. `width` and `height` are whole pixels,
 so two entries have the same aspect ratio when their ranges from `(width - 0.5) / (height + 0.5)`
-to `(width + 0.5) / (height - 0.5)` overlap, as for 1000 × 563 and 320 × 180, both 16:9.
+to `(width + 0.5) / (height - 0.5)` overlap, as for 1000 × 563 and 320 × 180, both 16:9. The
+test is approximate: two entries that pass it can show cuts that differ by a few pixels at the
+smaller entry's resolution, about two pixels per side for a wide one. From a 2000 × 800 original,
+an `inside` 799 × 320 of the whole image and a `cover` 798 × 321 of its centred cut, 1989 pixels
+wide, both pass it with `crop` `null`.
 
 #### When the listing and the bytes differ
 

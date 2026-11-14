@@ -598,8 +598,9 @@ dimensions and format are decided from the original
 right after upload — before any variant is actually rendered — so the first render needs no
 republish: until it lands, the path answers with the original's own bytes and type instead of the
 resized image. Apart from a format change, which moves the size to a new path and retires the old
-one, `variants[].path` changes only in its `?v=`, once a later render replaces bytes the path
-already had (a re-crop, a changed size, a repair), and that marks the pages that show the item for
+one, `variants[].path` changes only in its `?v=`, once new bytes replace those the path or its
+public copy already had (a re-crop, a changed size, a repair, a failed attempt whose bytes could
+not be taken back, or `images.syncPublic` rewriting a public copy of another byte size), and that marks the pages that show the item for
 a re-render (see [Focus and crop](#focus-and-crop)). `available` on the media item (`false` while any size still lacks its path, `true` once every
 size has one) is what an editor UI should gate insertion on; a page or an admin view can otherwise
 link every `variants[]` entry from the very first read. Generation is caught up by a resumable sync
@@ -642,14 +643,15 @@ error, failed } }], job, orphaned: { sizes: [name], variants: n }, registrySeen,
 `GET /media/:id` and `GET /media` additionally return `available` and
 `variants: [{ size, width, height, format, bytes, state, path, crop }]`; `path` is the public path
 `/media/<id>/variants/<size>.<ext>`, followed by `?v=<token>` once a later render replaced bytes the
-path already had, after a format change of a variant that rendered before, or once `images.syncPublic`
+path already had, after a failed attempt whose bytes could not be taken back, after a format change of a variant that rendered before, or once `images.syncPublic`
 rewrote the variant's public copy at another byte size, with a token that path is never given again (the file name never carries the
 query), and `width`/`height` are the planned dimensions, present in
 every state, not only once the render is `done`. `crop` is the part of the original, after its EXIF
 orientation, that the bytes of the last finished render at `path` show, `{ left, top, width, height }`
 in pixels, or `null` for the whole image (an `inside` size), the centred cut of the size's ratio (up
 to a pixel per edge), or a path without a finished render. Two `done` entries with the same aspect
-ratio and an equal `crop` show the same picture, so a `srcset` combines only such entries; anonymous
+ratio and an equal `crop` show the same picture, up to cuts that differ by a few pixels across the
+smaller one since the ratio test compares rounded dimensions, so a `srcset` combines only such entries; anonymous
 callers do not receive `state` by default. The ratio test and the moments when the listing and the
 bytes differ are in [Which variants show the same picture](../packages/images-default/README.md#which-variants-show-the-same-picture).
 `variants[]` never lists a size whose path has no

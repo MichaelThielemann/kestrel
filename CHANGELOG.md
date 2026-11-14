@@ -1406,7 +1406,9 @@ Net changes since 5.8.1.
   the form of `framing.ratios[].crop`, or `null` for the whole image (an `inside` size), the centred
   cut of the size's ratio, or a path without a finished render. It is the crop of the last finished
   render at the path, not the planned one. Two `done` entries with the same
-  aspect ratio and an equal `crop` show the same picture, so a `srcset` combines only such entries.
+  aspect ratio and an equal `crop` show the same picture, up to cuts that differ by a few pixels
+  across the smaller one since the ratio test compares rounded dimensions, so a `srcset` combines
+  only such entries.
   A cut whose edges each lie within one pixel of the centred cut counts as the centre:
   `cropForRatio` and `effectiveCrop` return `null` for it, it renders as the centred cut, and
   `framing.ratios[].crop` and `variants[].crop` list it as `null`, while `framing.ratios[].manual`
@@ -1524,9 +1526,11 @@ Net changes since 5.8.1.
 - `images-default`: `variants[].path` of a variant rendered again at a path that held bytes before
   (after a re-crop, a reset to the centre, a changed size or format, a repair by `images.resume`, or
   a size registered again after a prune) ends in `?v=<token>`. The token is a short hash of the row
-  and the number of its finished renders, raised when a render is marked `done` after its bytes are
-  at the path, so it changes only then and never comes back for that path, also when a crop is set
-  back to an earlier one or the framing is reset. The query appears from a row's second finished
+  and a count raised once new bytes are at the path or its public copy (a render marked `done`
+  after its bytes are at the path, a failed attempt whose bytes could not be taken back, or
+  `images.syncPublic` rewriting a public copy of another byte size), so it changes only then and
+  never comes back for that path, also when a crop is set back to an earlier one or the framing is
+  reset. The query appears from a row's second finished
   render on; a row placed at a path that held bytes before starts its count at one, and a format
   change keeps the count, one more when it moves the row to a path that held bytes before, so only
   a row's first render, at a path that never held other bytes, keeps the plain path. Such a render
