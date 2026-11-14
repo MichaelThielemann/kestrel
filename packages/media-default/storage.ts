@@ -12,7 +12,7 @@ export const STORAGE_VERSION = "6.0.0";
 /** Converts 5.x items to the `<prefix><id>/<name>` key layout and fills in `location`. */
 export const ID_KEY_LAYOUT = "media-default:id-key-layout";
 
-/** Asked for an item whose original is missing: `keep` leaves the row (and `media.reconcile` lists it), `trash` moves it to the trash. */
+/** Asked for an item whose original is missing: `keep` leaves the row (and `media.reconcile` lists it), `trash` moves it to the trash, where it holds no name in its folder. */
 export const MISSING_ORIGINAL: MigrationQuestion = {
   id: `${ID_KEY_LAYOUT}:missing-original`,
   text: "An item's original is missing from the blob store. Keep the item, or move it to the trash?",
@@ -56,10 +56,16 @@ function isReadyLike(row: Row): boolean {
   return row.status === "ready" || row.status === null;
 }
 
-async function prepare(db: Persistence): Promise<Result<void, ShapeMigrationError>> {
-  const items = await db.ensureCollection(COLLECTION, ITEMS_SCHEMA);
-  if (isErr(items)) return items;
-  return db.ensureCollection(LEGACY_KEYS, LEGACY_KEYS_SCHEMA);
+function nameOf(row: Row): string {
+  return nameFor(row.filename ?? urlNameOf(row.key), row.contentType, row.svgSanitized === true);
+}
+
+function isDemotedSvg(row: Row): boolean {
+  return nameFor(row.filename ?? urlNameOf(row.key), row.contentType, true) !== nameOf(row);
+}
+
+function demotedNote(row: Row, name: string): MigrationNote {
+  return { item: row.id, reason: `${row.key} is an SVG without a sanitize.svg record: it is kept as ${name} and served as application/octet-stream; upload it again through sanitize.svg to serve it as an image` };
 }
 
 async function allRows<T extends Document>(db: Persistence, collection: string): Promise<Result<T[], ShapeMigrationError>> {
@@ -95,7 +101,7 @@ function assign(rows: readonly Row[], prefix: string): { pending: Assignment[]; 
       pending.push({ row, name, key: row.key, location });
       continue;
     }
-    const base = nameFor(row.filename ?? urlNameOf(row.key), row.contentType, row.svgSanitized === true);
+    const base = nameOf(row);
     let name = base;
     if (!isTrashed(row)) {
       for (let attempt = 2; taken.has(keyFor(folder, name)); attempt += 1) name = suffixedName(base, attempt);
@@ -111,11 +117,34 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
   const prefix = config.prefix ?? "media/";
 
   const loaded = async (ctx: MigrationContext): Promise<Result<{ rows: Row[]; work: ReturnType<typeof assign> }, ShapeMigrationError>> => {
-    const prepared = await prepare(ctx.db);
+    const prepared = await ctx.db.ensureCollection(COLLECTION, ITEMS_SCHEMA);
     if (isErr(prepared)) return prepared;
     const rows = await allRows<Row>(ctx.db, COLLECTION);
     if (isErr(rows)) return rows;
     return ok({ rows: rows.value, work: assign(rows.value, prefix) });
+  };
+
+  const lostOriginals = async (ctx: MigrationContext, rows: readonly Row[]): Promise<Result<Set<string>, ShapeMigrationError>> => {
+    const lost = new Set<string>();
+    for (const row of rows) {
+      if (isTrashed(row) || canonicalIdOf(row.key, prefix) === row.id) continue;
+      const source = await ctx.blobOps.head(row.key);
+      if (isErr(source)) return source;
+      if (source.value !== null) continue;
+      const copies = await ctx.blobs.list(`${prefix}${row.id}/`);
+      if (isErr(copies)) return copies;
+      if (copies.value.length === 0) lost.add(row.id);
+    }
+    return ok(lost);
+  };
+
+  const decided = async (ctx: MigrationContext, rows: Row[]): Promise<Result<{ lost: Set<string>; work: ReturnType<typeof assign> }, ShapeMigrationError>> => {
+    const answer = answerOf(ctx, MISSING_ORIGINAL);
+    if (isErr(answer)) return answer;
+    const lost = answer.value === "trash" ? await lostOriginals(ctx, rows) : ok(new Set<string>());
+    if (isErr(lost)) return lost;
+    const effective = rows.map((row): Row => (lost.value.has(row.id) ? { ...row, status: "trashed", location: null } : row));
+    return ok({ lost: lost.value, work: assign(effective, prefix) });
   };
 
   const detected = (work: ReturnType<typeof assign>): Detection => ({
@@ -126,15 +155,17 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
   const recordLegacyKeys = async (ctx: MigrationContext, rows: readonly Row[]): Promise<Result<number, ShapeMigrationError>> => {
     const ids = new Set(rows.map((r) => r.id));
     const owner = new Map(rows.filter((r) => canonicalIdOf(r.key, prefix) !== r.id).map((r) => [r.key, r.id]));
+    const prepared = await ctx.db.ensureCollection(LEGACY_KEYS, LEGACY_KEYS_SCHEMA);
+    if (isErr(prepared)) return prepared;
     const known = await allRows<Document>(ctx.db, LEGACY_KEYS);
     if (isErr(known)) return known;
     const recorded = new Set(known.value.map((r) => r.key));
     const listed = await ctx.blobs.list(prefix);
     if (isErr(listed)) return listed;
+    const unowned = listed.value.map((b) => b.key).filter((key) => !owner.has(key) && !key.slice(prefix.length).split("/").slice(0, -1).some((segment) => ids.has(segment)));
     let added = 0;
-    for (const { key } of listed.value) {
-      const folders = key.slice(prefix.length).split("/").slice(0, -1);
-      if (recorded.has(key) || (!owner.has(key) && folders.some((segment) => ids.has(segment)))) continue;
+    for (const key of [...owner.keys(), ...unowned]) {
+      if (recorded.has(key)) continue;
       const created = await ctx.db.createOne(LEGACY_KEYS, { key, mediaId: owner.get(key) ?? null, recordedAt: ctx.now() });
       if (isErr(created) && created.error.code !== "CONFLICT") return created;
       added += 1;
@@ -158,11 +189,15 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
     async plan(ctx) {
       const state = await loaded(ctx);
       if (isErr(state)) return state;
-      const notes: MigrationNote[] = [...state.value.work.conflicts];
+      const decision = await decided(ctx, state.value.rows);
+      if (isErr(decision)) return decision;
+      const { work } = decision.value;
+      const notes: MigrationNote[] = [...work.conflicts];
       let copies = 0;
       let renamed = 0;
       let missing = 0;
-      for (const { row, name, key } of state.value.work.pending) {
+      let svgDemoted = 0;
+      for (const { row, name, key } of work.pending) {
         if (key === row.key) continue;
         const source = await ctx.blobOps.head(row.key);
         if (isErr(source)) return source;
@@ -170,37 +205,47 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
           missing += 1;
           notes.push({ item: row.id, reason: `original ${row.key} is missing` });
         } else copies += 1;
-        if (name !== nameFor(row.filename ?? urlNameOf(row.key), row.contentType, row.svgSanitized === true)) renamed += 1;
+        if (name !== nameOf(row)) renamed += 1;
+        if (isDemotedSvg(row)) {
+          svgDemoted += 1;
+          notes.push(demotedNote(row, name));
+        }
       }
-      return ok({ counts: { items: state.value.work.pending.length, copies, renamed, missingOriginals: missing, conflicts: state.value.work.conflicts.length }, notes });
+      return ok({ counts: { items: work.pending.length, copies, renamed, missingOriginals: missing, trashed: decision.value.lost.size, svgDemoted, conflicts: work.conflicts.length }, notes });
     },
 
     async apply(ctx) {
       const state = await loaded(ctx);
       if (isErr(state)) return state;
-      if (state.value.work.conflicts.length > 0) {
-        return err(storageMigrationFailed(`${ID_KEY_LAYOUT}: ${state.value.work.conflicts.length} item(s) in the new key layout share a location: ${state.value.work.conflicts.map((c) => c.item).slice(0, SAMPLE).join(", ")}`, { conflicts: state.value.work.conflicts }));
+      const decision = await decided(ctx, state.value.rows);
+      if (isErr(decision)) return decision;
+      const { lost, work } = decision.value;
+      if (work.conflicts.length > 0) {
+        return err(storageMigrationFailed(`${ID_KEY_LAYOUT}: ${work.conflicts.length} item(s) in the new key layout share a location: ${work.conflicts.map((c) => c.item).slice(0, SAMPLE).join(", ")}`, { conflicts: work.conflicts }));
       }
-      const missingAnswer = answerOf(ctx, MISSING_ORIGINAL);
-      if (isErr(missingAnswer)) return missingAnswer;
       const recorded = await recordLegacyKeys(ctx, state.value.rows);
       if (isErr(recorded)) return recorded;
       const notes: MigrationNote[] = [];
       let copied = 0;
       let trashed = 0;
-      for (const { row, name, key, location } of state.value.work.pending) {
+      let svgDemoted = 0;
+      for (const { row, name, key, location } of work.pending) {
         const patch: Record<string, unknown> = { key, filename: name, location };
-        if (key !== row.key) {
+        if (key !== row.key && isDemotedSvg(row)) {
+          svgDemoted += 1;
+          notes.push(demotedNote(row, name));
+        }
+        if (lost.has(row.id)) {
+          notes.push({ item: row.id, reason: `original ${row.key} is missing` });
+          Object.assign(patch, { status: "trashed", trashedAt: ctx.now(), trashVersion: (row.trashVersion ?? 0) + 1 });
+          trashed += 1;
+        } else if (key !== row.key) {
           const source = await ctx.blobOps.head(row.key);
           if (isErr(source)) return source;
           const target = await ctx.blobOps.head(key);
           if (isErr(target)) return target;
           if (source.value === null && target.value === null) {
             notes.push({ item: row.id, reason: `original ${row.key} is missing` });
-            if (missingAnswer.value === "trash" && !isTrashed(row)) {
-              Object.assign(patch, { status: "trashed", trashedAt: ctx.now(), location: null, trashVersion: (row.trashVersion ?? 0) + 1 });
-              trashed += 1;
-            }
           } else if (source.value !== null) {
             const sourceSha = await blobSha256(ctx, row.key, source.value);
             if (isErr(sourceSha)) return sourceSha;
@@ -226,7 +271,7 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
         const switched = await ctx.db.updateOne(COLLECTION, row.id, patch);
         if (isErr(switched)) return switched;
       }
-      return ok({ counts: { items: state.value.work.pending.length, copied, missingOriginals: notes.filter((n) => n.reason.endsWith("is missing")).length, trashed, legacyKeys: recorded.value }, notes });
+      return ok({ counts: { items: work.pending.length, copied, missingOriginals: notes.filter((n) => n.reason.endsWith("is missing")).length, trashed, svgDemoted, legacyKeys: recorded.value }, notes });
     },
   };
 

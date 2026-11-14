@@ -69,18 +69,19 @@ function counting<T extends object>(target: T, writes: readonly string[], counte
 const DB_WRITES = ["createOne", "createMany", "updateOne", "updateMany", "deleteOne", "deleteMany"];
 const BLOB_WRITES = ["put", "remove", "move"];
 
-async function oldStore(): Promise<{ db: Persistence; blobs: Blobstore }> {
+async function oldStore(items: readonly OldItem[] = OLD_ITEMS, extras = true): Promise<{ db: Persistence; blobs: Blobstore }> {
   const root = await mkdtemp(join(tmpdir(), "kestrel-media-storage-"));
   tempDirs.push(root);
   const db = createPersistenceSqlite({ file: ":memory:" });
   const blobs = createBlobstoreFilesystem({ root });
   expectOk(await db.ensureCollection(COLLECTION, OLD_ITEMS_SCHEMA));
-  for (const item of OLD_ITEMS) {
+  for (const item of items) {
     const key = `media/${item.folder === "" ? "" : `${item.folder}/`}${item.filename}`;
     const data = bytes(item.blob ?? `lost ${item.id}`);
     expectOk(await db.createOne(COLLECTION, { id: item.id, filename: item.filename, folder: item.folder, contentType: item.contentType, size: data.byteLength, key, checksum: sha(data), status: item.status ?? "ready", createdAt: 1, updatedAt: 1, provenance: { origin: "unknown" }, width: null, height: null, alt: {}, title: {}, description: {} }));
     if (item.blob !== undefined) expectOk(await blobs.put(key, data));
   }
+  if (!extras) return { db, blobs };
   expectOk(await blobs.put("media/stray/left-behind.png", bytes("no row names me")));
   expectOk(await blobs.put("media/variants/b2/thumb.webp", bytes("a variant another module keeps under this prefix")));
   expectOk(await db.ensureCollection("revisions", { document: "string", data: "json" }));
@@ -160,7 +161,7 @@ describe("media-default storage: converting 5.x items to the id key layout", () 
     }
     for (const key of OLD_KEYS) expect(expectOk(await blobs.get(key))).not.toBeNull();
     const outcome = report.modules[0]!.migrations[0]!.outcome!;
-    expect(outcome.counts).toMatchObject({ copied: 4, missingOriginals: 2, trashed: 0, legacyKeys: 5 });
+    expect(outcome.counts).toMatchObject({ copied: 4, missingOriginals: 2, trashed: 0, legacyKeys: 7 });
     expect(outcome.notes.map((n) => n.item).sort()).toEqual(["d4", "f6"]);
     expect(expectOk(await storageVersionOf(db, MODULE))).toMatchObject({ version: STORAGE_VERSION, migrations: [ID_KEY_LAYOUT] });
   });
@@ -201,7 +202,7 @@ describe("media-default storage: converting 5.x items to the id key layout", () 
     const reference = await oldStore();
     expectOk(await migrate(reference.db, reference.blobs));
     const expected = await snapshot(reference.db, reference.blobs);
-    for (const crashAt of [6, 11, 16]) {
+    for (const crashAt of [8, 13, 18]) {
       const { db, blobs } = await oldStore();
       const counter = { writes: 0, crashAt };
       await expect(migrate(counting(db, DB_WRITES, counter), counting(blobs, BLOB_WRITES, counter))).rejects.toBeInstanceOf(Crash);
@@ -210,6 +211,69 @@ describe("media-default storage: converting 5.x items to the id key layout", () 
       expectOk(await migrate(db, blobs));
       expect(await snapshot(db, blobs)).toEqual(expected);
     }
+  });
+
+  it("records the 5.x key of an item whose original is missing, so a blob put back there survives reconcileDelete", async () => {
+    const { db, blobs } = await oldStore();
+    expectOk(await migrate(db, blobs));
+    const legacy = expectOk(await db.findMany<Document>("media_legacy_keys", {}, { sort: { key: "asc" }, limit: 100 })).items;
+    expect(legacy.filter((r) => r.mediaId === "d4" || r.mediaId === "f6").map((r) => [r.key, r.mediaId])).toEqual([["media/broken.png", "f6"], ["media/docs/report.pdf", "d4"]]);
+    expectOk(await blobs.put("media/docs/report.pdf", bytes("the report, put back from a backup")));
+    const media = await createMediaDefault(CONFIG, blobs, db, silentLogger);
+    const reconciled = expectOk(await media.reconcile({ delete: true }));
+    expect(reconciled.blobsWithoutRow).toEqual([]);
+    expect(reconciled.legacyKeys).toContain("media/docs/report.pdf");
+    expect(expectOk(await blobs.get("media/docs/report.pdf"))).not.toBeNull();
+  });
+
+  it("names an item after its trashed neighbour gave up the name, also after an abort at any write", async () => {
+    const items: OldItem[] = [
+      { id: "m1", folder: "x", filename: "a.jpg", contentType: "image/jpeg" },
+      { id: "m2", folder: "x", filename: "a.jpeg", contentType: "image/jpeg", blob: "the neighbour" },
+    ];
+    const answers = { [MISSING_ORIGINAL.id]: "trash" };
+    const reference = await oldStore(items, false);
+    const plan = expectOk(await runShapeMigrations({ storages: [storage()], db: reference.db, blobs: reference.blobs, apply: false, blobWrites: true, answers })).modules[0]!.migrations[0]!.plan!;
+    expect(plan.counts).toMatchObject({ items: 2, copies: 1, renamed: 0, missingOriginals: 1, trashed: 1 });
+    const counter = { writes: 0, crashAt: null };
+    expectOk(await migrate(counting(reference.db, DB_WRITES, counter), counting(reference.blobs, BLOB_WRITES, counter), answers));
+    const expected = await snapshot(reference.db, reference.blobs);
+    expect(expected.rows).toEqual([
+      { id: "m1", key: "media/m1/a.jpg", filename: "a.jpg", location: null, status: "trashed" },
+      { id: "m2", key: "media/m2/a.jpg", filename: "a.jpg", location: "x/a.jpg", status: "ready" },
+    ]);
+    for (let crashAt = 1; crashAt <= counter.writes; crashAt += 1) {
+      const { db, blobs } = await oldStore(items, false);
+      const crashing = { writes: 0, crashAt };
+      await expect(migrate(counting(db, DB_WRITES, crashing), counting(blobs, BLOB_WRITES, crashing), answers)).rejects.toBeInstanceOf(Crash);
+      expectOk(await migrate(db, blobs, answers));
+      expect(await snapshot(db, blobs)).toEqual(expected);
+    }
+  });
+
+  it("reports each SVG that becomes a .bin download, in the plan and in the outcome", async () => {
+    const items: OldItem[] = [
+      { id: "s1", folder: "brand", filename: "logo.svg", contentType: "image/svg+xml", blob: "<svg xmlns=\"http://www.w3.org/2000/svg\"/>" },
+      { id: "p1", folder: "brand", filename: "photo.png", contentType: "image/png", blob: "png bytes" },
+    ];
+    const { db, blobs } = await oldStore(items, false);
+    const plan = expectOk(await runShapeMigrations({ storages: [storage()], db, blobs, apply: false, blobWrites: true })).modules[0]!.migrations[0]!.plan!;
+    expect(plan.counts).toMatchObject({ svgDemoted: 1 });
+    expect(plan.notes.map((n) => n.item)).toEqual(["s1"]);
+    expect(plan.notes[0]!.reason).toMatch(/logo-svg\.bin.*application\/octet-stream.*sanitize\.svg/);
+    const outcome = expectOk(await migrate(db, blobs)).modules[0]!.migrations[0]!.outcome!;
+    expect(outcome.counts).toMatchObject({ svgDemoted: 1 });
+    expect(outcome.notes.map((n) => n.item)).toEqual(["s1"]);
+    expect((await rowsOf(db)).map((r) => [r.id, r.key])).toEqual([["p1", "media/p1/photo.png"], ["s1", "media/s1/logo-svg.bin"]]);
+  });
+
+  it("plans on data that needs nothing without writing the version row", async () => {
+    const { db, blobs } = await oldStore([], false);
+    const counter = { writes: 0, crashAt: null };
+    const report = expectOk(await runShapeMigrations({ storages: [storage()], db: counting(db, DB_WRITES, counter), blobs: counting(blobs, BLOB_WRITES, counter), apply: false, blobWrites: true }));
+    expect(report.modules[0]!.state).toBe("unrecorded");
+    expect(counter.writes).toBe(0);
+    expect(expectOk(await storageVersionOf(db, MODULE))).toBeNull();
   });
 
   it("moves an item whose original is missing to the trash when asked to", async () => {

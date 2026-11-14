@@ -814,7 +814,8 @@ Net changes since 5.8.2.
     `<prefix><folder>/<filename>` to `<prefix><id>/<name>`, checks size and sha256, switches the item
     and fills in a unique `location` (a name its folder already holds becomes `<stem>-<n>.<ext>`). The
     old blob stays and its key is recorded in `media_legacy_keys`; an item whose original is missing
-    is kept and reported. `images-default:variant-slots` fills in the `slot` of 5.x variant and
+    is kept and reported, and its old key is recorded too. A 5.x SVG becomes `<stem>-svg.bin`, served
+    as `application/octet-stream`, and is reported until it is uploaded again through `sanitize.svg`. `images-default:variant-slots` fills in the `slot` of 5.x variant and
     retired rows, keeping the newest finished row of a slot and reporting the rows it drops.
   - Both modules take `storageMigrations: "check" | "apply"` (default `check`). `check` refuses to
     start on data in an older shape and names the migration and the command that runs it

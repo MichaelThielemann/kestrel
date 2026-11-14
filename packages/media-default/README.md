@@ -416,15 +416,20 @@ for `helpers/shape-migrations` of `kestrel-contracts`, and `migrations`. Its one
 `<prefix><folder>/<filename>`:
 
 - the item's name is `nameFor(filename, contentType)`, the name an upload of the same file gets;
-  when its folder already holds that name, the first free `<stem>-<n>.<ext>`;
+  when its folder already holds that name, the first free `<stem>-<n>.<ext>`. A 5.x SVG has no
+  record of passing `sanitize.svg`, so it becomes `<stem>-svg.bin` and is served as
+  `application/octet-stream`; the run lists each one (`svgDemoted`), and uploading the file again
+  through `sanitize.svg` serves it as an image;
 - the original is copied to `<prefix><id>/<name>`, and the copy's size and sha256 are checked
   against the original before the item switches to it;
 - `location` is filled in, so each name is unique within its folder;
-- the old blob stays, and its key is recorded in `media_legacy_keys`, together with every other
+- the old blob stays, and its key is recorded in `media_legacy_keys` (also when the original is
+  missing, so a file put back under that key later is never taken for an orphan), together with every other
   blob under `prefix` that no row names and that lies in no folder named after an item's id (a
   file of an earlier upload that lost its row; `images-default`'s variants are left out);
 - an item whose original is missing keeps its row and is reported; with the answer `trash` to the
-  question `media-default:id-key-layout:missing-original` it is moved to the trash instead.
+  question `media-default:id-key-layout:missing-original` it is moved to the trash instead, and
+  its name is free for the other items of its folder.
 
 The migration writes blobs, so it never runs when the module starts. It runs offline on a copy of
 the data (`kestrel upgrade migrate --db <file> --blobs-dir <dir>`) or as part of `kestrel update`.
