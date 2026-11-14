@@ -592,7 +592,18 @@ describe("acquireInstanceLock", () => {
     expect(Object.values(record.threads).map((at) => Date.now() - Date.parse(at) < 500)).toEqual([true]);
   }, 20_000);
 
-  it("never clears the takeover marker of a live process on this host by its age, and refuses naming that process", () => {
+  it("clears a takeover marker of a live process on this host once it is older than 5 s when the marker records no process start time", () => {
+    const stale = new Date(Date.now() - 120_000).toISOString();
+    writeRecord({ startedAt: stale, heartbeatAt: stale });
+    const guard = writeGuard({ pid: process.ppid, processStart: "" }, 3_600_000);
+    const began = performance.now();
+    take(file);
+    expect(performance.now() - began).toBeLessThan(3_000);
+    expect(readRecord().pid).toBe(process.pid);
+    expect(existsSync(guard)).toBe(false);
+  }, 20_000);
+
+  it.runIf(ownProcessStart() !== "")("never clears the takeover marker of a live process on this host by its age, and refuses naming that process", () => {
     const stale = new Date(Date.now() - 120_000).toISOString();
     const foreign = writeRecord({ startedAt: stale, heartbeatAt: stale });
     const guard = writeGuard({ pid: process.ppid, processStart: startOf(process.ppid) }, 60_000);
@@ -1157,6 +1168,51 @@ describe("acquireInstanceLock across processes", () => {
     const late = start(childScript(), 0);
     const lines = [firstLine, await staller.line, await late.line];
     expect(lines.filter((line) => line === "won")).toHaveLength(1);
+  }, 30_000);
+
+  function patchedRun(patches: string[], body: string[]): unknown {
+    const script = join(dir, `patched-${randomUUID()}.mjs`);
+    writeFileSync(
+      script,
+      [
+        "import fs from \"node:fs\";",
+        "import os from \"node:os\";",
+        "import { syncBuiltinESMExports } from \"node:module\";",
+        ...patches,
+        "syncBuiltinESMExports();",
+        `const { acquireInstanceLock, instanceLockFile } = await import(${JSON.stringify(LOCK_MODULE)});`,
+        "const [file] = process.argv.slice(2);",
+        "const lockPath = instanceLockFile(file);",
+        "const attempt = () => {",
+        "  try {",
+        "    return { lock: acquireInstanceLock(file, { module: \"store/sqlite\" }), outcome: \"won\" };",
+        "  } catch (err) {",
+        "    return { outcome: `lost:${err.code}` };",
+        "  }",
+        "};",
+        ...body,
+      ].join("\n"),
+    );
+    const run = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", script, file], { encoding: "utf8", timeout: 30_000 });
+    expect(run.stderr).toBe("");
+    return JSON.parse(run.stdout);
+  }
+
+  const HIDE_PROC = [
+    "const hidden = (path) => typeof path === \"string\" && path.startsWith(\"/proc/\");",
+    "const missing = (path) => Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: \"ENOENT\" });",
+    "const readFile = fs.readFileSync;",
+    "fs.readFileSync = function (path, ...rest) { if (hidden(path)) throw missing(path); return readFile.call(this, path, ...rest); };",
+    "const readLink = fs.readlinkSync;",
+    "fs.readlinkSync = function (path, ...rest) { if (hidden(path)) throw missing(path); return readLink.call(this, path, ...rest); };",
+  ];
+
+  it("clears a takeover marker by its age where the system cannot tell the start of the live process that has its pid", () => {
+    const stale = new Date(Date.now() - 3_600_000).toISOString();
+    writeRecord({ host: hostname(), bootId: "", pidNamespace: "", pid: deadPid(), startedAt: stale, heartbeatAt: stale });
+    writeGuard({ pid: process.pid, processStart: "1", pidNamespace: "", bootId: "", host: hostname() }, 3_600_000);
+    const result = patchedRun(HIDE_PROC, ["const began = performance.now();", "const { outcome } = attempt();", "process.stdout.write(JSON.stringify({ outcome, fast: performance.now() - began < 3_000 }));"]);
+    expect(result).toEqual({ outcome: "won", fast: true });
   }, 30_000);
 
   it("leaves the lock free when a process cannot finish writing it", async () => {

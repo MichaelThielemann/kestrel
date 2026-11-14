@@ -179,8 +179,8 @@ export function instanceLockFile(file: string): string | undefined {
  * PID and start time, the time from which the lock is taken over and the `optOut` setting. While
  * another process is in the middle of taking over or releasing the lock, the call waits for it for
  * up to 6 s and then throws `instance-locked` naming that process; a process on this machine and
- * in this PID namespace that died in that moment is noticed at once, a thread of this process or a
- * process elsewhere after 5 s. Two processes that clear such an abandoned takeover at the same
+ * in this PID namespace that died in that moment is noticed at once, a thread of this process, a
+ * process elsewhere or, without `/proc`, a process whose PID went to a new process after 5 s. Two processes that clear such an abandoned takeover at the same
  * moment can, in a window of two system calls, both take the lock; the one overwritten reports
  * `restartRequired` at its next heartbeat. A container restarted after its process was killed
  * usually runs in a new PID namespace and fails to boot until the TTL after the previous run's
@@ -556,7 +556,7 @@ function clearAbandonedGuard(guard: string): void {
 function guardAbandoned(label: GuardLabel | undefined, mtimeMs: number): boolean {
   const aged = Date.now() - mtimeMs > GUARD_STALE_MS;
   if (label === undefined || !sameKernel(label) || label.pidNamespace !== PID_NAMESPACE) return aged;
-  if (label.pid !== process.pid) return !runs(label.pid, label.processStart);
+  if (label.pid !== process.pid) return !runs(label.pid, label.processStart) || (aged && !(PROC_SHOWS_PIDS && label.processStart !== ""));
   if (PROCESS_START !== "" && label.processStart !== "" && label.processStart !== PROCESS_START) return true;
   return label.threadId === threadId || aged;
 }
