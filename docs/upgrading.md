@@ -195,7 +195,9 @@ module then gets a storage version row, which the start-up check of 6.0.0 reads.
   prefixes of the store, such as the variants of `images-default` or the delivery prefix, while a
   directory a level too deep holds the folders and files of the media themselves.
 - `--media-prefix <prefix>` names the media key prefix (`media-default`'s `prefix`, such as
-  `media/`) in place of the one of the config, also when the config does not load.
+  `media/`) in place of the one of the config, also when the config does not load. Without the
+  config, `migrate` cannot see the project's `sanitize.svg`, so a store that holds a 5.x SVG still
+  stops the run with exit code `2` before anything is converted (see [SVG files](#svg-files)).
 - `--json` prints the report (`schema: 1`, one entry per module with its migrations, what they found
   and what they did).
 - Exit codes: `0` every module is in the 6.0.0 shape, `1` a migration is still pending (always
@@ -242,7 +244,11 @@ the project registers `sanitize.svg`, which the report says in a note.
 - When the module that registers `sanitize.svg` cannot be set up on its own, without the contracts of
   other modules, its config does not parse, or start-up refuses its config schema (a 5.x
   `sanitize-svg` next to 6.0.0 media packages), `migrate` stops with exit code `2` before it converts
-  anything. An entry without `config` is set up with `{}` and the defaults, as at start-up.
+  anything.
+- When the config does not load, or a module entry does not load and no other one registers
+  `sanitize.svg`, `migrate` does not know whether the project would clean its SVGs. If the store
+  holds a 5.x SVG, it stops with exit code `2` before it converts anything, and `migrate --plan` says
+  so in a note; make every module entry load and run it again. An entry without `config` is set up with `{}` and the defaults, as at start-up.
 
 ### Leftovers
 

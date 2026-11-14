@@ -955,7 +955,9 @@ Net changes since 5.8.2.
     refuses or whose original is missing, and every 5.x SVG of a project without that step, is kept as a
     `.bin` download and named. A module registering `sanitize.svg` that cannot be set up without other
     modules, whose config does not parse, or whose config schema boot refuses (an older `sanitize-svg`),
-    stops the run with exit `2` before anything is converted. `kestrel upgrade data` warns with `data/media-layout:config` in
+    stops the run with exit `2` before anything is converted, and so does a store with a 5.x SVG when
+    the config or a module entry does not load and no loaded entry registers `sanitize.svg`, also
+    with `--media-prefix`. `kestrel upgrade data` warns with `data/media-layout:config` in
     that case. It neither takes nor
     honours the instance lock, so a lock file left next to the copy does not stop it. Exit `0` when
     every module is in this release's shape, `1` when a migration is still pending or the stored data

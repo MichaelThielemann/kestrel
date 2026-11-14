@@ -26,6 +26,9 @@ const PROJECT = join(REPO, "examples", "minimal");
 const NOW = 1_800_000_000_000;
 const MISSING = "8146a3f1-ee9b-4fbb-a394-290634519fd9";
 const SVG_ITEM = "0a73541a-1b50-4492-af2f-8dff9ccf216c";
+const installedModule = async (name: string): Promise<unknown> => boundaryCast<{ default: unknown }>(await importInstalled(PROJECT, name), "host").default;
+const MEDIA_MODULE = await installedModule("@michaelthielemann/kestrel-media-default");
+const SANITIZE_MODULE = await installedModule("@michaelthielemann/kestrel-sanitize-svg");
 const { sanitizeSvg } = boundaryCast<{ sanitizeSvg: (svg: string) => string }>(await importInstalled(PROJECT, "@michaelthielemann/kestrel-sanitize-svg/impl"), "host");
 const MISSING_ORIGINAL = "media-default:id-key-layout:missing-original";
 const KEEP = { [MISSING_ORIGINAL]: "keep" };
@@ -198,8 +201,17 @@ export default defineConfig({ modules: ${FILES_PREFIX_MODULES} });
 }
 
 function filesPrefixPlugin(): UpgradePlugin {
-  const project = { kind: "test-host", configFile: "kestrel.config.ts", moduleFiles: new Map(), pipelineFiles: [], input: { config: { modules: [{ use: "@michaelthielemann/kestrel-media-default", config: { prefix: "files/" } }], triggers: [] }, modules: [], pipelines: [] } };
+  const project = { kind: "test-host", configFile: "kestrel.config.ts", moduleFiles: new Map(), pipelineFiles: [], input: { config: { modules: [{ use: "@michaelthielemann/kestrel-media-default", config: { prefix: "files/" } }], triggers: [] }, modules: [MEDIA_MODULE], pipelines: [] } };
   return { kind: "test-host", detect: () => true, load: () => Promise.resolve({ project: boundaryCast<LoadedProject>(project, "host"), issues: [] }) };
+}
+
+function withoutSvg(copy: Copy): void {
+  const db = new DatabaseSync(copy.db);
+  try {
+    db.prepare("DELETE FROM media_items WHERE contentType = 'image/svg+xml'").run();
+  } finally {
+    db.close();
+  }
 }
 
 function keysOf(copy: Copy): string[] {
@@ -238,6 +250,22 @@ export default defineConfig({ modules: ${FILES_PREFIX_MODULES} });
     expect(keysOf(copy).every((key) => key.startsWith("files/<id>/"))).toBe(true);
   });
 
+  it("stops before converting a store with a 5.x SVG when the config does not load, also with --media-prefix, and names that in a plan", async () => {
+    const copy = fixtureCopy();
+    const before = files(copy.blobs);
+    const run = await cli(["migrate", "--root", failingConfigProject(), "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy), "--media-prefix", "files/"]);
+    expect(run.code).toBe(2);
+    expect(run.errors).toContain("1 5.x SVG(s) would be kept as a .bin download");
+    expect(run.errors).toContain("KESTREL_MIGRATE_TEST_SETTING is not set");
+    expect(run.errors).toContain("nothing was converted");
+    expect(files(copy.blobs)).toEqual(before);
+    expect(tableRows(copy.db, "kestrel_storage_versions")).toEqual([]);
+    const plan = await cli(["migrate", "--root", failingConfigProject(), "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy), "--media-prefix", "files/", "--plan"]);
+    expect(plan.code).toBe(1);
+    expect(plan.out).toContain("migrate without --plan refuses to convert anything until then");
+    expect(plan.out).not.toContain("no module of the project registers sanitize.svg");
+  });
+
   it("refuses a --media-prefix that media-default would not accept", async () => {
     const copy = fixtureCopy();
     for (const prefix of ["media", "/media/", ""]) {
@@ -247,8 +275,9 @@ export default defineConfig({ modules: ${FILES_PREFIX_MODULES} });
     }
   });
 
-  it("converts with the prefix --media-prefix names, whether or not the config loads", async () => {
+  it("converts a store without SVGs with the prefix --media-prefix names, whether or not the config loads", async () => {
     const copy = fixtureCopy();
+    withoutSvg(copy);
     const run = await cli(["migrate", "--root", failingConfigProject(), "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy), "--media-prefix", "files/"]);
     expect(run.code, run.errors).toBe(0);
     expect(run.out).toContain('note: media/default converts to the key prefix "files/" from --media-prefix');
@@ -561,12 +590,24 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
 
   it("cleans the 5.x SVGs with a sanitize module the host plugin lists without config", async () => {
     const copy = fixtureCopy();
-    const sanitizer = boundaryCast<{ default: unknown }>(await importInstalled(PROJECT, "@michaelthielemann/kestrel-sanitize-svg"), "host").default;
-    const project = { kind: "test-host", configFile: "kestrel.config.ts", moduleFiles: new Map(), pipelineFiles: [], input: { config: { modules: [{ use: "@michaelthielemann/kestrel-sanitize-svg" }, { use: "@michaelthielemann/kestrel-media-default", config: {} }], triggers: [] }, modules: [sanitizer], pipelines: [] } };
+    const project = { kind: "test-host", configFile: "kestrel.config.ts", moduleFiles: new Map(), pipelineFiles: [], input: { config: { modules: [{ use: "@michaelthielemann/kestrel-media-default", config: {} }, { use: "@michaelthielemann/kestrel-sanitize-svg" }], triggers: [] }, modules: [MEDIA_MODULE, SANITIZE_MODULE], pipelines: [] } };
     const plugin: UpgradePlugin = { kind: "test-host", detect: () => true, load: () => Promise.resolve({ project: boundaryCast<LoadedProject>(project, "host"), issues: [] }) };
     const run = await cli(["migrate", "--root", failingConfigProject(), "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)], [plugin]);
     expect(run.code, run.errors).toBe(0);
     expect(rows(copy.db, `SELECT key, svgSanitized FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([{ key: `media/${SVG_ITEM}/mark.svg`, svgSanitized: 1 }]);
+  });
+
+  it("stops before converting anything when a module entry does not load and no other registers sanitize.svg", async () => {
+    const copy = fixtureCopy();
+    const project = projectOf(copy, [{ use: "./svg-cleaner.ts", config: {} }]);
+    writeFileSync(join(project, "svg-cleaner.ts"), 'export { default } from "@example/not-installed-svg-cleaner";\n');
+    const before = files(copy.blobs);
+    const run = await cli(["migrate", "--root", project, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(run.code).toBe(2);
+    expect(run.errors).toContain("./svg-cleaner.ts could not be loaded");
+    expect(run.errors).toContain("nothing was converted");
+    expect(files(copy.blobs)).toEqual(before);
+    expect(rows(copy.db, `SELECT key FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([{ key: "media/mark.svg" }]);
   });
 
   it("stops before converting anything when the config of the module that registers sanitize.svg does not parse, and says so", async () => {
