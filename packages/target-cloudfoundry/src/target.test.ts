@@ -127,6 +127,28 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     expect((await failure((await target()).status())).exitCode).toBe(1);
   });
 
+  it("refuses with exit 1 a started app scaled to no instance before anything is stopped, naming how to scale or stop it", async () => {
+    Object.assign(cf.app(API.name), { instances: 0, running: 0, ready: 0 });
+    const t = await target();
+    const error = await failure(t.status());
+    expect(error.exitCode).toBe(1);
+    expect(error.message).toContain("0 instances");
+    expect(error.message).toContain(`cf scale ${API.name} -i 1`);
+    expect(error.message).toContain(`cf stop ${API.name}`);
+    await failure(t.stop());
+    expect(cf.actions).toEqual([]);
+  });
+
+  it("refuses with exit 1 to start a stopped app scaled to no instance", async () => {
+    Object.assign(cf.app(API.name), { state: "STOPPED", instances: 0, running: 0, ready: 0 });
+    const t = await target();
+    expect(await t.status()).toEqual({ state: "stopped", instances: 0 });
+    const error = await failure(t.start());
+    expect(error.exitCode).toBe(1);
+    expect(error.message).toContain(`cf scale ${API.name} -i 1`);
+    expect(cf.actions).toEqual([]);
+  });
+
   it("refuses with exit 1 while a rolling deployment of the app is active", async () => {
     cf.activeDeployments.add(API.guid);
     const t = await target();
