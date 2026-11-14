@@ -48,6 +48,7 @@
   "devDependencies": {
     "@michaelthielemann/kestrel": "workspace:*",
     "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "@michaelthielemann/kestrel-delivery-static": "workspace:*",
     "vitest": "^4.1.12"
   },
   "repository": {

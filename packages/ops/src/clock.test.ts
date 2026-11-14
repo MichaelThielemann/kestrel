@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Origin } from "@michaelthielemann/kestrel-replication-sqlite/impl";
 import { createHarness, LOCATION, PREFIXES } from "./harness.fixture.ts";
 import { stamp } from "./layout.ts";
 import { MemoryBucket, memoryStore } from "./memoryStore.ts";
@@ -54,6 +55,8 @@ describe("restore and the store's clock", () => {
       await store.copy(newest.snapshot.key, `${PREFIXES.replica}gen/${future}/snapshot.db`);
       for (const segment of newest.segments) await store.copy(segment.key, segment.key.replace(newest.name, future));
       await store.copy(sealed.key, `${PREFIXES.replica}gen/${future}/sealed.json`);
+      const origin: Origin = { kind: "restore", source: "a tool whose clock ran ahead", requestedAt: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(), nonce: "ahead" };
+      await store.put(`${PREFIXES.replica}gen/${future}/origin.json`, new TextEncoder().encode(JSON.stringify(origin)));
       await h.app.start();
       const writesBefore = bucket.writes.length;
       const refused = await h.run(["restore", "--backup", String(backup.json.id), "--yes", "--answers", h.answers({ "access-changes": "accept" })], { poll: { delayMs: 5, attempts: 200, sleep } });

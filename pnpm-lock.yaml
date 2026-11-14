@@ -646,6 +646,9 @@ importers:
       '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@michaelthielemann/kestrel-delivery-static':
+        specifier: workspace:*
+        version: link:../delivery-static
       vitest:
         specifier: ^4.1.12
         version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))

@@ -1,13 +1,30 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { CONTENT, type Content, type ContentDocument, type ContentModel } from "@michaelthielemann/kestrel-contracts/content";
+import { ok as okResult } from "@michaelthielemann/kestrel-contracts/errors";
+import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
+import { RENDERER, type Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
+import { SITE, type Site } from "@michaelthielemann/kestrel-contracts/site";
+import { createFakePersistence, matchesFilter } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
+// eslint-disable-next-line no-restricted-imports -- the stand-in app renders with the real delivery package
+import deliveryModule, { configSchema as deliveryConfig } from "@michaelthielemann/kestrel-delivery-static";
+// eslint-disable-next-line no-restricted-imports -- the stand-in app replicates with the real replication package
+import replicationModule, { configSchema as replicationConfig } from "@michaelthielemann/kestrel-replication-sqlite";
 // eslint-disable-next-line no-restricted-imports -- the stand-in app replicates with the real replication package
 import { createReplicationSqlite, restoreFromBlobs, type Replication } from "@michaelthielemann/kestrel-replication-sqlite/impl";
-import { isErr } from "@michaelthielemann/kestrel/result";
+import type { Introspection, Manifest, RunObserver } from "@michaelthielemann/kestrel";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import type { Contract } from "@michaelthielemann/kestrel/defineContract";
+import type { Deps } from "@michaelthielemann/kestrel/defineModule";
+import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
+import { silentLogger } from "@michaelthielemann/kestrel/logger";
+import type { Step } from "@michaelthielemann/kestrel/context";
+import { isErr, ok as okStep } from "@michaelthielemann/kestrel/result";
+import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import { blobstoreOf, listGenerations } from "./replica.ts";
-import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { ObjectStore } from "./store.ts";
 import type { Target, TargetFacts, TargetStatus } from "./target.ts";
 
@@ -39,10 +56,45 @@ const TABLES = [
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 
+const BOOT_STEPS = ["replication.checkRestored", "delivery.checkBuild"] as const;
+
+const PAGES_MODEL: ContentModel = {
+  locales: ["en"],
+  defaultLocale: "en",
+  types: { pages: { kind: "multi", fields: { slug: { type: "slug", required: true }, title: { type: "text" }, status: { type: "enum", options: ["draft", "published"] } } } },
+};
+
+const SITE_PATHS: Site = {
+  resolve: () => Promise.reject(new Error("the stand-in site resolves nothing")),
+  pathOf: (_type, doc) => (typeof doc.slug === "string" && doc.slug !== "" ? `/${doc.slug === "home" ? "" : doc.slug}` : null),
+  resolveLinks: async (_type, doc) => okResult(doc),
+};
+
+const PLAIN_RENDERER: Renderer = {
+  formats: () => ["html"],
+  render: async (input) => okResult({ data: `<h1>${String(input.document.title)}</h1>`, contentType: "text/html", extension: "html" }),
+};
+
+function providers(entries: ReadonlyArray<readonly [Contract<unknown>, unknown]>): Deps {
+  const byName = new Map(entries.map(([contract, value]) => [contract.name, value]));
+  return {
+    get<T>(contract: Contract<T>): T {
+      if (!byName.has(contract.name)) throw new Error(`the stand-in app provides no ${contract.name}`);
+      return boundaryCast<T>(byName.get(contract.name), "host");
+    },
+    find: <T>(): T | undefined => undefined,
+    logger: silentLogger,
+    root: process.cwd(),
+    eventTriggers: [],
+  };
+}
+
 /**
  * An in-process stand-in for a Kestrel app on an ephemeral disk: it rebuilds its database from the newest replica
- * generation at every start, replicates with the real replication code, and, from the sealing runtime major on,
- * writes `sealed.json` at teardown and `applied.json` after restoring a generation that carries `origin.json`.
+ * generation at every start and replicates with the real replication code. From the sealing runtime major on it
+ * starts through the real `replication-sqlite` module, runs a boot pipeline of `replication.checkRestored` and the
+ * real `delivery.checkBuild`, and seals the replica at teardown; the module then writes `applied.json` after a start
+ * that restored a generation carrying `origin.json`.
  */
 export class FakeApp implements Target {
   readonly transport = "promote" as const;
@@ -51,7 +103,12 @@ export class FakeApp implements Target {
   replication: Replication | null = null;
   starts = 0;
   restoredFrom: string | null = null;
-  private readonly segmentKeys = new Map<string, Set<string>>();
+  /** What the boot run of the last start answered: `replication.checkRestored` and `delivery.checkBuild`; null for a runtime before the sealing major. */
+  lastBoot: { databaseRestoredAt: number | null; checkBuild: { changed: boolean; restored: boolean; marked: number } } | null = null;
+  failNextBoot = false;
+  private readonly deliveryState = createFakePersistence();
+  private readonly observers = new Set<RunObserver>();
+  private detach: (() => void) | null = null;
 
   constructor(readonly options: FakeAppOptions) {
     mkdirSync(options.dir, { recursive: true });
@@ -72,37 +129,103 @@ export class FakeApp implements Target {
 
   async start(): Promise<void> {
     if (this.db !== null) throw new Error("already running");
-    const { store, prefixes } = this.options;
-    for (const suffix of ["", "-wal", "-shm", ".instance"]) rmSync(this.file + suffix, { force: true });
-    const newest = (await listGenerations(store, prefixes.replica)).at(-1);
+    const name = basename(this.file);
+    for (const entry of readdirSync(this.options.dir)) if (entry === name || entry.startsWith(`${name}-`) || entry.startsWith(`${name}.`)) rmSync(join(this.options.dir, entry), { recursive: true, force: true });
     this.restoredFrom = null;
-    if (newest) {
-      const restored = await restoreFromBlobs(blobstoreOf(store), prefixes.replica, {}, this.file);
-      if (isErr(restored)) throw new Error(restored.error.message);
-      this.restoredFrom = restored.value.generation;
-      const origin = newest.files["origin.json"];
-      if (this.sealing && origin && newest.name === restored.value.generation) {
-        const data = await store.get(origin.key);
-        const parsed = boundaryCast<{ nonce: string }>(JSON.parse(new TextDecoder().decode(data ?? new Uint8Array())), "json");
-        await store.put(`${prefixes.replica}gen/${newest.name}/applied.json`, encode(JSON.stringify({ generation: newest.name, nonce: parsed.nonce, restoredAt: Date.now() })));
-      }
-    }
+    this.lastBoot = null;
+    if (this.sealing) await this.startThroughModule();
+    else await this.startOnImpl();
     this.db = new DatabaseSync(this.file);
     this.db.exec("PRAGMA journal_mode = WAL");
     for (const sql of TABLES) this.db.exec(sql);
-    const blobs = blobstoreOf(store);
-    const counting: Blobstore = {
-      ...blobs,
-      put: async (key, data, options) => {
-        const put = await blobs.put(key, data, options);
-        const generation = /\/gen\/([^/]+)\/wal\//.exec(key)?.[1];
-        if (!isErr(put) && generation !== undefined) this.segmentKeys.set(generation, (this.segmentKeys.get(generation) ?? new Set()).add(key));
-        return put;
-      },
-    };
-    this.replication = createReplicationSqlite({ file: this.file, prefix: prefixes.replica, checkpointBytes: 4 * 1024 * 1024, checkpointSeconds: 300, snapshotSeconds: 86400, retentionSeconds: 172800, restoreOnStart: true }, counting, Date.now, { checkIntervalMs: 60_000 });
+    if (this.sealing) await this.boot();
     await this.sync();
     this.starts += 1;
+  }
+
+  private async startOnImpl(): Promise<void> {
+    const { store, prefixes } = this.options;
+    if ((await listGenerations(store, prefixes.replica)).length > 0) {
+      const restored = await restoreFromBlobs(blobstoreOf(store), prefixes.replica, {}, this.file);
+      if (isErr(restored)) throw new Error(restored.error.message);
+      this.restoredFrom = restored.value.generation;
+    }
+    this.replication = createReplicationSqlite(this.replicationSettings(), blobstoreOf(store), Date.now, { checkIntervalMs: 60_000 });
+  }
+
+  private replicationSettings(): { file: string; prefix: string; checkpointBytes: number; checkpointSeconds: number; snapshotSeconds: number; retentionSeconds: number; restoreOnStart: boolean } {
+    return { file: this.file, prefix: this.options.prefixes.replica, checkpointBytes: 4 * 1024 * 1024, checkpointSeconds: 300, snapshotSeconds: 86400, retentionSeconds: 172800, restoreOnStart: true };
+  }
+
+  private async startThroughModule(): Promise<void> {
+    const blobs = blobstoreOf(this.options.store);
+    const newest = (await listGenerations(this.options.store, this.options.prefixes.replica)).at(-1);
+    const deps: Deps = { ...providers([[BLOBSTORE, blobs]]), bootStartedAt: Date.now() };
+    const instance = boundaryCast<Replication>(await replicationModule.setup(replicationConfig.parse(this.replicationSettings()), deps), "host");
+    this.replication = instance;
+    this.observers.clear();
+    const detach = replicationModule.attach?.(instance, this.introspection());
+    this.detach = typeof detach === "function" ? detach : null;
+    this.restoredFrom = existsSync(this.file) ? (newest?.name ?? null) : null;
+  }
+
+  private introspection(): Introspection {
+    const steps = BOOT_STEPS.map((name) => ({ spec: name, name, module: name.startsWith("replication.") ? "replication/sqlite" : "delivery/static", description: { summary: name, reads: [], writes: name === "replication.checkRestored" ? ["result._databaseRestoredAt"] : [] } }));
+    const manifest = boundaryCast<Manifest>({ pipelines: [{ name: "boot", steps }] }, "host");
+    return {
+      describe: () => manifest,
+      observe: (observer) => {
+        this.observers.add(observer);
+        return () => this.observers.delete(observer);
+      },
+      health: () => ({ ok: true, restartRequired: false, modules: [] }),
+    };
+  }
+
+  private async boot(): Promise<void> {
+    const replication = this.replication;
+    if (replication === null) throw new Error("the app is not running");
+    const content = this.content();
+    const delivery = await deliveryModule.setup(deliveryConfig.parse({ types: { pages: { home: "home" } }, prefix: this.options.prefixes.delivery }), providers([[CONTENT, content], [SITE, SITE_PATHS], [RENDERER, PLAIN_RENDERER], [BLOBSTORE, blobstoreOf(this.options.store)], [PERSISTENCE, this.deliveryState]]));
+    try {
+      let databaseRestoredAt: number | null = null;
+      const capture: Step = async (ctx) => {
+        const reported: unknown = boundaryCast<Record<string, unknown>>(ctx.result, "host")._databaseRestoredAt;
+        databaseRestoredAt = typeof reported === "number" ? reported : null;
+        return okStep(ctx);
+      };
+      const pipeline = definePipeline({ name: "boot", steps: [BOOT_STEPS[0], "boot.capture", BOOT_STEPS[1]] });
+      const runId = `boot-${this.starts + 1}`;
+      for (const observer of this.observers) observer.stepStart?.({ runId, pipeline: "boot", step: "replication.checkRestored", at: Date.now() });
+      const run = await runPipeline(pipeline, { payload: { build: "stand-in-build" } }, { modules: [{ module: replicationModule, instance: replication }, { module: deliveryModule, instance: delivery }], steps: { "boot.capture": capture } });
+      if (run.status !== 200) throw new Error(`the boot pipeline failed with ${run.status}`);
+      const result = boundaryCast<{ changed: boolean; restored: boolean; marked: number }>(run.result, "host");
+      this.lastBoot = { databaseRestoredAt, checkBuild: { changed: result.changed, restored: result.restored, marked: result.marked } };
+      const outcome = this.failNextBoot ? "error" : "ok";
+      this.failNextBoot = false;
+      for (const observer of this.observers) observer.runEnd?.({ runId, pipeline: "boot", trigger: { kind: "http", name: "boot" }, at: Date.now(), ms: 1, status: outcome === "ok" ? 200 : 500, outcome });
+    } finally {
+      await boundaryCast<{ close(): Promise<void> }>(delivery, "host").close();
+    }
+  }
+
+  private content(): Content {
+    const documents = (): ContentDocument[] => boundaryCast<Array<{ id: string; title: string }>>(this.rows("pages"), "host").map((page) => ({ id: page.id, createdAt: 1, updatedAt: 1, slug: page.id, title: page.title, status: "published" }));
+    const refuse = (): Promise<never> => Promise.reject(new Error("the stand-in content is read-only"));
+    return {
+      model: () => PAGES_MODEL,
+      validate: () => ({ ok: true, data: {} }),
+      get: async (_type, id) => okResult(documents().find((doc) => doc.id === id) ?? null),
+      list: async (_type, filter = {}) => {
+        const all = documents().filter((doc) => matchesFilter(doc, filter));
+        return okResult({ items: all, total: all.length });
+      },
+      create: refuse,
+      set: refuse,
+      update: refuse,
+      remove: refuse,
+      removeTranslation: refuse,
+    };
   }
 
   async sync(): Promise<void> {
@@ -113,8 +236,10 @@ export class FakeApp implements Target {
   async stop(): Promise<{ stoppedAt: number }> {
     if (this.db !== null && this.replication !== null) {
       await this.sync();
-      const state = await this.replication.status();
-      if (this.sealing && state.generation !== null) await this.options.store.put(`${this.options.prefixes.replica}gen/${state.generation}/sealed.json`, encode(JSON.stringify({ lineage: state.lineage, lastFrame: state.shippedFrames, segments: this.segmentKeys.get(state.generation)?.size ?? 0, at: Date.now() })));
+      if (this.sealing) {
+        const sealed = await this.replication.seal();
+        if (isErr(sealed)) throw new Error(sealed.error.message);
+      }
     }
     this.close();
     return { stoppedAt: Date.now() };
@@ -126,6 +251,8 @@ export class FakeApp implements Target {
   }
 
   private close(): void {
+    this.detach?.();
+    this.detach = null;
     this.replication?.close();
     this.db?.close();
     this.replication = null;
