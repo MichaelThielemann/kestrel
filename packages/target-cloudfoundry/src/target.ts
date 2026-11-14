@@ -1,14 +1,18 @@
 import { resolve } from "node:path";
 import { z } from "zod";
 // eslint-disable-next-line no-restricted-imports -- a target adapter implements the Target interface of kestrel-ops and resolves credentials the way it does
-import { commandRunner, OpsError, Redactor, resolveCredential, type Target, type TargetDeps, type TargetFacts, type TargetFactory, type TargetStatus } from "@michaelthielemann/kestrel-ops";
+import { commandRunner, OpsError, Redactor, resolveCredential, type TargetDeps, type TargetFacts, type TargetFactory, type TargetStatus, type UpdateTarget } from "@michaelthielemann/kestrel-ops";
 import { cfRunner, CfUnfinished, type CfResult, type CfRunner } from "./cf.ts";
 import { parseConfig, type CloudFoundryConfig } from "./config.ts";
+import { readConfiguration, restoreConfiguration } from "./configuration.ts";
+import { deleteDroplet, listDroplets, listRevisions, restoreDroplet, saveDroplet } from "./droplets.ts";
 import { appManifest, withManifestFiles } from "./manifest.ts";
 import { installedPackages } from "./packages.ts";
+import { CfApiError, type CfSession } from "./session.ts";
+import { crashEvents, preflight, probeReady, stagePackage } from "./staging.ts";
 
-/** A {@link Target} for one app in a Cloud Foundry space, with the steps an update performs while it is stopped. */
-export interface CloudFoundryTarget extends Target {
+/** An {@link UpdateTarget} for one app in a Cloud Foundry space, with the steps an update performs while it is stopped. */
+export interface CloudFoundryTarget extends UpdateTarget {
   readonly transport: "promote";
   readonly config: CloudFoundryConfig;
   /**
@@ -33,15 +37,6 @@ export interface CloudFoundryOptions {
   readTimeoutMs?: number;
   /** How long one `cf curl` may run before it counts as a failed call, in milliseconds. Default 120000. */
   callTimeoutMs?: number;
-}
-
-class CfApiError extends OpsError {
-  constructor(
-    message: string,
-    readonly titles: readonly string[] = [],
-  ) {
-    super(message, 1, "target");
-  }
 }
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -175,6 +170,8 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     }
   };
 
+  const session: CfSession = { app, config, deps, env, pollMs, run, api, appGuid, confirmTarget, requireStopped, status };
+
   const target: CloudFoundryTarget = {
     transport: "promote",
     config,
@@ -307,6 +304,30 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
       await requireStopped("set the droplet");
       await api(`/v3/apps/${await appGuid()}/relationships/current_droplet`, currentDropletSchema, "PATCH", JSON.stringify({ data: { guid } }));
     },
+
+    async currentDroplet() {
+      const droplet = await api(`/v3/apps/${await appGuid()}/droplets/current`, dropletSchema).catch((error: unknown) => {
+        if (error instanceof CfApiError && error.titles.includes("CF-ResourceNotFound")) return null;
+        throw error;
+      });
+      return droplet?.guid ?? null;
+    },
+
+    async applyReleaseConfiguration() {
+      if (config.manifest !== undefined) await target.applyManifest();
+    },
+
+    preflight: () => preflight(session),
+    stage: (release) => stagePackage(session, release),
+    readConfiguration: (secretNames) => readConfiguration(session, secretNames),
+    restoreConfiguration: (recorded) => restoreConfiguration(session, recorded),
+    probeReady: () => probeReady(session),
+    crashEvents: (since) => crashEvents(session, since),
+    listDroplets: () => listDroplets(session),
+    listRevisions: () => listRevisions(session),
+    deleteDroplet: (guid) => deleteDroplet(session, guid),
+    saveDroplet: (guid, file) => saveDroplet(session, guid, file),
+    restoreDroplet: (file) => restoreDroplet(session, file),
   };
   return target;
 }

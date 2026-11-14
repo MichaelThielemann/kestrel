@@ -76,6 +76,27 @@ export default tseslint.config(
     },
   },
   {
+    files: ["packages/ops/src/update/**/*.ts"],
+    ignores: ["packages/ops/src/update/**/*.test.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            { group: ["@michaelthielemann/kestrel-*", "!@michaelthielemann/kestrel-contracts", "!@michaelthielemann/kestrel-contracts/*", "../../*"], message: "The update sources import the ops sources one level up, the core, the contracts, Node and the package's dependencies." },
+            { group: ["h3", "nuxt", "nuxt/*", "\\#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "A module may not import a host framework; adapters (e.g. kestrel-h3) bind the runtime, modules stay framework-agnostic." },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["packages/ops/src/update/**/*.test.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [{ group: ["../../*"], message: "The update tests import the ops sources one level up, Node and the package's dependencies." }] }],
+    },
+  },
+  {
     files: ["packages/*/*.interleaving.test.ts", "packages/*/*.permanence.test.ts"],
     rules: {
       "no-restricted-imports": "off",

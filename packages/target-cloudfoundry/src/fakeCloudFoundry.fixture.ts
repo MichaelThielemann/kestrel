@@ -61,6 +61,34 @@ interface Answer {
   after?: () => Promise<void>;
 }
 
+/** What an extra handler of the fake answers: the exit code and both streams of the stub `cf`. */
+export interface FakeCfAnswer {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** One `cf curl` call as an extra route sees it; `data` is the body, read from the file a `-d @<file>` names. */
+export interface FakeCfRequest {
+  method: string;
+  url: URL;
+  data: string;
+  /** The app whose guid the path names after `/v3/apps/`, if any. */
+  app: FakeCfApp | undefined;
+}
+
+/** An extra `cf curl` handler; answering `undefined` passes the call on to the next one and then to the built-in API. */
+export type FakeCfRoute = (request: FakeCfRequest) => FakeCfAnswer | undefined | Promise<FakeCfAnswer | undefined>;
+
+/** An extra cf subcommand, called with the arguments after its name. */
+export type FakeCfCommand = (args: string[]) => FakeCfAnswer | Promise<FakeCfAnswer>;
+
+/** A successful answer of `cf curl` with `value` as its JSON body. */
+export const fakeJson = (value: unknown): FakeCfAnswer => ({ code: 0, stdout: JSON.stringify(value), stderr: "" });
+
+/** A failed cf call with `stderr` on standard error. */
+export const fakeFailure = (stderr: string): FakeCfAnswer => ({ code: 1, stdout: "FAILED\n", stderr });
+
 interface StubRequest {
   argv: string[];
   color: string | null;
@@ -124,6 +152,10 @@ export class FakeCloudFoundry {
   /** How many of the next `cf curl` calls of a path, without its query, hang for a minute before they answer. */
   hungPaths: Map<string, number> = new Map();
   hooks: FakeCfHooks = {};
+  /** Extra `cf curl` handlers, tried in order before the built-in API. */
+  routes: FakeCfRoute[] = [];
+  /** Extra cf subcommands by name, answered after the login checks. */
+  commands: Map<string, FakeCfCommand> = new Map();
   url = "";
   private server: Server | null = null;
   private readonly shuttingDown = new Set<FakeCfApp>();
@@ -225,6 +257,8 @@ export class FakeCloudFoundry {
     if (!this.loggedIn) return fail("Not logged in. Use 'cf login' or 'cf login --sso' to log in.\n");
     if (command === "target") return { code: 0, stdout: `API endpoint:   https://api.example.test\nAPI version:    3.180.0\nuser:           operator\norg:            ${this.org}\nspace:          ${this.space}\n`, stderr: "" };
     if (this.sessionExpired) return fail("The token expired, was revoked, or the token ID is incorrect. Please log back in to re-authenticate.\n");
+    const extra = this.commands.get(command ?? "");
+    if (extra !== undefined) return extra(rest);
     switch (command) {
       case "app": {
         const app = this.inTarget(rest[0] ?? "");
@@ -270,12 +304,18 @@ export class FakeCloudFoundry {
   private async curl(args: string[]): Promise<Answer> {
     const path = args.find((arg) => arg.startsWith("/")) ?? "";
     const method = args.includes("-X") ? (args[args.indexOf("-X") + 1] ?? "GET") : "GET";
-    const data = args.includes("-d") ? (args[args.indexOf("-d") + 1] ?? "") : "";
+    const body = args.includes("-d") ? (args[args.indexOf("-d") + 1] ?? "") : "";
+    const data = body.startsWith("@") ? readFileSync(body.slice(1), "utf8") : body;
     const url = new URL(path, "https://api.example.test");
     if (this.failingPaths.has(url.pathname)) return fail(`Request error: ${url.pathname}\n`);
     if (this.takeOne(this.killedPaths, url.pathname)) return { ...fail(""), signal: "SIGKILL" };
     if (this.takeOne(this.hungPaths, url.pathname)) return { ...fail(""), hangMs: 60_000 };
     const parts = url.pathname.split("/").filter((p) => p !== "");
+    const named = parts[1] === "apps" ? this.byGuid(parts[2] ?? "") : undefined;
+    for (const route of this.routes) {
+      const answer = await route({ method, url, data, app: named });
+      if (answer !== undefined) return answer;
+    }
     const notFound = json({ errors: [{ code: 10010, title: "CF-ResourceNotFound", detail: "not found" }] });
     if (parts[0] !== "v3") return notFound;
     if (parts[1] === "deployments") {

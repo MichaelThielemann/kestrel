@@ -1,8 +1,9 @@
 import { OpsError } from "./errors.ts";
 
 /**
- * Stable ids of the questions the tool can ask. `confirm` has a safe default that `--yes` takes; the others are
- * risky branches that `--yes` never answers: they need an explicit `accept` in the answers file or at the prompt.
+ * Stable ids of the questions the tool can ask. `confirm`, `prune-delete` and `update-stop` have a safe default that
+ * `--yes` takes; the others are risky branches that `--yes` never answers: they need an explicit `accept` in the
+ * answers file or at the prompt. `rollback-accepted` takes the environment's name instead of `accept`.
  */
 export const QUESTIONS = {
   confirm: { risky: false },
@@ -11,6 +12,9 @@ export const QUESTIONS = {
   "unreadable-current": { risky: true },
   "prune-delete": { risky: false },
   "break-lock": { risky: true },
+  "update-stop": { risky: false },
+  "rollback-accepted": { risky: true },
+  "cleanup-delete": { risky: true },
 } as const;
 
 export type QuestionId = keyof typeof QUESTIONS;

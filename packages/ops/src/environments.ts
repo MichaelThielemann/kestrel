@@ -26,6 +26,33 @@ const storage = z
 
 const prefix = z.string().min(1).refine((p) => p.endsWith("/"), "must end with /");
 
+const seconds = (max: number) => z.number().int().min(1).max(max);
+
+const localBoot = z
+  .object({
+    command: z.array(z.string().min(1)).min(1),
+    dir: z.string().min(1).default("."),
+    env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string()).default({}),
+    readyPath: z.string().startsWith("/"),
+    timeoutSeconds: seconds(3600).default(300),
+  })
+  .strict();
+
+/** The `update` block of an environment with every default applied. */
+export const UPDATE_DEFAULTS = { release: { dir: "." }, sealTimeoutSeconds: 60, syncWindowSeconds: 120, renderTimeoutSeconds: 600, readyTimeoutSeconds: 300, cleanupAfterDays: 14 } as const;
+
+const update = z
+  .object({
+    release: z.object({ dir: z.string().min(1).default(UPDATE_DEFAULTS.release.dir) }).strict().default({ dir: UPDATE_DEFAULTS.release.dir }),
+    localBoot: localBoot.optional(),
+    sealTimeoutSeconds: seconds(3600).default(UPDATE_DEFAULTS.sealTimeoutSeconds),
+    syncWindowSeconds: seconds(3600).default(UPDATE_DEFAULTS.syncWindowSeconds),
+    renderTimeoutSeconds: seconds(7200).default(UPDATE_DEFAULTS.renderTimeoutSeconds),
+    readyTimeoutSeconds: seconds(3600).default(UPDATE_DEFAULTS.readyTimeoutSeconds),
+    cleanupAfterDays: z.number().int().min(0).max(365).default(UPDATE_DEFAULTS.cleanupAfterDays),
+  })
+  .strict();
+
 const environment = z
   .object({
     production: z.boolean().default(true),
@@ -48,6 +75,7 @@ const environment = z
         retention: z.object({ cutover: z.number().int().min(1).default(5), scheduled: z.number().int().min(1).default(14), manual: z.number().int().min(1).default(10), "pre-restore": z.number().int().min(1).default(5) }).strict().default({ cutover: 5, scheduled: 14, manual: 10, "pre-restore": 5 }),
       })
       .strict(),
+    update: update.optional(),
   })
   .strict();
 
@@ -59,6 +87,19 @@ export type Environment = z.infer<typeof environment>;
 export type StorageConfig = z.infer<typeof storage>;
 /** A credential source as the file states it. */
 export type CredentialConfig = z.infer<typeof credential>;
+/**
+ * The `update` block of an environment: the directory staged as the new release (`release.dir`, relative to the
+ * environments file), the local start of a release on a database copy that runs content migrations (`localBoot`), and
+ * the waits of an update run in seconds.
+ */
+export type UpdateSettings = z.infer<typeof update>;
+/** `update.localBoot`: the command that starts a release on this machine, its directory, its environment and readiness path. */
+export type LocalBootConfig = z.infer<typeof localBoot>;
+
+/** The `update` block of `env`, or {@link UPDATE_DEFAULTS} when the environment has none. */
+export function updateSettings(env: Environment): UpdateSettings {
+  return env.update ?? { ...UPDATE_DEFAULTS, release: { ...UPDATE_DEFAULTS.release } };
+}
 
 /** Reads and validates `kestrel.environments.json` in `root`; a missing or invalid file is a configuration error (exit 2). */
 export function loadEnvironments(root: string): Record<string, Environment> {

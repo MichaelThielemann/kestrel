@@ -17,10 +17,11 @@ const TERMINAL = new Set(["run-done", "run-failed"]);
 
 /**
  * A run's journal in the backup location, one write-once object per transition, mirrored into a local file.
- * Everything written passes the redactor.
+ * Everything written passes the redactor. `startSeq` continues the journal of a run another process began: the first
+ * entry gets `startSeq + 1`, so no key of that run is written twice.
  */
 export class Journal {
-  #seq = 0;
+  #seq: number;
 
   constructor(
     readonly runId: string,
@@ -29,7 +30,10 @@ export class Journal {
     private readonly redactor: Redactor,
     private readonly clock: () => number,
     private readonly mirror: string | null,
-  ) {}
+    startSeq = 0,
+  ) {
+    this.#seq = startSeq;
+  }
 
   async record(step: string, state: JournalEntry["state"], data: Record<string, unknown> = {}): Promise<void> {
     this.#seq += 1;

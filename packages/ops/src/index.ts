@@ -2,7 +2,7 @@ export { acceptSeal, createBackup, listBackups, precopy, prune, readManifest, re
 export { writeBundle, OPS_PACKAGE, type BundleInfo } from "./bundle.ts";
 export { REPLICATION_PACKAGE, runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
 export { commandRunner, resolveCredential, withSecretFile, type CommandRunner, type CredentialSource } from "./credentials.ts";
-export { ENVIRONMENTS_FILE, environmentProblems, loadEnvironments, overlaps, type CredentialConfig, type Environment, type StorageConfig } from "./environments.ts";
+export { ENVIRONMENTS_FILE, environmentProblems, loadEnvironments, overlaps, UPDATE_DEFAULTS, updateSettings, type CredentialConfig, type Environment, type LocalBootConfig, type StorageConfig, type UpdateSettings } from "./environments.ts";
 export { OpsError } from "./errors.ts";
 export { Interrupt, interruptible, Interrupted, type SignalSource } from "./interrupt.ts";
 export { Journal, listRuns, openRuns, RUN_STALE_MS, type JournalEntry, type RunSummary } from "./journal.ts";
@@ -22,3 +22,4 @@ export { probeProtection, status, type Protection, type StatusReport } from "./s
 export { ObjectMissing, PreconditionFailed, transfer, type CopyOptions, type ObjectInfo, type ObjectStore } from "./store.ts";
 export { localTarget, type LocalTargetConfig, type Target, type TargetDeps, type TargetFacts, type TargetFactory, type TargetStatus } from "./target.ts";
 export { createWorkspace, stateDir, type Workspace } from "./workspace.ts";
+export * from "./update/index.ts";
