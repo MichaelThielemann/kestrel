@@ -29,7 +29,7 @@ interface FakeBehaviour {
   pageSize?: number;
   clockOffsetMs?: number;
   md5Etags?: boolean;
-  serverSideEncryption?: "aws:kms";
+  serverSideEncryption?: "aws:kms" | "AES256";
 }
 
 function httpError(name: string, status: number): Error {
@@ -43,7 +43,7 @@ function fakeS3(behaviour: FakeBehaviour = {}) {
   let sequence = 0;
   const etagOf = (data: Uint8Array): string => {
     sequence += 1;
-    if (behaviour.md5Etags === true) return `"${createHash("md5").update(data).digest("hex")}"`;
+    if (behaviour.md5Etags === true || behaviour.serverSideEncryption === "AES256") return `"${createHash("md5").update(data).digest("hex")}"`;
     if (behaviour.serverSideEncryption !== undefined) return `"${sequence.toString(16).padStart(32, "0")}"`;
     return `"etag-${sequence}"`;
   };
@@ -647,6 +647,46 @@ describe("blobstore/s3 admin: copy", () => {
       };
       const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
       expectOk(await admin.copy("src", "dst", { ifMatch: normalizeEtag(s3.etagOf("src")), sourceCheck: "compare" }));
+    });
+
+    const md5 = (text: string): string => createHash("md5").update(text).digest("hex");
+
+    it("does not compare the copy's plain content hash with a multipart source ETag", async () => {
+      const s3 = fakeS3();
+      s3.put("src", "AAAA");
+      const multipart = `${md5("AAAA")}-2`;
+      const source = s3.objects.get("src");
+      if (source !== undefined) source.etag = `"${multipart}"`;
+      const original = s3.client.send.bind(s3.client);
+      s3.client.send = async (command) => {
+        const result = await original(command);
+        if (!(command instanceof CopyObjectCommand)) return result;
+        const written = s3.objects.get("dst");
+        if (written !== undefined) written.etag = `"${md5("AAAA")}"`;
+        return { CopyObjectResult: { ETag: `"${md5("AAAA")}"` } };
+      };
+      const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+      const copied = expectOk(await admin.copy("src", "dst", { ifMatch: multipart, sourceCheck: "compare" }));
+      expect(copied.etag).toBe(md5("AAAA"));
+      expect(s3.objects.has("dst")).toBe(true);
+    });
+
+    it("compares only the source's own ETag when the copy reports an ETag that is no content hash", async () => {
+      const s3 = fakeS3();
+      s3.put("src", "AAAA");
+      const source = s3.objects.get("src");
+      if (source !== undefined) source.etag = `"${md5("AAAA")}"`;
+      const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+      const copied = expectOk(await admin.copy("src", "dst", { ifMatch: md5("AAAA"), sourceCheck: "compare" }));
+      expect(copied.etag).not.toMatch(/^[0-9a-f]{32}$/);
+      expect(s3.objects.has("dst")).toBe(true);
+    });
+
+    it("compares the copy's ETag when the store encrypts with SSE-S3, so a stale read of an overwritten source is caught", async () => {
+      const { s3, listed, admin } = await staleSource({ ignoreConditions: true, serverSideEncryption: "AES256" });
+      const error = expectErr(await admin.copy("src", "dst", { ifMatch: listed, sourceCheck: "compare" }), "PRECONDITION_FAILED");
+      expect(error.details).toEqual({ expectedEtag: listed, foundEtag: normalizeEtag(s3.etagOf("src")), reason: "source-changed", destinationWritten: true, destinationRemoved: true });
+      expect(s3.objects.has("dst")).toBe(false);
     });
   });
 
