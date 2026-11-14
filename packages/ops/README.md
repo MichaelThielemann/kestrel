@@ -30,7 +30,7 @@ target; other targets come as their own packages.
 
 Every command takes `--env <name>` (optional when the file names one environment), `--json` (one JSON
 document on stdout, with a `schema` field such as `kestrel-ops/restore@1`), `--yes`, `--answers <file>`
-and `--keep` (keep the local working directory). Exit codes: 0 done, 1 a check failed or a step was refused,
+`--keep` (keep the local working directory) and `--break-lock`. Exit codes: 0 done, 1 a check failed or a step was refused,
 2 a usage or configuration error.
 
 ## kestrel.environments.json
@@ -167,6 +167,7 @@ passed its name.
 | `unsealed-stop` | a stopped replica without a seal | never |
 | `access-changes` | a restore of a production environment or one that brings back revoked access | never |
 | `prune-delete` | before prune deletes | answers yes |
+| `break-lock` | `--break-lock` finds a lock another run holds | never |
 
 `--answers <file>` is a JSON object from id to answer (`"yes"` or `"accept"`). Without a terminal and
 without an answer, the run stops at the question with exit 1.
@@ -180,7 +181,8 @@ without an end entry, active in the last two hours) or holds the lock. Interacti
 
 ## Lock and journal
 A writing command takes the lock: a start entry under `locks/<run>/`, a heartbeat every ten minutes and a
-release entry. A lock without a heartbeat for two hours is stale. Without a conditional write the trace
+release entry. A lock without a heartbeat for two hours is stale; `--break-lock` releases a lock whose run
+ended without releasing it, after the answer `break-lock`. Without a conditional write the trace
 cannot exclude a second operator who starts at the same moment, so serialize runs where they are started
 (one operator, or an exclusive deploy environment). The journal records each step with its inputs and
 outputs (ids, hashes, counts) under `runs/<run>/`, mirrored into the local working directory:

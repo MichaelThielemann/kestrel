@@ -10,7 +10,7 @@ import { loadEnvironments, type Environment, type StorageConfig } from "./enviro
 import { OpsError } from "./errors.ts";
 import { Journal } from "./journal.ts";
 import { hex, parseJson, type BackupKind } from "./layout.ts";
-import { acquireLock, type Lock } from "./lock.ts";
+import { acquireLock, breakLocks, type Lock } from "./lock.ts";
 import { createOutput } from "./output.ts";
 import type { Prompt } from "./questions.ts";
 import { Redactor } from "./redact.ts";
@@ -57,7 +57,8 @@ export const USAGE = `usage:
   backup prune [--dry-run]
   restore --backup <id> [--no-safety-backup]
   restore --to local <dir> (--backup <id> | --latest) [--with-media] [--keep-sessions]
-common options: --env <name>, --json, --yes, --answers <file>, --keep (keep the local working directory)
+common options: --env <name>, --json, --yes, --answers <file>, --keep (keep the local working directory),
+  --break-lock (release the lock of a run that ended without releasing it)
 exit codes: 0 done, 1 a check failed or a step was refused, 2 usage or configuration error`;
 
 interface Parsed {
@@ -83,7 +84,7 @@ function parse(argv: readonly string[]): Parsed {
   return { positional, flags };
 }
 
-const KNOWN_FLAGS = new Set([...VALUE_FLAGS, "--freeze", "--dry-run", "--no-safety-backup", "--latest", "--with-media", "--keep-sessions", "--json", "--yes", "--keep"]);
+const KNOWN_FLAGS = new Set([...VALUE_FLAGS, "--freeze", "--dry-run", "--no-safety-backup", "--latest", "--with-media", "--keep-sessions", "--json", "--yes", "--keep", "--break-lock"]);
 
 function value(parsed: Parsed, flag: string): string | null {
   const v = parsed.flags.get(flag);
@@ -230,6 +231,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
     writes = name !== "status" && name !== "backup-list";
     if (writes) {
       await journal.record("run", "started", { command: name, env: envName });
+      if (parsed.flags.has("--break-lock")) await breakLocks(ctx, runId);
       lock = await acquireLock(backups, ctx.location, runId, name, clock);
     }
     if (name === "status") {

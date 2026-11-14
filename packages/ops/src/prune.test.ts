@@ -89,7 +89,7 @@ describe("backup prune", () => {
     }
   });
 
-  it("refuses a second writing run while one holds the lock", async () => {
+  it("refuses a second writing run while one holds the lock, until --break-lock gets an explicit answer", async () => {
     const bucket = new MemoryBucket("second");
     const h = createHarness({ store: memoryStore(bucket) });
     try {
@@ -99,6 +99,10 @@ describe("backup prune", () => {
       const result = await h.run(["backup", "create"]);
       expect(result.code).toBe(1);
       expect(result.stderr).toContain("another run holds the lock: busy (restore) on laptop, pid 7");
+      expect((await h.run(["backup", "create", "--break-lock", "--yes"])).stderr).toContain('"break-lock" needs an answer');
+      const broken = await h.run(["backup", "create", "--break-lock", "--answers", h.answers({ "break-lock": "accept" })]);
+      expect(broken.code).toBe(0);
+      expect([...bucket.objects.keys()].some((k) => /locks\/busy\/\d{8}T\d{6}Z-released-/.test(k))).toBe(true);
       expect(stamp(0)).toBe("19700101T000000Z");
     } finally {
       await h.dispose();

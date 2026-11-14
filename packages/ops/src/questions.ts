@@ -9,6 +9,7 @@ export const QUESTIONS = {
   "unsealed-stop": { risky: true },
   "access-changes": { risky: true },
   "prune-delete": { risky: false },
+  "break-lock": { risky: true },
 } as const;
 
 export type QuestionId = keyof typeof QUESTIONS;

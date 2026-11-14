@@ -6,7 +6,7 @@ export { ENVIRONMENTS_FILE, environmentProblems, loadEnvironments, overlaps, typ
 export { OpsError } from "./errors.ts";
 export { Journal, listRuns, openRuns, RUN_STALE_MS, type JournalEntry, type RunSummary } from "./journal.ts";
 export { BACKUP_KINDS, backupId, keys, parseBackupId, stamp, unstamp, type BackupKind, type BlobEntry, type DerivedEntry, type Manifest, type SealState, type SiteEntry } from "./layout.ts";
-export { acquireLock, heldLocks, LOCK_STALE_MS, type HeldLock, type Lock } from "./lock.ts";
+export { acquireLock, breakLocks, heldLocks, LOCK_STALE_MS, type HeldLock, type Lock } from "./lock.ts";
 export { createOutput, type Output } from "./output.ts";
 export { confirm, QUESTIONS, type AnswerSource, type Prompt, type QuestionId } from "./questions.ts";
 export { Redactor } from "./redact.ts";

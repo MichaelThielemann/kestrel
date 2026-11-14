@@ -1,5 +1,7 @@
 import { hostname } from "node:os";
+import type { OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
+import { confirm } from "./questions.ts";
 import { jsonBytes, keys } from "./layout.ts";
 import type { ObjectStore } from "./store.ts";
 
@@ -73,4 +75,15 @@ export async function acquireLock(store: ObjectStore, location: string, runId: s
       await store.put(location + keys.lock(runId, clock(), "released"), jsonBytes({ runId, at: clock() }), { contentType: "application/json" });
     },
   };
+}
+
+/** Releases the locks other runs hold, after the `break-lock` answer, for a run that ended without releasing its lock. */
+export async function breakLocks(ctx: Pick<OpsContext, "backups" | "location" | "clock" | "answers" | "journal">, runId: string): Promise<string[]> {
+  const others = (await heldLocks(ctx.backups, ctx.location, ctx.clock())).filter((l) => l.runId !== runId);
+  for (const other of others) {
+    await confirm(ctx.answers, "break-lock", `release the lock of run ${other.runId} (${other.command}) on ${other.host}, pid ${other.pid}, last heartbeat ${new Date(other.lastBeat).toISOString()}; only when that run is no longer running`);
+    await ctx.backups.put(ctx.location + keys.lock(other.runId, ctx.clock(), "released"), jsonBytes({ runId: other.runId, brokenBy: runId, at: ctx.clock() }), { contentType: "application/json" });
+    await ctx.journal.record("break-lock", "done", { runId: other.runId });
+  }
+  return others.map((l) => l.runId);
 }
