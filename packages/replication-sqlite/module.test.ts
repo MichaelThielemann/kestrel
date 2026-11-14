@@ -1,4 +1,5 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -11,6 +12,7 @@ import type { Manifest, RunEndEvent, RunObserver } from "@michaelthielemann/kest
 import type { Deps, Introspection } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { failure } from "@michaelthielemann/kestrel/errors";
+import { acquireInstanceLock, instanceLockFile, type InstanceLock } from "@michaelthielemann/kestrel/instanceLock";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
@@ -856,5 +858,160 @@ describe("replication/sqlite restore of a sealed generation", () => {
       vi.useRealTimers();
     }
     expect(existsSync(file)).toBe(false);
+  });
+});
+
+function lockFileOf(file: string): string {
+  const path = instanceLockFile(file);
+  if (path === undefined) throw new Error(`${file} names no lock file`);
+  return path;
+}
+
+function holdForeignLock(file: string): string {
+  const now = new Date().toISOString();
+  const content = JSON.stringify({ instanceId: randomUUID(), pid: 4242, pidNamespace: "pid:[4026530001]", processStart: "1", clockStart: 1, bootId: randomUUID(), host: "other-host", startedAt: now, heartbeatAt: now, ttlMs: 60_000, threads: { [randomUUID()]: now } });
+  writeFileSync(lockFileOf(file), content);
+  return content;
+}
+
+function checksums(paths: readonly string[]): Record<string, string | null> {
+  return Object.fromEntries(paths.map((path) => [path, existsSync(path) ? createHash("sha256").update(readFileSync(path)).digest("hex") : null]));
+}
+
+function failureOf(promise: Promise<unknown>): Promise<unknown> {
+  return promise.then(
+    () => {
+      throw new Error("expected setup to fail");
+    },
+    (error: unknown) => error,
+  );
+}
+
+describe("replication/sqlite instance lock", () => {
+  const shares: InstanceLock[] = [];
+  afterEach(() => {
+    for (const share of shares.splice(0)) share.release();
+  });
+
+  it("refuses a file another process holds before it applies a pending restore, leaving every file next to the database unchanged", async () => {
+    const dir = freshDir();
+    const file = join(dir, "live.db");
+    const app = new DatabaseSync(file);
+    app.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+    app.prepare("INSERT INTO t (v) VALUES ('live')").run();
+    writeFileSync(`${file}.restore`, image(2));
+    writeFileSync(`${file}.restored-at`, JSON.stringify({ at: 1 }));
+    holdForeignLock(file);
+    const files = [file, `${file}-wal`, `${file}-shm`, `${file}.restore`, `${file}.restored-at`];
+    const before = checksums(files);
+    const blobs = readsOf(fakeBlobs());
+    place(blobs, "20260101T000000Z", 3, null);
+
+    const error = await failureOf(module.setup(configSchema.parse({ file }), moduleDeps(blobs, dir, Date.now())));
+
+    expect(error).toMatchObject({ code: "instance-locked", module: "replication/sqlite" });
+    expect(String(error)).toContain('host "other-host", pid 4242');
+    expect(checksums(files)).toEqual(before);
+    expect(Object.values(before).every((sum) => sum !== null)).toBe(true);
+    expect(blobs.keys).toEqual([]);
+    app.close();
+
+    rmSync(lockFileOf(file));
+    const instance = boundaryCast<Replication>(await module.setup(configSchema.parse({ file }), moduleDeps(blobs, dir, Date.now())), "host");
+    open.push(instance);
+    expect(existsSync(`${file}.restore`)).toBe(false);
+    expect(rowsIn(file)).toBe(2);
+  });
+
+  it("refuses a file another process holds before it rebuilds the missing file from the replica, creating no file", async () => {
+    const dir = freshDir();
+    const file = join(dir, "live.db");
+    holdForeignLock(file);
+    const blobs = readsOf(fakeBlobs());
+    place(blobs, "20260101T000000Z", 3, null);
+
+    expect(await failureOf(module.setup(configSchema.parse({ file, restoreOnStart: true }), moduleDeps(blobs, freshDir(), Date.now())))).toMatchObject({ code: "instance-locked" });
+
+    expect(readdirSync(dir)).toEqual(["live.db.instance"]);
+    expect(blobs.keys).toEqual([]);
+  });
+
+  it("starts beside another process's lock with allowConcurrentProcesses and leaves that lock as it is", async () => {
+    const dir = freshDir();
+    const file = join(dir, "live.db");
+    const held = holdForeignLock(file);
+    const blobs = fakeBlobs();
+    place(blobs, "20260101T000000Z", 3, null);
+
+    const instance = boundaryCast<Replication>(await module.setup(configSchema.parse({ file, allowConcurrentProcesses: true }), moduleDeps(blobs, dir, Date.now())), "host");
+    expect(rowsIn(file)).toBe(3);
+    await module.teardown!(instance);
+
+    expect(readFileSync(lockFileOf(file), "utf8")).toBe(held);
+  });
+
+  it("gives the lock up when it refuses to start for another reason", async () => {
+    const dir = freshDir();
+    const file = join(dir, "live.db");
+    const blobs = fakeBlobs();
+    const generation = sixGeneration("20260101T000000Z", Date.UTC(2026, 0, 1));
+    place(blobs, generation, 1, null);
+    place(blobs, "20260102T000000Z", 1, null);
+
+    expect(await failureOf(module.setup(configSchema.parse({ file, restoreOnStart: true }), moduleDeps(blobs, dir, Date.now())))).toBeInstanceOf(Error);
+
+    expect(existsSync(lockFileOf(file))).toBe(false);
+  });
+
+  it("holds its share of the lock until the teardown seal has shipped the last frames", async () => {
+    const dir = freshDir();
+    const file = join(dir, "live.db");
+    const seed = new DatabaseSync(file);
+    seed.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+    seed.close();
+    const blobs = fakeBlobs();
+    const instance = boundaryCast<Replication>(await module.setup(configSchema.parse({ file, restoreOnStart: false }), moduleDeps(blobs, dir, Date.now())), "host");
+    expect(existsSync(lockFileOf(file))).toBe(true);
+    expect((await instance.sync()).ok).toBe(true);
+    const lockedDuringPut: boolean[] = [];
+    const put = blobs.put.bind(blobs);
+    blobs.put = async (key, data, options) => {
+      lockedDuringPut.push(existsSync(lockFileOf(file)));
+      return put(key, data, options);
+    };
+    const app = new DatabaseSync(file);
+    app.prepare("INSERT INTO t (v) VALUES ('late')").run();
+    app.close();
+
+    await module.teardown!(instance);
+
+    expect(lockedDuringPut.length).toBeGreaterThan(0);
+    expect(lockedDuringPut.every(Boolean)).toBe(true);
+    expect(existsSync(lockFileOf(file))).toBe(false);
+  });
+
+  it("keeps the lock file while another holder in the process still holds the database", async () => {
+    const dir = freshDir();
+    const file = join(dir, "live.db");
+    shares.push(acquireInstanceLock(file, { module: "persistence/sqlite" }));
+    const instance = boundaryCast<Replication>(await module.setup(configSchema.parse({ file, restoreOnStart: false }), moduleDeps(fakeBlobs(), dir, Date.now())), "host");
+
+    await module.teardown!(instance);
+
+    expect(existsSync(lockFileOf(file))).toBe(true);
+  });
+
+  it("reports a lock that another instance took over as needing a restart", async () => {
+    const dir = freshDir();
+    const file = join(dir, "live.db");
+    shares.push(acquireInstanceLock(file, { module: "test", ttlMs: 300, heartbeatMs: 100 }));
+    const instance = boundaryCast<Replication>(await module.setup(configSchema.parse({ file, restoreOnStart: false }), moduleDeps(fakeBlobs(), dir, Date.now())), "host");
+    open.push(instance);
+    expect(module.health!(instance)).toMatchObject({ ok: true });
+
+    holdForeignLock(file);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+
+    expect(module.health!(instance)).toMatchObject({ ok: false, restartRequired: true });
   });
 });

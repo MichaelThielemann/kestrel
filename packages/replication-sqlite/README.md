@@ -203,6 +203,20 @@ to the newest of them to start from it, or move them out of `<prefix>gen/` to st
 generation before them. A replica written only by 5.x releases holds neither kind of generation and
 restores its newest generation as before.
 
+**One process per file.** The first thing `setup()` does is take the instance lock on `file`, the
+sidecar `<file>.instance` next to the database: before it applies a prepared restore, rebuilds a
+missing file or checks a skipped restore. While another process holds the file, `setup()` fails
+with `instance-locked`, naming that process's host and PID, and leaves the database, its `-wal`,
+`-shm`, `.restore` and `.restored-at` as they are; with `restoreOnStart` it creates no file. The
+lock is never part of a snapshot or segment, so a fresh disk that rebuilds the file from the replica
+takes a lock of its own. `persistence/sqlite` and `backup/blobstore` on the same file in the same
+process share the lock. Teardown gives it up only after the last WAL frames are shipped and the
+generation is sealed, and a `setup()` that fails gives it up before boot reports the failure.
+`health()` answers `ok: false` with `restartRequired: true` once another instance took the lock
+over. `allowConcurrentProcesses: true` skips the lock; it has to be set alike on every module that
+names the file, otherwise boot fails with `invalid-module-config`. The lock covers one file on one
+file system: a process elsewhere that replicates to the same prefix is noticed as described next.
+
 **Another writer.** Only one process may replicate a database to a prefix. Every sync lists the
 replica and compares it with a first listing: the one `setup()` made to rebuild a missing file, or else
 the process's first sync. When a listing shows a key that this process did not write, outside a
@@ -229,6 +243,7 @@ keys, and nothing keeps a second process from writing.
 | `snapshotSeconds` | integer | no | `86400` |
 | `retentionSeconds` | integer | no | `172800` |
 | `restoreOnStart` | boolean | no | `true` |
+| `allowConcurrentProcesses` | boolean | no | `false` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|

@@ -4,10 +4,11 @@ import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { Manifest } from "@michaelthielemann/kestrel";
 import { first, type Context } from "@michaelthielemann/kestrel/context";
-import { defineModule } from "@michaelthielemann/kestrel/defineModule";
+import { defineModule, type Deps } from "@michaelthielemann/kestrel/defineModule";
 import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { applyPendingRestore, createReplicationSqlite, listSealedReplica, markerKey, readOrigin, restoreFromBlobs, unplacedNewerGenerations, type Config, type GenerationMarker, type PlacedRestore, type Replication, type ReplicaListing, type ReplicationOptions } from "./impl.ts";
+import { lockDatabaseFile, withLockHealth, type ProcessLock } from "./processLock.ts";
 import { checkSkippedRestore, markRestoredThisBoot, reportedRestoreAt, unacknowledgedRestore } from "./restoreFreshness.ts";
 
 export const configSchema = z
@@ -19,12 +20,13 @@ export const configSchema = z
     snapshotSeconds: z.number().int().positive().default(24 * 3600),
     retentionSeconds: z.number().int().positive().default(48 * 3600),
     restoreOnStart: z.boolean().default(true),
+    allowConcurrentProcesses: z.boolean().default(false).describe("Let other processes open the file while this one runs, instead of refusing to start beside them"),
   })
   .strict();
 
 const POINT = { type: "object", properties: { generation: { type: "string" }, at: { type: "number" }, kind: { type: "string", enum: ["snapshot", "wal"] }, key: { type: "string" } }, required: ["generation", "at", "kind", "key"] };
 
-type ReplicationInstance = Replication & { logger: Logger; reportedRestoreAt: () => number | null; reportRuns: Set<string> | null };
+type ReplicationInstance = Replication & { logger: Logger; lock: ProcessLock; reportedRestoreAt: () => number | null; reportRuns: Set<string> | null };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -123,6 +125,27 @@ function reportingSteps(manifest: Manifest): Set<string> {
   return new Set(manifest.pipelines.flatMap((pipeline) => pipeline.steps.filter((step) => step.description.writes.includes("result._databaseRestoredAt")).map((step) => step.spec)));
 }
 
+async function start(config: Config, deps: Deps, lock: ProcessLock): Promise<ReplicationInstance> {
+  const blobs = deps.get(BLOBSTORE);
+  const bootStartedAt = deps.bootStartedAt ?? Date.now();
+  const restoredFromMarker = applyPendingRestore(config.file, () => markRestoredThisBoot(config.file, bootStartedAt, true));
+  let restore: MissingFileRestore | undefined;
+  if (config.restoreOnStart) {
+    if (!existsSync(config.file)) restore = await restoreMissingFile(config, blobs, deps.logger, bootStartedAt);
+    else if (!restoredFromMarker) await checkSkippedRestore(config, blobs, deps.logger, bootStartedAt);
+  }
+  const placed = restore === undefined ? unacknowledgedRestore(config.file) : (restore.placed ?? null);
+  const options: ReplicationOptions = { logger: deps.logger };
+  if (restore !== undefined) options.listedBefore = restore.listedBefore;
+  if (placed !== null) {
+    options.placedRestore = placed;
+    options.onAcknowledged = () => {
+      if (unacknowledgedRestore(config.file)?.applied.generation === placed.applied.generation) markRestoredThisBoot(config.file, placed.applied.restoredAt, true);
+    };
+  }
+  return { ...createReplicationSqlite(config, blobs, Date.now, options), logger: deps.logger, lock, reportedRestoreAt: () => reportedRestoreAt(config.file), reportRuns: placed === null ? null : new Set<string>() };
+}
+
 export default defineModule({
   name: "replication/sqlite",
   provides: [],
@@ -131,24 +154,13 @@ export default defineModule({
   configSchema,
 
   async setup(config, deps): Promise<ReplicationInstance> {
-    const blobs = deps.get(BLOBSTORE);
-    const bootStartedAt = deps.bootStartedAt ?? Date.now();
-    const restoredFromMarker = applyPendingRestore(config.file, () => markRestoredThisBoot(config.file, bootStartedAt, true));
-    let restore: MissingFileRestore | undefined;
-    if (config.restoreOnStart) {
-      if (!existsSync(config.file)) restore = await restoreMissingFile(config, blobs, deps.logger, bootStartedAt);
-      else if (!restoredFromMarker) await checkSkippedRestore(config, blobs, deps.logger, bootStartedAt);
+    const lock = lockDatabaseFile(config.file, "replication/sqlite", config.allowConcurrentProcesses);
+    try {
+      return await start(config, deps, lock);
+    } catch (err) {
+      lock.release();
+      throw err;
     }
-    const placed = restore === undefined ? unacknowledgedRestore(config.file) : (restore.placed ?? null);
-    const options: ReplicationOptions = { logger: deps.logger };
-    if (restore !== undefined) options.listedBefore = restore.listedBefore;
-    if (placed !== null) {
-      options.placedRestore = placed;
-      options.onAcknowledged = () => {
-        if (unacknowledgedRestore(config.file)?.applied.generation === placed.applied.generation) markRestoredThisBoot(config.file, placed.applied.restoredAt, true);
-      };
-    }
-    return { ...createReplicationSqlite(config, blobs, Date.now, options), logger: deps.logger, reportedRestoreAt: () => reportedRestoreAt(config.file), reportRuns: placed === null ? null : new Set<string>() };
   },
 
   attach(replication, kestrel) {
@@ -169,7 +181,7 @@ export default defineModule({
     });
   },
 
-  health: (r) => r.health(),
+  health: (r) => withLockHealth(r.lock, r.health()),
 
   async teardown(r) {
     try {
@@ -178,7 +190,11 @@ export default defineModule({
     } catch (err) {
       r.logger.error(TEARDOWN_FAILED, { error: err instanceof Error ? err.message : String(err) });
     }
-    r.close();
+    try {
+      r.close();
+    } finally {
+      r.lock.release();
+    }
   },
 
   steps: (replication) => ({
