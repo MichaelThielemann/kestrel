@@ -428,6 +428,26 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
       for (const argv of cf.calls) for (const arg of argv) for (const secret of [SECRET, OTHER_SECRET, "upstream-host-value"]) expect(arg).not.toContain(secret);
       expect(namesOtherApp()).toEqual([]);
       expect(cf.calls.some((argv) => argv[0] === "set-env")).toBe(false);
+      expect(cf.app(API.name).env).toEqual({ NODE_ENV: "production", STORAGE_SECRET: SECRET, SESSION_SECRET: OTHER_SECRET });
+      expect(cf.app(WEB.name).env).toEqual({});
+    });
+
+    for (const scale of ["instances: 2", "instances: 0", "processes:\n  - type: web\n    instances: 3"]) {
+      it(`refuses with exit 2 before cf runs an entry that scales the app with ${scale.replaceAll("\n", " ").replaceAll(/ +/g, " ")}`, async () => {
+        writeFileSync(join(root, "scaled.yml"), `applications:\n- name: site-api\n  ${scale}\n`);
+        const error = await failure((await target({ manifest: "scaled.yml" })).applyManifest());
+        expect(error.exitCode).toBe(2);
+        expect(error.message).toContain("exactly one");
+        expect(cf.calls.some((argv) => argv[0] === "apply-manifest")).toBe(false);
+        expect(cf.app(API.name).instances).toBe(1);
+      });
+    }
+
+    it("applies an entry that keeps one web instance and scales another process type", async () => {
+      writeFileSync(join(root, "worker.yml"), "applications:\n- name: site-api\n  instances: 1\n  processes:\n  - type: web\n    instances: 1\n  - type: worker\n    instances: 2\n");
+      await (await target({ manifest: "worker.yml" })).applyManifest();
+      expect(cf.applied).toHaveLength(1);
+      expect(cf.app(API.name).instances).toBe(1);
     });
 
     it("resolves merge keys and YAML 1.1 booleans the way cf reads them, and keeps only the version and the app's resolved entry", async () => {

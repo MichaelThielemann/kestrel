@@ -12,7 +12,8 @@ const PLACEHOLDER = /\(\((!?[-/.\w\p{L}]+)\)\)/gu;
 
 /**
  * The manifest reduced to its `version` and the entry of `app`, as JSON (which every YAML reader takes), and the
- * placeholder names that entry uses, without a leading `!`; a name with a dot ends with exit 2. It is read as YAML 1.1 with merge keys, as cf reads it: dates and clock times
+ * placeholder names that entry uses, without a leading `!`. A name with a dot, or an entry that scales the web process
+ * to another count than 1, ends with exit 2. It is read as YAML 1.1 with merge keys, as cf reads it: dates and clock times
  * such as `03:00` stay strings.
  */
 export function appManifest(file: string, app: string): { text: string; vars: string[] } {
@@ -25,6 +26,11 @@ export function appManifest(file: string, app: string): { text: string; vars: st
   const applications: unknown = Reflect.get(Object(doc), "applications");
   const entry: unknown = Array.isArray(applications) ? applications.find((a: unknown) => Reflect.get(Object(a), "name") === app) : undefined;
   if (entry === undefined) throw new OpsError(`${file} has no application named ${app}`, 2, "target");
+  const processes: unknown = Reflect.get(Object(entry), "processes");
+  const web: unknown = Array.isArray(processes) ? processes.find((p: unknown) => Reflect.get(Object(p), "type") === "web") : undefined;
+  for (const instances of [Reflect.get(Object(entry), "instances"), Reflect.get(Object(web), "instances")]) {
+    if (instances !== undefined && instances !== 1) throw new OpsError(`${file}: the entry of ${app} sets ${String(instances)} instances of its web process; backup and restore need exactly one, so the entry sets 1 or leaves the count out`, 2, "target");
+  }
   const version: unknown = Reflect.get(Object(doc), "version");
   const text = JSON.stringify({ ...(version === undefined ? {} : { version }), applications: [entry] }, null, 2);
   const vars = [...new Set([...JSON.stringify(entry).matchAll(PLACEHOLDER)].map((m) => (m[1] ?? "").replace(/^!/, "")))].sort();

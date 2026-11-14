@@ -197,10 +197,25 @@ export class FakeCloudFoundry {
         const unresolved = [...readFileSync(manifest, "utf8").matchAll(PLACEHOLDER)].map((m) => (m[1] ?? "").replace(/^!/, "")).filter((name) => name.split(".").reduce<unknown>((value, key) => (value === undefined ? undefined : Reflect.get(Object(value), key)), values) === undefined);
         if (unresolved.length > 0) return fail(`Expected to find variables: ${unresolved.join(", ")}\n`);
         this.applied.push({ manifest: readFileSync(manifest, "utf8"), varsFile, varsMode: statSync(varsFile).mode & 0o777, vars: readFileSync(varsFile, "utf8"), target: `${this.org}/${this.space}` });
+        this.applyEntries(readFileSync(manifest, "utf8").replaceAll(PLACEHOLDER, (_match, name: string) => JSON.stringify(String(Reflect.get(Object(values), name.replace(/^!/, "")))).slice(1, -1)));
         return { code: 0, stdout: "OK\n", stderr: "" };
       }
       default:
         return fail(`'${command ?? ""}' is not a registered command.\n`);
+    }
+  }
+
+  private applyEntries(text: string): void {
+    const applications: unknown = Reflect.get(Object(JSON.parse(text)), "applications");
+    for (const entry of Array.isArray(applications) ? applications : []) {
+      const app = this.inTarget(String(Reflect.get(Object(entry), "name")));
+      if (app === undefined) continue;
+      const processes: unknown = Reflect.get(Object(entry), "processes");
+      const web: unknown = Array.isArray(processes) ? processes.find((p: unknown) => Reflect.get(Object(p), "type") === "web") : undefined;
+      const instances: unknown = Reflect.get(Object(web), "instances") ?? Reflect.get(Object(entry), "instances");
+      if (typeof instances === "number") app.instances = instances;
+      const env: unknown = Reflect.get(Object(entry), "env");
+      if (typeof env === "object" && env !== null) for (const [name, value] of Object.entries(env)) app.env[name] = String(value);
     }
   }
 
