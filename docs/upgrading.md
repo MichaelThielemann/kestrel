@@ -228,6 +228,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`tests/run-pipeline-validates`](#tests-run-pipeline-validates) | source | none (info) | a file importing `testing/runPipeline` |
 | [`boot/dependency-cycle`](#boot-dependency-cycle) | boot | manual | a module dependency cycle |
 | [`runtime/restore-freshness`](#runtime-restore-freshness) | load | none (info) | `restoreOnStart` left on for `replication-sqlite`/`backup-blobstore` |
+| [`runtime/single-process`](#runtime-single-process) | load | none (info) | a `persistence-sqlite`, `replication-sqlite` or `backup-blobstore` entry, each of which takes the instance lock on its database file |
 | [`http/trusted-proxies`](#http-trusted-proxies) | load | none (info) | `http.trustProxy` or `http.trustedHeader` without `http.trustedProxies` |
 | [`delivery/dependents`](#delivery-dependents) | source | none (info) | `delivery-static` publishing on events without marking dependent outputs |
 | [`delivery/export-llms`](#delivery-export-llms) | load | auto / manual | a pipeline file naming the removed `delivery.exportLlms` |
@@ -545,7 +546,9 @@ exhaustive `switch` over it needs the case; `MediaItem` gains `trashedAt` and `t
 `location` may be `null` (while the item is trashed), so code that reads `item.location` as a string
 needs a check; `Media` gains `trash`, `trashFolder`, `restore`, `listTrash`, `trashIds`,
 `selectTrash` and `purge`, and `Images` gains `hide`, `show` and `hidden`, which a hand-built test
-double of either must add. Focus and crop add `setFraming` and `framingsOf` to `Images` and the
+double of either must add. Removing upload metadata adds `sourceChecksum` to `MediaItem`: the sha256
+of the bytes as uploaded when removing their metadata changed them, `null` otherwise, which a
+hand-built item must set. Focus and crop add `setFraming` and `framingsOf` to `Images` and the
 fields `crop`, `renderedCrop`, `renders`, `originalWidth` and `originalHeight` to `Variant`, which a
 hand-built variant row must set (`""` or `null` for the centre, `0` or `null` for no render yet or
 unknown dimensions). `Planned`
@@ -646,6 +649,20 @@ A module dependency cycle — `boot()` names the full cycle path.
 #### runtime-restore-freshness
 `replication-sqlite`/`backup-blobstore` now fail boot when the database file was created during
 this boot while a restore point exists, if `restoreOnStart` is on (the default).
+
+#### runtime-single-process
+`persistence-sqlite`, `replication-sqlite` and `backup-blobstore` take an instance lock on their
+database file at setup. The lock is a sidecar `<file>.instance` next to the database, never a row
+inside it, so it does not travel with a replica, a snapshot or a backup. A second process that starts
+on the same file fails boot with `instance-locked`, naming the host, PID and start time of the
+process that holds the lock. A deploy that starts the new process before the old one has stopped
+fails the same way; stop the old process first. A lock left behind by a killed process is taken over
+60 s after its last heartbeat, at once when the process ran on the same machine in the same PID
+namespace. The finding appears once for each such module entry, and not for an entry with an
+in-memory database or with `allowConcurrentProcesses: true`, the setting for several processes that
+share the file on purpose. The 5.x data is not changed by this: the first 6.0.0 start creates the
+sidecar. `kestrel upgrade data` and `kestrel upgrade migrate` neither take nor honour the lock, so a
+sidecar left next to a copy of the database does not stop them.
 
 #### http-trusted-proxies
 `http.trustProxy` or `http.trustedHeader` is set, but `http.trustedProxies` is not. Forwarding headers

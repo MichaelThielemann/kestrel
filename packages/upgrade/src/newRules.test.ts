@@ -10,7 +10,7 @@ import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import type { LoadedProject, RuleContext } from "./plugin.ts";
 import { upgradingDocs } from "./ruleHelpers.ts";
 import { readFileOrUndefined } from "./rules.ts";
-import { breakingStepShapesRule, busHandlerThrowsRule, busSubscriberQueueRule, ctxDoneTerminalOutputRule, deliveryDependentsRule, deliveryMembersRule, restoreFreshnessRule, runPipelineValidatesRule, trustedProxiesRule, typeSignaturesRule } from "./ruleInfo.ts";
+import { breakingStepShapesRule, busHandlerThrowsRule, busSubscriberQueueRule, ctxDoneTerminalOutputRule, deliveryDependentsRule, deliveryMembersRule, restoreFreshnessRule, runPipelineValidatesRule, singleProcessRule, trustedProxiesRule, typeSignaturesRule } from "./ruleInfo.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
 import { dependencyCycleRule, optionalReadOrderRule, outputFoldRule, terminalOutputRule, undeclaredOutputRule, undeclaredRequiredRule } from "./ruleBootWraps.ts";
 import { underscoreFieldRule } from "./ruleUnderscoreField.ts";
@@ -697,6 +697,46 @@ describe("info rules", () => {
     expect(await restoreFreshnessRule.check(contextFor(p))).toEqual([]);
   });
 
+  it("runtime/single-process names each module entry that takes the instance lock on its database file", async () => {
+    const p = await project({
+      configModules: [
+        { use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: "./data/blobs" } },
+        { use: "@michaelthielemann/kestrel-replication-sqlite", config: { file: "./data/kestrel.db" } },
+        { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "./data/kestrel.db" } },
+        { use: "@michaelthielemann/kestrel-backup-blobstore", config: { file: "./data/kestrel.db" } },
+        { use: "@michaelthielemann/kestrel-content-default", config: {} },
+      ],
+    });
+    const findings = await singleProcessRule.check(contextFor(p));
+    expect(findings.map((f) => f.where.module)).toEqual(["@michaelthielemann/kestrel-replication-sqlite", "@michaelthielemann/kestrel-persistence-sqlite", "@michaelthielemann/kestrel-backup-blobstore"]);
+    expect(new Set(findings.map((f) => f.id)).size).toBe(3);
+    for (const finding of findings) {
+      expect(finding.rule).toBe("runtime/single-process");
+      expect(finding.severity).toBe("info");
+      expect(finding.fix.kind).toBe("none");
+      expect(finding.docs).toBe(upgradingDocs("runtime-single-process"));
+      expect(finding.message).toContain("./data/kestrel.db.instance");
+      expect(finding.message).toContain("instance-locked");
+      expect(finding.suggestion).toContain("allowConcurrentProcesses: true");
+    }
+  });
+
+  it("runtime/single-process stays quiet without a module that takes the lock", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: "./data/blobs" } }, { use: "@michaelthielemann/kestrel-content-default", config: {} }] });
+    expect(await singleProcessRule.check(contextFor(p))).toEqual([]);
+  });
+
+  it("runtime/single-process stays quiet for an entry that allows several processes or uses an in-memory database", async () => {
+    const p = await project({
+      configModules: [
+        { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "./data/kestrel.db", allowConcurrentProcesses: true } },
+        { use: "@michaelthielemann/kestrel-replication-sqlite", config: { file: ":memory:" } },
+        { use: "@michaelthielemann/kestrel-backup-blobstore", config: { file: "./data/kestrel.db" }, defaults: { from: "host", values: { allowConcurrentProcesses: true } } },
+      ],
+    });
+    expect(await singleProcessRule.check(contextFor(p))).toEqual([]);
+  });
+
   const publishing = {
     triggers: [{ event: "page.updated", pipeline: "publishPage" }],
     pipelines: [{ name: "publishPage", steps: ["delivery.publish:pages", "delivery.exportLlms"] }],
@@ -768,6 +808,11 @@ describe("info rules", () => {
   it("types/breaking-signatures names what the media trash changed", async () => {
     const findings = await typeSignaturesRule.check(contextFor(await project({})));
     for (const part of ["MediaStatus gained trashed", "MediaItem gained trashedAt and trashVersion, and its location may be null", "Media gained trash, trashFolder, restore, listTrash, trashIds, selectTrash and purge", "Images gained hide, show and hidden"]) expect(findings[0]?.message).toContain(part);
+  });
+
+  it("types/breaking-signatures names the checksum of the bytes as uploaded that removing metadata adds", async () => {
+    const findings = await typeSignaturesRule.check(contextFor(await project({})));
+    expect(findings[0]?.message).toContain("MediaItem gained sourceChecksum");
   });
 
   it("types/breaking-signatures names what focus and crop changed", async () => {

@@ -1,8 +1,10 @@
+import { effectiveModuleConfig } from "@michaelthielemann/kestrel";
 import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
 import { isRecord } from "./guards.ts";
 import type { Rule, SourceRule } from "./plugin.ts";
 import type { Finding } from "./report.ts";
 import { hasModule, infoFinding, localModuleFiles, moduleEntry, upgradingDocs } from "./ruleHelpers.ts";
+import { useToken } from "./useToken.ts";
 
 const PUBLISH_STEPS = ["delivery.publish", "delivery.unpublish"];
 
@@ -73,7 +75,7 @@ export const typeSignaturesRule: SourceRule = {
   needs: "source",
   check() {
     return [
-      infoFinding("types/breaking-signatures", "types/breaking-signatures", "Deps.eventTriggers, Introspection.health(), PipelineDefinition[\"steps\"] (readonly PipelineEntry[]), ModuleManifest.atomicScope, FakePersistence's atomic members, Manifest.warnings and Kestrel[\"contracts\"].names() are all required now. Media: Media lost migrateKeys, gained serveFile, syncPublic, toPublicItem, publicCopyEnabled, anonymousListAllowed, sanitizesSvg and attach, and upload takes a fourth svgSanitized argument; MediaItem gained location and svgSanitized. Images: Images gained plan, syncPublic, publicCopyEnabled, variantCounts and attach, and its Renderer takes a third planned argument; VariantState gained planned. Reading media through media@1: createImages takes deps.media (a media@1 provider) and images-default's Config lost media; Media extends MediaFiles (file, files, load, scan, count); MediaStatus gained removing. The media trash: MediaStatus gained trashed; MediaItem gained trashedAt and trashVersion, and its location may be null; Media gained trash, trashFolder, restore, listTrash, trashIds, selectTrash and purge; Images gained hide, show and hidden. Focus and crop: Images gained setFraming and framingsOf; Variant gained crop, renderedCrop, renders, originalWidth and originalHeight; Planned gained crop, and a Renderer passed as deps.render must cut planned.crop from the oriented original before it resizes. Config schemas: ModuleDefinition[\"configSchema\"] and defineModule's configSchema are zod 4 schemas (zod ^4.6.6)", "run your own typecheck after installing the 6.0.0 packages; a hand-built implementation of any of these needs the new members", {}, upgradingDocs("types-breaking-signatures")),
+      infoFinding("types/breaking-signatures", "types/breaking-signatures", "Deps.eventTriggers, Introspection.health(), PipelineDefinition[\"steps\"] (readonly PipelineEntry[]), ModuleManifest.atomicScope, FakePersistence's atomic members, Manifest.warnings and Kestrel[\"contracts\"].names() are all required now. Media: Media lost migrateKeys, gained serveFile, syncPublic, toPublicItem, publicCopyEnabled, anonymousListAllowed, sanitizesSvg and attach, and upload takes a fourth svgSanitized argument; MediaItem gained location and svgSanitized. Removing upload metadata: MediaItem gained sourceChecksum (the sha256 of the bytes as uploaded when removing their metadata changed them, else null). Images: Images gained plan, syncPublic, publicCopyEnabled, variantCounts and attach, and its Renderer takes a third planned argument; VariantState gained planned. Reading media through media@1: createImages takes deps.media (a media@1 provider) and images-default's Config lost media; Media extends MediaFiles (file, files, load, scan, count); MediaStatus gained removing. The media trash: MediaStatus gained trashed; MediaItem gained trashedAt and trashVersion, and its location may be null; Media gained trash, trashFolder, restore, listTrash, trashIds, selectTrash and purge; Images gained hide, show and hidden. Focus and crop: Images gained setFraming and framingsOf; Variant gained crop, renderedCrop, renders, originalWidth and originalHeight; Planned gained crop, and a Renderer passed as deps.render must cut planned.crop from the oriented original before it resizes. Config schemas: ModuleDefinition[\"configSchema\"] and defineModule's configSchema are zod 4 schemas (zod ^4.6.6)", "run your own typecheck after installing the 6.0.0 packages; a hand-built implementation of any of these needs the new members", {}, upgradingDocs("types-breaking-signatures")),
     ];
   },
 };
@@ -164,6 +166,30 @@ export const restoreFreshnessRule: Rule = {
   },
 };
 
+const LOCKING_MODULES = ["persistence-sqlite", "replication-sqlite", "backup-blobstore"];
+
+function takesNoLock(file: unknown): boolean {
+  return file === ":memory:" || file === "" || (typeof file === "string" && file.startsWith("file:") && /(^file::memory:|[?&]mode=memory(&|$))/.test(file));
+}
+
+/** `runtime/single-process`: persistence-sqlite, replication-sqlite and backup-blobstore take an instance lock on their database file at setup, so a second process on the same file fails boot with `instance-locked`. */
+export const singleProcessRule: Rule = {
+  id: "runtime/single-process",
+  check(ctx) {
+    const findings: Finding[] = [];
+    for (const entry of ctx.project.input.config.modules) {
+      if (!LOCKING_MODULES.includes(useToken(entry.use))) continue;
+      const config = effectiveModuleConfig(entry);
+      const file = isRecord(config) ? config.file : undefined;
+      if (isRecord(config) && config.allowConcurrentProcesses === true) continue;
+      if (takesNoLock(file)) continue;
+      const lockFile = typeof file === "string" ? `${file}.instance` : "<file>.instance";
+      findings.push(infoFinding(`runtime/single-process:${entry.use}`, "runtime/single-process", `${entry.use} takes an instance lock on its database file at setup: a sidecar ${lockFile} next to the database, never a row inside it; a second process on the same file fails boot with instance-locked, naming the process that holds the lock`, "run one process per database file and stop the old process before the new one starts; a lock left by a killed process is taken over 60 s after its last heartbeat. Set allowConcurrentProcesses: true only where several processes share the file on purpose", { module: entry.use }, upgradingDocs("runtime-single-process")));
+    }
+    return findings;
+  },
+};
+
 /** `delivery/dependents`: a `delivery-static` project that publishes on events but does not mark dependent outputs refreshes a page only when that page itself is saved. */
 export const deliveryDependentsRule: Rule = {
   id: "delivery/dependents",
@@ -197,4 +223,4 @@ export const trustedProxiesRule: Rule = {
   },
 };
 
-export const INFO_RULES: readonly Rule[] = [deliveryMembersRule, busHandlerThrowsRule, busSubscriberQueueRule, typeSignaturesRule, breakingStepShapesRule, ctxDoneTerminalOutputRule, runPipelineValidatesRule, restoreFreshnessRule, deliveryDependentsRule, trustedProxiesRule];
+export const INFO_RULES: readonly Rule[] = [deliveryMembersRule, busHandlerThrowsRule, busSubscriberQueueRule, typeSignaturesRule, breakingStepShapesRule, ctxDoneTerminalOutputRule, runPipelineValidatesRule, restoreFreshnessRule, singleProcessRule, deliveryDependentsRule, trustedProxiesRule];
