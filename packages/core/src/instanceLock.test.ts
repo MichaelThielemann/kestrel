@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
@@ -96,6 +96,22 @@ describe("instanceLockFile", () => {
 
   it("names the same sidecar for every spelling of the same file", () => {
     expect(instanceLockFile(join(dir, ".", "sub", "..", "app.db"))).toBe(instanceLockFile(file));
+  });
+
+  it("follows a symlinked database file whose target does not exist yet, so the lock stays the same once it is created", () => {
+    mkdirSync(join(dir, "vol"));
+    mkdirSync(join(dir, "data"));
+    symlinkSync(join("..", "vol", "app.db"), join(dir, "data", "app.db"));
+    const before = instanceLockFile(join(dir, "data", "app.db"));
+    expect(before).toBe(`${join(dir, "vol", "app.db")}.instance`);
+    writeFileSync(join(dir, "vol", "app.db"), "");
+    expect(instanceLockFile(join(dir, "data", "app.db"))).toBe(before);
+    expect(instanceLockFile(join(dir, "vol", "app.db"))).toBe(before);
+  });
+
+  it("follows a symlinked directory whose target does not exist yet", () => {
+    symlinkSync("missing", join(dir, "link"));
+    expect(instanceLockFile(join(dir, "link", "app.db"))).toBe(`${join(dir, "missing", "app.db")}.instance`);
   });
 });
 

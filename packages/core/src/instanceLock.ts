@@ -57,6 +57,7 @@ const ATTEMPTS = 20;
 const RETRY_PAUSE_MS = 20;
 const GUARD_STALE_MS = 5_000;
 const SAME_PROCESS_SLACK_MS = 1_000;
+const MAX_LINK_HOPS = 40;
 const HOLDERS_KEY = Symbol.for("kestrel.instanceLocks");
 
 const holders = sharedHolders();
@@ -86,7 +87,8 @@ function pidNamespace(): string {
 
 /**
  * The lock file for a database file: the file's real path with `.instance` appended, resolved
- * through symlinks so that every spelling of one database names the same lock. The lock also
+ * through symlinks, including ones whose target does not exist yet, so that every spelling of
+ * one database names the same lock before and after the database file is created. The lock also
  * writes short-lived siblings whose names start with this path. None of them belongs in a
  * replica, snapshot or backup of the database.
  */
@@ -130,19 +132,25 @@ export function acquireInstanceLock(file: string, opts: InstanceLockOptions): In
   };
 }
 
-function canonicalPath(file: string): string {
+function canonicalPath(file: string, hops = 0): string {
   const absolute = resolve(file);
-  const tail: string[] = [];
-  let head = absolute;
-  for (;;) {
-    try {
-      return join(realpathSync(head), ...tail);
-    } catch {
-      const parent = dirname(head);
-      if (parent === head) return absolute;
-      tail.unshift(basename(head));
-      head = parent;
-    }
+  try {
+    return realpathSync(absolute);
+  } catch {
+    const parent = dirname(absolute);
+    if (parent === absolute) return absolute;
+    const path = join(canonicalPath(parent, hops), basename(absolute));
+    const target = linkTarget(path);
+    if (target === undefined || hops >= MAX_LINK_HOPS) return path;
+    return canonicalPath(resolve(dirname(path), target), hops + 1);
+  }
+}
+
+function linkTarget(path: string): string | undefined {
+  try {
+    return readlinkSync(path);
+  } catch {
+    return undefined;
   }
 }
 
