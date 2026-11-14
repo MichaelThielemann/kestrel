@@ -10,7 +10,8 @@
   "exports": {
     ".": "./module.ts",
     "./impl": "./impl.ts",
-    "./framing": "./framing.ts"
+    "./framing": "./framing.ts",
+    "./storage": "./storage.ts"
   },
   "publishConfig": {
     "exports": {
@@ -25,6 +26,10 @@
       "./framing": {
         "types": "./dist/framing.d.ts",
         "default": "./dist/framing.js"
+      },
+      "./storage": {
+        "types": "./dist/storage.d.ts",
+        "default": "./dist/storage.js"
       }
     }
   },
@@ -47,6 +52,7 @@
     "@michaelthielemann/kestrel": "workspace:*",
     "@michaelthielemann/kestrel-contracts": "workspace:*",
     "@michaelthielemann/kestrel-media-default": "workspace:*",
+    "@michaelthielemann/kestrel-persistence-sqlite": "workspace:*",
     "vitest": "^4.1.12"
   },
   "repository": {

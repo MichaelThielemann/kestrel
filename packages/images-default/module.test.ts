@@ -106,7 +106,7 @@ function addImage(media: FakeMedia, id: string, data: Uint8Array, contentType = 
 describe("images/default configSchema", () => {
   it("applies defaults", () => {
     const parsed = configSchema.parse({});
-    expect(parsed).toEqual({ prefix: "media-variants/", publicPath: "/media", chunk: 20, staleAfterMs: 60000, maxAttempts: 5, renderTimeoutMs: 30000 });
+    expect(parsed).toEqual({ prefix: "media-variants/", publicPath: "/media", chunk: 20, staleAfterMs: 60000, maxAttempts: 5, renderTimeoutMs: 30000, storageMigrations: "check" });
     expect(parsed.publicCopy).toBeUndefined();
   });
 
@@ -124,7 +124,7 @@ describe("images/default configSchema", () => {
   });
 
   it("rejects a renderTimeoutMs that is not less than staleAfterMs, so a render ends before its lease on the item runs out", () => {
-    const parsed = configSchema.safeParse({ staleAfterMs: 30000, renderTimeoutMs: 30000 });
+    const parsed = configSchema.safeParse({ staleAfterMs: 30000, renderTimeoutMs: 30000, storageMigrations: "check" });
     expect(parsed.success).toBe(false);
     expect(parsed.error?.issues[0]).toMatchObject({ path: ["renderTimeoutMs"], message: "renderTimeoutMs must be less than staleAfterMs" });
     expect(configSchema.safeParse({ staleAfterMs: 30001, renderTimeoutMs: 30000 }).success).toBe(true);

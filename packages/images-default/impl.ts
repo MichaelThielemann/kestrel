@@ -29,6 +29,12 @@ export const HIDDEN = "images_hidden";
 export const FRAMING = "images_framing";
 export const ITEMS = "images_items";
 
+/** The schema of {@link VARIANTS} this release reads and writes. */
+export const VARIANTS_SCHEMA: Schema = { mediaId: "string", size: "string", slot: { type: "string", unique: true }, spec: "string", width: "number", height: "number", format: "string", key: "string", bytes: "number", state: "string", error: "json", attempts: "number", updatedAt: "number", crop: "string", renderedCrop: "string", renders: "number", originalWidth: "number", originalHeight: "number" };
+
+/** The schema of {@link RETIRED} this release reads and writes. */
+export const RETIRED_SCHEMA: Schema = { mediaId: "string", file: "string", slot: { type: "string", unique: true }, retiredAt: "number" };
+
 /** Every collection this module stores; the persistence handle it is given reaches these and no other. */
 export const COLLECTIONS: readonly string[] = [SIZES, VARIANTS, JOBS, RETIRED, HIDDEN, FRAMING, ITEMS];
 
@@ -45,7 +51,7 @@ const VARIANTS_CHANGED = "images.variantsChanged";
 const UNDECODABLE = "cannot decode";
 const TIMED_OUT = "render timed out";
 
-export type Config = z.output<typeof configSchema>;
+export type Config = Omit<z.output<typeof configSchema>, "storageMigrations">;
 
 export type VariantState = "planned" | "pending" | "done" | "error" | "failed";
 
@@ -341,9 +347,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
 
   const collections: Array<[string, Schema]> = [
     [SIZES, { name: "string", width: "number", height: "number", fit: "string", format: "string", quality: "number", source: "string", updatedAt: "number" }],
-    [VARIANTS, { mediaId: "string", size: "string", slot: { type: "string", unique: true }, spec: "string", width: "number", height: "number", format: "string", key: "string", bytes: "number", state: "string", error: "json", attempts: "number", updatedAt: "number", crop: "string", renderedCrop: "string", renders: "number", originalWidth: "number", originalHeight: "number" }],
+    [VARIANTS, VARIANTS_SCHEMA],
     [JOBS, { state: "string", total: "number", done: "number", failed: "number", cursor: "string", startedAt: "number", updatedAt: "number", finishedAt: "json", error: "json" }],
-    [RETIRED, { mediaId: "string", file: "string", slot: { type: "string", unique: true }, retiredAt: "number" }],
+    [RETIRED, RETIRED_SCHEMA],
     [HIDDEN, { mediaId: { type: "string", unique: true }, hidden: "boolean", version: "number", updatedAt: "number" }],
     [FRAMING, { mediaId: { type: "string", unique: true }, focus: "json", crops: "json", width: "number", height: "number", updatedAt: "number" }],
     [ITEMS, { mediaId: { type: "string", unique: true }, writer: "string", writerUntil: "number", request: "string", redo: "boolean", updatedAt: "number" }],
@@ -357,7 +363,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const unslotted = await db.count(collection, { slot: { eq: null } });
     if (isErr(unslotted)) throw new Error(`images/default: cannot check "${collection}": ${unslotted.error.message}`);
     if (unslotted.value > 0) {
-      throw new Error(`images/default: ${unslotted.value} row(s) in "${collection}" have no slot – they were written before 6.0.0 and this version does not read them; start with empty "${VARIANTS}" and "${RETIRED}" collections`);
+      throw new Error(`images/default: ${unslotted.value} row(s) in "${collection}" have no slot – they were written before 6.0.0 and this version does not read them; convert them with the storage migration images-default:variant-slots: set storageMigrations: "apply", or run \`kestrel upgrade migrate --db <file> --blobs-dir <dir>\` on a copy of the data`);
     }
   }
 

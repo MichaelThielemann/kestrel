@@ -12,6 +12,8 @@ import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import type { FramingView } from "./framed.ts";
 import { parseCrop, type PixelCrop } from "./framing.ts";
 import { eligible } from "./generate.ts";
+import { guardStorage } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
+import { storage } from "./storage.ts";
 import { COLLECTIONS, DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, createImages, type Images, type Variant, type VariantCounts } from "./impl.ts";
 import { sizeSchema } from "./sizes.ts";
 
@@ -30,6 +32,7 @@ export const configSchema = z
     staleAfterMs: z.number().int().positive().default(60000),
     maxAttempts: z.number().int().positive().default(DEFAULT_MAX_ATTEMPTS),
     renderTimeoutMs: z.number().int().positive().default(DEFAULT_RENDER_TIMEOUT_MS),
+    storageMigrations: z.enum(["check", "apply"]).default("check").describe('What setup does with stored data in an older storage shape: "check" refuses to start and names the migration, "apply" runs images-default:variant-slots at start-up'),
   })
   .strict()
   .refine((config) => config.renderTimeoutMs < config.staleAfterMs, { message: "renderTimeoutMs must be less than staleAfterMs", path: ["renderTimeoutMs"] });
@@ -108,6 +111,8 @@ export default defineModule({
   configSchema,
 
   async setup(config, deps): Promise<Images> {
+    const guarded = await guardStorage(storage(), { db: deps.get(PERSISTENCE), blobs: deps.get(BLOBSTORE), mode: config.storageMigrations });
+    if (isErr(guarded)) throw new Error(guarded.error.message);
     const bus = deps.find(EVENTS);
     const db = ownedPersistence(deps.get(PERSISTENCE), "images/default", COLLECTIONS);
     return createImages(config, { blobs: deps.get(BLOBSTORE), db, media: deps.get(MEDIA), logger: deps.logger, ...(bus ? { events: bus } : {}) });
