@@ -1093,6 +1093,7 @@
         "authn.loadIdentity",
         "authn.logout",
         "authn.verifyUser",
+        "authn.requireAbsentUser",
         "authn.createUser",
         "authn.listUsers",
         "authn.getUser",
@@ -8474,6 +8475,22 @@
       }
     },
     {
+      "name": "authn.requireAbsentUser",
+      "module": "authn/multi",
+      "factory": false,
+      "description": {
+        "summary": "Require that params.id names no user, active or not; the guard of the routes that clean up after a deleted user",
+        "reads": [
+          "params.id"
+        ],
+        "writes": [],
+        "errors": {
+          "409": "the user still exists"
+        },
+        "atomicSafe": true
+      }
+    },
+    {
       "name": "authn.createUser",
       "module": "authn/multi",
       "factory": false,
@@ -13831,6 +13848,27 @@
     },
     {
       "name": "auditAuth",
+      "steps": [
+        {
+          "spec": "audit.record",
+          "name": "audit.record",
+          "module": "audit/persistence",
+          "description": {
+            "summary": "Persist an audit log entry for an emitted event",
+            "reads": [
+              "payload"
+            ],
+            "writes": [],
+            "input": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "auditUsers",
       "steps": [
         {
           "spec": "audit.record",
@@ -28370,6 +28408,22 @@
           }
         },
         {
+          "spec": "authn.requireAbsentUser",
+          "name": "authn.requireAbsentUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require that params.id names no user, active or not; the guard of the routes that clean up after a deleted user",
+            "reads": [
+              "params.id"
+            ],
+            "writes": [],
+            "errors": {
+              "409": "the user still exists"
+            },
+            "atomicSafe": true
+          }
+        },
+        {
           "spec": "audit.anonymize",
           "name": "audit.anonymize",
           "module": "audit/persistence",
@@ -28399,6 +28453,100 @@
             },
             "errors": {
               "400": "no user id"
+            }
+          }
+        },
+        {
+          "spec": "events.emit:user.auditAnonymizeRetried",
+          "name": "events.emit",
+          "module": "events/direct",
+          "description": {
+            "summary": "Emit event \"user.auditAnonymizeRetried\" to every subscribed handler pipeline and wait for them",
+            "reads": [],
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
+          }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending",
+                        "queued"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending",
+                              "queued"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
             }
           }
         }
@@ -28618,6 +28766,22 @@
           }
         },
         {
+          "spec": "authn.requireAbsentUser",
+          "name": "authn.requireAbsentUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require that params.id names no user, active or not; the guard of the routes that clean up after a deleted user",
+            "reads": [
+              "params.id"
+            ],
+            "writes": [],
+            "errors": {
+              "409": "the user still exists"
+            },
+            "atomicSafe": true
+          }
+        },
+        {
           "spec": "authn.verifyUser:reassignTo",
           "name": "authn.verifyUser",
           "module": "authn/multi",
@@ -28716,6 +28880,100 @@
               "400": "no user id, or the former author again"
             },
             "atomicSafe": true
+          }
+        },
+        {
+          "spec": "events.emit:user.revisionsReassignRetried",
+          "name": "events.emit",
+          "module": "events/direct",
+          "description": {
+            "summary": "Emit event \"user.revisionsReassignRetried\" to every subscribed handler pipeline and wait for them",
+            "reads": [],
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
+          }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending",
+                        "queued"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending",
+                              "queued"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
+            }
           }
         }
       ]
@@ -33687,6 +33945,14 @@
       {
         "event": "user.deleted",
         "pipeline": "anonymizeAuditUser"
+      },
+      {
+        "event": "user.auditAnonymizeRetried",
+        "pipeline": "auditUsers"
+      },
+      {
+        "event": "user.revisionsReassignRetried",
+        "pipeline": "auditUsers"
       }
     ],
     "crons": [

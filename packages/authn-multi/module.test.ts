@@ -71,6 +71,7 @@ const verifyUserEventPipeline = definePipeline({ name: "verifyUserEvent", steps:
 const deleteUserAsAdminPipeline = definePipeline({ name: "deleteUserAsAdmin", steps: ["authn.deleteUser"] });
 const deactivateUserPipeline = definePipeline({ name: "deactivateUser", steps: ["authn.deactivateUser"] });
 const activateUserPipeline = definePipeline({ name: "activateUser", steps: ["authn.activateUser"] });
+const requireAbsentUserPipeline = definePipeline({ name: "requireAbsentUser", steps: ["authn.requireAbsentUser"] });
 const cleanupSessionsPipeline = definePipeline({ name: "cleanupSessions", steps: ["authn.cleanupSessions"] });
 
 describe("authn/multi module steps via runPipeline", () => {
@@ -212,6 +213,26 @@ describe("authn/multi module steps via runPipeline", () => {
     provesObjectBinding("authn/multi", "deleteUser");
   });
 
+  it("requireAbsentUser answers 409 CONFLICT for an active or a deactivated user and passes for an id that names no user", async () => {
+    const { instance } = await boot();
+    const created = await runPipeline(createUserPipeline, { body: { username: "carol", password: "long-enough" } }, { modules: [{ module, instance }] });
+    const id = boundaryCast<{ id: string }>(created.result, "json").id;
+
+    const active = await runPipeline(requireAbsentUserPipeline, { params: { id } }, { modules: [{ module, instance }] });
+    expect(active).toMatchObject({ status: 409, code: "CONFLICT" });
+
+    await runPipeline(deactivateUserPipeline, { params: { id } }, { modules: [{ module, instance }] });
+    const inactive = await runPipeline(requireAbsentUserPipeline, { params: { id } }, { modules: [{ module, instance }] });
+    expect(inactive).toMatchObject({ status: 409, code: "CONFLICT" });
+
+    await runPipeline(deleteUserAsAdminPipeline, { params: { id } }, { modules: [{ module, instance }] });
+    const gone = await runPipeline(requireAbsentUserPipeline, { params: { id } }, { modules: [{ module, instance }] });
+    expect(gone.status).toBe(200);
+
+    const unknown = await runPipeline(requireAbsentUserPipeline, { params: { id: "never-existed" } }, { modules: [{ module, instance }] });
+    expect(unknown.status).toBe(200);
+  });
+
   function verify(pipeline: PipelineDefinition, body: Record<string, unknown>, instance: unknown) {
     return runPipeline(pipeline, { body }, { modules: [{ module, instance }], steps: EXPOSE_VERIFIED_USER, writes: { "test.exposeVerifiedUser": ["result"] } });
   }
@@ -289,7 +310,7 @@ describe("authn/multi: atomicSafe is pinned", () => {
   it("matches the shipped table", async () => {
     const { instance } = await boot();
     const describeMap = boundaryCast<Record<string, StepDescription | ((arg: string) => StepDescription)>>(module.describe!(instance), "host");
-    const expected: Record<string, boolean> = { verifyUser: true, updateUser: true, deactivateUser: true, deleteUser: true, requireUser: false, loadIdentity: false, login: false, logout: false };
+    const expected: Record<string, boolean> = { verifyUser: true, requireAbsentUser: true, updateUser: true, deactivateUser: true, deleteUser: true, requireUser: false, loadIdentity: false, login: false, logout: false };
     for (const [name, expect_] of Object.entries(expected)) {
       const description = describeMap[name];
       const resolved = typeof description === "function" ? description("x") : description;

@@ -79,6 +79,7 @@ prefix).
 | `authn.loadIdentity` | portable |
 | `authn.logout` | portable |
 | `authn.verifyUser` | beside |
+| `authn.requireAbsentUser` | beside |
 | `authn.createUser` | beside |
 | `authn.listUsers` | beside |
 | `authn.getUser` | beside |

@@ -7168,7 +7168,7 @@
     "/admin/users/{id}/audit/anonymize": {
       "post": {
         "operationId": "retryAnonymizeAuditUser",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission users.manage → Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param naming them go, the event and its time stay",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission users.manage → Require that params.id names no user, active or not; the guard of the routes that clean up after a deleted user → Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param naming them go, the event and its time stay → Emit event \"user.auditAnonymizeRetried\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "admin"
         ],
@@ -7177,7 +7177,10 @@
           "authn.requireUser",
           "authz.requireRole",
           "authz.require:users.manage",
-          "audit.anonymize"
+          "authn.requireAbsentUser",
+          "audit.anonymize",
+          "events.emit:user.auditAnonymizeRetried",
+          "events.relay"
         ],
         "parameters": [
           {
@@ -7199,9 +7202,71 @@
                   "properties": {
                     "entries": {
                       "type": "number"
+                    },
+                    "_events": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending",
+                            "queued"
+                          ]
+                        },
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending",
+                                  "queued"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "pipelines"
+                      ]
                     }
                   },
                   "required": [
+                    "_events",
                     "entries"
                   ]
                 }
@@ -7238,8 +7303,18 @@
               }
             }
           },
+          "409": {
+            "description": "the user still exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -7288,7 +7363,7 @@
     "/admin/users/{id}/revisions/reassign": {
       "post": {
         "operationId": "retryReassignRevisionAuthor",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission users.manage → Verify the user reference at payload.reassignTo: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over → Replace the author of every revision written by the user in `params.id` or the event payload's `id`, with the canonical `{ id, name }` a preceding step's `verifiedUser` (e.g. `authn.verifyUser`) verified. Without a target, the anonymous author `{ id: null, name: null }`",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission users.manage → Require that params.id names no user, active or not; the guard of the routes that clean up after a deleted user → Verify the user reference at payload.reassignTo: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over → Replace the author of every revision written by the user in `params.id` or the event payload's `id`, with the canonical `{ id, name }` a preceding step's `verifiedUser` (e.g. `authn.verifyUser`) verified. Without a target, the anonymous author `{ id: null, name: null }` → Emit event \"user.revisionsReassignRetried\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "admin"
         ],
@@ -7297,8 +7372,11 @@
           "authn.requireUser",
           "authz.requireRole",
           "authz.require:users.manage",
+          "authn.requireAbsentUser",
           "authn.verifyUser:reassignTo",
-          "revisions.reassignAuthor"
+          "revisions.reassignAuthor",
+          "events.emit:user.revisionsReassignRetried",
+          "events.relay"
         ],
         "parameters": [
           {
@@ -7341,12 +7419,74 @@
                     },
                     "revisions": {
                       "type": "number"
+                    },
+                    "_events": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending",
+                            "queued"
+                          ]
+                        },
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending",
+                                  "queued"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "pipelines"
+                      ]
                     }
                   },
                   "required": [
+                    "_events",
                     "from",
-                    "to",
-                    "revisions"
+                    "revisions",
+                    "to"
                   ]
                 }
               }
@@ -7392,8 +7532,18 @@
               }
             }
           },
+          "409": {
+            "description": "the user still exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {

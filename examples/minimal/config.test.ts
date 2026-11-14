@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import { boot, defineModule, definePipeline, err, failure, KestrelBootError } from "@michaelthielemann/kestrel";
 import { loadConfig, loadModules, loadPipelines } from "@michaelthielemann/kestrel/load";
 import type { RevisionPage } from "@michaelthielemann/kestrel-contracts/revisions";
-import type { PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
 import { STATUS as DELIVERY_STATUS_COLLECTION } from "@michaelthielemann/kestrel-delivery-static/impl";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { KestrelConfigInput } from "@michaelthielemann/kestrel/defineConfig";
@@ -554,7 +554,10 @@ describe("content model wiring", () => {
   });
 });
 
-async function bootIsolated(withPipelines?: (pipelines: PipelineDefinition[]) => PipelineDefinition[]): Promise<{ kestrel: Awaited<ReturnType<typeof boot>>; blobRoot: string; dispose: () => Promise<void> }> {
+async function bootIsolated(
+  withPipelines?: (pipelines: PipelineDefinition[]) => PipelineDefinition[],
+  capture?: { persistence?: Persistence },
+): Promise<{ kestrel: Awaited<ReturnType<typeof boot>>; blobRoot: string; dispose: () => Promise<void> }> {
   const configInput = await loadConfig(join(root, "kestrel.config.ts"));
   const dataDir = mkdtempSync(join(tmpdir(), "kestrel-minimal-"));
   const isolated: KestrelConfigInput = {
@@ -573,7 +576,18 @@ async function bootIsolated(withPipelines?: (pipelines: PipelineDefinition[]) =>
       return m;
     }),
   };
-  const modules = await loadModules(root, isolated);
+  const loadedModules = await loadModules(root, isolated);
+  const modules = loadedModules.map((mod) => {
+    if (capture === undefined || mod.name !== "persistence/sqlite") return mod;
+    return defineModule({
+      ...mod,
+      async setup(config, deps) {
+        const real = await mod.setup(config, deps);
+        capture.persistence = boundaryCast<Persistence>(real, "host");
+        return real;
+      },
+    });
+  });
   const loaded = await loadPipelines(root, "pipelines");
   const pipelines = withPipelines ? withPipelines(loaded) : loaded;
   const kestrel = await boot({ config: isolated, modules, pipelines, root, validateOutput: true });
@@ -732,6 +746,12 @@ async function revisionsOf(kestrel: Instance, admin: Session, pageId: string): P
   return boundaryCast<RevisionPage>(listed.result, "json");
 }
 
+const withSilentDelete = (pipelines: PipelineDefinition[]): PipelineDefinition[] => [...pipelines, definePipeline({ name: "deleteUserSilently", steps: ["authn.requireUser", "authz.requireRole", "authn.deleteUser"] })];
+
+async function deleteSilently(kestrel: Instance, admin: Session, id: string): Promise<void> {
+  expect((await kestrel.run("deleteUserSilently", { trigger, headers: bearer(admin.token), params: { id } })).status).toBe(200);
+}
+
 async function failedPipelines(kestrel: Instance, admin: Session): Promise<string[]> {
   const stats = await kestrel.run("insightsStats", { trigger, headers: bearer(admin.token) });
   expect(stats.status).toBe(200);
@@ -813,7 +833,7 @@ describe("user deletion wiring", () => {
     const audit = boundaryCast<{ retentionDays?: number }>(config.modules.find((m) => m.use === "@michaelthielemann/kestrel-audit-persistence")!.config, "json");
     expect(audit.retentionDays).toBe(365);
     const events = config.triggers.filter((t) => "event" in t).map((t) => [(t as { event: string }).event, t.pipeline]);
-    expect(events).toEqual(expect.arrayContaining([["user.deleted", "reassignRevisionAuthor"], ["user.deleted", "anonymizeAuditUser"]]));
+    expect(events).toEqual(expect.arrayContaining([["user.deleted", "reassignRevisionAuthor"], ["user.deleted", "anonymizeAuditUser"], ["user.auditAnonymizeRetried", "auditUsers"], ["user.revisionsReassignRetried", "auditUsers"]]));
     const routes = config.triggers.filter((t) => "http" in t).map((t) => [(t as { http: string }).http, t.pipeline]);
     expect(routes).toEqual(
       expect.arrayContaining([
@@ -827,8 +847,9 @@ describe("user deletion wiring", () => {
     expect(pipelines.get("deleteUser")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:users.manage", "authn.deleteUser", "events.emit:user.deleted?with=result", "events.relay"]);
     expect(pipelines.get("reassignRevisionAuthor")).toEqual(["authn.verifyUser:result.reassignTo", "revisions.reassignAuthor"]);
     expect(pipelines.get("anonymizeAuditUser")).toEqual(["audit.anonymize"]);
-    expect(pipelines.get("retryReassignRevisionAuthor")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:users.manage", "authn.verifyUser:reassignTo", "revisions.reassignAuthor"]);
-    expect(pipelines.get("retryAnonymizeAuditUser")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:users.manage", "audit.anonymize"]);
+    expect(pipelines.get("retryReassignRevisionAuthor")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:users.manage", "authn.requireAbsentUser", "authn.verifyUser:reassignTo", "revisions.reassignAuthor", "events.emit:user.revisionsReassignRetried", "events.relay"]);
+    expect(pipelines.get("auditUsers")).toEqual(["audit.record"]);
+    expect(pipelines.get("retryAnonymizeAuditUser")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:users.manage", "authn.requireAbsentUser", "audit.anonymize", "events.emit:user.auditAnonymizeRetried", "events.relay"]);
     expect(pipelines.get("pruneAudit")).toEqual(["audit.prune"]);
   });
 
@@ -875,7 +896,7 @@ describe("user deletion wiring", () => {
 
       const retry = await kestrel.run("retryAnonymizeAuditUser", { trigger: { kind: "http", name: "test" }, headers: bearer(admin.token), params: { id: editor.id } });
       expect(retry.status).toBe(200);
-      expect(retry.result).toEqual({ entries: 0 });
+      expect(retry.result).toMatchObject({ entries: 0 });
       expect(await failedPipelines(kestrel, admin)).toEqual(["deleteUser"]);
     } finally {
       await dispose();
@@ -883,7 +904,7 @@ describe("user deletion wiring", () => {
   });
 
   it("retryReassignRevisionAuthor rejects an unknown or inactive target and leaves revisions unchanged", async () => {
-    const { kestrel, dispose } = await bootIsolated();
+    const { kestrel, dispose } = await bootIsolated(withSilentDelete);
     try {
       const admin = await login(kestrel, "admin", "kestrel-demo");
       const editor = await createEditor(kestrel, admin, "erin");
@@ -891,6 +912,7 @@ describe("user deletion wiring", () => {
       const pageId = await createPage(kestrel, editorSession, "erin-page");
       const inactive = await createEditor(kestrel, admin, "fay");
       await kestrel.run("deactivateUser", { trigger, headers: bearer(admin.token), params: { id: inactive.id } });
+      await deleteSilently(kestrel, admin, editor.id);
 
       const unknown = await kestrel.run("retryReassignRevisionAuthor", {
         trigger,
@@ -918,13 +940,14 @@ describe("user deletion wiring", () => {
   });
 
   it("retryReassignRevisionAuthor writes the canonical name even when the payload names a different one", async () => {
-    const { kestrel, dispose } = await bootIsolated();
+    const { kestrel, dispose } = await bootIsolated(withSilentDelete);
     try {
       const admin = await login(kestrel, "admin", "kestrel-demo");
       const editor = await createEditor(kestrel, admin, "gus");
       const editorSession = await login(kestrel, "gus", "long-enough");
       const pageId = await createPage(kestrel, editorSession, "gus-page");
       const target = await createEditor(kestrel, admin, "hana");
+      await deleteSilently(kestrel, admin, editor.id);
 
       const reassigned = await kestrel.run("retryReassignRevisionAuthor", {
         trigger,
@@ -943,11 +966,12 @@ describe("user deletion wiring", () => {
   });
 
   it("retryReassignRevisionAuthor accepts a bare id or { id } alone, name is never required", async () => {
-    const { kestrel, dispose } = await bootIsolated();
+    const { kestrel, dispose } = await bootIsolated(withSilentDelete);
     try {
       const admin = await login(kestrel, "admin", "kestrel-demo");
       const editor = await createEditor(kestrel, admin, "ivy");
       const target = await createEditor(kestrel, admin, "jill");
+      await deleteSilently(kestrel, admin, editor.id);
 
       const bareId = await kestrel.run("retryReassignRevisionAuthor", { trigger, headers: bearer(admin.token), params: { id: editor.id }, payload: { reassignTo: target.id }, body: { reassignTo: target.id } });
       expect(bareId.status).toBe(200);
@@ -968,10 +992,11 @@ describe("user deletion wiring", () => {
   });
 
   it("retryReassignRevisionAuthor rejects a reassignTo that is neither a user id, an object with id, nor null", async () => {
-    const { kestrel, dispose } = await bootIsolated();
+    const { kestrel, dispose } = await bootIsolated(withSilentDelete);
     try {
       const admin = await login(kestrel, "admin", "kestrel-demo");
       const editor = await createEditor(kestrel, admin, "kim");
+      await deleteSilently(kestrel, admin, editor.id);
 
       const wrongType = await kestrel.run("retryReassignRevisionAuthor", { trigger, headers: bearer(admin.token), params: { id: editor.id }, payload: { reassignTo: 7 }, body: { reassignTo: 7 } });
       expect(wrongType.status).toBe(400);
@@ -1319,6 +1344,71 @@ describe("the last-admin guard holds under concurrent requests", () => {
         kestrel.run("deleteUser", { trigger, headers: bearer(second.session.token), params: { id: first.identity.id } }),
       ]);
       expect([a.status, b.status].sort()).toEqual([200, 409]);
+    } finally {
+      await dispose();
+    }
+  });
+});
+
+describe("the retry routes act only on the id of a deleted user", () => {
+  interface AuditRow {
+    event: string;
+    identityId: string | null;
+    params: Record<string, string>;
+  }
+
+  async function auditRows(capture: { persistence?: Persistence }): Promise<AuditRow[]> {
+    const found = await capture.persistence!.findMany<AuditRow & { id: string }>("audit_entries", {}, { sort: { at: "asc" } });
+    expect(found.ok).toBe(true);
+    return found.ok ? found.value.items.map(({ event, identityId, params }) => ({ event, identityId, params })) : [];
+  }
+
+  it("refuses an active or deactivated user with 409 and leaves audit entries and revisions untouched", async () => {
+    const capture: { persistence?: Persistence } = {};
+    const { kestrel, dispose } = await bootIsolated(undefined, capture);
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const editor = await createEditor(kestrel, admin, "gina");
+      const editorSession = await login(kestrel, "gina", "long-enough");
+      const pageId = await createPage(kestrel, editorSession, "gina-page");
+      const sleeper = await createEditor(kestrel, admin, "hal");
+      await kestrel.run("deactivateUser", { trigger, headers: bearer(admin.token), params: { id: sleeper.id } });
+      const before = await auditRows(capture);
+
+      for (const target of [editor.id, sleeper.id, admin.identity.id]) {
+        const anonymize = await kestrel.run("retryAnonymizeAuditUser", { trigger, headers: bearer(admin.token), params: { id: target } });
+        expect(anonymize).toMatchObject({ status: 409, code: "CONFLICT" });
+        const reassignBody = { reassignTo: admin.identity.id };
+        const reassign = await kestrel.run("retryReassignRevisionAuthor", { trigger, headers: bearer(admin.token), params: { id: target }, payload: reassignBody, body: reassignBody });
+        expect(reassign).toMatchObject({ status: 409, code: "CONFLICT" });
+      }
+
+      expect(await auditRows(capture)).toEqual(before);
+      const revisions = await revisionsOf(kestrel, admin, pageId);
+      expect(revisions.items[0]?.author).toEqual({ id: editor.id, name: "gina" });
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("runs for a deleted user and records who called it", async () => {
+    const capture: { persistence?: Persistence } = {};
+    const { kestrel, dispose } = await bootIsolated(undefined, capture);
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const editor = await createEditor(kestrel, admin, "ines");
+      const deleted = await kestrel.run("deleteUser", { trigger, headers: bearer(admin.token), params: { id: editor.id } });
+      expect(deleted.status).toBe(200);
+
+      const anonymize = await kestrel.run("retryAnonymizeAuditUser", { trigger, headers: bearer(admin.token), params: { id: editor.id } });
+      expect(anonymize.status).toBe(200);
+      const reassignBody = { reassignTo: admin.identity.id };
+      const reassign = await kestrel.run("retryReassignRevisionAuthor", { trigger, headers: bearer(admin.token), params: { id: editor.id }, payload: reassignBody, body: reassignBody });
+      expect(reassign.status).toBe(200);
+
+      const rows = await auditRows(capture);
+      expect(rows.filter((row) => row.event === "user.auditAnonymizeRetried")).toEqual([{ event: "user.auditAnonymizeRetried", identityId: admin.identity.id, params: { id: editor.id } }]);
+      expect(rows.filter((row) => row.event === "user.revisionsReassignRetried")).toEqual([{ event: "user.revisionsReassignRetried", identityId: admin.identity.id, params: { id: editor.id } }]);
     } finally {
       await dispose();
     }

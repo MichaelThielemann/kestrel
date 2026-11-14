@@ -192,6 +192,8 @@ export default defineConfig({
     { event: "auth.loggedOut", pipeline: "auditAuth" },
     { event: "user.deleted", pipeline: "reassignRevisionAuthor" },
     { event: "user.deleted", pipeline: "anonymizeAuditUser" },
+    { event: "user.auditAnonymizeRetried", pipeline: "auditUsers" },
+    { event: "user.revisionsReassignRetried", pipeline: "auditUsers" },
     { cron: "45 3 * * *", pipeline: "pruneAudit" },
   ],
   http: { port: 4000, host: "127.0.0.1", corsOrigin: "http://localhost:3000", inlineTypes: ["image/svg+xml"] },

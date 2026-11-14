@@ -93,7 +93,9 @@ started by an event, from the payload's `id`, and the target from `verifiedUser`
 from `payload.result.reassignTo`. A pipeline that runs `revisions.reassignAuthor` without such a
 preceding step fails to boot. It answers `{ from, to, revisions }`, is idempotent (a second run
 finds nothing left to move and reports `revisions: 0`) and can therefore be re-run by hand after a
-failure, through an admin route of its own.
+failure, through an admin route of its own. That route must run `authn.requireAbsentUser` before
+`authn.verifyUser`: the step rewrites the author of whatever id it is given, so on an existing user
+it would take their revisions away.
 
 **Steps.** `revisions.record:<collection>` after `content.create`/`content.update`,
 `revisions.restore:<collection>` before the ordinary update chain (it only fills the body, the
@@ -142,7 +144,7 @@ Pipelines in `examples/minimal` using these steps:
 - **pruneRevisions** (cron 15 3 * * *): **`revisions.prune`**
 - **reassignRevisionAuthor** (event user.deleted): `authn.verifyUser:result.reassignTo` → **`revisions.reassignAuthor`**
 - **restorePageRevision** (POST /admin/pages/:id/revisions/:revisionId/restore): `authn.requireUser` → `authz.requireRole` → `authz.require:pages.write` → **`revisions.restore:pages`** → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → [ `references.check:pages` → `content.update:pages` → **`revisions.record:pages`** → `references.index:pages` → `links.extract:pages` → `site.indexPath:pages` ] → `site.announcePaths` → **`revisions.reportRestore`** → `events.emit:page.restored` → `events.relay`
-- **retryReassignRevisionAuthor** (POST /admin/users/:id/revisions/reassign): `authn.requireUser` → `authz.requireRole` → `authz.require:users.manage` → `authn.verifyUser:reassignTo` → **`revisions.reassignAuthor`**
+- **retryReassignRevisionAuthor** (POST /admin/users/:id/revisions/reassign): `authn.requireUser` → `authz.requireRole` → `authz.require:users.manage` → `authn.requireAbsentUser` → `authn.verifyUser:reassignTo` → **`revisions.reassignAuthor`** → `events.emit:user.revisionsReassignRetried` → `events.relay`
 - **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.requireRole` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → [ `references.check:pages` → `content.update:pages` → **`revisions.record:pages`** → `references.index:pages` → `links.extract:pages` → `site.indexPath:pages` ] → `site.announcePaths` → `events.emit:page.updated` → `events.relay`
 
 <!-- kestrel-docs:end -->

@@ -113,6 +113,14 @@ export default defineModule({
       if (!user.value.active) return ctx.fail("VALIDATION", `authn.verifyUser:${path}: user is not active`);
       return ok({ ...ctx, verifiedUser: { id: user.value.id, name: user.value.username } });
     }),
+    requireAbsentUser: async (ctx: Context) => {
+      const id = ctx.params.id;
+      if (id === undefined) throw new Error("authn.requireAbsentUser: no params.id (boot's dataflow check already proved this route always provides it)");
+      const user = await authn.getUser(id);
+      if (isErr(user)) return ctx.fail(user.error);
+      if (user.value) return ctx.fail("CONFLICT", `user ${id} still exists`);
+      return ok(ctx);
+    },
     createUser: async (ctx: Context) => {
       const username = str(ctx.payload.username);
       const password = str(ctx.payload.password);
@@ -258,6 +266,13 @@ export default defineModule({
       errors: { 400: "the value is neither a user id, { id } nor null, or the user is not active", 404: "user not found" },
       atomicSafe: true,
     }),
+    requireAbsentUser: {
+      summary: "Require that params.id names no user, active or not; the guard of the routes that clean up after a deleted user",
+      reads: ["params.id"],
+      writes: [],
+      errors: { 409: "the user still exists" },
+      atomicSafe: true,
+    },
     createUser: {
       summary: "Create a user",
       reads: [],

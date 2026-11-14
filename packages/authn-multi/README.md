@@ -117,6 +117,7 @@ concerns), an e-mail field.
 | `authn.loadIdentity` | Current identity | `identity` | `result` | – | { id: string, claims: object, … } | 401 not authenticated | portable | no |
 | `authn.logout` | End the current session and remove the session cookie | `token` | `responseHeaders`, `result` | – | { ok: boolean, … } | 401 not authenticated | portable | no |
 | `authn.verifyUser:<arg>` | Verify the user reference at payload.<arg>: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over | `payload.<arg>` | `verifiedUser` | { <arg>?: string \| object \| null, … } | – | 400 the value is neither a user id, { id } nor null, or the user is not active; 404 user not found | beside | yes |
+| `authn.requireAbsentUser` | Require that params.id names no user, active or not; the guard of the routes that clean up after a deleted user | `params.id` | – | – | – | 409 the user still exists | beside | yes |
 | `authn.createUser` | Create a user | – | `result` | { username: string, password: string, roles?: string[] } | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 400 invalid input; 409 username already exists | beside | no |
 | `authn.listUsers` | List users | – | `result` | – | object[] | – | beside | no |
 | `authn.getUser` | One user | `params.id` | `result` | – | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 404 user not found | beside | no |
@@ -131,6 +132,6 @@ concerns), an e-mail field.
 | `authn.requireRecentAuth:<arg>` | Require that the session's password was checked within the last <arg> seconds, at login or through authn.confirmPassword; otherwise 403 REAUTH_REQUIRED | `token` | – | – | – | 401 not authenticated; 403 the last password check is older than the window (`REAUTH_REQUIRED`) | beside | no |
 | `authn.confirmPassword` | Confirm the caller's password; marks the session as freshly authenticated for authn.requireRecentAuth | `token` | `result` | { password: string } | { ok: boolean, … } | 400 the password is missing or wrong; 401 not authenticated | beside | no |
 
-Used by 86 of 110 pipelines in `examples/minimal`.
+Used by 86 of 111 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

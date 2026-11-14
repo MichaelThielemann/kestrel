@@ -10,7 +10,10 @@ carries a user id (who was acted upon); no username, no token, no body. `audit.a
 both for one user — `identityId` becomes `null` and every param naming them is dropped, while the
 event and its time stay, so the log keeps telling that something happened without telling who. An
 entry is never moved to another user: a login belongs to nobody else. Run it from a pipeline on
-`user.deleted`; it is idempotent, so a failed run can simply be repeated from an admin route.
+`user.deleted`; it is idempotent, so a failed run can simply be repeated from an admin route. That
+route must run `authn.requireAbsentUser` first: the step acts on whatever id it is given, so on an
+existing user it would erase their trail. Emit an event after the step and record it with
+`audit.record` to keep a trace of who ran the repair.
 
 **Security entries.** With `securityEvents` (default on) the module watches every HTTP run and records,
 without any pipeline: `auth.failed` when one of `failedSteps` failed (default: `authn.login`,
@@ -53,7 +56,8 @@ Pipelines in `examples/minimal` using these steps:
 
 - **anonymizeAuditUser** (event user.deleted): **`audit.anonymize`**
 - **auditAuth** (event auth.loggedIn, event auth.loggedOut): **`audit.record`**
+- **auditUsers** (event user.auditAnonymizeRetried, event user.revisionsReassignRetried): **`audit.record`**
 - **pruneAudit** (cron 45 3 * * *): **`audit.prune`**
-- **retryAnonymizeAuditUser** (POST /admin/users/:id/audit/anonymize): `authn.requireUser` → `authz.requireRole` → `authz.require:users.manage` → **`audit.anonymize`**
+- **retryAnonymizeAuditUser** (POST /admin/users/:id/audit/anonymize): `authn.requireUser` → `authz.requireRole` → `authz.require:users.manage` → `authn.requireAbsentUser` → **`audit.anonymize`** → `events.emit:user.auditAnonymizeRetried` → `events.relay`
 
 <!-- kestrel-docs:end -->
