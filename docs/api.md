@@ -564,8 +564,10 @@ step after it does not run, see [pipelines.md](pipelines.md#event-data)). Which 
 depends on `stripImageMetadata` (default on). While it is on, a JPEG, PNG, WebP or GIF that differs from
 the stored file only in the metadata that is removed on upload is answered as the existing item, because
 it would be stored as the same bytes; this holds for an item that was stored without its metadata. With
-the option off, the checksum of the file as sent decides, and a file with other bytes is a 409, whatever
-its type. The same name with a file that differs in more than that stays a 409 as well; the
+the option off, the checksum of the file as `media.upload` receives it decides, and a file with other
+bytes is a 409. For an SVG that is the file after `sanitize.svg`, with either setting: two SVGs that
+differ only in what the sanitizer removes (prolog, comments, scripts, event handlers) are answered as
+the existing item. The same name with a file that differs in more than that stays a 409 as well; the
 details are in [Image metadata](../packages/media-default/README.md#image-metadata). Deleting an item removes its own copy and blob; nothing else shares
 its id-based key.
 
