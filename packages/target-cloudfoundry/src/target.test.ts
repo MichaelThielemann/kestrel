@@ -541,6 +541,29 @@ await withManifestFiles("applications: []", { storage_secret: ${JSON.stringify(S
       expect(cf.calls.some((argv) => argv[0] === "apply-manifest")).toBe(false);
     });
 
+    it("reads a placeholder with a leading ! by its name, as cf does", async () => {
+      writeFileSync(join(root, "bang.yml"), "applications:\n- name: site-api\n  env:\n    STORAGE_SECRET: ((!storage_secret))\n");
+      const missing = await failure((await target({ manifest: "bang.yml" })).applyManifest());
+      expect(missing.exitCode).toBe(2);
+      expect(missing.message).toContain("((storage_secret))");
+      expect(cf.calls.some((argv) => argv[0] === "apply-manifest")).toBe(false);
+      await (await target({ manifest: "bang.yml", vars: { storage_secret: { env: "APP_STORAGE_SECRET" } } }, { APP_STORAGE_SECRET: SECRET })).applyManifest();
+      const [applied] = cf.applied;
+      if (applied === undefined) throw new Error("nothing applied");
+      expect(JSON.parse(applied.vars)).toEqual({ storage_secret: SECRET });
+    });
+
+    it("refuses with exit 2 before cf runs a placeholder with a dotted path, which cf reads as a field of another variable", async () => {
+      writeFileSync(join(root, "dotted.yml"), "applications:\n- name: site-api\n  env:\n    DATABASE_URL: ((db.url))\n");
+      const error = await failure((await target({ manifest: "dotted.yml", vars: { db: { env: "APP_STORAGE_SECRET" } } }, { APP_STORAGE_SECRET: SECRET })).applyManifest());
+      expect(error.exitCode).toBe(2);
+      expect(error.message).toContain("((db.url))");
+      expect(cf.calls.some((argv) => argv[0] === "apply-manifest")).toBe(false);
+      const dotted = await failure(target({ manifest: "dotted.yml", vars: { "db.url": { env: "APP_STORAGE_SECRET" } } }));
+      expect(dotted.exitCode).toBe(2);
+      expect(dotted.message).toContain("vars");
+    });
+
     it("sets a droplet only while the app is stopped", async () => {
       const t = await target();
       await t.setDroplet("0b1e9d4c-2f3a-4e5b-8c6d-7a8b9c0d1e2f");

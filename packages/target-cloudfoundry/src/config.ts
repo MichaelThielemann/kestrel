@@ -19,8 +19,8 @@ export const configSchema = z
     readyUrl: z.url({ protocol: /^https?$/ }).optional(),
     /** A manifest, relative to the environments file, holding the app's entry; `((name))` placeholders take their values from `vars`. */
     manifest: z.string().min(1).optional(),
-    /** Where the value of each `((name))` placeholder of the manifest comes from: an environment variable or the output of a command. */
-    vars: z.record(z.string().regex(/^[A-Za-z0-9_.-]+$/), credential).default({}),
+    /** Where the value of each `((name))` placeholder of the manifest comes from: an environment variable or the output of a command. A name holds no dot, which cf reads as a field path. */
+    vars: z.record(z.string().regex(/^[A-Za-z0-9_-]+$/), credential).default({}),
   })
   .strict();
 

@@ -70,6 +70,8 @@ stderr.write(answer.stderr);
 exit(answer.code);
 `;
 
+const PLACEHOLDER = /\(\((!?[-/.\w\p{L}]+)\)\)/gu;
+
 const json = (value: unknown): Answer => ({ code: 0, stdout: JSON.stringify(value), stderr: "" });
 const fail = (stderr: string): Answer => ({ code: 1, stdout: "FAILED\n", stderr });
 const apiError = (title: string): Answer => json({ errors: [{ code: 10008, title, detail: title }] });
@@ -191,6 +193,9 @@ export class FakeCloudFoundry {
         const manifest = rest[rest.indexOf("-f") + 1] ?? "";
         const varsFile = rest[rest.indexOf("--vars-file") + 1] ?? "";
         if (!existsSync(manifest) || !existsSync(varsFile)) return fail("manifest or vars file missing\n");
+        const values: unknown = JSON.parse(readFileSync(varsFile, "utf8"));
+        const unresolved = [...readFileSync(manifest, "utf8").matchAll(PLACEHOLDER)].map((m) => (m[1] ?? "").replace(/^!/, "")).filter((name) => name.split(".").reduce<unknown>((value, key) => (value === undefined ? undefined : Reflect.get(Object(value), key)), values) === undefined);
+        if (unresolved.length > 0) return fail(`Expected to find variables: ${unresolved.join(", ")}\n`);
         this.applied.push({ manifest: readFileSync(manifest, "utf8"), varsFile, varsMode: statSync(varsFile).mode & 0o777, vars: readFileSync(varsFile, "utf8"), target: `${this.org}/${this.space}` });
         return { code: 0, stdout: "OK\n", stderr: "" };
       }

@@ -8,11 +8,11 @@ import { OpsError } from "@michaelthielemann/kestrel-ops";
 
 const asCfReads = (tags: Tags): Tags => tags.filter((tag) => typeof tag === "string" || (tag.tag !== "tag:yaml.org,2002:timestamp" && tag.format !== "TIME"));
 
-const PLACEHOLDER = /\(\(([A-Za-z0-9_.-]+)\)\)/g;
+const PLACEHOLDER = /\(\((!?[-/.\w\p{L}]+)\)\)/gu;
 
 /**
  * The manifest reduced to its `version` and the entry of `app`, as JSON (which every YAML reader takes), and the
- * placeholder names that entry uses. It is read as YAML 1.1 with merge keys, as cf reads it: dates and clock times
+ * placeholder names that entry uses, without a leading `!`; a name with a dot ends with exit 2. It is read as YAML 1.1 with merge keys, as cf reads it: dates and clock times
  * such as `03:00` stay strings.
  */
 export function appManifest(file: string, app: string): { text: string; vars: string[] } {
@@ -27,7 +27,10 @@ export function appManifest(file: string, app: string): { text: string; vars: st
   if (entry === undefined) throw new OpsError(`${file} has no application named ${app}`, 2, "target");
   const version: unknown = Reflect.get(Object(doc), "version");
   const text = JSON.stringify({ ...(version === undefined ? {} : { version }), applications: [entry] }, null, 2);
-  return { text, vars: [...new Set([...JSON.stringify(entry).matchAll(PLACEHOLDER)].map((m) => m[1] ?? ""))].sort() };
+  const vars = [...new Set([...JSON.stringify(entry).matchAll(PLACEHOLDER)].map((m) => (m[1] ?? "").replace(/^!/, "")))].sort();
+  const dotted = vars.filter((name) => name.includes("."));
+  if (dotted.length > 0) throw new OpsError(`${file}: the entry of ${app} uses ${dotted.map((name) => `((${name}))`).join(", ")}, which cf reads as a field of the variable before the first dot; target.vars fills only names without a dot`, 2, "target");
+  return { text, vars };
 }
 
 const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
