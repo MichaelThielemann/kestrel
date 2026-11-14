@@ -119,8 +119,8 @@ async function recordRebuild(config: Config, blobs: Blobstore, logger: Logger, b
   return placed;
 }
 
-function readsReport(manifest: Manifest): boolean {
-  return manifest.pipelines.some((pipeline) => pipeline.steps.some((step) => step.module === "replication/sqlite" && step.name.endsWith(".checkRestored")));
+function reportingSteps(manifest: Manifest): Set<string> {
+  return new Set(manifest.pipelines.flatMap((pipeline) => pipeline.steps.filter((step) => step.description.writes.includes("result._databaseRestoredAt")).map((step) => step.spec)));
 }
 
 export default defineModule({
@@ -154,11 +154,15 @@ export default defineModule({
   attach(replication, kestrel) {
     const runs = replication.reportRuns;
     if (runs === null) return;
-    if (!readsReport(kestrel.describe())) {
+    const reporting = reportingSteps(kestrel.describe());
+    if (reporting.size === 0) {
       replication.restoreHandled();
       return;
     }
     return kestrel.observe({
+      stepStart(event) {
+        if (reporting.has(event.step)) runs.add(event.runId);
+      },
       runEnd(event) {
         if (runs.delete(event.runId) && event.outcome === "ok") replication.restoreHandled();
       },

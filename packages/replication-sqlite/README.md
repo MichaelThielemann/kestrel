@@ -180,10 +180,11 @@ When `restoreOnStart` rebuilds the missing file from a generation with `origin.j
 module acknowledges it with `applied.json`, holding the generation, the `nonce` of `origin.json` (or
 `null` when it holds none) and that boot start, so the tool can tell that the process restored exactly
 what it placed. It writes it only once the report was acted on, at the end of the first successful
-`replication.sync` or seal at teardown that starts after a pipeline run that went through
-`replication.checkRestored` ended without failure; when no pipeline of the instance runs that step, at
-the end of the first successful sync or seal. Until then every generation the process starts, by a sync, `replication.snapshot` or the first
-snapshot at teardown, carries a copy of `origin.json`, and the acknowledgement writes `applied.json`
+`replication.sync` or seal at teardown that starts after a pipeline run that went through a step adding
+`_databaseRestoredAt`, `replication.checkRestored` or `backup.checkRestored`, ended without failure; when
+no pipeline of the instance runs such a step, at the end of the first successful sync or seal. Until
+then every generation the process starts, by a sync, `replication.snapshot` or the first snapshot at
+teardown, carries a copy of `origin.json`, and the acknowledgement writes `applied.json`
 into each of them as well as into the placed generation. A start that stops before, with or without
 teardown, therefore leaves the restore reported to the next start that restores from the replica, and
 the `<file>.restored-at` sidecar hands the acknowledgement to the next start on a persistent disk. A

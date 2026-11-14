@@ -271,9 +271,16 @@ async function databaseRestoredAt(instance: Replication): Promise<unknown> {
 
 const sixGeneration = (stamp: string, order: number): string => `${stamp}-${order.toString(16).padStart(12, "0")}${"5a".repeat(16)}`;
 
-function introspection(pipelines: readonly (readonly string[])[]): Introspection & { runEnd(runId: string, outcome: RunEndEvent["outcome"]): void } {
+const stepModules: Record<string, string> = { replication: "replication/sqlite", backup: "backup/blobstore" };
+
+function introspection(pipelines: readonly (readonly string[])[]): Introspection & { stepStart(runId: string, pipeline: string, step: string): void; runEnd(runId: string, outcome: RunEndEvent["outcome"]): void } {
   const observers = new Set<RunObserver>();
-  const manifest: Pick<Manifest, "pipelines"> = { pipelines: pipelines.map((steps, i) => ({ name: `pipeline-${i}`, steps: steps.map((name) => ({ spec: name, name, module: name.startsWith("replication.") ? "replication/sqlite" : "test", description: { summary: name, reads: [], writes: [] } })) })) };
+  const manifest: Pick<Manifest, "pipelines"> = {
+    pipelines: pipelines.map((steps, i) => ({
+      name: `pipeline-${i}`,
+      steps: steps.map((name) => ({ spec: name, name, module: stepModules[name.slice(0, name.indexOf("."))] ?? "test", description: { summary: name, reads: [], writes: name.endsWith(".checkRestored") ? ["result._databaseRestoredAt"] : [] } })),
+    })),
+  };
   return {
     describe: () => boundaryCast<Manifest>(manifest, "host"),
     observe(observer) {
@@ -281,6 +288,9 @@ function introspection(pipelines: readonly (readonly string[])[]): Introspection
       return () => observers.delete(observer);
     },
     health: () => ({ ok: true, restartRequired: false, modules: [] }),
+    stepStart(runId, pipeline, step) {
+      for (const observer of observers) observer.stepStart?.({ runId, pipeline, step, at: Date.now() });
+    },
     runEnd(runId, outcome) {
       for (const observer of observers) observer.runEnd?.({ runId, pipeline: "pipeline-0", trigger: { kind: "http", name: "test" }, at: Date.now(), ms: 1, status: outcome === "ok" ? 200 : 500, outcome });
     },
@@ -473,6 +483,25 @@ describe("replication/sqlite restore from a placed generation", () => {
     const second = await startOn(file, blobs);
     open.push(second.instance);
     expect(await databaseRestoredAt(second.instance)).toBe(second.bootStartedAt);
+  });
+
+  it("acknowledges the restore only after a run through backup.checkRestored when that step reads the report instead", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    const { instance, bootStartedAt } = await startOn(file, blobs);
+    open.push(instance);
+    const kestrel = introspection([["backup.checkRestored", "delivery.checkBuild"], ["test.other"]]);
+    module.attach!(instance, kestrel);
+    kestrel.stepStart("other-run", "pipeline-1", "test.other");
+    kestrel.runEnd("other-run", "ok");
+    expect((await instance.sync()).ok).toBe(true);
+    expect(blobs.blobs.has("replica/gen/20260102T000000Z/applied.json")).toBe(false);
+
+    kestrel.stepStart("boot-run", "pipeline-0", "backup.checkRestored");
+    kestrel.runEnd("boot-run", "ok");
+    expect((await instance.sync()).ok).toBe(true);
+    expect(readJson(blobs, "replica/gen/20260102T000000Z/applied.json")).toEqual({ generation: "20260102T000000Z", nonce: "nonce-1", restoredAt: bootStartedAt });
   });
 
   it("acknowledges the restore at the first sync when no pipeline reads the report", async () => {
