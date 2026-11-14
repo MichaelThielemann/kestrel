@@ -31,12 +31,19 @@ function backupRows(data: Uint8Array): Record<string, unknown[]> {
 
 const parseLines = <T>(data: Uint8Array | null): T[] => boundaryCast<T[]>(fromJsonl(data ?? new Uint8Array()), "json");
 
+/** Options of {@link backupRestoreRoundTrip}. */
+export interface RoundTripOptions {
+  /** False for a store whose ETags are no digest of the bytes, such as one encrypting with KMS: every write gets a new ETag. Default true. */
+  etagIsDigest?: boolean;
+}
+
 /**
  * The end-to-end backup and restore round trip against a store: seed, frozen backup, verify, mutate (delete an
  * original, change and add pages, upload, export again), restore, then a second restore that changes nothing.
  */
-export function backupRestoreRoundTrip(makeStore: () => Promise<ObjectStore>): void {
-  it("restores rows, originals and the delivery prefix of a frozen backup, keeps newer uploads, and a second restore is a no-op", async () => {
+export function backupRestoreRoundTrip(makeStore: () => Promise<ObjectStore>, options: RoundTripOptions = {}): void {
+  const etagIsDigest = options.etagIsDigest ?? true;
+  it(`restores rows, originals and the delivery prefix of a frozen backup, keeps newer uploads, and a second restore is a no-op${etagIsDigest ? "" : ", with ETags that are no digest of the bytes"}`, async () => {
     const store = await makeStore();
     const h = createHarness({ store });
     try {
@@ -73,14 +80,19 @@ export function backupRestoreRoundTrip(makeStore: () => Promise<ObjectStore>): v
       expect(h.app.rows("authn_sessions")).toEqual([]);
 
       const blobs = parseLines<BlobEntry>(await store.get(LOCATION + keys.blobs(id)));
-      for (const entry of blobs) expect((await store.head(entry.key))?.etag, entry.key).toBe(entry.etag);
+      const same = async (entry: BlobEntry | SiteEntry): Promise<boolean> => new TextDecoder().decode((await store.get(entry.key)) ?? new Uint8Array()) === new TextDecoder().decode((await store.get(LOCATION + entry.object)) ?? new Uint8Array());
+      for (const entry of blobs) {
+        if (etagIsDigest) expect((await store.head(entry.key))?.etag, entry.key).toBe(entry.etag);
+        expect(await same(entry), entry.key).toBe(true);
+      }
       expect(await store.head(newer)).not.toBeNull();
       const site = parseLines<SiteEntry>(await store.get(LOCATION + keys.site(id)));
       const live = await stableList(store, PREFIXES.delivery, { delayMs: 5 });
-      expect(live.map((i) => [i.key, i.etag, i.size])).toEqual(site.map((s) => [s.key, s.etag, s.size]));
-      for (const entry of site) expect(new TextDecoder().decode((await store.get(entry.key)) ?? new Uint8Array())).toBe(new TextDecoder().decode((await store.get(LOCATION + entry.object)) ?? new Uint8Array()));
+      expect(live.map((i) => [i.key, ...(etagIsDigest ? [i.etag] : []), i.size])).toEqual(site.map((s) => [s.key, ...(etagIsDigest ? [s.etag] : []), s.size]));
+      for (const entry of site) expect(await same(entry), entry.key).toBe(true);
 
       const again = await h.run(["restore", "--backup", id, "--yes", "--answers", h.answers({ "access-changes": "accept" }), "--json"]);
+      expect(again.stderr).toBe("");
       expect(again.code).toBe(0);
       expect(again.json).toMatchObject({ noop: true, originalsRestored: [], delivery: { written: [], removed: [] }, safetyBackup: null, promoted: null });
       expect((await h.app.status()).state).toBe("started");

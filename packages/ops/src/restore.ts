@@ -55,10 +55,22 @@ async function downloadDb(ctx: OpsContext, manifest: Manifest, file: string): Pr
 
 const isVersionOf = (info: ObjectInfo | null | undefined, entry: BlobEntry | SiteEntry): boolean => info !== null && info !== undefined && info.size === entry.size && (info.etag === entry.etag || info.etag === entry.objectEtag);
 
-async function waitForVersion(ctx: OpsContext, entry: SiteEntry): Promise<boolean> {
+async function holdsVersion(ctx: OpsContext, info: ObjectInfo | null | undefined, entry: BlobEntry | SiteEntry): Promise<boolean> {
+  if (info === null || info === undefined || info.size !== entry.size) return false;
+  if (isVersionOf(info, entry)) return true;
+  const live = await ctx.app.get(entry.key);
+  if (live === null) return false;
+  const recorded = "sha256" in entry ? entry.sha256 : null;
+  if (recorded !== null) return sha256(live) === recorded;
+  const copy = await ctx.backups.get(ctx.location + entry.object);
+  return copy !== null && sha256(live) === sha256(copy);
+}
+
+async function waitForVersion(ctx: OpsContext, entry: SiteEntry, before: string | null): Promise<boolean> {
   const sleep = ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
   for (let i = 0; i < (ctx.poll.attempts ?? 30); i++) {
-    if (isVersionOf(await ctx.app.head(entry.key), entry)) return true;
+    const info = await ctx.app.head(entry.key);
+    if (isVersionOf(info, entry) || (info !== null && info.size === entry.size && info.etag !== before)) return true;
     await sleep(ctx.poll.delayMs ?? 1000);
   }
   return false;
@@ -69,7 +81,7 @@ async function restoreOriginals(ctx: OpsContext, blobs: readonly BlobEntry[], dr
   const restored: string[] = [];
   for (const entry of blobs) {
     const current = live.get(entry.key) ?? (await ctx.app.head(entry.key));
-    if (isVersionOf(current, entry)) continue;
+    if (await holdsVersion(ctx, current, entry)) continue;
     restored.push(entry.key);
     if (!dryRun) await transfer(ctx.backups, ctx.location + entry.object, ctx.app, entry.key);
   }
@@ -81,13 +93,13 @@ async function restoreDelivery(ctx: OpsContext, site: readonly SiteEntry[], dryR
   const wanted = new Map(site.map((s) => [s.key, s]));
   const written: string[] = [];
   for (const entry of site) {
-    if (isVersionOf(live.get(entry.key), entry)) continue;
+    if (await holdsVersion(ctx, live.get(entry.key), entry)) continue;
     written.push(entry.key);
     if (!dryRun) await transfer(ctx.backups, ctx.location + entry.object, ctx.app, entry.key);
   }
   if (!dryRun) for (const key of written) {
     const entry = wanted.get(key);
-    if (entry && !(await waitForVersion(ctx, entry))) ctx.out.warn(`${key} does not read back with the restored version yet`);
+    if (entry && !(await waitForVersion(ctx, entry, live.get(key)?.etag ?? null))) ctx.out.warn(`${key} does not read back with the restored version yet`);
   }
   const removed = [...live.keys()].filter((key) => !wanted.has(key));
   if (!dryRun) for (const key of removed) await ctx.app.delete(key);

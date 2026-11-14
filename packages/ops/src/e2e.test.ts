@@ -8,6 +8,11 @@ describe("backup and restore against an in-memory store whose listings lag behin
   backupRestoreRoundTrip(async () => memoryStore(new MemoryBucket("lagging", { listLag: 1 })));
 });
 
+describe("backup and restore against an in-memory store whose ETags are no digest of the bytes", () => {
+  let writes = 0;
+  backupRestoreRoundTrip(async () => memoryStore(new MemoryBucket("encrypted", { etag: () => `kms${String((writes += 1)).padStart(8, "0")}` })), { etagIsDigest: false });
+});
+
 describe("backup and restore against an in-memory store", () => {
   backupRestoreRoundTrip(async () => memoryStore(new MemoryBucket("round-trip")));
 

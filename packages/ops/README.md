@@ -163,6 +163,9 @@ is listed until two listings agree.
    deleted; ones uploaded after the backup stay and are listed.
 5. The delivery prefix is set to the backup's: keys that differ are written, then keys the backup does not
    know are removed. This and `backup prune` are the only places the tool deletes data.
+   A key whose size matches but whose ETag is neither the recorded one nor the copy's (a store that encrypts
+   with KMS gives every write a new ETag) is compared by its sha256, so a second restore stays a no-op there
+   too; a written delivery key counts as read back once a HEAD shows its size with an ETag other than the one before.
 6. The login sessions of the restored database are emptied: everyone signs in again.
 7. The database is promoted as the newest replica generation, or placed as `<database>.restore`, and the app
    is started.
