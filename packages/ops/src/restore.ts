@@ -1,7 +1,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { acceptSeal, createBackup, readManifest, verifyBackup, type BackupMode } from "./backup.ts";
-import { runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
+import { messageOf, recordQuietly, runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
 import { fromJsonl, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
@@ -143,17 +143,22 @@ export async function restoreBackup(ctx: OpsContext, options: RestoreOptions): P
 
   await confirm(ctx.answers, "confirm", `restore ${manifest.id} (${new Date(manifest.createdAt).toISOString()}) over ${ctx.envName}: the app stops now`);
   const stop = await stopTarget(ctx);
-  const state = { changed: false };
+  const state: RestoreState = { changed: false, started: false, safetyBackup: null };
   try {
     return await restoreStopped(ctx, manifest, stop, state, options);
   } catch (error) {
-    if (state.changed) {
-      ctx.out.error(`the restore stopped after it changed the store; the app stays stopped. Run the restore again, or restore the pre-restore backup`);
-      throw error;
-    }
-    if (stop.wasRunning) await startTarget(ctx).catch((cause: unknown) => ctx.out.error(`starting the app again failed: ${cause instanceof Error ? cause.message : String(cause)}`));
+    const undo = state.safetyBackup === null ? "" : `, or restore the pre-restore backup ${state.safetyBackup}`;
+    if (state.started) ctx.out.error(`the restore changed the store and started the app again; check it${undo}`);
+    else if (state.changed) ctx.out.error(`the restore stopped after it changed the store; the app stays stopped. Run the restore again${undo}`);
+    else if (stop.wasRunning) await startTarget(ctx).catch((cause: unknown) => ctx.out.error(`starting the app again failed: ${messageOf(cause)}`));
     throw error;
   }
+}
+
+interface RestoreState {
+  changed: boolean;
+  started: boolean;
+  safetyBackup: string | null;
 }
 
 type Current = ({ kind: "readable"; seal: SealReport; file: string } | { kind: "unreadable"; reason: string }) & { unfinished: string[] };
@@ -185,7 +190,7 @@ async function readCurrent(ctx: OpsContext, stoppedAt: number): Promise<Current>
   return { kind: "readable", seal, file, unfinished };
 }
 
-async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stoppedAt: number }, state: { changed: boolean }, options: RestoreOptions): Promise<RestoreResult> {
+async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stoppedAt: number }, state: RestoreState, options: RestoreOptions): Promise<RestoreResult> {
   const blobs = await entries<BlobEntry>(ctx, ctx.location + keys.blobs(manifest.id));
   const site = await entries<SiteEntry>(ctx, ctx.location + keys.site(manifest.id));
   const restoredDb = ctx.workspace.path("backup.db");
@@ -215,8 +220,10 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   const base: RestoreResult = { backupId: manifest.id, noop: false, loss, safetyBackup: null, sessionsDeleted: 0, originalsRestored: originals, newerOriginals, delivery, promoted: null, acknowledgement: null };
   if (loss?.identical === true && unchangedStore && current.unfinished.length === 0) {
     ctx.out.info("nothing differs from the backup apart from login sessions, which stay; starting the app again");
-    await startTarget(ctx);
-    await ctx.journal.record("restore", "done", { backupId: manifest.id, noop: true });
+    await startTarget(ctx, () => {
+      state.started = true;
+    });
+    await recordQuietly(ctx, "restore", "done", { backupId: manifest.id, noop: true });
     return { ...base, noop: true };
   }
 
@@ -232,6 +239,7 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   else {
     const mode: BackupMode = current.kind === "unreadable" ? { kind: "unreadable", reason: current.reason, stoppedAt: stop.stoppedAt } : { kind: "stopped", seal: current.seal, stoppedAt: stop.stoppedAt };
     safetyBackup = (await createBackup(ctx, { kind: "pre-restore", mode, pinFor: ctx.runId })).id;
+    state.safetyBackup = safetyBackup;
     ctx.out.info(`pre-restore backup ${safetyBackup} written and verified`);
   }
 
@@ -257,7 +265,9 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
     await ctx.target.installDatabase(prepared);
     await ctx.journal.record("install-database", "done", {});
   }
-  await startTarget(ctx);
+  await startTarget(ctx, () => {
+    state.started = true;
+  });
   if (promoted !== null) {
     try {
       ack = await acknowledgement(ctx.app, ctx.env.app.replicaPrefix, promoted, ctx.poll);
@@ -266,10 +276,10 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
       if (gens.at(-1)?.name === promoted.generation) ctx.out.warn("the app has not started its own generation yet");
     } catch (cause) {
       ack = "unconfirmed";
-      ctx.out.warn(`the restore is done and the app started again, but checking whether it acknowledged ${promoted.generation} failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+      ctx.out.warn(`the restore is done and the app started again, but checking whether it acknowledged ${promoted.generation} failed: ${messageOf(cause)}`);
     }
   }
-  await ctx.journal.record("restore", "done", { backupId: manifest.id, safetyBackup, acknowledgement: ack });
+  await recordQuietly(ctx, "restore", "done", { backupId: manifest.id, safetyBackup, acknowledgement: ack });
   return { ...base, safetyBackup, sessionsDeleted, promoted, acknowledgement: ack };
 }
 

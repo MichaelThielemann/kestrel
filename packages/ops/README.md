@@ -173,8 +173,10 @@ is listed until two listings agree.
 When nothing differs from the backup apart from login sessions, the restore asks nothing more, starts the app
 again and changes nothing; the sessions stay. When it stops
 before step 4, it starts the app again; after that, until step 7 started the app, the app stays stopped and the
-output says so. A check that fails once the app runs again, such as reading its acknowledgement, is a warning:
-the restore ends with exit 0 and `unconfirmed`.
+output says so, naming the `pre-restore` backup when there is one. Once the app was started, the output says
+that instead: an app that does not become ready ends the restore with exit 1, while a check that fails once the
+app runs again, such as reading its acknowledgement or writing a journal entry, is a warning: the restore ends
+with exit 0, `unconfirmed` when the acknowledgement could not be read.
 
 A restore that stops between the snapshot and `origin.json` of its promotion leaves an unfinished placement:
 a plain time name with a snapshot and nothing else, which a runtime that understands `origin.json` refuses to

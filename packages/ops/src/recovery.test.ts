@@ -77,3 +77,56 @@ describe("a restore that failed while it placed its generation", () => {
     }
   });
 });
+
+describe("a restore that fails after it changed the store", () => {
+  it("treats a journal entry it cannot write after the app started again as a warning and releases the pre-restore backup", async () => {
+    const { h, failNext, restoreArgs } = await seededWithChange("journal-after-start");
+    try {
+      failNext((key) => key.endsWith("-restore-done.json"));
+      failNext((key) => key.endsWith("-start-done.json"));
+      const restored = await h.run(restoreArgs());
+      expect(restored.code).toBe(0);
+      expect(restored.stderr).not.toContain("stays stopped");
+      expect(restored.stderr).toContain("-restore-done.json");
+      expect(restored.stderr).toContain("-start-done.json");
+      expect((await h.app.status()).state).toBe("started");
+      expect(h.app.rows("pages")).toContainEqual({ id: "home", title: "Home", body: "Welcome" });
+      const list = await h.run(["backup", "list"]);
+      expect(list.stdout).toContain(String(restored.json.safetyBackup));
+      expect(list.stdout).not.toContain("pinned by");
+    } finally {
+      await h.dispose();
+    }
+  });
+
+  it("says the app was started again when it does not become ready, and names the pre-restore backup", async () => {
+    const { h, restoreArgs } = await seededWithChange("not-ready");
+    const waitReady = h.app.waitReady.bind(h.app);
+    try {
+      h.app.waitReady = async () => false;
+      const restored = await h.run(restoreArgs());
+      h.app.waitReady = waitReady;
+      expect(restored.code).toBe(1);
+      expect(restored.stderr).not.toContain("stays stopped");
+      expect(restored.stderr).toContain("did not become ready");
+      expect(restored.stderr).toMatch(/started the app again; check it, or restore the pre-restore backup prod-\d{8}T\d{6}Z-pre-restore-[0-9a-f]{4}/);
+      expect((await h.app.status()).state).toBe("started");
+    } finally {
+      await h.dispose();
+    }
+  });
+
+  it("names no pre-restore backup when --no-safety-backup skipped it", async () => {
+    const { h, failNext, id } = await seededWithChange("no-safety");
+    try {
+      failNext((key) => key.endsWith("-blobs-done.json"));
+      const restored = await h.run(["restore", "--backup", id, "--no-safety-backup", "--yes", "--answers", h.answers({ "access-changes": "accept" })]);
+      expect(restored.code).toBe(1);
+      expect(restored.stderr).toContain("the app stays stopped. Run the restore again");
+      expect(restored.stderr).not.toContain("or restore the pre-restore backup");
+      expect((await h.app.status()).state).toBe("stopped");
+    } finally {
+      await h.dispose();
+    }
+  });
+});

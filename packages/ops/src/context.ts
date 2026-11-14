@@ -53,10 +53,21 @@ export async function stopTarget(ctx: OpsContext): Promise<{ stoppedAt: number; 
   return { stoppedAt, wasRunning };
 }
 
-/** Starts the target and waits for its readiness check. */
-export async function startTarget(ctx: OpsContext): Promise<void> {
+/** The message of a caught value. */
+export function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+/** Records a journal entry, reporting a failure to write it as a warning instead of failing the step it describes. */
+export async function recordQuietly(ctx: OpsContext, step: string, state: "done" | "failed", data: Record<string, unknown>): Promise<void> {
+  await ctx.journal.record(step, state, data).catch((cause: unknown) => ctx.out.warn(`the journal entry ${step}-${state} could not be written: ${messageOf(cause)}`));
+}
+
+/** Starts the target and waits for its readiness check; `started` is called once the start resolved, before the wait. */
+export async function startTarget(ctx: OpsContext, started?: () => void): Promise<void> {
   await ctx.target.start();
+  started?.();
   const ready = await ctx.target.waitReady(ctx.readyTimeoutMs);
-  await ctx.journal.record("start", ready ? "done" : "failed", { ready });
+  await recordQuietly(ctx, "start", ready ? "done" : "failed", { ready });
   if (!ready) throw new OpsError(`the app did not become ready within ${Math.round(ctx.readyTimeoutMs / 1000)} s`, 1, "target");
 }
