@@ -175,7 +175,7 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
     await confirm(ctx.answers, "unreadable-current", lines.join("\n"));
     if (ctx.env.production) await confirm(ctx.answers, "access-changes", [...lines, "access changes cannot be listed; every login session ends; everyone signs in again"].join("\n"));
   } else {
-    loss = lossReport(current.file, restoredDb, manifest.createdAt);
+    loss = lossReport(current.file, restoredDb, manifest.source.lastFrameAt ?? manifest.createdAt);
     const lines = describeLoss(ctx, loss);
     await ctx.journal.record("loss-report", "done", { tables: loss.tables, auditEntriesAfter: loss.auditEntriesAfter, access: loss.access });
     if (ctx.env.production || hasAccessChanges(loss)) await confirm(ctx.answers, "access-changes", [...lines, "every login session ends; everyone signs in again"].join("\n"));

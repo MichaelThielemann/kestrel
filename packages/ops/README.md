@@ -141,7 +141,7 @@ is listed until two listings agree.
 ## Restore
 1. The backup is verified again, then the app is stopped and must report stopped with no instance.
 2. The stopped replica is rebuilt and compared with the backup. The report counts, per table, the rows the
-   restore drops, reverts and brings back, the audit entries since the backup, and the access changes: users
+   restore drops, reverts and brings back, the audit entries the backup does not hold, and the access changes: users
    created, deleted or deactivated, changed roles and reset second factors. A restore that would bring back
    revoked access, or any restore of a `production` environment, needs the answer `access-changes`.
    When the stopped replica has no generation or its newest one cannot be rebuilt, there is nothing to compare:

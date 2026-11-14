@@ -198,7 +198,11 @@ function accessChanges(db: DatabaseSync, current: string[], backup: string[]): A
   return out;
 }
 
-/** Compares the current database with a backup's and reports what a restore of the backup would discard or bring back. */
+/**
+ * Compares the current database with a backup's and reports what a restore of the backup would discard or bring
+ * back. Audit entries after the backup are the ones the backup does not hold by id, or, without an id column, the
+ * ones later than `since`.
+ */
 export function lossReport(currentFile: string, backupFile: string, since: number): LossReport {
   return withDb(currentFile, true, (db) => {
     db.prepare("ATTACH DATABASE ? AS backup").run(backupFile);
@@ -215,7 +219,9 @@ export function lossReport(currentFile: string, backupFile: string, since: numbe
         report.tables[table] = diff;
         if (table !== SESSIONS_TABLE) report.identical = false;
       }
-      if (current.includes(AUDIT_TABLE) && columns(db, AUDIT_TABLE).includes("at")) report.auditEntriesAfter = boundaryCast<{ n: number }>(db.prepare(`SELECT count(*) AS n FROM main.${quote(AUDIT_TABLE)} WHERE "at" > ?`).get(since), "host").n;
+      const audit = quote(AUDIT_TABLE);
+      if (current.includes(AUDIT_TABLE) && backup.includes(AUDIT_TABLE) && columns(db, AUDIT_TABLE, "main").includes("id") && columns(db, AUDIT_TABLE, "backup").includes("id")) report.auditEntriesAfter = count(db, `SELECT count(*) AS n FROM main.${audit} m WHERE NOT EXISTS (SELECT 1 FROM backup.${audit} b WHERE b."id" = m."id")`);
+      else if (current.includes(AUDIT_TABLE) && columns(db, AUDIT_TABLE).includes("at")) report.auditEntriesAfter = boundaryCast<{ n: number }>(db.prepare(`SELECT count(*) AS n FROM main.${audit} WHERE "at" > ?`).get(since), "host").n;
       return report;
     } finally {
       db.exec("DETACH DATABASE backup");
