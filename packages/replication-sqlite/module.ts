@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, renameSync, rmSync } from "node:fs";
 import { z } from "zod";
 import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
@@ -42,6 +42,8 @@ function unlistedSegmentsError(file: string, prefix: string, generation: string,
   return `replication/sqlite: refusing to restore ${file} from generation ${generation}: its sealed.json names ${segments} WAL segments, but repeated listings of ${prefix}gen/${generation}/wal/ show only ${segments - missing}. The blobstore lists new keys late, or segments were removed. Start again once the listing shows them all; to restore from the listed segments alone, move ${prefix}gen/${generation}/sealed.json aside.`;
 }
 
+const rebuildFile = (file: string): string => `${file}.rebuilding`;
+
 interface StartListing {
   keys: string[];
   at: number;
@@ -82,32 +84,40 @@ async function restoreMissingFile(config: Config, blobs: Blobstore, logger: Logg
   const unplaced = await confirmedUnplaced(blobs, config.prefix, listing);
   if (unplaced.newest !== null && unplaced.generations.length > 0) throw new Error(unplacedGenerationsError(config.file, config.prefix, unplaced.newest, unplaced.generations));
   if (newest !== null && segments !== null && missing > 0) throw new Error(unlistedSegmentsError(config.file, config.prefix, newest, segments, missing));
-  const restored = await restoreFromBlobs(blobs, config.prefix, {}, config.file, listing.points);
+  const rebuilt = rebuildFile(config.file);
+  const restored = await restoreFromBlobs(blobs, config.prefix, {}, rebuilt, listing.points);
   if (isErr(restored)) {
     if (restored.error.message.includes("no snapshot")) return startListing;
     throw new Error(restored.error.message, { cause: restored.error });
   }
   const { generation } = restored.value;
+  const recorded = await recordRebuild(config, blobs, logger, bootStartedAt, generation);
+  for (const suffix of ["-wal", "-shm"]) rmSync(config.file + suffix, { force: true });
+  renameSync(rebuilt, config.file);
+  return recorded === undefined ? startListing : { ...startListing, placed: recorded };
+}
+
+async function recordRebuild(config: Config, blobs: Blobstore, logger: Logger, bootStartedAt: number, generation: string): Promise<PlacedRestore | undefined> {
   const origin = await readOrigin(blobs, config.prefix, generation);
   if (isErr(origin) && origin.error.code === "NOT_FOUND") {
     markRestoredThisBoot(config.file, bootStartedAt);
-    return startListing;
+    return undefined;
   }
   if (isErr(origin)) {
     markRestoredThisBoot(config.file, bootStartedAt, true);
     logWarn(logger, "replication/sqlite: restored from a generation that may carry origin.json but could not read that file, so the restore is reported and no applied.json acknowledges it", { file: config.file, generation, error: origin.error.message });
-    return startListing;
+    return undefined;
   }
   const acknowledged = await blobs.get(markerKey(config.prefix, generation, "applied"));
   if (!isErr(acknowledged) && acknowledged.value !== null) {
     markRestoredThisBoot(config.file, bootStartedAt);
     logger.info("replication/sqlite: restored from a generation placed with origin.json that an earlier start already reported", { file: config.file, generation });
-    return startListing;
+    return undefined;
   }
   const placed: PlacedRestore = { applied: { generation, nonce: origin.value.nonce, restoredAt: bootStartedAt }, origin: origin.value.content };
   markRestoredThisBoot(config.file, bootStartedAt, true, placed);
   logger.info("replication/sqlite: restored from a generation placed with origin.json and reported the restore", { file: config.file, generation, nonce: origin.value.nonce });
-  return { ...startListing, placed };
+  return placed;
 }
 
 function readsReport(manifest: Manifest): boolean {

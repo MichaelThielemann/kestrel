@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -552,6 +552,41 @@ describe("replication/sqlite restore from a placed generation", () => {
       vi.useRealTimers();
     }
     expect(existsSync(file)).toBe(false);
+  });
+
+  it("reports the restore from a placed generation in the next start on the same disk when the start that rebuilt the file stopped while it read origin.json", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    const stopping: Blobstore = {
+      ...blobs,
+      async get(key) {
+        if (key.endsWith("/origin.json")) throw new Error("process stopped");
+        return blobs.get(key);
+      },
+    };
+    await expect(module.setup(configSchema.parse({ file, restoreOnStart: true }), moduleDeps(stopping, freshDir(), Date.now()))).rejects.toThrow("process stopped");
+
+    const second = await startOn(file, blobs);
+    open.push(second.instance);
+    expect(rowsIn(file)).toBe(2);
+    expect(await databaseRestoredAt(second.instance)).toBe(second.bootStartedAt);
+  });
+
+  it("leaves no WAL of an earlier database next to the file it rebuilds", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260102T000000Z", 2, null);
+    const otherFile = join(freshDir(), "other.db");
+    const other = new DatabaseSync(otherFile);
+    other.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+    for (let i = 0; i < 5; i++) other.prepare("INSERT INTO t (v) VALUES ('stale')").run();
+    copyFileSync(`${otherFile}-wal`, `${file}-wal`);
+    other.close();
+
+    const { instance } = await startOn(file, blobs);
+    open.push(instance);
+    expect(rowsIn(file)).toBe(2);
   });
 
   it("names a null nonce in applied.json when origin.json holds none", async () => {

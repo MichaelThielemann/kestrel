@@ -88,7 +88,9 @@ restored file can be older than what was derived from the database before it. Th
 `"placed": { "generation", "nonce", "origin" }` while a restore from a placed generation waits for its
 `applied.json` (see [Replica layout](#replica-layout)), so a later start on the same file writes it. The sidecar is written
 atomically, before the restored file is moved into place, so a boot that stops in between applies the
-restore again on the next start. The other module, if
+restore again on the next start. This module rebuilds a missing file into `<file>.rebuilding`, reads
+`origin.json` and `applied.json` of the generation, writes the sidecar and only then renames the
+rebuilt file to `<file>`, removing any `-wal` and `-shm` left next to it. The other module, if
 configured on the same file, recognizes a matching boot as "this boot already restored the file" and
 skips its own check — neither module has to know the other exists. The next restore overwrites the
 sidecar.
