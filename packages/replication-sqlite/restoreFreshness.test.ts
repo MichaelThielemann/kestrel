@@ -205,6 +205,16 @@ describe("checkSkippedRestore", () => {
     await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger, Date.now() - 1000, () => Date.now())).rejects.toThrow(/was created during this start-up/);
   });
 
+  it("rejects a fresh file next to a replica whose only snapshot carries a generation name with an order key and random part", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-check-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    writeFileSync(file, "x");
+    const blobs = fakeBlobs();
+    blobs.blobs.set(`replica/gen/20260101T000000Z-${"0".repeat(11)}1${"ab".repeat(16)}/snapshot.db`, { data: new Uint8Array([1]), contentType: "application/vnd.sqlite3" });
+    await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger, Date.now() - 1000, () => Date.now())).rejects.toThrow(/was created during this start-up/);
+  });
+
   it("logs and stays clean, with no blobstore call, when the stubbed birth time is before this boot's start", async () => {
     const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-check-"));
     dirs.push(dir);

@@ -54,7 +54,7 @@ function holdsNoRows(file: string): boolean {
 async function hasSnapshot(blobs: Blobstore, prefix: string): Promise<boolean> {
   const list = await blobs.list(`${prefix}gen/`);
   if (isErr(list)) throw new Error(list.error.message, { cause: list.error });
-  return list.value.some((info) => /gen\/\d{8}T\d{6}Z\/snapshot\.db$/.test(info.key));
+  return list.value.some((info) => /gen\/\d{8}T\d{6}Z(?:-[0-9a-f]+)?\/snapshot\.db$/.test(info.key));
 }
 
 /**
