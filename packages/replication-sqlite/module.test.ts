@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Step } from "@michaelthielemann/kestrel/context";
@@ -13,7 +13,7 @@ import { failure } from "@michaelthielemann/kestrel/errors";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
-import type { Replication } from "./impl.ts";
+import { restoreFromBlobs, type Replication } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
 
 function fakeBlobs(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
@@ -213,5 +213,197 @@ describe("replication/sqlite checkRestored", () => {
     const { instance } = await boot();
     const run = await runPipeline(definePipeline({ name: "checkRestored", steps: ["test.earlier", "replication.checkRestored"] }), {}, { modules: [{ module, instance }], steps: { "test.earlier": writeResult({ kept: 1 }) }, writes: { "test.earlier": ["result"] } });
     expect(run.result).toEqual({ kept: 1, _databaseRestoredAt: null });
+  });
+});
+
+function freshDir(): string {
+  const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-layout-"));
+  dirs.push(dir);
+  return dir;
+}
+
+function image(rows: number): Uint8Array {
+  const file = join(freshDir(), "image.db");
+  const db = new DatabaseSync(file);
+  db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+  for (let i = 0; i < rows; i++) db.prepare("INSERT INTO t (v) VALUES (?)").run(`placed-${i}`);
+  db.close();
+  return new Uint8Array(readFileSync(file));
+}
+
+function place(blobs: ReturnType<typeof fakeBlobs>, generation: string, rows: number, origin: { nonce?: string } | null): void {
+  blobs.blobs.set(`replica/gen/${generation}/snapshot.db`, { data: image(rows), contentType: "application/vnd.sqlite3" });
+  if (origin) blobs.blobs.set(`replica/gen/${generation}/origin.json`, { data: new TextEncoder().encode(JSON.stringify({ kind: "restore", source: "backup-1", requestedAt: "2026-01-01T00:00:00Z", ...origin })), contentType: "application/json" });
+}
+
+function readJson(blobs: ReturnType<typeof fakeBlobs>, key: string): unknown {
+  const blob = blobs.blobs.get(key);
+  if (!blob) throw new Error(`${key} is missing`);
+  return JSON.parse(new TextDecoder().decode(blob.data));
+}
+
+function rowsIn(file: string): number {
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    return boundaryCast<{ n: number }>(db.prepare("SELECT count(*) AS n FROM t").get(), "host").n;
+  } finally {
+    db.close();
+  }
+}
+
+function removeDatabase(file: string): void {
+  for (const suffix of ["", "-wal", "-shm", ".restored-at"]) rmSync(`${file}${suffix}`, { force: true });
+}
+
+async function startOn(file: string, blobs: Blobstore): Promise<{ instance: Replication; bootStartedAt: number }> {
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const bootStartedAt = Date.now();
+  const instance = boundaryCast<Replication>(await module.setup(configSchema.parse({ file, restoreOnStart: true }), moduleDeps(blobs, freshDir(), bootStartedAt)), "host");
+  return { instance, bootStartedAt };
+}
+
+async function databaseRestoredAt(instance: Replication): Promise<unknown> {
+  const run = await runPipeline(definePipeline({ name: "checkRestored", steps: ["replication.checkRestored"] }), {}, { modules: [{ module, instance }] });
+  expect(run.status).toBe(200);
+  return boundaryCast<Record<string, unknown>>(run.result, "host")._databaseRestoredAt;
+}
+
+const sixGeneration = (stamp: string, order: number): string => `${stamp}-${order.toString(16).padStart(12, "0")}${"5a".repeat(16)}`;
+
+describe("replication/sqlite teardown seal", () => {
+  it("ships the frames committed since the last sync and then seals the generation, with no prune or snapshot although both are due", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.UTC(2026, 0, 1));
+    try {
+      const dir = freshDir();
+      const file = join(dir, "live.db");
+      const app = new DatabaseSync(file);
+      app.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+      app.prepare("INSERT INTO t (v) VALUES ('x')").run();
+      const blobs = fakeBlobs();
+      const instance = boundaryCast<Replication>(await module.setup(configSchema.parse({ file, restoreOnStart: false, snapshotSeconds: 60, retentionSeconds: 60 }), moduleDeps(blobs, dir)), "host");
+      const generation = (await instance.sync()).ok ? (await instance.status()).generation : null;
+      if (generation === null) throw new Error("expected a generation after the first sync");
+      place(blobs, "20251201T000000Z", 1, null);
+      place(blobs, "20251202T000000Z", 1, null);
+      for (let i = 0; i < 3; i++) app.prepare("INSERT INTO t (v) VALUES ('y')").run();
+      app.close();
+      vi.setSystemTime(Date.UTC(2026, 0, 1, 0, 5));
+      const before = new Set(blobs.blobs.keys());
+      const written: string[] = [];
+      const put = blobs.put.bind(blobs);
+      blobs.put = async (key, data, options) => {
+        written.push(key);
+        return put(key, data, options);
+      };
+
+      await module.teardown!(instance);
+
+      expect([...before].every((key) => blobs.blobs.has(key))).toBe(true);
+      expect(written.filter((key) => key.endsWith("/snapshot.db"))).toEqual([]);
+      expect(written.at(-1)).toBe(`replica/gen/${generation}/sealed.json`);
+      expect(written.slice(0, -1).length).toBeGreaterThan(0);
+      expect(written.slice(0, -1).every((key) => key.startsWith(`replica/gen/${generation}/wal/`))).toBe(true);
+      const segments = [...blobs.blobs.keys()].filter((key) => key.startsWith(`replica/gen/${generation}/wal/`)).length;
+      expect(readJson(blobs, `replica/gen/${generation}/sealed.json`)).toEqual({ lineage: expect.any(Number) as unknown, lastFrame: expect.any(Number) as unknown, segments, at: Date.UTC(2026, 0, 1, 0, 5) });
+      const out = join(dir, "restored.db");
+      expect((await restoreFromBlobs(blobs, "replica/", { generation }, out)).ok).toBe(true);
+      expect(rowsIn(out)).toBe(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves no sealed.json behind when the process ends without teardown", async () => {
+    const { instance, blobs } = await boot();
+    expect((await instance.sync()).ok).toBe(true);
+    instance.close();
+    open.splice(0);
+    expect([...blobs.blobs.keys()].filter((key) => key.endsWith("/sealed.json"))).toEqual([]);
+  });
+});
+
+describe("replication/sqlite restore from a placed generation", () => {
+  it("reports a restore from a generation placed with origin.json and acknowledges it with applied.json naming the generation and nonce", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260101T000000Z", 1, null);
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    const { instance, bootStartedAt } = await startOn(file, blobs);
+    open.push(instance);
+    expect(rowsIn(file)).toBe(2);
+    expect(await databaseRestoredAt(instance)).toBe(bootStartedAt);
+    expect(readJson(blobs, "replica/gen/20260102T000000Z/applied.json")).toEqual({ generation: "20260102T000000Z", nonce: "nonce-1", restoredAt: bootStartedAt });
+  });
+
+  it("reports the placed generation again only while no applied.json acknowledges it", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    const first = await startOn(file, blobs);
+    first.instance.close();
+
+    removeDatabase(file);
+    const acknowledged = await startOn(file, blobs);
+    expect(await databaseRestoredAt(acknowledged.instance)).toBeNull();
+    acknowledged.instance.close();
+
+    removeDatabase(file);
+    blobs.blobs.delete("replica/gen/20260102T000000Z/applied.json");
+    const unacknowledged = await startOn(file, blobs);
+    open.push(unacknowledged.instance);
+    expect(await databaseRestoredAt(unacknowledged.instance)).toBe(unacknowledged.bootStartedAt);
+    expect(readJson(blobs, "replica/gen/20260102T000000Z/applied.json")).toEqual({ generation: "20260102T000000Z", nonce: "nonce-1", restoredAt: unacknowledged.bootStartedAt });
+  });
+
+  it("names a null nonce in applied.json when origin.json holds none", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260102T000000Z", 1, {});
+    const { instance, bootStartedAt } = await startOn(file, blobs);
+    open.push(instance);
+    expect(readJson(blobs, "replica/gen/20260102T000000Z/applied.json")).toEqual({ generation: "20260102T000000Z", nonce: null, restoredAt: bootStartedAt });
+  });
+});
+
+describe("replication/sqlite start with a generation of unknown origin", () => {
+  it("refuses to start when a generation named by its time alone, without origin.json, sorts after the newest generation named with an order key", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    const own = sixGeneration("20260101T000000Z", Date.UTC(2026, 0, 1));
+    place(blobs, own, 2, null);
+    place(blobs, "20260102T000000Z", 0, null);
+    await expect(startOn(file, blobs)).rejects.toThrow(new RegExp(`20260102T000000Z[^]*origin\\.json[^]*${own}`));
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it("refuses to start when such a generation sorts after one placed with origin.json", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260101T000000Z", 2, { nonce: "nonce-1" });
+    place(blobs, "20260102T000000Z", 0, null);
+    await expect(startOn(file, blobs)).rejects.toThrow(/refusing to restore/);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it("starts from a newer generation named by its time alone when it carries origin.json", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, sixGeneration("20260101T000000Z", Date.UTC(2026, 0, 1)), 2, null);
+    place(blobs, "20260102T000000Z", 3, { nonce: "nonce-1" });
+    const { instance } = await startOn(file, blobs);
+    open.push(instance);
+    expect(rowsIn(file)).toBe(3);
+  });
+
+  it("starts from the newest generation of a replica that holds only generations named by their time alone", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260101T000000Z", 1, null);
+    place(blobs, "20260102T000000Z", 2, null);
+    const { instance } = await startOn(file, blobs);
+    open.push(instance);
+    expect(rowsIn(file)).toBe(2);
+    expect(await databaseRestoredAt(instance)).toBeNull();
   });
 });

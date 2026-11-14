@@ -1,12 +1,12 @@
 import { existsSync } from "node:fs";
 import { z } from "zod";
-import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { first, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
-import type { Logger } from "@michaelthielemann/kestrel/logger";
+import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { applyPendingRestore, createReplicationSqlite, restoreFromBlobs, type Replication } from "./impl.ts";
+import { applyPendingRestore, createReplicationSqlite, listReplica, markerKey, readOriginNonce, restoreFromBlobs, unplacedNewerGenerations, type Applied, type Config, type Replication } from "./impl.ts";
 import { checkSkippedRestore, markRestoredThisBoot, reportedRestoreAt } from "./restoreFreshness.ts";
 
 export const configSchema = z
@@ -29,6 +29,47 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const TEARDOWN_FAILED = "replication/sqlite: failed to ship pending WAL frames and seal the generation on teardown; the replica lacks the frames committed since the last sync until the next start takes a new snapshot, and the generation stays unsealed";
+
+function unplacedGenerationsError(file: string, prefix: string, newest: string, generations: readonly string[]): string {
+  const one = generations.length === 1;
+  const named = one ? `generation ${generations.join("")}` : `generations ${generations.join(", ")}`;
+  return `replication/sqlite: refusing to restore ${file} from the replica: ${named} under ${prefix}gen/ ${one ? "is" : "are"} named by time alone without origin.json, yet sort${one ? "s" : ""} after ${newest}, the newest generation that this version wrote or that was placed with origin.json. A 5.x release, or another process writing to the same prefix, wrote ${one ? "it" : "them"}, and restoring the newest generation would start from that data. If that data is wanted, add an origin.json to ${prefix}gen/${generations.at(-1) ?? ""}/ and start again; otherwise move ${one ? "it" : "them"} out of ${prefix}gen/ to start from ${newest}.`;
+}
+
+async function restoreMissingFile(config: Config, blobs: Blobstore, logger: Logger, bootStartedAt: number): Promise<void> {
+  const listing = await listReplica(blobs, config.prefix);
+  if (isErr(listing)) throw new Error(listing.error.message, { cause: listing.error });
+  const unplaced = unplacedNewerGenerations(listing.value);
+  if (unplaced.newest !== null && unplaced.generations.length > 0) throw new Error(unplacedGenerationsError(config.file, config.prefix, unplaced.newest, unplaced.generations));
+  const restored = await restoreFromBlobs(blobs, config.prefix, {}, config.file, listing.value.points);
+  if (isErr(restored)) {
+    if (restored.error.message.includes("no snapshot")) return;
+    throw new Error(restored.error.message, { cause: restored.error });
+  }
+  const { generation } = restored.value;
+  const markers = listing.value.markers.get(generation);
+  if (markers === undefined || !markers.has("origin")) {
+    markRestoredThisBoot(config.file, bootStartedAt);
+    return;
+  }
+  if (markers.has("applied")) {
+    markRestoredThisBoot(config.file, bootStartedAt);
+    logger.info("replication/sqlite: restored from a generation placed with origin.json that an earlier start already reported", { file: config.file, generation });
+    return;
+  }
+  markRestoredThisBoot(config.file, bootStartedAt, true);
+  const nonce = await readOriginNonce(blobs, config.prefix, generation);
+  if (isErr(nonce)) {
+    logWarn(logger, "replication/sqlite: restored from a generation placed with origin.json but could not read that file, so no applied.json acknowledges the restore", { file: config.file, generation, error: nonce.error.message });
+    return;
+  }
+  const applied: Applied = { generation, nonce: nonce.value, restoredAt: bootStartedAt };
+  const written = await blobs.put(markerKey(config.prefix, generation, "applied"), new TextEncoder().encode(JSON.stringify(applied)), { contentType: "application/json" });
+  if (isErr(written)) logWarn(logger, "replication/sqlite: could not write applied.json; the next start that restores this generation reports the restore again", { file: config.file, generation, error: written.error.message });
+  else logger.info("replication/sqlite: restored from a generation placed with origin.json and reported the restore", { file: config.file, generation, nonce: nonce.value });
+}
+
 export default defineModule({
   name: "replication/sqlite",
   provides: [],
@@ -41,25 +82,20 @@ export default defineModule({
     const bootStartedAt = deps.bootStartedAt ?? Date.now();
     const restoredFromMarker = applyPendingRestore(config.file, () => markRestoredThisBoot(config.file, bootStartedAt, true));
     if (config.restoreOnStart) {
-      if (!existsSync(config.file)) {
-        const restored = await restoreFromBlobs(blobs, config.prefix, {}, config.file);
-        if (isErr(restored) && !restored.error.message.includes("no snapshot")) throw new Error(restored.error.message, { cause: restored.error });
-        if (!isErr(restored)) markRestoredThisBoot(config.file, bootStartedAt);
-      } else if (!restoredFromMarker) {
-        await checkSkippedRestore(config, blobs, deps.logger, bootStartedAt);
-      }
+      if (!existsSync(config.file)) await restoreMissingFile(config, blobs, deps.logger, bootStartedAt);
+      else if (!restoredFromMarker) await checkSkippedRestore(config, blobs, deps.logger, bootStartedAt);
     }
-    return { ...createReplicationSqlite(config, blobs), logger: deps.logger, reportedRestoreAt: () => reportedRestoreAt(config.file) };
+    return { ...createReplicationSqlite(config, blobs, Date.now, { logger: deps.logger }), logger: deps.logger, reportedRestoreAt: () => reportedRestoreAt(config.file) };
   },
 
   health: (r) => r.health(),
 
   async teardown(r) {
     try {
-      const result = await r.sync();
-      if (isErr(result)) r.logger.error("replication/sqlite: failed to ship pending WAL frames on teardown; the replica lacks them until the next start takes a new snapshot", { error: result.error.message });
+      const result = await r.seal();
+      if (isErr(result)) r.logger.error(TEARDOWN_FAILED, { error: result.error.message });
     } catch (err) {
-      r.logger.error("replication/sqlite: failed to ship pending WAL frames on teardown; the replica lacks them until the next start takes a new snapshot", { error: err instanceof Error ? err.message : String(err) });
+      r.logger.error(TEARDOWN_FAILED, { error: err instanceof Error ? err.message : String(err) });
     }
     r.close();
   },
