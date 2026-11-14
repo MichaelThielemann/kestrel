@@ -320,6 +320,30 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     expect(await t.waitReady(30_000)).toBe(true);
   });
 
+  it("repeats a status read whose cf ended by a signal, before the start and while waiting for readiness", async () => {
+    Object.assign(cf.app(API.name), { state: "STOPPED", running: 0, ready: 0 });
+    const t = await target();
+    await t.status();
+    cf.killedPaths.set(`/v3/apps/${API.guid}`, 1);
+    await t.start();
+    expect(cf.actions.map((action) => action.action)).toEqual(["start"]);
+    cf.killedPaths.set(`/v3/apps/${API.guid}/processes/web/stats`, 1);
+    expect(await t.waitReady(10_000)).toBe(true);
+    expect(cf.killedPaths.get(`/v3/apps/${API.guid}/processes/web/stats`)).toBe(0);
+  });
+
+  it("repeats a status read whose cf did not finish in time, before the start and while waiting for readiness", async () => {
+    Object.assign(cf.app(API.name), { state: "STOPPED", running: 0, ready: 0 });
+    const t = await target({}, {}, { callTimeoutMs: 1500 });
+    await t.status();
+    cf.hungPaths.set(`/v3/apps/${API.guid}`, 1);
+    await t.start();
+    expect(cf.actions.map((action) => action.action)).toEqual(["start"]);
+    cf.hungPaths.set(`/v3/apps/${API.guid}/processes/web/stats`, 1);
+    expect(await t.waitReady(10_000)).toBe(true);
+    expect(cf.hungPaths.get(`/v3/apps/${API.guid}/processes/web/stats`)).toBe(0);
+  });
+
   it("answers false when the instances cannot be read before the timeout", async () => {
     const t = await target();
     await t.status();

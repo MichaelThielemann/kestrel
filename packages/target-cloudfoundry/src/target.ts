@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { z } from "zod";
 // eslint-disable-next-line no-restricted-imports -- a target adapter implements the Target interface of kestrel-ops and resolves credentials the way it does
 import { commandRunner, OpsError, Redactor, resolveCredential, type Target, type TargetDeps, type TargetFacts, type TargetFactory, type TargetStatus } from "@michaelthielemann/kestrel-ops";
-import { cfRunner, type CfResult, type CfRunner } from "./cf.ts";
+import { cfRunner, CfUnfinished, type CfResult, type CfRunner } from "./cf.ts";
 import { parseConfig, type CloudFoundryConfig } from "./config.ts";
 import { appManifest, withManifestFiles } from "./manifest.ts";
 import { installedPackages } from "./packages.ts";
@@ -31,6 +31,8 @@ export interface CloudFoundryOptions {
   stopTimeoutMs?: number;
   /** How long a failing status read before a start is repeated, in milliseconds. Default 30000. */
   readTimeoutMs?: number;
+  /** How long one `cf curl` may run before it counts as a failed call, in milliseconds. Default 120000. */
+  callTimeoutMs?: number;
 }
 
 class CfApiError extends OpsError {
@@ -103,7 +105,9 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
 
   const api = async <T>(path: string, schema: z.ZodType<T>, method = "GET", data?: string): Promise<T> => {
     const args = method === "GET" ? ["curl", path] : ["curl", path, "-X", method, ...(data === undefined ? [] : ["-d", data])];
-    const result = await run(args);
+    const result = await run(args, { timeoutMs: options.callTimeoutMs ?? 120_000 }).catch((error: unknown) => {
+      throw error instanceof CfUnfinished ? new CfApiError(error.message) : error;
+    });
     if (result.code !== 0) throw new CfApiError(`cf ${(method === "GET" ? ["curl", path] : ["curl", "-X", method, path]).join(" ")} exited with ${result.code}`);
     let body: unknown;
     try {

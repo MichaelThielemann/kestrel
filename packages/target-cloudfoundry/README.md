@@ -59,7 +59,8 @@ The `target` block of an environment in `kestrel.environments.json` names this p
   repeats a failing status read for up to 30 s, then sends the start action; when cf answers that request
   with an error but the app reads `STARTED` afterwards, the start counts as done. Readiness is an instance in
   state `RUNNING`, and then `readyUrl` answering 200 when it is set; a failing read during that wait counts as
-  not ready yet and is repeated until the wait ends.
+  not ready yet and is repeated until the wait ends. A `cf curl` that does not finish within 120 s or ends by a
+  signal counts as a failing read.
 - **Describe** records the app's guid, its current droplet (null only when the platform answers that the app
   has none), its newest revision (guid and version, or null) and the names of its environment variables,
   never their values, next to the installed package versions. A read that fails ends the description with
@@ -91,7 +92,7 @@ its `web` process, to anything but 1, or a manifest without the app ends with ex
 ## API
 `createTarget(config, { root, clock })` is the factory `kestrel-ops` imports. `cloudFoundryTarget(config, deps,
 options)` builds the same target with another environment for cf (`env`) and other waiting intervals
-(`pollMs`, `stopTimeoutMs`, `readTimeoutMs`).
+(`pollMs`, `stopTimeoutMs`, `readTimeoutMs`) and another limit for one `cf curl` (`callTimeoutMs`).
 
 ## Testing
 The package's tests put a stub `cf` first on `PATH` that hands each call to a fake space in the test process,
