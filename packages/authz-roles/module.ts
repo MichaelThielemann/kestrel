@@ -7,6 +7,8 @@ import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { cutAnswer, FIELD_PATH, parseFieldsArgument, RESOURCE, unsortableField } from "./fields.ts";
 import { createAuthzRoles, DEFAULT_ROLELESS_PIPELINES, type AuthzRoles } from "./impl.ts";
 
+const READ_PERMISSION = /^[a-z0-9_-]+(\.[a-z0-9_-]+)*\.read$/;
+
 const fieldGrants = z.record(
   z.string().regex(RESOURCE, 'a resource is a name such as "media"'),
   z.array(z.string().regex(FIELD_PATH, 'a field path is "name", "name.sub" or "name[].sub", e.g. "variants[].path"')).min(1),
@@ -16,7 +18,7 @@ export const configSchema = z
   .object({
     roles: z.record(z.string(), z.array(z.string().regex(/^(\*|[a-z0-9_-]+(\.[a-z0-9_-]+)*(\.\*)?)$/))),
     roleClaim: z.string().min(1).default("roles"),
-    anonymous: z.array(z.string()).default([]),
+    anonymous: z.array(z.string().regex(READ_PERMISSION, 'anonymous may hold only read permissions such as "pages.read"; a wildcard or a permission that writes, manages or lists is for roles')).default([]),
     anonymousFields: fieldGrants.default({}),
     fields: z.record(z.string(), fieldGrants).default({}),
     rolelessPipelines: z.array(z.string().min(1)).default([...DEFAULT_ROLELESS_PIPELINES]).describe("Pipelines that need a signed-in caller but serve an account without a configured role; every other such pipeline must run authz.requireRole"),

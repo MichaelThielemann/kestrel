@@ -1231,7 +1231,8 @@
             "anonymous": {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^[a-z0-9_-]+(\\.[a-z0-9_-]+)*\\.read$"
               },
               "default": []
             },

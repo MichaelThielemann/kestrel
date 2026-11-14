@@ -187,7 +187,7 @@ async function bootWithGatedPipelines(identity: Identity, anonymous: string[] = 
     },
     modules: [probe, customGateModule, module],
     pipelines: [
-      definePipeline({ name: "gated", steps: ["probe.set", "authz.require:pages.manage"] }),
+      definePipeline({ name: "gated", steps: ["probe.set", "authz.require:media.read"] }),
       definePipeline({ name: "mixed", steps: ["probe.set", "authz.require:pages.write", "authz.require:users.manage"] }),
       definePipeline({ name: "open", steps: ["probe.set", "custom.gate"] }),
       definePipeline({ name: "access", steps: ["probe.set", "authz.describePipelineAccess"] }),
@@ -220,7 +220,7 @@ describe("authz/roles: describePipelineAccess against a booted instance", () => 
   });
 
   it("answers granted for a signed-in caller when anonymous callers have the permission its roles lack", async () => {
-    const kestrel = await bootWithGatedPipelines({ id: "g", claims: { roles: [] } }, ["pages.manage"]);
+    const kestrel = await bootWithGatedPipelines({ id: "g", claims: { roles: [] } }, ["media.read"]);
     const access = await kestrel.run("access", { trigger });
     const pipelineAccess = boundaryCast<{ pipelineAccess: Record<string, string> }>(access.result, "json").pipelineAccess;
     expect(pipelineAccess.gated).toBe("granted");
@@ -295,6 +295,37 @@ describe("authz/roles: dataflow and step registration", () => {
         logger: silentLogger,
       }),
     ).rejects.toThrow(/unknown step "authz.describeAccess"/);
+  });
+});
+
+describe("authz/roles config: anonymous permissions", () => {
+  const parse = (anonymous: string[]) => configSchema.safeParse({ roles: {}, anonymous });
+
+  it("accepts read permissions, also below a longer name", () => {
+    expect(parse(["pages.read", "settings.read", "media.read", "site.pages.read"]).success).toBe(true);
+    expect(parse([]).success).toBe(true);
+  });
+
+  it("refuses a wildcard and a permission that does not read, naming the entry", () => {
+    for (const entry of ["*", "pages.*", "pages.write", "pages.manage", "media.list", "media.delete", "pages", "read", "pages.read.*", "Pages.read", "pages. read", ""]) {
+      const parsed = parse(["pages.read", entry]);
+      expect(parsed.success, entry).toBe(false);
+      expect(parsed.error?.issues[0]?.path, entry).toEqual(["anonymous", 1]);
+      expect(parsed.error?.issues[0]?.message, entry).toMatch(/^anonymous may hold only read permissions such as "pages.read"/);
+    }
+  });
+
+  it("stops boot on an anonymous wildcard", async () => {
+    for (const anonymous of [["*"], ["pages.*"]]) {
+      await expect(
+        bootKestrel({
+          config: { modules: [{ use: "@michaelthielemann/kestrel-authz-roles", config: { roles: {}, anonymous } }], triggers: [], http: null },
+          modules: [module],
+          pipelines: [definePipeline({ name: "access", steps: ["authz.listRoles"] })],
+          logger: silentLogger,
+        }),
+      ).rejects.toThrow(/anonymous may hold only read permissions/);
+    }
   });
 });
 

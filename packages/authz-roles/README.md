@@ -4,7 +4,9 @@ roles come from `identity.claims[roleClaim]` (default `roles`, string or string[
 authn module. Permissions are dotted names; `x.*` grants everything below `x`.
 `anonymous: ["pages.read"]` lists what a request without identity may do, and every signed-in
 caller may do it too, whatever its roles: `can` answers true when the roles or `anonymous` grant the
-permission.
+permission. `anonymous` takes only read permissions (`pages.read`, `settings.read`, `media.read`);
+a wildcard (`*`, `pages.*`) or a permission such as `pages.write` or `media.list` stops boot with
+the offending entry named, because a visitor with no account must never gain more than a read.
 
 **Accounts without a role.** A signed-in account none of whose roles the config defines may sign out
 and read its own identity, and is otherwise served like an anonymous visitor: on a public pipeline
