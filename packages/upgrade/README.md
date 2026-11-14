@@ -48,7 +48,7 @@ functions below.
 package registers its project loader and rules as a plugin through the `kestrel` field of its own
 `package.json` (see `docs/upgrading.md` § Registering a plugin); `./hosts` reads that field from a
 project's direct dependencies as data (`scanHosts`, `loadHostPlugins`, `selectHostPlugin`). `./plugin` carries the plugin API (`UpgradePlugin`, `Rule`, `RuleContext`,
-`KestrelPluginFactory`, `KestrelPluginHost`, `HostProblem`, `PLUGIN_API_VERSION`, `PLUGIN_API_MIN`,
+`KestrelPluginFactory`, `KestrelPluginHost`, `HostProblem`, `OpsFacts`, `PLUGIN_API_VERSION`, `PLUGIN_API_MIN`,
 and `createRuleContext` for a plugin's own rule tests) — see `docs/upgrading.md`'s "The plugin API" for the full surface, and `./codemods` for the edit,
 verify and AST-reading primitives a plugin's own rule or locator is written with, so it never needs
 a second copy of this engine's own edit machinery. A registered plugin's own `load()` (its config

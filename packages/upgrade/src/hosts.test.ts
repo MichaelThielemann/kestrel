@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { runCli } from "./cli-run.ts";
 import { loadHostPlugins, satisfiesCaret, scanHosts, selectHostPlugin } from "./hosts.ts";
-import { PLUGIN_API_MIN, PLUGIN_API_VERSION } from "./plugin.ts";
+import { PLUGIN_API_MIN, PLUGIN_API_VERSION, type OpsFacts, type UpgradePlugin } from "./plugin.ts";
 import type { UpgradeReport } from "./report.ts";
 import { toolVersion } from "./versions.ts";
 
@@ -149,6 +149,57 @@ describe("loading and selecting host plugins", () => {
     const { loaded: throwing } = await loadHostPlugins(scanHosts(dir, { cliVersion: VERSION }).loadable, { pluginApiVersion: PLUGIN_API_VERSION, cliVersion: VERSION });
     const selection = await selectHostPlugin(throwing, dir);
     expect(selection.ok ? "" : selection.message).toContain('"host-c"');
+  });
+});
+
+describe("plugin API 6", () => {
+  it("is the engine's plugin API, and 4 stays the lowest a host may declare", () => {
+    expect(PLUGIN_API_VERSION).toBe(6);
+    expect(PLUGIN_API_MIN).toBe(4);
+  });
+
+  it("keeps loading a host that declares plugin API 5 and runs its rules", async () => {
+    await installHost(dir, "api5-host", { type: "module", kestrel: { plugin: "./cli/plugin.mjs", pluginApi: 5, engine: MATCHING } }, { "cli/plugin.mjs": pluginSource({ rule: true }) });
+    await writeProject(dir, { "api5-host": "1.0.0" });
+    const scan = scanHosts(dir, { cliVersion: VERSION });
+    expect(scan.loadable.map((h) => [h.package, h.pluginApi])).toEqual([["api5-host", 5]]);
+    expect(scan.outdated).toEqual([]);
+    expect(scan.refused).toEqual([]);
+    const { loaded, refused } = await loadHostPlugins(scan.loadable, { pluginApiVersion: PLUGIN_API_VERSION, cliVersion: VERSION });
+    expect(refused).toEqual([]);
+    const lines: string[] = [];
+    await runCli(["check", "--root", dir, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: loaded.map((h) => h.plugin), hosts: scan });
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
+    expect(report.findings.map((f) => f.id)).toContain("example/source");
+  });
+
+  it("lets a plugin describe its operations facts without the upgrade commands calling the hook", async () => {
+    let called = 0;
+    const plugin: UpgradePlugin = {
+      kind: "ops-host",
+      detect: () => true,
+      load: async () => ({ issues: [] }),
+      ops: (): OpsFacts => {
+        called += 1;
+        return { readyPath: "/api/ready", secretEnvNames: ["EXAMPLE_SECRET"], migrationSwitches: { storage: "EXAMPLE_STORAGE_MIGRATIONS" }, databaseFile: (env) => env.EXAMPLE_DB, blobstoreFromEnv: () => ({ use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: "./blobs" } }) };
+      },
+    };
+    await writeProject(dir, {});
+    const lines: string[] = [];
+    await runCli(["check", "--root", dir, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin] });
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
+    expect(report.project.kind).toBe("ops-host");
+    expect(report.findings.filter((f) => f.rule === "plugin/hook-failed")).toEqual([]);
+    expect(called).toBe(0);
+  });
+
+  it("accepts a host that declares plugin API 6 and refuses one that needs 7", async () => {
+    await installHost(dir, "api6-host", { kestrel: { plugin: "./cli/plugin.mjs", pluginApi: 6, engine: MATCHING } }, { "cli/plugin.mjs": pluginSource() });
+    await installHost(dir, "api7-host", { kestrel: { plugin: "./cli/plugin.mjs", pluginApi: 7, engine: MATCHING } }, { "cli/plugin.mjs": pluginSource() });
+    await writeProject(dir, { "api6-host": "1.0.0", "api7-host": "1.0.0" });
+    const scan = scanHosts(dir, { cliVersion: VERSION });
+    expect(scan.loadable.map((h) => h.package)).toEqual(["api6-host"]);
+    expect(scan.refused.map((r) => [r.package, r.reason])).toEqual([["api7-host", "needs plugin API 7, this kestrel-cli has 6; update kestrel-cli"]]);
   });
 });
 

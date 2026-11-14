@@ -309,6 +309,41 @@ export interface UpgradePlugin {
    * commands do not call it.
    */
   hostChecks?(project: LoadedProject, bootCheck: BootCheck): readonly HostProblem[] | Promise<readonly HostProblem[]>;
+  /**
+   * The facts the operations tooling (backup, restore, update) needs about a project this plugin
+   * owns and cannot read from a `kestrel.config.ts`: its readiness path, how it maps its environment
+   * to a blob store and a database file, which variables hold secrets and which switch the
+   * migrations. `undefined` means the plugin has none for this project. The upgrade commands do not
+   * call it. Available from plugin API `6`.
+   */
+  ops?(root: string): OpsFacts | undefined | Promise<OpsFacts | undefined>;
+}
+
+/** An environment as the operations tooling passes it to {@link OpsFacts}: a plain map, never `process.env` itself. */
+export type OpsEnv = Readonly<Record<string, string | undefined>>;
+
+/** A module-list entry the operations tooling builds a provider from, such as the blob store a project's environment selects. */
+export interface OpsModuleEntry {
+  use: string;
+  config: Record<string, unknown>;
+}
+
+/** What {@link UpgradePlugin.ops} returns. Every member is optional; the tooling falls back to its own default or asks for a value it lacks. */
+export interface OpsFacts {
+  /** The path that answers 200 once a started instance serves requests, such as `/api/ready`. */
+  readyPath?: string;
+  /** Environment variables, without secrets, that a local start of the project for a rehearsal needs. */
+  localBootEnv?: Readonly<Record<string, string>>;
+  /** Paths inside the static export that must exist once the project has rendered after a restore or an update, such as `index.html`. */
+  exportChecks?: readonly string[];
+  /** The blob store entry the project builds from `env`, or `undefined` when `env` selects none. */
+  blobstoreFromEnv?(env: OpsEnv): OpsModuleEntry | undefined;
+  /** The database file the project opens with `env`, relative to the project root unless absolute. */
+  databaseFile?(env: OpsEnv): string | undefined;
+  /** Names of environment variables whose values are secrets; the tooling never prints, logs or passes them on a command line. */
+  secretEnvNames?: readonly string[];
+  /** Names of the environment variables that switch content migrations (`content`) and storage migrations (`storage`) at start-up. */
+  migrationSwitches?: { content?: string; storage?: string };
 }
 
 /** What the running kestrel CLI passes to a plugin factory. */

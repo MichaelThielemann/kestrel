@@ -1253,6 +1253,15 @@ classification never imports a plugin.
   lists what it returns (`code`, `severity` `error` or `warning`, `owner`, `reason`, optionally
   `pipeline`, `module`, `file`) next to the boot problems; an `error` fails the check. The upgrade
   commands do not call it.
+- `ops?(root): OpsFacts | undefined | Promise<…>` — what the operations tooling (backup, restore,
+  update) needs about a project it cannot read from a `kestrel.config.ts`: `readyPath` (the path that
+  answers 200 once a started instance serves requests), `localBootEnv` (variables without secrets for
+  a local start of the project), `exportChecks` (paths inside the static export that must exist once
+  the project has rendered again), `blobstoreFromEnv(env)` and `databaseFile(env)` (the blob store
+  entry and the database file the project builds from an environment passed as a plain map, never
+  `process.env`), `secretEnvNames` (variables the tooling never prints, logs or puts on a command line)
+  and `migrationSwitches` (the variables that switch content and storage migrations at start-up).
+  Every member is optional. The upgrade commands do not call it. Available from plugin API `6`.
 
 A `Rule` answers one of its own `ask` questions the same way every other finding changes: through
 `ctx.answers` on the next `check()` call — there is no separate answer-to-edit path a plugin's rule
@@ -1285,12 +1294,12 @@ without running the CLI: `root` and `scratch` default to the directory of `proje
 `overrides` replaces any of them. A member `RuleContext` gains later gets its default there, so a
 test built on it keeps compiling.
 
-`PLUGIN_API_VERSION` is the version of this plugin API, `5` as 6.0.0 ships it. It covers every type
+`PLUGIN_API_VERSION` is the version of this plugin API, `6` as 6.0.0 ships it. It covers every type
 `./plugin` exports, the ones a plugin returns to the engine as much as the ones it receives:
 `UpgradePlugin`, `LoadResult`, `LoadedProject`, `LoadIssue`, `PipelineFile`, `DataContentModel` and
 its parts, `SwitchEditsResult`, `Rule` with its `needs` values, `RuleContext`/`SourceRuleContext`, the
-locator types, `Finding`/`Edit`, `KestrelPluginHost`, `HostProblem`, `KestrelPluginFactory` and
-`RunUpgradeCliOptions`. A member added to any of them later is an optional one, and a new `needs`
+locator types, `Finding`/`Edit`, `KestrelPluginHost`, `HostProblem`, `OpsFacts` with its parts,
+`KestrelPluginFactory` and `RunUpgradeCliOptions`. A member added to any of them later is an optional one, and a new `needs`
 value is a new variant of `Rule`; each such addition raises the number by one. An engine older than
 an addition ignores a hook or member it does not know, so a plugin that relies on one compares
 `host.pluginApiVersion` first and reports the engine as too old instead. The number only grows: a
