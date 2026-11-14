@@ -164,6 +164,14 @@ export function persistenceContractTests(make: () => Promise<Persistence>) {
       expect(await idsOf({ meta: { in: [{ tags: [] }, { tags: ["x", "y"] }] } })).toEqual(["b", "c"]);
     });
 
+    it("reads a json filter value whose only key is an Object.prototype name as an equality value", async () => {
+      expectOk(await db.ensureCollection("blobs", { payload: "json" }));
+      const shadow = Object.fromEntries([["toString", 1]]);
+      expectOk(await db.createOne("blobs", { id: "a", payload: shadow }));
+      expectOk(await db.createOne("blobs", { id: "b", payload: { other: 1 } }));
+      expect(expectOk(await db.findMany("blobs", { payload: shadow })).items.map((d) => d.id)).toEqual(["a"]);
+    });
+
     it("in matches string, number, boolean and json values exactly", async () => {
       expectOk(await seed());
       expect(await idsOf({ id: { in: ["a", "c"] } })).toEqual(["a", "c"]);
