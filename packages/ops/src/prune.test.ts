@@ -266,3 +266,42 @@ describe("copying originals into the backup", () => {
     }
   });
 });
+
+describe("backup prune right after a backup the listing does not show yet", () => {
+  it("keeps an object only that backup refers to, reused from an older backup, so the new backup stays restorable, and forgets backups older than a day", async () => {
+    let now = Date.parse("2026-10-01T00:00:00Z");
+    const bucket = new MemoryBucket("reuse-lag", { clock: () => now });
+    const h = createHarness({ store: memoryStore(bucket) });
+    const clock = { clock: () => now };
+    try {
+      h.editEnvironments((file) => {
+        const backups = file.environments.prod?.backups;
+        if (typeof backups === "object" && backups !== null) Reflect.set(backups, "retention", { cutover: 5, scheduled: 14, manual: 1, "pre-restore": 5 });
+      });
+      await h.app.start();
+      await h.app.seed();
+      expect((await h.run(["backup", "create", "--json"], clock)).code).toBe(0);
+      await h.app.deleteMedia("m1");
+      await h.app.sync();
+      now += 60 * 60 * 1000;
+      expect((await h.run(["backup", "create", "--json"], clock)).code).toBe(0);
+      await h.app.upload("m1", "harbour.jpg", new TextEncoder().encode("harbour image bytes"));
+      await h.app.sync();
+      now += 2 * DAY;
+      bucket.options.listLag = 3;
+      const latest = await h.run(["backup", "create", "--json"], clock);
+      expect(latest.code).toBe(0);
+      const pruned = await h.run(["backup", "prune", "--yes", "--json"], clock);
+      expect(pruned.code).toBe(0);
+      expect(boundaryCast<string[]>(pruned.json.backups, "json")).toHaveLength(1);
+      const recent = [...bucket.objects.keys()].filter((key) => key.startsWith(`${LOCATION}recent/`));
+      expect(recent).toEqual([`${LOCATION}recent/20261003/000000.json`]);
+      bucket.options.listLag = 0;
+      const verified = await h.run(["backup", "verify", String(latest.json.id)]);
+      expect(verified.stderr).toBe("");
+      expect(verified.code).toBe(0);
+    } finally {
+      await h.dispose();
+    }
+  });
+});

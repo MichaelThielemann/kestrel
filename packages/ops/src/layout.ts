@@ -59,6 +59,7 @@ export const keys = {
   journal: (runId: string, seq: number, step: string, state: string) => `runs/${runId}/${String(seq).padStart(6, "0")}-${step}-${state}.json`,
   lock: (runId: string, at: number, what: "start" | "beat" | "released") => `locks/${runId}/${stamp(at)}-${what}-${hex(2)}.json`,
   probe: (runId: string) => `probes/${runId}-${hex(4)}`,
+  recent: (day: string, n: number) => `recent/${day}/${String(n).padStart(6, "0")}.json`,
 };
 
 /** One authoritative original as `blobs.jsonl` records it. `object` is the backup copy's key in the backup location, `objectEtag` the ETag the store gave that copy. */

@@ -105,6 +105,7 @@ is the directory that holds `kestrel.environments.json`; in a bundle that is `.k
 <location>objects/<key>@<etag>            the bytes, shared by every backup that has this version
 <location>runs/<run>/…                    the journal, one object per step
 <location>locks/<run>/…                   the lock trace
+<location>recent/<yyyymmdd>/<n>.json      the id of each backup written that day, numbered from 0
 ```
 
 The id reads `<env>-<yyyymmddThhmmssZ>-<kind>-<4 hex>`. Every key is written once and never overwritten: a
@@ -208,7 +209,10 @@ without an answer, the run stops at the question with exit 1.
 10, `pre-restore` 5); only verified backups count. A failed or unverified backup stays while it is newer than the
 oldest verified one kept, or, when its kind has no verified backup, while it is among the newest of the count.
 Prune also keeps every pinned backup and the newest verified backup of each Kestrel major, then removes the
-objects no kept backup refers to. Nothing younger than a day is removed. It refuses while another run is open (a journal
+objects no kept backup refers to. Nothing younger than a day is removed. A backup reuses an object it finds
+under `objects/` without writing it again, so the object's age does not protect it; a backup the listing does
+not show yet still counts, since prune reads the backups of today and yesterday from `recent/`, which it finds
+by key, not by listing, and forgets older days there. It refuses while another run is open (a journal
 without an end entry, active in the last two hours) or holds the lock. Interactive runs ask before deleting;
 `--dry-run` only lists.
 

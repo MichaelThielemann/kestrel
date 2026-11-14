@@ -5,7 +5,7 @@ import { REPLICATION_PACKAGE, runtimeVersion, startTarget, stopTarget, type OpsC
 import { OpsError } from "./errors.ts";
 import { openRuns, listRuns } from "./journal.ts";
 import { heldLocks } from "./lock.ts";
-import { BACKUP_KINDS, backupId, fromJsonl, jsonBytes, keys, parseBackupId, parseJson, toJsonl, type BackupKind, type BlobEntry, type DerivedEntry, type Manifest, type SiteEntry } from "./layout.ts";
+import { BACKUP_KINDS, backupId, fromJsonl, jsonBytes, keys, parseBackupId, parseJson, stamp, toJsonl, type BackupKind, type BlobEntry, type DerivedEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
 import { buildDatabase, completeGeneration, SEALING_MAJOR, sealOf, stableGenerations, type SealReport } from "./replica.ts";
 import { integrityCheck, referencedBlobs, sha256, sha256File, tableCounts, vacuumInto } from "./sqlite.ts";
@@ -179,6 +179,7 @@ async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: Exclud
   await putNew(ctx.backups, ctx.location + keys.blobs(id), toJsonl(blobs), "application/x-ndjson");
   await putNew(ctx.backups, ctx.location + keys.site(id), toJsonl(site), "application/x-ndjson");
   await putNew(ctx.backups, ctx.location + keys.derived(id), toJsonl(derived), "application/x-ndjson");
+  await recordRecent(ctx, id);
   const manifest: Manifest = {
     schema: "kestrel-ops/backup@1",
     id,
@@ -380,6 +381,32 @@ const majorOfKestrel = (manifest: Manifest | null): string | null => {
   return version === undefined ? null : (version.split(".")[0] ?? null);
 };
 
+const dayOf = (at: number): string => stamp(at).slice(0, 8);
+
+async function recordRecent(ctx: OpsContext, id: string): Promise<void> {
+  const day = dayOf(ctx.clock());
+  for (let n = 0; ; n++) {
+    const key = ctx.location + keys.recent(day, n);
+    if ((await ctx.backups.head(key)) !== null) continue;
+    await ctx.backups.put(key, jsonBytes({ backupId: id }), { contentType: "application/json" });
+    return;
+  }
+}
+
+async function recentBackupIds(ctx: Pick<OpsContext, "backups" | "location">, now: number): Promise<string[]> {
+  const ids: string[] = [];
+  for (const day of new Set([dayOf(now), dayOf(now - PRUNE_MIN_AGE_MS)])) {
+    for (let n = 0; ; n++) {
+      const data = await ctx.backups.get(ctx.location + keys.recent(day, n));
+      if (data === null) break;
+      const value: unknown = parseJson(data);
+      const id: unknown = typeof value === "object" && value !== null ? Reflect.get(value, "backupId") : null;
+      if (typeof id === "string") ids.push(id);
+    }
+  }
+  return ids;
+}
+
 async function backupIdsAtLocation(ctx: Pick<OpsContext, "backups" | "location">): Promise<Set<string>> {
   const ids = new Set<string>();
   for (const info of await ctx.backups.list(`${ctx.location}backups/`)) {
@@ -394,8 +421,9 @@ async function backupIdsAtLocation(ctx: Pick<OpsContext, "backups" | "location">
  * verified backups count towards the retention; a failed or unverified one is kept while it is newer than the oldest
  * verified backup the count keeps (or, when its kind has no verified backup, while it is among the newest of the
  * count). It keeps pinned backups and the newest verified backup of every Kestrel major, never removes anything
- * younger than a day, keeps every object a backup of any environment at the same location refers to, and refuses
- * while a run is open or another run holds the lock.
+ * younger than a day, keeps every object a backup of any environment at the same location refers to, also a backup
+ * of today or yesterday that the listing does not show yet (read from `recent/`), and refuses while a run is open or
+ * another run holds the lock.
  */
 export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResult> {
   const now = ctx.clock();
@@ -429,12 +457,20 @@ export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResu
   }
   const referenced = new Set<string>();
   const removing = new Set(remove);
-  for (const id of await backupIdsAtLocation(ctx)) {
-    if (removing.has(id)) continue;
+  const recent = await recentBackupIds(ctx, now);
+  for (const id of new Set([...(await backupIdsAtLocation(ctx)), ...recent])) {
+    if (removing.has(id) && !recent.includes(id)) continue;
     for (const list of [await readJsonl<BlobEntry>(ctx, ctx.location + keys.blobs(id)), await readJsonl<SiteEntry>(ctx, ctx.location + keys.site(id))]) for (const entry of list ?? []) referenced.add(ctx.location + entry.object);
   }
   const objects = (await ctx.backups.list(`${ctx.location}objects/`)).filter((o) => !referenced.has(o.key) && now - o.lastModified >= PRUNE_MIN_AGE_MS).map((o) => o.key);
   const result: PruneResult = { dryRun, backups: remove, objects, kept: [...keep].sort() };
+  if (!dryRun) {
+    const oldest = dayOf(now - PRUNE_MIN_AGE_MS);
+    for (const info of await ctx.backups.list(`${ctx.location}recent/`)) {
+      const day = /^recent\/(\d{8})\//.exec(info.key.slice(ctx.location.length))?.[1];
+      if (day !== undefined && day < oldest) await ctx.backups.delete(info.key);
+    }
+  }
   if (dryRun || (remove.length === 0 && objects.length === 0)) return result;
   await confirm(ctx.answers, "prune-delete", `prune removes ${remove.length} backup(s) and ${objects.length} object(s)`);
   for (const id of remove) for (const info of await ctx.backups.list(ctx.location + keys.backupDir(id))) await ctx.backups.delete(info.key);
