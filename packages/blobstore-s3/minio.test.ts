@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import { blobstoreContractTests } from "@michaelthielemann/kestrel-contracts/blobstore.contract.test";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { createS3Admin } from "./admin.ts";
 import { createBlobstoreS3, createClient, type Config } from "./impl.ts";
 
 const endpoint = process.env.KESTREL_S3_ENDPOINT;
@@ -98,6 +99,65 @@ describe.skipIf(!endpoint)("blobstore/s3 against MinIO", () => {
       expect(expectOk(await store.get("b/c/x.txt"))).not.toBeNull();
       expect(await contentTypeOf(prefix, "b/c/x.txt")).toBe("text/plain");
       expect(expectOk(await store.list("")).map((i) => i.key)).toEqual(["b/c/x.txt"]);
+    });
+  });
+  describe("admin", () => {
+    const bytes = new TextEncoder().encode("hello admin");
+
+    async function adminWith(prefix: string) {
+      await clearPrefix(prefix);
+      return createS3Admin({ ...baseConfig, prefix }, client);
+    }
+
+    it("lists with size, ETag and server time, and heads the same object", async () => {
+      const prefix = `${runPrefix}admin-list/`;
+      const store = createBlobstoreS3({ ...baseConfig, prefix }, client);
+      const admin = await adminWith(prefix);
+      expectOk(await store.put("a/x.txt", bytes, { contentType: "text/plain" }));
+      expectOk(await store.put("b.txt", new Uint8Array([1, 2]), { contentType: "text/plain" }));
+      const listed = expectOk(await admin.listDetailed(""));
+      expect(listed.map((item) => [item.key, item.size])).toEqual([["a/x.txt", bytes.byteLength], ["b.txt", 2]]);
+      expect(listed[0]?.etag).toMatch(/^[0-9a-f]{32}$/);
+      expect(listed[0]?.lastModified).toBeGreaterThan(Date.now() - 60_000);
+      const head = expectOk(await admin.head("a/x.txt"));
+      expect(head).toMatchObject({ key: "a/x.txt", size: bytes.byteLength, etag: listed[0]?.etag });
+      expect(expectOk(await admin.head("missing.txt"))).toBeNull();
+    });
+
+    it("copies on the server, verifies the size and refuses a stale source ETag without writing", async () => {
+      const prefix = `${runPrefix}admin-copy/`;
+      const store = createBlobstoreS3({ ...baseConfig, prefix }, client);
+      const admin = await adminWith(prefix);
+      expectOk(await store.put("src.txt", bytes, { contentType: "text/plain" }));
+      const etag = expectOk(await admin.head("src.txt"))?.etag ?? "";
+      const copied = expectOk(await admin.copy("src.txt", "objects/dst.txt", { ifMatch: etag }));
+      expect(copied.size).toBe(bytes.byteLength);
+      expect(Array.from(expectOk(await store.get("objects/dst.txt")) ?? [])).toEqual(Array.from(bytes));
+      expect(await contentTypeOf(prefix, "objects/dst.txt")).toBe("text/plain");
+      expectOk(await store.put("src.txt", new TextEncoder().encode("changed source"), { contentType: "text/plain" }));
+      expectErr(await admin.copy("src.txt", "objects/stale.txt", { ifMatch: etag }), "PRECONDITION_FAILED");
+      expect(expectOk(await store.get("objects/stale.txt"))).toBeNull();
+      expectErr(await admin.copy("absent.txt", "objects/x.txt"), "NOT_FOUND");
+    });
+
+    it("reads a server time close to the local clock and leaves no probe object", async () => {
+      const prefix = `${runPrefix}admin-clock/`;
+      const admin = await adminWith(prefix);
+      const clock = expectOk(await admin.serverTime());
+      expect(Math.abs(clock.skewMs)).toBeLessThan(30_000);
+      expect(expectOk(await admin.listDetailed(""))).toEqual([]);
+    });
+
+    it("probes the write conditions and leaves no scratch keys", async () => {
+      const prefix = `${runPrefix}admin-probe/`;
+      const admin = await adminWith(prefix);
+      const probed = expectOk(await admin.probeCapabilities());
+      expect(probed.copySourceIfMatch).toMatchObject({ supported: true, outcome: "enforced" });
+      for (const capability of [probed.conditionalCreate, probed.conditionalOverwrite]) {
+        expect(typeof capability.supported).toBe("boolean");
+        expect(capability.supported).toBe(capability.outcome === "enforced");
+      }
+      expect(expectOk(await admin.listDetailed(""))).toEqual([]);
     });
   });
 });

@@ -1,7 +1,18 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+
+const packagesDir = fileURLToPath(new URL("../packages", import.meta.url));
+
+function minioTestFiles() {
+  return readdirSync(packagesDir)
+    .filter((name) => existsSync(join(packagesDir, name, "minio.test.ts")))
+    .sort()
+    .map((name) => `packages/${name}/minio.test.ts`);
+}
 
 const require = createRequire(fileURLToPath(new URL("../packages/blobstore-s3/package.json", import.meta.url)));
 const { S3Client, CreateBucketCommand, HeadBucketCommand } = require("@aws-sdk/client-s3");
@@ -71,7 +82,8 @@ async function main() {
     console.log(`== creating bucket ${BUCKET}`);
     await ensureBucket();
 
-    console.log("== running contract tests against MinIO");
+    const files = minioTestFiles();
+    console.log(`== running ${files.join(", ")} against MinIO`);
     const env = {
       ...process.env,
       KESTREL_S3_ENDPOINT: ENDPOINT,
@@ -79,7 +91,7 @@ async function main() {
       KESTREL_S3_ACCESS_KEY: ROOT_USER,
       KESTREL_S3_SECRET_KEY: ROOT_PASSWORD,
     };
-    const child = spawn("pnpm", ["vitest", "run", "packages/blobstore-s3/minio.test.ts"], {
+    const child = spawn("pnpm", ["vitest", "run", ...files], {
       stdio: "inherit",
       env,
     });
