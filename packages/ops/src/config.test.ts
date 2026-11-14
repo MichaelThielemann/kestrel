@@ -88,3 +88,27 @@ describe("--answers", () => {
     }
   });
 });
+
+describe("app credentials", () => {
+  it("resolves them only for status, so backup and restore run without them", async () => {
+    const h = createHarness({ store: memoryStore(new MemoryBucket("app-credentials")) });
+    try {
+      h.editEnvironments((file) => {
+        const app = file.environments.prod?.app;
+        if (typeof app === "object" && app !== null) Reflect.set(app, "credentials", { accessKeyId: { env: "APP_ACCESS_KEY" }, secretAccessKey: { env: "APP_SECRET_KEY" } });
+      });
+      await h.app.start();
+      await h.app.seed();
+      const backup = await h.run(["backup", "create", "--json"]);
+      expect(backup.stderr).toBe("");
+      expect(backup.code).toBe(0);
+      const list = await h.run(["backup", "list"]);
+      expect(list.code).toBe(0);
+      const status = await h.run(["status"]);
+      expect(status.code).toBe(2);
+      expect(status.stderr).toContain("environment variable APP_ACCESS_KEY is not set");
+    } finally {
+      await h.dispose();
+    }
+  });
+});

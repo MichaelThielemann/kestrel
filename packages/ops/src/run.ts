@@ -210,7 +210,6 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
     const toolCredentials = await credentialsOf(environment.storage.credentials, `${envName}.storage.credentials`, redactor, env, options.runCommand);
     const backupStorage = environment.backups.storage ?? environment.storage;
     const backupCredentials = environment.backups.storage ? await credentialsOf(backupStorage.credentials, `${envName}.backups.storage.credentials`, redactor, env, options.runCommand) : toolCredentials;
-    const appCredentials = await credentialsOf(environment.app.credentials, `${envName}.app.credentials`, redactor, env, options.runCommand);
     const app = stores(environment.storage, toolCredentials, "tool");
     const backups = environment.backups.storage ? stores(backupStorage, backupCredentials, "tool") : app;
     const workspace = createWorkspace(options.stateRoot ?? stateDir(env), runId, parsed.flags.has("--keep"));
@@ -243,6 +242,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
       lock = await acquireLock(backups, ctx.location, runId, name, clock);
     }
     if (name === "status") {
+      const appCredentials = await credentialsOf(environment.app.credentials, `${envName}.app.credentials`, redactor, env, options.runCommand);
       const appStore = appCredentials === null ? null : stores(backupStorage, appCredentials, "app");
       const report = await status(ctx, appStore);
       out.info(`${envName}: target ${report.target.state} (${report.target.instances} instance(s)), replica ${report.replica.newest ?? "empty"}${report.replica.sealed ? " sealed" : ""}, runtime ${report.replica.runtime ?? "unknown"}`);
