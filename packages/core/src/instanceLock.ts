@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import type { ModuleHealth } from "./defineModule.ts";
@@ -51,9 +51,9 @@ const MEMORY = ":memory:";
 const DEFAULT_OPT_OUT = "allowConcurrentProcesses: true";
 const DEFAULT_TTL_MS = 60_000;
 const DEFAULT_HEARTBEAT_MS = 10_000;
-const ATTEMPTS = 8;
-const READ_TRIES = 5;
-const READ_PAUSE_MS = 20;
+const ATTEMPTS = 20;
+const RETRY_PAUSE_MS = 20;
+const GUARD_STALE_MS = 5_000;
 
 const holders = new Map<string, Holder>();
 
@@ -123,15 +123,15 @@ function take(file: string, lockPath: string, opts: InstanceLockOptions): Holder
   mkdirSync(dirname(lockPath), { recursive: true });
   const now = new Date().toISOString();
   const record: LockRecord = { instanceId: randomUUID(), pid: process.pid, host: hostname(), startedAt: now, heartbeatAt: now };
+  const content = JSON.stringify(record);
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-    if (createExclusive(lockPath, JSON.stringify(record))) {
-      if (confirmOwner(lockPath, record.instanceId)) return hold(lockPath, record, opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
-      continue;
-    }
+    if (createExclusive(lockPath, content)) return hold(lockPath, record, opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
     const seen = readLock(lockPath);
     if (seen.kind === "absent") continue;
     if (!isStale(seen, ttlMs)) throw new KestrelBootError(opts.module, refusal(file, lockPath, seen, ttlMs, opts.optOut ?? DEFAULT_OPT_OUT), "instance-locked");
-    moveAside(lockPath, seen.raw);
+    const outcome = guarded(lockPath, () => replaceIf(lockPath, seen.raw, content));
+    if (outcome === "replaced" && ownedBy(lockPath, record.instanceId)) return hold(lockPath, record, opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
+    if (outcome === BUSY) pause(RETRY_PAUSE_MS);
   }
   throw new KestrelBootError(opts.module, `${file}: could not take the instance lock ${lockPath} because other processes kept changing it; retry once they have settled`, "instance-locked");
 }
@@ -146,21 +146,22 @@ function hold(lockPath: string, record: LockRecord, heartbeatMs: number): Holder
 
 function beat(holder: Holder): void {
   try {
-    const seen = readLock(holder.lockPath);
-    if (seen.kind === "unreadable") return;
-    if (seen.kind === "held" && seen.record.instanceId !== holder.record.instanceId) {
-      lose(holder, seen.record);
-      return;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const seen = readLock(holder.lockPath);
+      if (seen.kind === "unreadable") return;
+      if (seen.kind === "held" && seen.record.instanceId !== holder.record.instanceId) {
+        lose(holder, seen.record);
+        return;
+      }
+      holder.record.heartbeatAt = new Date().toISOString();
+      const content = JSON.stringify(holder.record);
+      const outcome = seen.kind === "absent" ? createExclusive(holder.lockPath, content) : guarded(holder.lockPath, () => replaceIf(holder.lockPath, seen.raw, content));
+      if (outcome === BUSY) return;
+      if (outcome === true || outcome === "replaced") {
+        holder.health = { ok: true };
+        return;
+      }
     }
-    holder.record.heartbeatAt = new Date().toISOString();
-    if (seen.kind === "absent") {
-      createExclusive(holder.lockPath, JSON.stringify(holder.record));
-    } else {
-      const tmp = `${holder.lockPath}.${holder.record.instanceId}.tmp`;
-      writeFileSync(tmp, JSON.stringify(holder.record));
-      renameSync(tmp, holder.lockPath);
-    }
-    holder.health = { ok: true };
   } catch (err) {
     holder.health = { ok: true, note: `the heartbeat of ${holder.lockPath} could not be written: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -184,7 +185,11 @@ function drop(holder: Holder): void {
   const lost = !holder.health.ok;
   stop(holder);
   holders.delete(holder.lockPath);
-  if (!lost && ownedBy(holder.lockPath, holder.record.instanceId)) rmSync(holder.lockPath, { force: true });
+  if (!lost) guarded(holder.lockPath, () => removeIfOwned(holder.lockPath, holder.record.instanceId));
+}
+
+function removeIfOwned(lockPath: string, instanceId: string): void {
+  if (ownedBy(lockPath, instanceId)) rmSync(lockPath, { force: true });
 }
 
 function ownedBy(lockPath: string, instanceId: string): boolean {
@@ -197,60 +202,95 @@ function ownedBy(lockPath: string, instanceId: string): boolean {
 }
 
 function createExclusive(path: string, content: string): boolean {
+  const tmp = siblingPath(path, "tmp");
   try {
-    writeFileSync(path, content, { flag: "wx" });
+    writeFileSync(tmp, content, { flag: "wx" });
+    linkSync(tmp, path);
     return true;
   } catch (err) {
     if (errorCode(err) === "EEXIST") return false;
     throw err;
+  } finally {
+    rmSync(tmp, { force: true });
   }
 }
 
-function confirmOwner(lockPath: string, instanceId: string): boolean {
-  for (let i = 0; i < READ_TRIES; i++) {
-    const seen = readLock(lockPath);
-    if (seen.kind === "held") return seen.record.instanceId === instanceId;
-    pause(READ_PAUSE_MS);
-  }
-  return false;
+function siblingPath(path: string, suffix: string): string {
+  return `${path}.${randomUUID()}.${suffix}`;
 }
 
-function moveAside(lockPath: string, judged: string): void {
-  const aside = `${lockPath}.${randomUUID()}.stale`;
+const BUSY = Symbol("busy");
+
+function guarded<T>(lockPath: string, fn: () => T): T | typeof BUSY {
+  const guard = `${lockPath}.takeover`;
+  const token = randomUUID();
+  if (!createExclusive(guard, token)) {
+    clearAbandonedGuard(guard);
+    return BUSY;
+  }
   try {
-    renameSync(lockPath, aside);
+    return fn();
+  } finally {
+    if (readQuietly(guard) === token) rmSync(guard, { force: true });
+  }
+}
+
+function clearAbandonedGuard(guard: string): void {
+  let token: string;
+  try {
+    token = readFileSync(guard, "utf8");
+    if (Date.now() - statSync(guard).mtimeMs <= GUARD_STALE_MS) return;
+  } catch (err) {
+    if (errorCode(err) === "ENOENT") return;
+    throw err;
+  }
+  const aside = siblingPath(guard, "stale");
+  try {
+    renameSync(guard, aside);
   } catch (err) {
     if (errorCode(err) === "ENOENT") return;
     throw err;
   }
   try {
-    const moved = readFileSync(aside, "utf8");
-    if (moved !== judged) createExclusive(lockPath, moved);
+    if (readQuietly(aside) !== token) linkSync(aside, guard);
+  } catch (err) {
+    if (errorCode(err) !== "EEXIST") throw err;
   } finally {
     rmSync(aside, { force: true });
   }
 }
 
+function replaceIf(lockPath: string, expected: string, content: string): "replaced" | "changed" {
+  if (readQuietly(lockPath) !== expected) return "changed";
+  const tmp = siblingPath(lockPath, "tmp");
+  try {
+    writeFileSync(tmp, content, { flag: "wx" });
+    renameSync(tmp, lockPath);
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+  return "replaced";
+}
+
+function readQuietly(path: string): string | undefined {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (err) {
+    if (errorCode(err) === "ENOENT") return undefined;
+    throw err;
+  }
+}
+
 function readLock(lockPath: string): Seen {
-  for (let i = 0; ; i++) {
-    let raw: string;
-    try {
-      raw = readFileSync(lockPath, "utf8");
-    } catch (err) {
-      if (errorCode(err) === "ENOENT") return { kind: "absent" };
-      throw err;
-    }
-    const record = parseRecord(raw);
-    if (record !== undefined) return { kind: "held", raw, record };
-    if (i + 1 >= READ_TRIES) {
-      try {
-        return { kind: "unreadable", raw, mtimeMs: statSync(lockPath).mtimeMs };
-      } catch (err) {
-        if (errorCode(err) === "ENOENT") return { kind: "absent" };
-        throw err;
-      }
-    }
-    pause(READ_PAUSE_MS);
+  const raw = readQuietly(lockPath);
+  if (raw === undefined) return { kind: "absent" };
+  const record = parseRecord(raw);
+  if (record !== undefined) return { kind: "held", raw, record };
+  try {
+    return { kind: "unreadable", raw, mtimeMs: statSync(lockPath).mtimeMs };
+  } catch (err) {
+    if (errorCode(err) === "ENOENT") return { kind: "absent" };
+    throw err;
   }
 }
 
@@ -265,7 +305,7 @@ function isStale(seen: Exclude<Seen, { kind: "absent" }>, ttlMs: number): boolea
 function refusal(file: string, lockPath: string, seen: Exclude<Seen, { kind: "absent" }>, ttlMs: number, optOut: string): string {
   const advice = `Stop that process, or set ${optOut} to run several processes on this database on purpose.`;
   if (seen.kind === "unreadable") {
-    return `${file} is locked by ${lockPath}, which is unreadable and was written within the last ${Math.round(ttlMs / 1000)} s, likely by a process that is starting. ${advice}`;
+    return `${file} is locked by ${lockPath}, which is unreadable and was written within the last ${Math.round(ttlMs / 1000)} s; it is taken over once it is older. ${advice}`;
   }
   const { record } = seen;
   return `${file} is in use by another process: host "${record.host}", pid ${record.pid}, started ${record.startedAt}, last heartbeat ${record.heartbeatAt} (lock file ${lockPath}). ${advice}`;

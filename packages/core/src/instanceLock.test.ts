@@ -207,6 +207,28 @@ describe("acquireInstanceLock", () => {
     expect(readRecord().pid).toBe(process.pid);
   });
 
+  it("leaves a stale lock alone while another process is in the middle of taking it over", () => {
+    const stale = new Date(Date.now() - 120_000).toISOString();
+    const foreign = writeRecord({ startedAt: stale, heartbeatAt: stale });
+    writeFileSync(`${instanceLockFile(file)}.takeover`, randomUUID());
+    const err = thrownBy(() => take(file));
+    expect(err).toBeInstanceOf(KestrelBootError);
+    expect(err instanceof KestrelBootError ? err.code : undefined).toBe("instance-locked");
+    expect(readRecord()).toEqual(foreign);
+  });
+
+  it("clears a takeover marker left behind by a process that died while taking over", () => {
+    const stale = new Date(Date.now() - 120_000).toISOString();
+    writeRecord({ startedAt: stale, heartbeatAt: stale });
+    const marker = `${instanceLockFile(file)}.takeover`;
+    writeFileSync(marker, randomUUID());
+    const past = new Date(Date.now() - 120_000);
+    utimesSync(marker, past, past);
+    take(file);
+    expect(readRecord().pid).toBe(process.pid);
+    expect(existsSync(marker)).toBe(false);
+  });
+
   it("keeps its heartbeat fresh, so a long-running holder is never taken over", () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.setSystemTime(new Date("2026-03-01T10:00:00.000Z"));
@@ -291,18 +313,77 @@ describe("acquireInstanceLock across processes", () => {
     return script;
   }
 
-  function start(script: string, startAt: number): { child: ChildProcess; line: Promise<string> } {
-    const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", script, file, String(startAt)], { stdio: ["pipe", "pipe", "inherit"] });
+  function stallingScript(go: string): string {
+    const script = join(dir, `staller-${randomUUID()}.mjs`);
+    writeFileSync(
+      script,
+      [
+        "import fs from \"node:fs\";",
+        "import { syncBuiltinESMExports } from \"node:module\";",
+        `const go = ${JSON.stringify(go)};`,
+        "const [file] = process.argv.slice(2);",
+        "const lockPath = `${file}.instance`;",
+        "const rename = fs.renameSync;",
+        "const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);",
+        "let stalled = false;",
+        "fs.renameSync = function (from, to) {",
+        "  if (stalled || (from !== lockPath && to !== lockPath)) return rename(from, to);",
+        "  stalled = true;",
+        "  process.stdout.write(\"ready\\n\");",
+        "  while (!fs.existsSync(go)) wait(5);",
+        "  rename(from, to);",
+        "  process.stdout.write(\"renamed\\n\");",
+        "  wait(500);",
+        "};",
+        "syncBuiltinESMExports();",
+        `const { acquireInstanceLock } = await import(${JSON.stringify(LOCK_MODULE)});`,
+        "let line;",
+        "try {",
+        "  acquireInstanceLock(file, { module: \"store/sqlite\" });",
+        "  line = \"won\";",
+        "} catch (err) {",
+        "  line = `lost:${err.code}`;",
+        "}",
+        "process.stdout.write(line + \"\\n\");",
+        "process.stdin.resume();",
+        "process.stdin.on(\"end\", () => process.exit(0));",
+      ].join("\n"),
+    );
+    return script;
+  }
+
+  interface Racer {
+    child: ChildProcess;
+    line: Promise<string>;
+    said(text: string): Promise<void>;
+  }
+
+  function start(script: string, startAt: number, command: string[] = [process.execPath]): Racer {
+    const [program = process.execPath, ...prefix] = command;
+    const child = spawn(program, [...prefix, "--disable-warning=ExperimentalWarning", script, file, String(startAt)], { stdio: ["pipe", "pipe", "inherit"] });
     children.push(child);
+    let out = "";
+    const waiting: { text: string; resolve: () => void }[] = [];
+    const outcome = /^(won|lost:.*)$/m;
     const line = new Promise<string>((resolve, reject) => {
-      let out = "";
       child.stdout?.on("data", (chunk: Buffer) => {
         out += chunk.toString();
-        if (out.includes("\n")) resolve(out.trim());
+        for (const w of waiting.splice(0)) {
+          if (out.split("\n").includes(w.text)) w.resolve();
+          else waiting.push(w);
+        }
+        const found = outcome.exec(out);
+        if (found !== null) resolve(found[1] ?? "");
       });
-      child.on("exit", (code) => reject(new Error(`child exited with ${String(code)} before reporting`)));
+      child.on("exit", (code, signal) => reject(new Error(`child exited with ${String(code ?? signal)} before reporting`)));
     });
-    return { child, line };
+    line.catch(() => undefined);
+    const said = (text: string): Promise<void> =>
+      new Promise((resolve) => {
+        if (out.split("\n").includes(text)) resolve();
+        else waiting.push({ text, resolve });
+      });
+    return { child, line, said };
   }
 
   function exited(child: ChildProcess): Promise<void> {
@@ -329,11 +410,11 @@ describe("acquireInstanceLock across processes", () => {
     expect(readRecord().pid).toBe(process.pid);
   }, 20_000);
 
-  async function race(prepare: () => void): Promise<string[]> {
+  async function race(prepare: () => void, count = 2): Promise<string[]> {
     prepare();
     const script = childScript();
     const startAt = Date.now() + 800;
-    const racers = [start(script, startAt), start(script, startAt)];
+    const racers = Array.from({ length: count }, () => start(script, startAt));
     const lines = await Promise.all(racers.map((r) => r.line));
     for (const r of racers) r.child.stdin?.end();
     await Promise.all(racers.map((r) => exited(r.child)));
@@ -352,4 +433,36 @@ describe("acquireInstanceLock across processes", () => {
       expect(await race(() => writeRecord({ startedAt: stale, heartbeatAt: stale }))).toEqual(["lost:instance-locked", "won"]);
     }
   }, 30_000);
+
+  it("lets exactly one of four processes win the race to take over a stale lock, and leaves the winner's record behind", async () => {
+    for (let round = 0; round < 8; round++) {
+      const stale = new Date(Date.now() - 120_000).toISOString();
+      const lines = await race(() => writeRecord({ startedAt: stale, heartbeatAt: stale }), 4);
+      expect(lines).toEqual(["lost:instance-locked", "lost:instance-locked", "lost:instance-locked", "won"]);
+      expect(readRecord().heartbeatAt).not.toBe(stale);
+      rmSync(instanceLockFile(file), { force: true });
+    }
+  }, 60_000);
+
+  it("lets exactly one of three processes win when one of them stalls in the middle of taking over a stale lock", async () => {
+    const stale = new Date(Date.now() - 120_000).toISOString();
+    writeRecord({ startedAt: stale, heartbeatAt: stale });
+    const go = join(dir, "go");
+    const staller = start(stallingScript(go), 0);
+    await staller.said("ready");
+    const first = start(childScript(), 0);
+    const firstLine = await first.line;
+    writeFileSync(go, "");
+    await staller.said("renamed");
+    const late = start(childScript(), 0);
+    const lines = [firstLine, await staller.line, await late.line];
+    expect(lines.filter((line) => line === "won")).toHaveLength(1);
+  }, 30_000);
+
+  it("leaves the lock free when a process cannot finish writing it", async () => {
+    const failing = start(childScript(), 0, ["/bin/sh", "-c", 'ulimit -f 0; exec "$0" "$@"', process.execPath]);
+    expect(await failing.line.catch(() => "died")).not.toBe("won");
+    take(file);
+    expect(readRecord().pid).toBe(process.pid);
+  }, 20_000);
 });
