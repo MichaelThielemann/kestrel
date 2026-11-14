@@ -665,6 +665,25 @@ Net changes since 5.8.2.
   generations named by the time alone are still listed, restored and pruned. The READMEs of
   `media-default` and `blobstore-s3` list every key family on the blobstore and which of them may be
   public (`site/*` only), with an example bucket policy.
+- `replication-sqlite` documents its replica layout as a storage format (README, "Replica layout") and
+  adds three files to a generation. Teardown writes `sealed.json` (`{ lineage, lastFrame, segments, at }`)
+  once the frames committed since the last sync are shipped, so a generation without one shows a stop
+  that may have lost frames. A tool that places a database into the replica writes `origin.json` next to
+  its snapshot; a start that rebuilds the missing database from such a generation reports the restore
+  through `replication.checkRestored`, so `delivery.checkBuild` renders every output again, and writes
+  `applied.json` naming the generation and the `nonce` of `origin.json`. A later start that finds
+  `applied.json` does not report the restore again. `Replication` (`./impl`) gains `seal()`, and
+  `./impl` exports `listReplica()`, `markerKey()`, `readOriginNonce()`, `unplacedNewerGenerations()`
+  and the types `Seal`, `Origin`, `Applied` and `ReplicaListing`.
+- `replication-sqlite` refuses to rebuild a missing database at start when a generation named by its
+  time alone and without `origin.json`, as 5.x releases name every generation, sorts after the newest
+  generation that this version wrote or that carries `origin.json`. Restoring it would start from data
+  this version never wrote; the error names the generations and how to go on. A replica written only by
+  5.x releases restores its newest generation as before.
+- `replication-sqlite` notices another process writing to the same replica: a key it did not write
+  that turns up in a later listing, in a generation without `origin.json`, logs a warning and makes
+  `health()` answer `{ ok: true, note }` until the process restarts. Health stays ok, so that a
+  readiness probe does not restart the process into the other process's data.
 - `examples/nginx-njs` proxies to the origin over `https://` with certificate verification and passes
   `Host`, `X-Forwarded-For` and `X-Forwarded-Proto`; `ORIGIN_UPSTREAM` defaults to `origin` (port 443).
 - Forwarding headers count only from a trusted proxy. The new `http.trustedProxies` (also an option
@@ -1534,6 +1553,13 @@ Net changes since 5.8.2.
 - `backup-blobstore`: `setup()` gets the same check as `replication-sqlite` — including the shared
   `<file>.restored-at` sidecar and the "move aside" wording — minus the row-count fallback, since
   the backed-up file is not necessarily SQLite; an unavailable birth time is only logged, not failed.
+- `replication-sqlite`: teardown ships the frames committed since the last sync and then seals the
+  generation. It no longer checkpoints, takes a due snapshot or prunes, so the time between a stop
+  signal and the kill goes to the frames. A process that never synced and committed nothing writes
+  nothing at teardown.
+- `replication-sqlite` names a new generation after the newest one the replica lists, one millisecond
+  later where its own clock is behind, so a generation placed by a process whose clock runs ahead never
+  sorts after this process's data.
 - A `reassignTo` value in `authn.verifyUser`'s request body or event hand-over no longer requires a
   `name` alongside `id`, and also accepts a bare user id string.
 - `authn-single` and `authn-multi` share one behavioural test suite for the five steps both

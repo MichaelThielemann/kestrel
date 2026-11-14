@@ -10,13 +10,15 @@ restore = snapshot + segments up to the requested time, applied page by page; th
 opened and passes `PRAGMA quick_check` before it is handed over, otherwise the restore fails with
 `TRANSIENT` naming the generation.
 
-A generation is named by the time its snapshot was taken, then 12 hex digits of its millisecond
-timestamp (kept strictly increasing within a process, so generations of the same second sort in the
-order they were taken and a restore without a target picks the newest), then 32 random hex digits
-(`20260927T101500Z-0192…9f…`), and every key of it lives under `<prefix>gen/<generation>/`, so a snapshot
-key cannot be derived from the time it was taken. A generation named by the time alone is listed and
-restored as well. The snapshot holds the whole database, sessions and
-password hashes included: `prefix` must lie outside anything a bucket or static host serves publicly.
+A generation is named by a time, then 12 hex digits of the same time in milliseconds, then 32 random
+hex digits (`20260927T101500Z-0192…9f…`), and every key of it lives under `<prefix>gen/<generation>/`,
+so a snapshot key cannot be derived from the time it was taken. The time is when the snapshot was
+taken, raised where needed to one millisecond past the newest generation the replica lists and kept
+strictly increasing within a process: a new generation sorts after every generation listed before it,
+even one placed by a process whose clock runs ahead, and a restore without a target picks the newest.
+A generation named by the time alone is listed and restored as well. The snapshot holds the whole
+database, sessions and password hashes included: `prefix` must lie outside anything a bucket or static
+host serves publicly.
 
 Shipping reads the WAL from the frame the previous run stopped at, asynchronously in 1 MiB chunks,
 and uploads segments of about 4 MiB (a single transaction larger than that stays in one segment), so
@@ -43,9 +45,11 @@ from copying every frame back; the WAL then keeps growing and the next check tri
 If an upload fails after a checkpoint, the frames stay in memory and go out first on the next run;
 a new snapshot supersedes them, as does the snapshot a restarted process takes on its first sync.
 A `replication.sync` called before a running one has started reading returns that run's result;
-called later, it runs once more after it, so a sync at shutdown ships every frame committed before
-it was called. `replication.snapshot`, `replication.prepareRestore` and the size-triggered
-checkpoint wait for each other.
+called later, it runs once more after it, so a sync ships every frame committed before it was called.
+`replication.snapshot`, `replication.prepareRestore`, the size-triggered checkpoint and teardown wait
+for each other. Teardown ships the frames committed since the last sync and then seals the generation
+(see [Replica layout](#replica-layout)); it takes no checkpoint and no periodic snapshot and prunes
+nothing, so the time between a stop signal and the kill goes to the frames.
 
 Config: `file`, `prefix`, `checkpointBytes`/`checkpointSeconds`,
 `snapshotSeconds` (24 h), `retentionSeconds` (48 h; the newest generation is always kept),
@@ -97,14 +101,74 @@ Put the step directly before that check in the pipeline that runs it at boot, fo
 `["replication.checkRestored", "delivery.checkBuild", "delivery.requestIndexes"]`, and only when `file` is
 the database: a step in between that writes `result` replaces it and drops the member.
 
-This module's rebuild of a missing file under `restoreOnStart` is not reported: it brings back the
-replica as of the last shipped WAL frames, which a stop through teardown ships, and on an ephemeral disk
-it happens at every start. A process that stopped without teardown loses the frames written since the
+This module's rebuild of a missing file under `restoreOnStart` is not reported, unless the generation
+it restores from was placed with `origin.json` (see [Replica layout](#replica-layout)): it brings back
+the replica as of the last shipped WAL frames, which a stop through teardown ships, and on an ephemeral
+disk it happens at every start. A process that stopped without teardown loses the frames written since the
 last `replication.sync`, and output derived from them (for delivery-static, the files of pages saved in
 that window) is not rendered again. A database file copied into place by hand is not reported either.
 After either one, restore through `replication.prepareRestore` instead, or render everything again
 yourself (for delivery-static, `delivery.markAll` for every delivered type).
 Not included: multi-process setups, encryption, restore without restart.
+
+## Replica layout
+
+The keys under `prefix` are a storage format that other tools read and write, for example a backup
+tool that places a database for the next start to restore. The format stays stable within a major
+version; it is not a contract. Every key belongs to one generation and lives under
+`<prefix>gen/<generation>/`:
+
+| Key | Written by | Content |
+|---|---|---|
+| `snapshot.db` | the snapshot that starts the generation | the database file with the committed WAL frames applied, in the live file's page layout |
+| `wal/<lineage>-<seq>-<time>.wal` | every sync and checkpoint | a WAL header and the committed frames after the previous segment; `lineage` (6 digits) counts the WAL resets seen by the process, `seq` (6 digits) numbers the generation's segments from `000000`, `time` is when the segment was shipped |
+| `sealed.json` | teardown, once | `{ "lineage", "lastFrame", "segments", "at" }` |
+| `origin.json` | whoever placed the generation | `{ "kind": "restore" \| "upgrade", "source", "requestedAt", "nonce" }`; this module reads only `nonce` |
+| `applied.json` | the start that restored from a generation with `origin.json` | `{ "generation", "nonce", "restoredAt" }` |
+
+Times in names are UTC, `YYYYMMDDTHHMMSSZ`. A generation is named either by such a time alone, as
+5.x releases name every generation, or by the time, a hyphen, 12 hex digits of milliseconds and 32
+random hex digits, as this version names its own. A restore without a target rebuilds the generation
+whose name sorts last, by byte order, among those with a `snapshot.db`, and applies its segments in
+`lineage`, then `seq` order. Neither `origin.json` nor any other marker changes that choice.
+
+**Seal.** `sealed.json` says that the replica holds every frame the process committed before it stopped:
+`lastFrame` frames of the WAL lineage `lineage`, counted from the start of the WAL, in `segments`
+segments with `seq` from `0` to `segments - 1`, so a reader can check that a listing shows all of them
+before it relies on it; `at` is when the seal was written, in epoch milliseconds. A process killed before
+teardown, or whose teardown could not ship its frames, leaves its generation without a seal, and the
+replica may lack the frames committed since that process's last sync. A process that never synced takes
+its first snapshot at teardown when it committed anything, and writes nothing when it did not: the
+generation it was restored from already holds its database.
+
+**Placed generations.** A tool that places a database into the replica while the process is stopped
+writes the snapshot and `origin.json` into a new generation. Name it by its time alone, after every
+generation the replica lists, so that 5.x releases list and restore it too. When `restoreOnStart`
+rebuilds the missing file from that generation, the restore is reported: `replication.checkRestored`
+answers the start of this boot, and the module writes `applied.json` with the generation, the `nonce`
+of `origin.json` (or `null` when it holds none) and that boot start, so the tool can tell that the
+process restored exactly what it placed. A later start that restores the same generation finds
+`applied.json` and does not report the restore again; when writing it failed, the next start reports
+the restore once more, which renders delivered output once more and changes nothing else.
+
+**Generations of unknown origin.** Before it rebuilds a missing file, `setup()` refuses to start when a
+generation named by its time alone, without `origin.json`, sorts after the newest generation that is
+named with an order key or carries `origin.json`. Only a 5.x release, or another process writing to the
+same prefix, writes such a generation after this version has run, and restoring it would start from
+data this version never wrote. The error names the generations and both ways on: add an `origin.json`
+to the newest of them to start from it, or move them out of `<prefix>gen/` to start from the
+generation before them. A replica written only by 5.x releases holds neither kind of generation and
+restores its newest generation as before.
+
+**Another writer.** Only one process may replicate a database to a prefix. Every sync lists the
+replica; when a listing shows a key that this process did not write, in a generation without
+`origin.json`, that was not there at its first listing (a snapshot, or a WAL segment shipped after this
+process started), the module logs a warning and `health()` answers `{ ok: true, note }` naming the key
+until the process restarts. Health stays ok on purpose: a failing readiness probe gets the process
+restarted, and the restart would restore from the other process's generation. Stop the other process,
+then run `replication.snapshot` in this one, so that the next restore starts from its data. This is
+detection, not a lock: it relies on clocks within seconds of each other and on listings that show new
+keys, and nothing keeps a second process from writing.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
