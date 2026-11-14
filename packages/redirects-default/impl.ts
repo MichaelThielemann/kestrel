@@ -5,7 +5,7 @@ import type { Document, Filter, Persistence, PersistenceError, Schema } from "@m
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { unobserved } from "@michaelthielemann/kestrel/reads";
 import { matchWildcardPath } from "./match.ts";
-import { compilePublishableRedirects, compileRedirects, exactPathPatternSource, matchRedirect, serializeRedirects, RedirectRuleError, type RedirectRule } from "./rules.ts";
+import { compilePublishableRedirects, compileRedirects, exactPathPatternSource, matchRedirect, reservedPathOf, serializeRedirects, RedirectRuleError, type RedirectRule } from "./rules.ts";
 
 export interface Config {
   type: string;
@@ -200,6 +200,11 @@ export async function createRedirects(config: Config, deps: { content: Content; 
         logger.info(`redirects/default: skipped the automatic redirect ${auto.from} -> ${auto.to}, its path contains a wildcard character`, { from: auto.from, to: auto.to });
         continue;
       }
+      const reserved = reservedPathOf(auto.from, config.reservedPaths);
+      if (reserved !== undefined) {
+        logger.info(`redirects/default: skipped the automatic redirect ${auto.from} -> ${auto.to}, its source is at the reserved path ${reserved}`, { from: auto.from, to: auto.to });
+        continue;
+      }
       const shadowedBy = editorRules.find((rule) => matchWildcardPath(rule.from, auto.to) !== null);
       if (shadowedBy) {
         logger.info(`redirects/default: skipped the automatic redirect ${auto.from} -> ${auto.to}, an editor rule already redirects its target`, { from: auto.from, to: auto.to });
@@ -272,7 +277,9 @@ export async function createRedirects(config: Config, deps: { content: Content; 
         if (isErr(rules)) return rules;
         const hit = matchRedirect(rules.value, path);
         if (hit) return ok({ to: hit.target, status: hit.status });
-        const auto = await autoAt(canonicalPath(path));
+        const canonical = canonicalPath(path);
+        if (reservedPathOf(canonical, config.reservedPaths) !== undefined) return ok(null);
+        const auto = await autoAt(canonical);
         if (isErr(auto)) return auto;
         if (!auto.value || matchRedirect(rules.value, auto.value.to)) return ok(null);
         return ok({ to: auto.value.to, status: 301 });

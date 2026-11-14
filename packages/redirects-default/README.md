@@ -39,7 +39,8 @@ the API sits under.
 
 A rule stored under a reserved path before the list was set, or after it grew, is not an error when
 publishing: `redirects.lookup`, `redirects.export` and `redirects.render` leave it out and log the row,
-like any other row they cannot honour. The edge handler in `../../examples/nginx-njs` takes the same list
+like any other row they cannot honour. The same holds for an automatic redirect whose old path lies at a
+reserved path, for instance a page that moved away from `/admin`. The edge handler in `../../examples/nginx-njs` takes the same list
 in `RESERVED_PATHS` and never redirects those paths.
 
 ## Matching

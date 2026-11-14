@@ -73,6 +73,11 @@ function matchesReserved(from: string, reserved: string): boolean {
   return true;
 }
 
+/** The first of `reservedPaths` that a canonical `path` (wildcards allowed) can match, or `undefined`. */
+export function reservedPathOf(path: string, reservedPaths: readonly string[]): string | undefined {
+  return reservedPaths.find((reserved) => matchesReserved(path, reserved));
+}
+
 /**
  * Validate an authored `from` and return its canonical form: leading slash, no trailing slash. Matching is
  * path-only and case-sensitive; an authored trailing slash is dropped and one is tolerated at match time, so
@@ -93,7 +98,7 @@ export function canonicalFrom(from: string, reservedPaths: readonly string[] = [
   const wildcards = wildcardCount(raw);
   if (wildcards > MAX_WILDCARDS) throw new RedirectRuleError(`"From" has ${wildcards} wildcards, at most ${MAX_WILDCARDS} are allowed`);
   const canonical = `/${raw.replace(/^\/+/, "").replace(/\/+$/, "")}`;
-  const taken = reservedPaths.find((reserved) => matchesReserved(canonical, reserved));
+  const taken = reservedPathOf(canonical, reservedPaths);
   if (taken !== undefined) throw new RedirectRuleError(`"From" can match the reserved path ${taken}, which the application serves itself`);
   return canonical;
 }

@@ -134,6 +134,29 @@ describe("automatic redirects: recording moves", () => {
   });
 });
 
+describe("automatic redirects: reserved paths", () => {
+  it("a move away from a reserved path is neither looked up nor published", async () => {
+    const blobs = fakeBlobs();
+    const infos: string[] = [];
+    const r = await createRedirects(config, { content: fakeContent(), blobs, db: createFakePersistence(), logger: { ...quiet, info: (message: string) => void infos.push(message) } });
+    await r.recordMoves([
+      move({ type: "page", id: "d1", locale: "de", from: "/admin", to: "/control", seq: 1 }),
+      move({ type: "page", id: "d2", locale: "de", from: "/api/x", to: "/y", seq: 1 }),
+      move({ type: "page", id: "d3", locale: "de", from: "/administration", to: "/office", seq: 1 }),
+    ]);
+
+    expect(expectOk(await r.lookup("/admin"))).toBeNull();
+    expect(expectOk(await r.lookup("/api/x"))).toBeNull();
+    expect(expectOk(await r.lookup("/administration"))).toEqual({ to: "/office", status: 301 });
+
+    expect(expectOk(await r.render()).map((rule) => rule.from)).toEqual(["/administration"]);
+    expect(expectOk(await r.export())).toEqual({ rules: 1, skipped: [] });
+    const published: unknown = JSON.parse(new TextDecoder().decode(blobs.blobs.get("site/redirects.json")));
+    expect(published).toEqual([expect.objectContaining({ from: "/administration" })]);
+    expect(infos.filter((message) => message.includes("reserved path"))).toHaveLength(4);
+  });
+});
+
 describe("automatic redirects: admin removal", () => {
   it("a removed automatic redirect stays removed when the move that created it is replayed", async () => {
     const r = await domain();

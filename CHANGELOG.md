@@ -758,9 +758,9 @@ Net changes since 5.8.2.
   refuses a `from` that equals, lies below or, through a wildcard, can match one of them
   (`/admin`, `/admin/x`, `/*/login`; `/administration` stays allowed) with `VALIDATION` and the row.
   A rule already stored under such a path is left out of `redirects.json`, `redirects.lookup` and
-  `redirects.render` and logged. Set `reservedPaths` to the mounts of your own project. `kestrel
-  upgrade data`'s `data/redirect-reserved-paths` lists the stored rules an upgrade would leave out, wildcard sources
-  such as `/**` included.
+  `redirects.render` and logged, and so is an automatic redirect from a reserved path. Set `reservedPaths`
+  to the mounts of your own project. `kestrel upgrade data`'s `data/redirect-reserved-paths` lists the
+  stored rules an upgrade would leave out, wildcard sources such as `/**` included.
 - The two admin routes that repeat a user's cleanup, `POST /admin/users/:id/revisions/reassign` and
   `POST /admin/users/:id/audit/anonymize`, answer 409 `CONFLICT` while `:id` still names a user,
   active or not, so they can no longer rewrite the revisions or erase the audit trail of an existing
