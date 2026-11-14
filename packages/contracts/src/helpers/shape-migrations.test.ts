@@ -346,6 +346,45 @@ describe("shape-migrations: kinds", () => {
     expect(expectOk(await storageVersionOf(db, "m/x"))).toBeNull();
   });
 
+  it("applies no cleanup migration while an ask migration of the module waits for an answer, also in a run that selects auto and cleanup", async () => {
+    const order: string[] = [];
+    const db = createFakePersistence();
+    const storages = [storage("m/x", [{ ...rowOnly(order, "m:asked", "6.0.0", 1), kind: "ask", questions: [question] }, { ...rowOnly(order, "m:drop-old", "6.0.0", 1), kind: "cleanup" }])];
+    const report = expectOk(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true, kinds: ["auto", "cleanup"] }));
+    expect(report.modules[0]).toMatchObject({ state: "pending", migrations: [{ id: "m:asked", blocked: "not-selected" }, { id: "m:drop-old", blocked: "earlier-pending" }] });
+    const asking = expectOk(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true, kinds: ["auto", "ask", "cleanup"] }));
+    expect(asking.modules[0]).toMatchObject({ state: "pending", migrations: [{ id: "m:asked", blocked: "needs-answer" }, { id: "m:drop-old", blocked: "earlier-pending" }] });
+    expect(order.filter((entry) => entry.startsWith("apply"))).toEqual([]);
+    expect(expectOk(await storageVersionOf(db, "m/x"))).toBeNull();
+  });
+
+  it("applies no cleanup migration of a module while a module it depends on still has a conversion open, in a cleanup run", async () => {
+    const order: string[] = [];
+    const db = createFakePersistence();
+    const storages = [
+      storage("m/a", [{ ...rowOnly(order, "a:drop-old", "6.0.0", 1), kind: "cleanup" }], ["m/b"]),
+      storage("m/b", [rowOnly(order, "b:convert", "6.0.0", 1)]),
+    ];
+    const report = expectOk(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true, kinds: ["cleanup"] }));
+    expect(report.modules.map((m) => [m.module, m.state])).toEqual([["m/b", "pending"], ["m/a", "pending"]]);
+    expect(report.modules[1]?.migrations[0]).toMatchObject({ id: "a:drop-old", blocked: "dependency-pending" });
+    expect(order.filter((entry) => entry.startsWith("apply"))).toEqual([]);
+  });
+
+  it("applies a cleanup migration in a cleanup run once the conversions are done, in the dependency and in the module itself", async () => {
+    const order: string[] = [];
+    const db = createFakePersistence();
+    const storages = [
+      storage("m/a", [rowOnly(order, "a:convert", "6.0.0", 1), { ...rowOnly(order, "a:drop-old", "6.0.0", 1), kind: "cleanup" }], ["m/b"]),
+      storage("m/b", [rowOnly(order, "b:convert", "6.0.0", 1), { ...rowOnly(order, "b:drop-old", "6.0.0", 1), kind: "cleanup" }]),
+    ];
+    expectOk(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true }));
+    order.length = 0;
+    const report = expectOk(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true, kinds: ["cleanup"] }));
+    expect(report.modules.map((m) => [m.module, m.state])).toEqual([["m/b", "migrated"], ["m/a", "migrated"]]);
+    expect(order.filter((entry) => entry.startsWith("apply"))).toEqual(["apply b:drop-old", "apply a:drop-old"]);
+  });
+
   it("leaves an ask migration with an unanswered question pending and holds back the version row until it is answered", async () => {
     const order: string[] = [];
     const db = createFakePersistence();
@@ -366,6 +405,36 @@ describe("shape-migrations: kinds", () => {
     const applied = expectOk(await guardStorage(asked(), { db: createFakePersistence(), blobs: memoryBlobs(), mode: "apply" }));
     expect(applied).toMatchObject({ state: "migrated", migrations: [{ id: "m:asked-without-question", state: "applied" }] });
     expect(order).toContain("apply m:asked-without-question");
+  });
+
+  it("points a check-mode refusal to the offline command when an ask migration without a question waits behind one that needs an answer or writes blobs", async () => {
+    const order: string[] = [];
+    const behind = (earlier: Partial<ShapeMigration>): ModuleStorage =>
+      storage("m/z", [{ ...rowOnly(order, "m:first", "6.0.0", 1), ...earlier }, { ...rowOnly(order, "m:second", "6.1.0", 1), kind: "ask" }]);
+    const variants: Array<[string, ModuleStorage]> = [
+      ["needs an answer", behind({ kind: "ask", questions: [question] })],
+      ["writes blobs", behind({ blobWrites: true })],
+    ];
+    for (const [, waiting] of variants) {
+      for (const mode of ["check", "apply"] as const) {
+        const refused = expectErr(await guardStorage(waiting, { db: createFakePersistence(), blobs: memoryBlobs(), mode }), "STORAGE_REFUSED");
+        expect(refused.message).toContain("m:first");
+        expect(refused.message).toContain("m:second");
+        expect(refused.message).toContain(OFFLINE_COMMAND);
+        expect(refused.message).not.toContain("set storageMigrations");
+      }
+    }
+    expect(order.filter((entry) => entry.startsWith("apply"))).toEqual([]);
+  });
+
+  it("names the apply mode for several pending migrations that all run at start-up, and none of them has run when it refuses", async () => {
+    const order: string[] = [];
+    const db = createFakePersistence();
+    const both = (): ModuleStorage => storage("m/z", [rowOnly(order, "m:first", "6.0.0", 1), { ...rowOnly(order, "m:second", "6.1.0", 1), kind: "ask" }]);
+    const checked = expectErr(await guardStorage(both(), { db, blobs: memoryBlobs(), mode: "check" }), "STORAGE_REFUSED");
+    expect(checked.message).toMatch(/m:first .*m:second .*set storageMigrations: "apply" to run it at start-up, or run them/);
+    expect(order.filter((entry) => entry.startsWith("apply"))).toEqual([]);
+    expect(expectOk(await storageVersionOf(db, "m/z"))).toBeNull();
   });
 
   it("starts on data whose only pending migration is a cleanup, and refuses an unanswered ask migration at start-up without suggesting apply mode", async () => {
