@@ -9,6 +9,7 @@ import { resolveCredential, type CommandRunner } from "./credentials.ts";
 import { ENVIRONMENTS_FILE, environmentProblems, loadEnvironments, type Environment, type StorageConfig } from "./environments.ts";
 import { OpsError } from "./errors.ts";
 import { Journal } from "./journal.ts";
+import { Interrupt, interruptible, type SignalSource } from "./interrupt.ts";
 import { hex, parseBackupId, parseJson, type BackupKind } from "./layout.ts";
 import { acquireLock, breakLocks, type Lock } from "./lock.ts";
 import { createOutput } from "./output.ts";
@@ -46,6 +47,8 @@ export interface RunOptions {
   runCommand?: CommandRunner;
   /** Package versions and lockfile hash to record instead of reading them from the project, as a bundle does. */
   project?: { versions: Record<string, string>; lockfileSha256: string | null };
+  /** Where SIGINT and SIGTERM arrive while a writing command runs. Default: `process`. */
+  signals?: SignalSource;
 }
 
 /** The usage text of the commands {@link runOps} understands. */
@@ -226,13 +229,14 @@ function readAnswers(file: string | null): Record<string, string> {
   return boundaryCast<Record<string, string>>(value, "json");
 }
 
-/** A prompt on the terminal, or undefined when stdin is not one. */
-export function terminalPrompt(): Prompt | undefined {
+/** A prompt on the terminal, or undefined when stdin is not one. Ctrl-C at the prompt sends the process SIGINT; `signal` ends a pending question. */
+export function terminalPrompt(signal?: AbortSignal): Prompt | undefined {
   if (!process.stdin.isTTY) return undefined;
   return async (question) => {
     const rl = createInterface({ input: process.stdin, output: process.stderr });
+    rl.on("SIGINT", () => process.kill(process.pid, "SIGINT"));
     try {
-      return await rl.question(question);
+      return await rl.question(question, signal ? { signal } : {});
     } finally {
       rl.close();
     }
@@ -264,6 +268,8 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
   const root = resolve(options.cwd ?? process.cwd());
   const env = options.env ?? process.env;
   const runId = hex(6);
+  const interrupt = new Interrupt();
+  let stopListening = (): void => undefined;
   let ctx: OpsContext | null = null;
   let lock: Lock | null = null;
   let writes = false;
@@ -281,6 +287,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
     const writing = name !== "status" && name !== "backup-list";
     const problems = writing ? environmentProblems(environment) : [];
     if (problems.length > 0) throw new OpsError(`${ENVIRONMENTS_FILE}: ${problems.join("; ")}`, 2, ENVIRONMENTS_FILE);
+    if (writing) stopListening = interrupt.listen(options.signals ?? process);
     const stores = options.stores ?? defaultStores;
     const toolCredentials = await credentialsOf(environment.storage.credentials, `${envName}.storage.credentials`, redactor, env, options.runCommand);
     const backupStorage = environment.backups.storage ?? environment.storage;
@@ -290,12 +297,13 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
     const workspace = createWorkspace(options.stateRoot ?? stateDir(env), runId, parsed.flags.has("--keep"));
     const target = await loadTarget(environment, options, root, clock);
     const journal = new Journal(runId, backups, environment.backups.prefix, redactor, clock, workspace.path("journal.jsonl"));
-    const prompt = options.prompt ?? terminalPrompt();
+    const ask = options.prompt ?? terminalPrompt(interrupt.signal);
+    const prompt: Prompt | undefined = ask && ((question) => interrupt.race(ask(question)));
     ctx = {
       envName,
       env: environment,
-      app,
-      backups,
+      app: interruptible(app, interrupt),
+      backups: interruptible(backups, interrupt),
       location: environment.backups.prefix,
       target,
       out,
@@ -385,5 +393,6 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
   } finally {
     await lock?.release().catch(() => undefined);
     ctx?.workspace.dispose();
+    stopListening();
   }
 }

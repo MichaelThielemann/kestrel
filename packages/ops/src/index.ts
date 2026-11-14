@@ -4,6 +4,7 @@ export { REPLICATION_PACKAGE, runtimeVersion, startTarget, stopTarget, type OpsC
 export { resolveCredential, withSecretFile, type CommandRunner, type CredentialSource } from "./credentials.ts";
 export { ENVIRONMENTS_FILE, environmentProblems, loadEnvironments, overlaps, type CredentialConfig, type Environment, type StorageConfig } from "./environments.ts";
 export { OpsError } from "./errors.ts";
+export { Interrupt, interruptible, Interrupted, type SignalSource } from "./interrupt.ts";
 export { Journal, listRuns, openRuns, RUN_STALE_MS, type JournalEntry, type RunSummary } from "./journal.ts";
 export { BACKUP_KINDS, backupId, keys, parseBackupId, stamp, unstamp, type BackupKind, type BlobEntry, type DerivedEntry, type Manifest, type SealState, type SiteEntry } from "./layout.ts";
 export { acquireLock, breakLocks, heldLocks, LOCK_STALE_MS, type HeldLock, type Lock } from "./lock.ts";

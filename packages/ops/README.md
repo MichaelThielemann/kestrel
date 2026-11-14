@@ -246,6 +246,12 @@ outputs (ids, hashes, counts) under `runs/<run>/`, mirrored into the local worki
 `$XDG_STATE_HOME/kestrel/runs/<run>` on Linux, `~/Library/Application Support/kestrel/runs/<run>` on macOS,
 mode 0700, removed after the run unless `--keep`.
 
+SIGINT or SIGTERM (Ctrl-C, or a CI job that is cancelled or times out) ends a writing command at its next
+store operation, or at once while it waits at a question, with exit 1 and `interrupted by <signal>`. What a
+failure at that point does then happens: a frozen backup, or a restore that has not changed the store yet,
+starts the app again, and the run releases its lock and ends its journal. A second signal ends the process
+at once.
+
 ## Testing
 `@michaelthielemann/kestrel-ops/testing` exports `MemoryBucket` and `memoryStore`, an in-memory object store
 that records every write and can lag listings, ignore `copy-source-if-match` or change a key just before it is
