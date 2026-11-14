@@ -29,6 +29,17 @@ export interface CloudFoundryOptions {
   pollMs?: number;
   /** How long a stop may take to show no running instance, in milliseconds. Default 120000. */
   stopTimeoutMs?: number;
+  /** How long a failing status read before a start is repeated, in milliseconds. Default 30000. */
+  readTimeoutMs?: number;
+}
+
+class CfApiError extends OpsError {
+  constructor(
+    message: string,
+    readonly titles: readonly string[] = [],
+  ) {
+    super(message, 1, "target");
+  }
 }
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -59,7 +70,7 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
   const { app } = config;
   let guidOnce: Promise<string> | null = null;
 
-  const exited = (args: readonly string[], code: number): OpsError => new OpsError(`cf ${args.join(" ")} exited with ${code}`, 1, "target");
+  const readTimeoutMs = options.readTimeoutMs ?? 30_000;
 
   const resolveGuid = async (): Promise<string> => {
     const current = await run(["target"]);
@@ -93,20 +104,20 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
   const api = async <T>(path: string, schema: z.ZodType<T>, method = "GET", data?: string): Promise<T> => {
     const args = method === "GET" ? ["curl", path] : ["curl", path, "-X", method, ...(data === undefined ? [] : ["-d", data])];
     const result = await run(args);
-    if (result.code !== 0) throw exited(method === "GET" ? ["curl", path] : ["curl", "-X", method, path], result.code);
+    if (result.code !== 0) throw new CfApiError(`cf ${(method === "GET" ? ["curl", path] : ["curl", "-X", method, path]).join(" ")} exited with ${result.code}`);
     let body: unknown;
     try {
       body = JSON.parse(result.stdout);
     } catch {
-      throw new OpsError(`cf curl ${path} answered no JSON`, 1, "target");
+      throw new CfApiError(`cf curl ${path} answered no JSON`);
     }
     const errors: unknown = Reflect.get(Object(body), "errors");
     if (Array.isArray(errors) && errors.length > 0) {
       const titles = errors.map((e: unknown): unknown => Reflect.get(Object(e), "title")).filter((t): t is string => typeof t === "string");
-      throw new OpsError(`cf curl ${path} answered ${titles.join(", ") || "an error"}`, 1, "target");
+      throw new CfApiError(`cf curl ${path} answered ${titles.join(", ") || "an error"}`, titles);
     }
     const parsed = schema.safeParse(body);
-    if (!parsed.success) throw new OpsError(`cf curl ${path} answered an unexpected document`, 1, "target");
+    if (!parsed.success) throw new CfApiError(`cf curl ${path} answered an unexpected document`);
     return parsed.data;
   };
 
@@ -126,6 +137,18 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     const running = await requireOneInstance(guid);
     const { state } = await api(`/v3/apps/${guid}`, appSchema);
     return { state: state === "STARTED" ? "started" : state === "STOPPED" ? "stopped" : "unknown", instances: running };
+  };
+
+  const statusRead = async (): Promise<TargetStatus> => {
+    const deadline = deps.clock() + readTimeoutMs;
+    for (;;) {
+      try {
+        return await status();
+      } catch (error) {
+        if (!(error instanceof CfApiError) || deps.clock() >= deadline) throw error;
+      }
+      await sleep(pollMs);
+    }
   };
 
   const requireStopped = async (step: string): Promise<void> => {
@@ -187,11 +210,19 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     },
 
     async start() {
-      const now = await status();
+      let now: TargetStatus;
+      try {
+        now = await statusRead();
+      } catch (error) {
+        if (!(error instanceof CfApiError)) throw error;
+        throw new OpsError(`the state of ${app} could not be read before the start: ${messageOf(error)}; it stays as it is until it is started with cf start ${app} in ${config.org}/${config.space}`, 1, "target");
+      }
       if (now.state === "started" && now.instances > 0) throw new OpsError(`${app} is already running`, 1, "target");
       try {
         await api(`/v3/apps/${await appGuid()}/actions/start`, appSchema, "POST");
       } catch (error) {
+        const after = await status().catch(() => null);
+        if (after?.state === "started") return;
         throw new OpsError(`starting ${app} failed: ${messageOf(error)}; cf logs ${app} --recent shows why`, 1, "target");
       }
     },
@@ -199,7 +230,13 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     async waitReady(timeoutMs) {
       const deadline = deps.clock() + timeoutMs;
       for (;;) {
-        if ((await instanceRuns()) && (await answersReady())) return true;
+        let runs = false;
+        try {
+          runs = await instanceRuns();
+        } catch (error) {
+          if (!(error instanceof CfApiError)) throw error;
+        }
+        if (runs && (await answersReady())) return true;
         if (deps.clock() >= deadline) return false;
         await sleep(pollMs);
       }

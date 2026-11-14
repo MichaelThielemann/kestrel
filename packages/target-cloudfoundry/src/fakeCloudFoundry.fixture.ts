@@ -100,6 +100,8 @@ export class FakeCloudFoundry {
   failNext: Map<string, number> = new Map();
   /** App actions, `stop` or `start`, that the API refuses. */
   rejectedActions: Set<string> = new Set();
+  /** App actions, `stop` or `start`, that take effect while cf answers them with exit 1. */
+  lostAnswers: Set<string> = new Set();
   hooks: FakeCfHooks = {};
   url = "";
   private server: Server | null = null;
@@ -255,6 +257,7 @@ export class FakeCloudFoundry {
       Object.assign(app, { state: "STARTED", running: app.instances, ready: app.instances, downAfter: 0 });
       app.events.unshift({ type: "audit.app.start", created_at: new Date().toISOString() });
     }
+    if (this.lostAnswers.has(action)) return fail("Request error: connection reset\n");
     return json({ guid: app.guid, name: app.name, state: app.state });
   }
 }

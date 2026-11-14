@@ -197,6 +197,53 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     expect(cf.actions).toEqual([]);
   });
 
+  it("keeps reading through a failed status read before the start and starts the app", async () => {
+    Object.assign(cf.app(API.name), { state: "STOPPED", running: 0, ready: 0 });
+    const t = await target();
+    cf.failNext.set("curl", 2);
+    await t.start();
+    expect(cf.actions.map((action) => action.action)).toEqual(["start"]);
+    expect(await t.waitReady(5000)).toBe(true);
+  });
+
+  it("ends with exit 1 without a start, naming the stopped app, when its state cannot be read in time", async () => {
+    Object.assign(cf.app(API.name), { state: "STOPPED", running: 0, ready: 0 });
+    const t = await target({}, {}, { readTimeoutMs: 50 });
+    await t.status();
+    cf.failures.set("curl", 1);
+    const error = await failure(t.start());
+    expect(error.exitCode).toBe(1);
+    expect(error.message).toContain("could not be read");
+    expect(error.message).toContain(`cf start ${API.name}`);
+    expect(cf.actions).toEqual([]);
+  });
+
+  it("counts the start as done when the start request fails but the app reads started afterwards", async () => {
+    Object.assign(cf.app(API.name), { state: "STOPPED", running: 0, ready: 0 });
+    cf.lostAnswers.add("start");
+    const t = await target();
+    await t.start();
+    expect(cf.actions.map((action) => action.action)).toEqual(["start"]);
+    expect(await t.waitReady(5000)).toBe(true);
+  });
+
+  it("waits through a failed read of the instances after the start until an instance runs", async () => {
+    Object.assign(cf.app(API.name), { state: "STOPPED", running: 0, ready: 0 });
+    cf.hooks.start = async () => {
+      cf.failNext.set("curl", 1);
+    };
+    const t = await target();
+    await t.start();
+    expect(await t.waitReady(30_000)).toBe(true);
+  });
+
+  it("answers false when the instances cannot be read before the timeout", async () => {
+    const t = await target();
+    await t.status();
+    cf.failures.set("curl", 1);
+    expect(await t.waitReady(50)).toBe(false);
+  });
+
   it("answers false when no instance runs before the timeout", async () => {
     const t = await target();
     const app = cf.app(API.name);
