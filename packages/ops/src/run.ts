@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createBackup, listBackups, prune, unpin, verifyBackup } from "./backup.ts";
 import { messageOf, type OpsContext } from "./context.ts";
@@ -13,6 +13,7 @@ import { Interrupt, interruptible, type SignalSource } from "./interrupt.ts";
 import { hex, parseBackupId, parseJson, type BackupKind } from "./layout.ts";
 import { acquireLock, breakLocks, type Lock } from "./lock.ts";
 import { createOutput } from "./output.ts";
+import { packageDir, packageEntry } from "./packages.ts";
 import type { Prompt } from "./questions.ts";
 import { Redactor } from "./redact.ts";
 import type { PollOptions } from "./replica.ts";
@@ -221,11 +222,13 @@ async function loadTarget(env: Environment, options: RunOptions, root: string, c
   const { adapter, ...config } = env.target;
   const factory = options.targets?.[adapter] ?? (adapter === "local" ? localTarget : null);
   if (factory) return factory(config, { root, clock });
+  const dir = packageDir(adapter, root) ?? packageDir(adapter, fileURLToPath(new URL("..", import.meta.url)));
+  if (dir === null) throw new OpsError(`target adapter ${adapter} is not installed`, 2, "target");
   let mod: unknown;
   try {
-    mod = await import(adapter);
-  } catch {
-    throw new OpsError(`target adapter ${adapter} is not installed`, 2, "target");
+    mod = await import(pathToFileURL(packageEntry(dir)).href);
+  } catch (cause) {
+    throw new OpsError(`cannot load target adapter ${adapter}: ${messageOf(cause)}`, 2, "target");
   }
   const create: unknown = typeof mod === "object" && mod !== null ? Reflect.get(mod, "createTarget") : undefined;
   if (typeof create !== "function") throw new OpsError(`target adapter ${adapter} exports no createTarget`, 2, "target");

@@ -109,6 +109,46 @@ describe("restore --to local", () => {
   });
 });
 
+describe("target adapters", () => {
+  function install(root: string, name: string, source: string): void {
+    const dir = join(root, "node_modules", ...name.split("/"));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name, version: "1.0.0", type: "module", exports: { ".": { import: "./index.js" } } }));
+    writeFileSync(join(dir, "index.js"), source);
+  }
+
+  it("are resolved from the project, name the cause when one cannot load, and report one the project lacks as not installed", async () => {
+    const h = createHarness({ store: memoryStore(new MemoryBucket("adapters")) });
+    const useAdapter = (adapter: string): void =>
+      h.editEnvironments((file) => {
+        const prod = file.environments.prod;
+        if (prod) prod.target = { adapter };
+      });
+    try {
+      install(h.root, "@example/some-target", `import { writeFileSync } from "node:fs";\nimport { join } from "node:path";\nexport function createTarget(config, deps) {\n  writeFileSync(join(deps.root, "adapter-loaded"), "yes");\n  return { transport: "promote", describe: async () => ({ kind: "example", packages: {} }), status: async () => ({ state: "stopped", instances: 0 }), stop: async () => ({ stoppedAt: Date.now() }), start: async () => {}, waitReady: async () => true };\n}\n`);
+      install(h.root, "@example/broken-target", `import "kestrel-no-such-dependency";\nexport function createTarget() {}\n`);
+      useAdapter("@example/some-target");
+      const listed = await h.run(["backup", "list"]);
+      expect(listed.stderr).toBe("");
+      expect(listed.code).toBe(0);
+      expect(existsSync(join(h.root, "adapter-loaded"))).toBe(true);
+
+      useAdapter("@example/broken-target");
+      const broken = await h.run(["backup", "list"]);
+      expect(broken.code).toBe(2);
+      expect(broken.stderr).toContain("cannot load target adapter @example/broken-target");
+      expect(broken.stderr).toContain("kestrel-no-such-dependency");
+
+      useAdapter("@example/absent-target");
+      const absent = await h.run(["backup", "list"]);
+      expect(absent.code).toBe(2);
+      expect(absent.stderr).toContain("target adapter @example/absent-target is not installed");
+    } finally {
+      await h.dispose();
+    }
+  });
+});
+
 describe("restore --to local --with-media", () => {
   it("asks before it writes anything and leaves no partial copy when it stops, so the same command runs again", async () => {
     const bucket = new MemoryBucket("local-media-refused");

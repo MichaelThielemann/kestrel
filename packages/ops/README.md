@@ -102,8 +102,10 @@ in the background with only the variables in `env` (and `PATH`), its pid kept in
 `disk: "ephemeral"` removes the database before each start, so the app restores the newest replica
 generation, as a container with an empty disk does; a restore then promotes a generation. `disk:
 "persistent"` keeps the file, and a restore places the database as `<database>.restore`, which
-`replication-sqlite` applies at the next start. Any other `adapter` is imported by package name and must
-export `createTarget(config, { root, clock })`; `writeBundle()` copies each adapter the environments name, with
+`replication-sqlite` applies at the next start. Any other `adapter` is a package name, resolved from `root`
+(then from where kestrel-ops is installed) and imported; it must export `createTarget(config, { root, clock })`.
+A package that cannot be found stops the run with exit 2 as not installed, one that fails to load with exit 2
+and the cause; `writeBundle()` copies each adapter the environments name, with
 its dependencies, into the bundle. `root`, against which relative paths such as `dir` resolve,
 is the directory that holds `kestrel.environments.json`; in a bundle that is `.kestrel-ops/` itself.
 

@@ -26,3 +26,22 @@ export function packageVersion(name: string, from: string): string | null {
   const version = boundaryCast<{ version?: unknown }>(JSON.parse(readFileSync(join(dir, "package.json"), "utf8")), "json").version;
   return typeof version === "string" ? version : null;
 }
+
+function conditional(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  for (const condition of ["import", "node", "default"]) {
+    const found = conditional(Reflect.get(value, condition));
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/** The file an ESM import of the package in `dir` loads: its `exports` entry for `.` under the import, node or default condition, else `module`, `main` or `index.js`. */
+export function packageEntry(dir: string): string {
+  const manifest: unknown = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+  const exports: unknown = Reflect.get(Object(manifest), "exports");
+  const dot: unknown = typeof exports === "object" && exports !== null && !Array.isArray(exports) && Object.keys(exports).some((k) => k.startsWith(".")) ? Reflect.get(exports, ".") : exports;
+  const fallback = [Reflect.get(Object(manifest), "module"), Reflect.get(Object(manifest), "main")].find((v): v is string => typeof v === "string");
+  return join(dir, conditional(dot) ?? fallback ?? "index.js");
+}
