@@ -102,6 +102,26 @@ describe("stripImageMetadata: JPEG", () => {
     if (result.kind === "stripped") expect(includes(result.data, "GPS")).toBe(false);
   });
 
+  it("skips stray bytes between segments the way decoders do and still removes the metadata", () => {
+    const source = jpeg({ orientation: 6 });
+    const dqt = source.findIndex((b, i) => b === 0xff && source[i + 1] === 0xdb);
+    const withStray = bytes(source.subarray(0, dqt), [0x00, 0x13], source.subarray(dqt));
+    const result = stripImageMetadata(withStray);
+    expect(result.kind).toBe("stripped");
+    if (result.kind !== "stripped") return;
+    for (const needle of ["GPSLatitude", "PrivateAuthor", "CommentSecret", "TRAILING"]) expect(includes(result.data, needle)).toBe(false);
+    expect(exifOrientation(result.data)).toBe(6);
+    const clean = stripImageMetadata(source);
+    if (clean.kind !== "stripped") throw new Error("expected stripped");
+    expect(Array.from(result.data)).toEqual(Array.from(clean.data));
+  });
+
+  it("finds the orientation behind stray bytes between segments", () => {
+    const source = jpeg({ orientation: 8 });
+    const exif = source.findIndex((b, i) => b === 0xff && source[i + 1] === 0xe1);
+    expect(exifOrientation(bytes(source.subarray(0, exif), [0x00], source.subarray(exif)))).toBe(8);
+  });
+
   it("reports a segment that runs past the end of the file as malformed", () => {
     const broken = bytes([0xff, 0xd8, 0xff, 0xe1, 0x7f, 0xff], "Exif\0\0GPS");
     expect(stripImageMetadata(broken).kind).toBe("malformed");

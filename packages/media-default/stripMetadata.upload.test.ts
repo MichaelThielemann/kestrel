@@ -129,6 +129,16 @@ describe("media.upload removes image metadata", () => {
     expect(warnings.some((w) => w.includes("could not remove the metadata"))).toBe(true);
   });
 
+  it("stores a JPEG with a stray byte between two segments without its GPS position", async () => {
+    const { media, blobs, warnings } = await setup();
+    const source = jpeg();
+    const sof = source.findIndex((b, i) => b === 0xff && source[i + 1] === 0xc0);
+    const withStray = bytes([...source.subarray(0, sof)], [0x00], [...source.subarray(sof)]);
+    expectOk(await media.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: withStray }));
+    expect(containsGps([...blobs.values()][0]!)).toBe(false);
+    expect(warnings).toEqual([]);
+  });
+
   it("removes the metadata of a raster image whose declared type is not an image type", async () => {
     const { media, blobs } = await setup({ ...CONFIG, allowedTypes: ["*"] });
     const { item } = expectOk(await media.upload({ filename: "photo.jpg", contentType: "application/octet-stream", data: jpeg() }));

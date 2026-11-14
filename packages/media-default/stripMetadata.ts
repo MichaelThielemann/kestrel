@@ -48,11 +48,22 @@ function orientationTiff(orientation: number): Uint8Array {
 const EXIF_PREFIX = "Exif\0\0";
 const tiffOf = (payload: Uint8Array): Uint8Array => (ascii(payload, 0, 6) === EXIF_PREFIX ? payload.subarray(6) : payload);
 
-/** The EXIF orientation (2 to 8) of a JPEG, PNG or WebP file; `null` for orientation 1, no EXIF, or a file that does not parse. */
+function nextJpegMarker(d: Uint8Array, from: number): number {
+  for (let i = from; i + 1 < d.length; i += 1) {
+    if (d[i] === 0xff && d[i + 1] !== 0) return i;
+  }
+  return d.length;
+}
+
+/** The EXIF orientation (2 to 8) of a JPEG, PNG or WebP file; stray bytes between JPEG segments are skipped like a decoder does; `null` for orientation 1, no EXIF, or a file that does not parse. */
 export function exifOrientation(d: Uint8Array): number | null {
   if (d[0] === 0xff && d[1] === 0xd8) {
     let at = 2;
-    while (at + 4 <= d.length && d[at] === 0xff) {
+    while (at + 4 <= d.length) {
+      if (d[at] !== 0xff || d[at + 1] === 0) {
+        at = nextJpegMarker(d, at + 1);
+        continue;
+      }
       const marker = d[at + 1] ?? 0;
       if (marker === 0xda || marker === 0xd9) return null;
       const length = u16be(d, at + 2);
@@ -118,7 +129,10 @@ function stripJpeg(d: Uint8Array): StripResult {
   };
   let at = 2;
   while (at < d.length) {
-    if (d[at] !== 0xff) return MALFORMED;
+    if (d[at] !== 0xff || d[at + 1] === 0) {
+      at = nextJpegMarker(d, at + 1);
+      continue;
+    }
     while (d[at + 1] === 0xff) at += 1;
     const marker = d[at + 1];
     if (marker === undefined) return MALFORMED;
@@ -268,7 +282,7 @@ function stripGif(d: Uint8Array): StripResult {
  * the end of the image. Pixel data, colour profiles and animation are copied byte for byte, so nothing is
  * re-encoded. The EXIF orientation (2 to 8) is kept as the only tag in a minimal EXIF block, because the
  * pixels are not rotated. Other formats come back as `unsupported`, a file of a handled format that cannot be
- * walked to its end as `malformed`.
+ * walked to its end as `malformed`. Stray bytes between JPEG segments are dropped, as decoders skip them.
  */
 export function stripImageMetadata(data: Uint8Array): StripResult {
   if (data.length >= 4 && data[0] === 0xff && data[1] === 0xd8) return stripJpeg(data);
