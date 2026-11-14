@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { MemoryBucket, memoryStore } from "./memoryStore.ts";
+import { MemoryBucket, memoryStore, type MemoryBucketOptions } from "./memoryStore.ts";
+import type { RunOptions } from "./run.ts";
 import { listGenerations } from "./replica.ts";
-import { copyFixtureDatabase, FiveEightApp, FIXTURE_REPLICA, fixtureProject, loadFixtureBlobs, snapshotOnlyGeneration } from "./upgradeFixture.fixture.ts";
+import { copyFixtureDatabase, FiveEightApp, FIXTURE_REPLICA, fixtureProject, loadFixtureBlobs, snapshotOnlyGeneration, type FixtureRun } from "./upgradeFixture.fixture.ts";
 
 const STORE_AHEAD_MS = 3000;
 
@@ -93,5 +94,59 @@ describe("a restore onto a 5.8.1 app whose clock runs behind the store's and thi
     expect(restored.stderr).toContain("stop the app, correct its clock and restore again");
     expect(restored.stderr).not.toContain("has not started its own generation yet");
     expect(restored.json).toMatchObject({ ok: false, element: "target" });
+  }, 30_000);
+});
+
+describe("a restore onto a 5.8.1 app whose clock runs behind and whose own generation shows up late", () => {
+  const accept = { "unsealed-stop": "accept", "access-changes": "accept" };
+  let cleanup: Array<() => void> = [];
+  afterEach(() => {
+    for (const run of cleanup.reverse()) run();
+    cleanup = [];
+  });
+
+  async function restoreAfterChange(listLag: number, firstSyncAfterMs: number | null, extra: Partial<RunOptions> = {}): Promise<{ restored: FixtureRun; bucket: MemoryBucket; app: FiveEightApp; before: Set<string> }> {
+    const lag: MemoryBucketOptions = {};
+    const bucket = new MemoryBucket(`late-5.8.1-${listLag}-${String(firstSyncAfterMs)}`, lag);
+    loadFixtureBlobs(bucket);
+    const app = new FiveEightApp(memoryStore(bucket), () => Date.now() - 3000, firstSyncAfterMs);
+    const project = fixtureProject(bucket, () => app);
+    const work = mkdtempSync(join(tmpdir(), "kestrel-ops-late-"));
+    cleanup.push(() => project.dispose(), () => app.dispose(), () => rmSync(work, { recursive: true, force: true }));
+    const backup = await project.run(["backup", "create", "--freeze", "--yes", "--answers", project.answers(accept), "--json"]);
+    expect(backup.code).toBe(0);
+    const changed = join(work, "changed.db");
+    copyFixtureDatabase(changed);
+    const db = new DatabaseSync(changed);
+    db.exec(`UPDATE pages SET "title__en" = 'Renamed after the backup' WHERE rowid = (SELECT min(rowid) FROM pages)`);
+    db.close();
+    await snapshotOnlyGeneration(memoryStore(bucket), Date.now() - 60_000, changed);
+    const before = new Set((await listGenerations(memoryStore(bucket), FIXTURE_REPLICA)).map((g) => g.name));
+    lag.listLag = listLag;
+    const restored = await project.run(["restore", "--backup", String(backup.json.id), "--yes", "--answers", project.answers(accept), "--json"], extra);
+    return { restored, bucket, app, before };
+  }
+
+  it.each([
+    ["at its first sync after the start", 0, 500],
+    ["two listings behind", 2, 0],
+    ["three listings behind", 3, 0],
+  ])("fails naming both generations when the app's generation shows up %s", async (_label, listLag, firstSyncAfterMs) => {
+    const { restored, app } = await restoreAfterChange(listLag, firstSyncAfterMs);
+    expect(restored.code).toBe(1);
+    const promoted = app.restoredFrom ?? "";
+    expect(restored.stderr).toMatch(new RegExp(`the app started generation \\S+, which sorts before the promoted generation ${promoted}`));
+    expect(restored.stderr).not.toContain("unconfirmed");
+    expect(restored.json).toMatchObject({ ok: false, element: "target" });
+  }, 30_000);
+
+  it("ends with exit 0 and says the order is unconfirmed when the app starts no generation within the wait", async () => {
+    const { restored, bucket, before } = await restoreAfterChange(0, null, { generationWaitMs: 300 });
+    expect(restored.code).toBe(0);
+    const promoted = String(Reflect.get(Object(restored.json.promoted), "generation"));
+    expect(restored.stderr).toContain(`the app started no generation of its own within 1 s: whether its first one sorts after the promoted generation ${promoted} is unconfirmed`);
+    expect(restored.json).toMatchObject({ ok: true, ownGeneration: null });
+    const gens = (await listGenerations(memoryStore(bucket), FIXTURE_REPLICA)).map((g) => g.name).filter((name) => !before.has(name));
+    expect(gens).toEqual([promoted]);
   }, 30_000);
 });

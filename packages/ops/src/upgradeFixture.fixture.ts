@@ -8,7 +8,7 @@ import { stamp } from "./layout.ts";
 import type { MemoryBucket } from "./memoryStore.ts";
 import { memoryStore } from "./memoryStore.ts";
 import { buildDatabase, completeGeneration, listGenerations } from "./replica.ts";
-import { runOps } from "./run.ts";
+import { runOps, type RunOptions } from "./run.ts";
 import type { ObjectStore } from "./store.ts";
 import type { Target, TargetFacts, TargetStatus } from "./target.ts";
 
@@ -69,8 +69,9 @@ export async function snapshotOnlyGeneration(store: ObjectStore, at: number, dat
 
 /**
  * A stand-in for an app on the published 5.8.1 packages on an ephemeral disk: every start restores the generation
- * that sorts last by name, whatever files lie next to it, and writes a generation named by its own clock at the start,
- * with no lower bound, that holds only its snapshot.
+ * that sorts last by name, whatever files lie next to it, and writes a generation named by its own clock, with no
+ * lower bound, that holds only its snapshot: at the start, or at the first sync `firstSyncAfterMs` later, as a
+ * `replication.sync` cron trigger would.
  */
 export class FiveEightApp implements Target {
   readonly transport = "promote" as const;
@@ -78,11 +79,16 @@ export class FiveEightApp implements Target {
   readonly file = join(this.dir, "kestrel.db");
   running = false;
   restoredFrom: string | null = null;
+  private firstSync: ReturnType<typeof setTimeout> | null = null;
 
-  /** `clock` names the generation the app starts, as the app host's clock would; the default is this machine's clock. */
+  /**
+   * `clock` names the generation the app starts, as the app host's clock would; the default is this machine's clock.
+   * `firstSyncAfterMs` delays writing that generation after the start; null never writes it.
+   */
   constructor(
     private readonly store: ObjectStore,
     private readonly clock: () => number = Date.now,
+    private readonly firstSyncAfterMs: number | null = 0,
   ) {}
 
   async describe(): Promise<TargetFacts> {
@@ -94,6 +100,7 @@ export class FiveEightApp implements Target {
   }
 
   async stop(): Promise<{ stoppedAt: number }> {
+    this.cancelFirstSync();
     this.running = false;
     return { stoppedAt: Date.now() };
   }
@@ -104,8 +111,19 @@ export class FiveEightApp implements Target {
     rmSync(this.file, { force: true });
     await buildDatabase(this.store, FIXTURE_REPLICA, await completeGeneration(this.store, FIXTURE_REPLICA, newest), this.file);
     this.restoredFrom = newest.name;
-    await snapshotOnlyGeneration(this.store, this.clock(), this.file);
+    if (this.firstSyncAfterMs === 0) await snapshotOnlyGeneration(this.store, this.clock(), this.file);
+    else if (this.firstSyncAfterMs !== null) {
+      this.firstSync = setTimeout(() => {
+        this.firstSync = null;
+        snapshotOnlyGeneration(this.store, this.clock(), this.file).catch(() => undefined);
+      }, this.firstSyncAfterMs);
+    }
     this.running = true;
+  }
+
+  private cancelFirstSync(): void {
+    if (this.firstSync !== null) clearTimeout(this.firstSync);
+    this.firstSync = null;
   }
 
   async waitReady(): Promise<boolean> {
@@ -113,6 +131,7 @@ export class FiveEightApp implements Target {
   }
 
   dispose(): void {
+    this.cancelFirstSync();
     rmSync(this.dir, { recursive: true, force: true });
   }
 }
@@ -126,7 +145,7 @@ export interface FixtureRun {
 }
 
 /** A project directory whose environment `prod` names the fixture's prefixes in `bucket` and the given target. */
-export function fixtureProject(bucket: MemoryBucket, target: () => Target): { root: string; run: (args: string[]) => Promise<FixtureRun>; answers: (values: Record<string, string>) => string; dispose: () => void } {
+export function fixtureProject(bucket: MemoryBucket, target: () => Target): { root: string; run: (args: string[], extra?: Partial<RunOptions>) => Promise<FixtureRun>; answers: (values: Record<string, string>) => string; dispose: () => void } {
   const root = mkdtempSync(join(tmpdir(), "kestrel-ops-fixture-"));
   const environments = {
     environments: {
@@ -142,7 +161,7 @@ export function fixtureProject(bucket: MemoryBucket, target: () => Target): { ro
   let answerFiles = 0;
   return {
     root,
-    async run(args) {
+    async run(args, extra = {}) {
       let stdout = "";
       let stderr = "";
       const store = memoryStore(bucket);
@@ -161,6 +180,7 @@ export function fixtureProject(bucket: MemoryBucket, target: () => Target): { ro
         poll: { delayMs: 1, attempts: 20 },
         readyTimeoutMs: 100,
         project: { versions: fixture.packages, lockfileSha256: null },
+        ...extra,
       });
       const start = stdout.lastIndexOf('{\n  "schema"');
       const json = start < 0 ? {} : boundaryCast<Record<string, unknown>>(JSON.parse(stdout.slice(start)), "json");

@@ -45,6 +45,8 @@ export interface RunOptions {
   stateRoot?: string;
   poll?: PollOptions;
   readyTimeoutMs?: number;
+  /** How long after the start a restore waits for the first generation of a runtime before 6, which writes it at its first `replication.sync`. Default 90 000. */
+  generationWaitMs?: number;
   runCommand?: CommandRunner;
   /** Package versions and lockfile hash to record instead of reading them from the project, as a bundle does. */
   project?: { versions: Record<string, string>; lockfileSha256: string | null };
@@ -335,6 +337,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
       project: options.project ?? (cmd.name === "backup-create" || cmd.name === "restore" ? projectFacts(root) : { versions: {}, lockfileSha256: null }),
       poll: options.poll ?? {},
       readyTimeoutMs: options.readyTimeoutMs ?? 300_000,
+      generationWaitMs: options.generationWaitMs ?? 90_000,
     };
     const finish = async (ok: boolean, data: Record<string, unknown>): Promise<void> => {
       await journal.finish(ok, data).catch((cause: unknown) => out.warn(`the end entry of the journal could not be written: ${messageOf(cause)}; the run counts as open for two hours`));

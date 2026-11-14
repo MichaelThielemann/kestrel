@@ -7,7 +7,7 @@ import { Interrupted } from "./interrupt.ts";
 import { fromJsonl, hex, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
 import { placedUnstarted, recordPlacement, unfinishedPlacements } from "./placements.ts";
-import { acknowledgement, buildDatabase, checkPromotable, completeGeneration, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Promoted, type SealReport } from "./replica.ts";
+import { acknowledgement, buildDatabase, checkPromotable, completeGeneration, listGenerations, namesAfterListed, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Generation, type Promoted, type SealReport } from "./replica.ts";
 import { appClock } from "./serverTime.ts";
 import { deleteSessions, hasAccessChanges, integrityCheck, lossReport, sha256, vacuumInto, type LossReport } from "./sqlite.ts";
 import { listMap, stableList, transfer, type ObjectInfo } from "./store.ts";
@@ -35,6 +35,8 @@ export interface RestoreResult {
   delivery: { written: string[]; removed: string[] };
   promoted: Promoted | null;
   acknowledgement: Acknowledgement | null;
+  /** The first generation the app started after a promotion; null when none appeared within the wait or nothing was promoted. */
+  ownGeneration: string | null;
 }
 
 async function entries<T>(ctx: OpsContext, key: string): Promise<T[]> {
@@ -230,7 +232,7 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   const referenced = new Set(blobs.map((b) => b.key));
   const newerOriginals = [...(await listMap(ctx.app, ctx.env.app.mediaPrefix)).keys()].filter((k) => !referenced.has(k));
   if (newerOriginals.length > 0) ctx.out.info(`${newerOriginals.length} original(s) in the store are not in the backup and stay: ${newerOriginals.slice(0, 10).join(", ")}${newerOriginals.length > 10 ? ", …" : ""}`);
-  const base: RestoreResult = { backupId: manifest.id, noop: false, loss, safetyBackup: null, sessionsDeleted: 0, originalsRestored: originals, newerOriginals, delivery, promoted: null, acknowledgement: null };
+  const base: RestoreResult = { backupId: manifest.id, noop: false, loss, safetyBackup: null, sessionsDeleted: 0, originalsRestored: originals, newerOriginals, delivery, promoted: null, acknowledgement: null, ownGeneration: null };
   if (loss?.identical === true && unchangedStore && current.unfinished.length === 0) {
     ctx.out.info("nothing differs from the backup apart from login sessions, which stay; starting the app again");
     if (current.kind === "readable" && current.seal.state === "placed") await recordPlacement(ctx, current.seal.generation);
@@ -294,26 +296,44 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
     await ctx.journal.record("install-database", "done", {});
   }
   const before = promoted === null ? null : new Set((await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).map((g) => g.name));
+  const waitMs = namesAfterListed(runtimeVersion(await ctx.target.describe())) ? 0 : ctx.generationWaitMs;
   await ctx.journal.record("start", "started", promoted === null ? {} : { generation: promoted.generation });
   await startTarget(ctx, () => {
     state.started = true;
   });
+  const startedAt = ctx.clock();
+  let own: string | null = null;
   if (promoted !== null && before !== null) {
     let started: string[] | null = null;
     try {
       ack = await acknowledgement(ctx.app, ctx.env.app.replicaPrefix, promoted, ctx.poll);
       ctx.out.info(ack === "applied" ? `the app reports the restore of ${promoted.generation}` : `the app did not acknowledge ${promoted.generation}; a runtime without restore reporting renders nothing again by itself`);
-      started = (await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).map((g) => g.name).filter((name) => !before.has(name));
+      started = await startedGenerations(ctx, before, startedAt + waitMs, waitMs);
     } catch (cause) {
       ack = "unconfirmed";
       ctx.out.warn(`the restore is done and the app started again, but checking whether it acknowledged ${promoted.generation} failed: ${messageOf(cause)}`);
     }
     const earlier = started?.find((name) => name < promoted.generation);
     if (earlier !== undefined) throw new OpsError(`the app started generation ${earlier}, which sorts before the promoted generation ${promoted.generation}: the app's clock runs behind the store's, and its next start would restore ${promoted.generation} and drop everything written since; stop the app, correct its clock and restore again`, 1, "target");
-    if (started?.length === 0) ctx.out.warn("the app has not started its own generation yet");
+    own = started?.[0] ?? null;
+    if (started?.length === 0 && waitMs > 0) ctx.out.warn(`the app started no generation of its own within ${Math.ceil(waitMs / 1000)} s: whether its first one sorts after the promoted generation ${promoted.generation} is unconfirmed; a runtime before 6 writes it at its first replication.sync and names it by the app's clock, so once it appears, the newest generation under ${ctx.env.app.replicaPrefix} must be that one, not ${promoted.generation}`);
+    else if (started?.length === 0) ctx.out.warn("the app has not started its own generation yet");
   }
-  await recordQuietly(ctx, "restore", "done", { backupId: manifest.id, safetyBackup, acknowledgement: ack });
-  return { ...base, safetyBackup, sessionsDeleted, promoted, acknowledgement: ack };
+  await recordQuietly(ctx, "restore", "done", { backupId: manifest.id, safetyBackup, acknowledgement: ack, ownGeneration: own });
+  return { ...base, safetyBackup, sessionsDeleted, promoted, acknowledgement: ack, ownGeneration: own };
+}
+
+async function startedGenerations(ctx: OpsContext, before: ReadonlySet<string>, until: number, waitMs: number): Promise<string[]> {
+  const prefix = ctx.env.app.replicaPrefix;
+  const sleep = ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+  const delayMs = ctx.poll.delayMs ?? 1000;
+  const fresh = (gens: readonly Generation[]): string[] => gens.map((g) => g.name).filter((name) => !before.has(name)).sort();
+  let started = fresh(await stableGenerations(ctx.app, prefix, ctx.poll));
+  for (let i = 0; started.length === 0 && i < Math.ceil(waitMs / delayMs) && ctx.clock() < until; i++) {
+    await sleep(delayMs);
+    started = fresh(await listGenerations(ctx.app, prefix));
+  }
+  return started;
 }
 
 /** Options of {@link restoreToLocal}. */

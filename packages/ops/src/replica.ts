@@ -158,6 +158,12 @@ const majorOf = (version: string | null): number | null => {
   return m ? Number(m[1]) : null;
 };
 
+/** Whether a replication runtime of this version names every generation it starts after the ones it listed; false when the version is unknown. */
+export function namesAfterListed(runtime: string | null): boolean {
+  const major = majorOf(runtime);
+  return major !== null && major >= SEALING_MAJOR;
+}
+
 function isSeal(value: unknown): value is Seal {
   if (typeof value !== "object" || value === null) return false;
   const segments: unknown = Reflect.get(value, "segments");

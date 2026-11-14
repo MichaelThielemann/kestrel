@@ -268,7 +268,12 @@ it starts by its own clock alone and would otherwise sort it before the promoted
 machine's clock is the app's. A target on another machine whose clock runs further behind starts a generation
 that sorts before the promoted one; the restore then ends with exit 1, names both generations and asks to stop
 the app, correct its clock and restore again, since the app's next start would restore the promoted generation
-and drop what it wrote since.
+and drop what it wrote since. A runtime before 6 writes that generation only at its first `replication.sync`,
+which a cron trigger runs up to a minute after the start, so the restore lists the replica again until a generation
+of the app appears, for at most 90 s after the start (`generationWaitMs` of `runOps`). When none appears in that
+time, the restore ends with exit 0 and `ownGeneration: null`, and its output says that the order is unconfirmed:
+once the app's generation appears, it must be the newest one, not the promoted generation. A runtime from 6 on
+names every generation after the ones it listed, so the restore does not wait for it.
 
 ## Questions
 | Id | Asked | `--yes` |
