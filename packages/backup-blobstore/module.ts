@@ -2,9 +2,10 @@ import { z } from "zod";
 import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { first, type Context } from "@michaelthielemann/kestrel/context";
-import { defineModule } from "@michaelthielemann/kestrel/defineModule";
+import { defineModule, type Deps } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { applyPendingRestore, createBackupBlobstore, exists, type Backup } from "./impl.ts";
+import { applyPendingRestore, createBackupBlobstore, exists, type Backup, type Config } from "./impl.ts";
+import { lockDatabaseFile, withLockHealth, type ProcessLock } from "./processLock.ts";
 import { checkSkippedRestore, markRestoredThisBoot, reportedRestoreAt } from "./restoreFreshness.ts";
 
 export const configSchema = z
@@ -14,13 +15,28 @@ export const configSchema = z
     key: z.string().min(1),
     restoreOnStart: z.boolean().default(true),
     versions: z.number().int().min(0).default(24),
+    allowConcurrentProcesses: z.boolean().default(false).describe("Let other processes open the file while this one runs, instead of refusing to start beside them"),
   })
   .strict();
 
-type BackupInstance = Backup & { reportedRestoreAt: () => number | null };
+type BackupInstance = Backup & { lock: ProcessLock; reportedRestoreAt: () => number | null };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function start(cfg: Config, deps: Deps): Promise<Backup & { reportedRestoreAt: () => number | null }> {
+  const blobs = deps.get(BLOBSTORE);
+  const bootStartedAt = deps.bootStartedAt ?? Date.now();
+  const record = (): void => markRestoredThisBoot(cfg.file, bootStartedAt, true);
+  const applied = await applyPendingRestore(cfg.file, record);
+  if (applied) deps.logger.info("backup/blobstore: applied pending restore", { file: cfg.file, key: applied.key, size: applied.size });
+  const backup = createBackupBlobstore(cfg, blobs);
+  if (cfg.restoreOnStart && !applied) {
+    if (await exists(cfg.file)) await checkSkippedRestore(cfg, blobs, deps.logger, bootStartedAt);
+    else await backup.restoreWhenMissing(record);
+  }
+  return { ...backup, reportedRestoreAt: () => reportedRestoreAt(cfg.file) };
 }
 
 export default defineModule({
@@ -31,18 +47,18 @@ export default defineModule({
   configSchema,
 
   async setup(cfg, deps): Promise<BackupInstance> {
-    const blobs = deps.get(BLOBSTORE);
-    const bootStartedAt = deps.bootStartedAt ?? Date.now();
-    const record = (): void => markRestoredThisBoot(cfg.file, bootStartedAt, true);
-    const applied = await applyPendingRestore(cfg.file, record);
-    if (applied) deps.logger.info("backup/blobstore: applied pending restore", { file: cfg.file, key: applied.key, size: applied.size });
-    const backup = createBackupBlobstore(cfg, blobs);
-    if (cfg.restoreOnStart && !applied) {
-      if (await exists(cfg.file)) await checkSkippedRestore(cfg, blobs, deps.logger, bootStartedAt);
-      else await backup.restoreWhenMissing(record);
+    const lock = lockDatabaseFile(cfg.file, "backup/blobstore", cfg.allowConcurrentProcesses);
+    try {
+      return { ...(await start(cfg, deps)), lock };
+    } catch (err) {
+      lock.release();
+      throw err;
     }
-    return { ...backup, reportedRestoreAt: () => reportedRestoreAt(cfg.file) };
   },
+
+  teardown: (backup) => backup.lock.release(),
+
+  health: (backup) => withLockHealth(backup.lock, { ok: true }),
 
   steps: (backup) => ({
     checkRestored: async (ctx: Context) => {

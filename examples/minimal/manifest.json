@@ -103,6 +103,11 @@
             "restoreOnStart": {
               "type": "boolean",
               "default": true
+            },
+            "allowConcurrentProcesses": {
+              "type": "boolean",
+              "default": false,
+              "description": "Let other processes open the file while this one runs, instead of refusing to start beside them"
             }
           },
           "required": [
@@ -186,6 +191,17 @@
             "value": true,
             "redacted": false,
             "default": true
+          },
+          {
+            "path": "allowConcurrentProcesses",
+            "type": "boolean",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": false,
+            "redacted": false,
+            "default": false
           }
         ]
       },
@@ -231,6 +247,11 @@
               "type": "integer",
               "minimum": 100,
               "default": 5000
+            },
+            "allowConcurrentProcesses": {
+              "type": "boolean",
+              "default": false,
+              "description": "Let other processes open the file while this one runs, instead of refusing to start beside them"
             }
           },
           "required": [
@@ -279,6 +300,17 @@
             "value": 5000,
             "redacted": false,
             "default": 5000
+          },
+          {
+            "path": "allowConcurrentProcesses",
+            "type": "boolean",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": false,
+            "redacted": false,
+            "default": false
           }
         ]
       },

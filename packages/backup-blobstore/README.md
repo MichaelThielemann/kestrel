@@ -49,6 +49,18 @@ without a staged file – an interrupted download – is dropped instead of appl
 `{ key, size, file, pending: true, appliedOnRestart: true }`; **restart the process** for it to take
 effect. Preparing a restore twice keeps the newer one.
 
+**One process per file.** The first thing `setup()` does is take the instance lock on `file`, the
+sidecar `<file>.instance` next to it: before it applies a pending restore or restores a missing file.
+While another process holds the file, `setup()` fails with `instance-locked`, naming that process's
+host and PID, and leaves `file`, its `-wal` and `-shm`, `.restore-pending`, `.restore-marker` and
+`.restored-at` as they are; with `restoreOnStart` it creates no file and reads no backup. The lock is
+never uploaded with a backup. `persistence/sqlite` and `replication/sqlite` on the same file in the
+same process share it, and teardown gives this module's share up; a `setup()` that fails gives it up
+before boot reports the failure. `health()` answers `{ ok: true }` while the lock holds and `ok: false`
+with `restartRequired: true` once another instance took it over. `allowConcurrentProcesses: true`
+skips the lock; it has to be set alike on every module that names the file, otherwise boot fails
+with `invalid-module-config`.
+
 Every step returns a `Result`. A blobstore `Err` (`Err(TRANSIENT)`, 503, `retryable`) passes
 through unchanged; `backup.restore` with an unknown or missing backup key is `Err(NOT_FOUND)`
 (`no backup at <key>`), an unrecognised `key` in the payload is `Err(VALIDATION)`.
@@ -77,6 +89,7 @@ Not included: continuous replication (see `replication-sqlite`), restore without
 | `key` | string | yes | – |
 | `restoreOnStart` | boolean | no | `true` |
 | `versions` | integer | no | `24` |
+| `allowConcurrentProcesses` | boolean | no | `false` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
