@@ -78,9 +78,10 @@ pipeline that is not in the booted manifest, or one that no event trigger runs a
 row, fails at `attach()`, once every pipeline is resolved, with an error naming the module, the
 pipeline(s) and which of the two it is.
 
-To answer a save before its page is rendered, name the publishing pipeline in a lane and leave it out
-of `relayPipelines` (`relayPipelines: []` when nothing else should be relayed): the lane's worker
-claims its row as soon as the request has returned, and `_events.pipelines` reports it as `"queued"`.
+To answer a save before its page is rendered, name the publishing pipeline in a lane; the relay never
+claims a lane row, so no `relayPipelines` entry is needed (an array that names it fails boot, and
+`relayPipelines: []` additionally hands every other subscriber to the worker). The lane's worker
+claims the row on its next poll (`pollMs`, default 500 ms) and `_events.pipelines` reports it as `"queued"`.
 That decouples only the response of the saving request; a visitor's request still shares the
 process with the render. Rows without a `coalesceKey` are not merged, so each save renders once, and
 no order holds between lanes or between the pipelines subscribed to one event.

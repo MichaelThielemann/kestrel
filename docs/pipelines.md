@@ -880,28 +880,39 @@ at `attach()`, once every pipeline is resolved, naming the module, the pipeline(
 two it is.
 
 A save can be answered before its page is rendered. With `events-queue`, put `publishPage` (and
-`unpublishPage`) into a lane of their own and leave them out of `relayPipelines`:
+`unpublishPage`) into a lane of their own. The relay never claims a lane row, so the lane is enough:
 
 ```ts
-{ use: "@michaelthielemann/kestrel-events-queue", config: { relayPipelines: [], lanes: { render: ["publishPage", "unpublishPage"] } } }
+{ use: "@michaelthielemann/kestrel-events-queue", config: { lanes: { render: ["publishPage", "unpublishPage"] } } }
 ```
 
 `PATCH /pages/:id` then returns once the atomic group has committed and the event row is written;
-the lane's worker renders afterwards, so the response time no longer includes the renderer. The
-response says so: `_events.status` is `"pending"` and the `publishPage` entry has `status: "queued"`.
-The wiring is a choice of `events-queue` alone, `events-direct` always delivers inline. Boot fails
-at `attach()` when a pipeline is named in both a lane and `relayPipelines`.
+the lane's worker claims the row on its next poll (`pollMs`) and renders it, so the response time no
+longer includes the renderer. The response says so: `_events.status` is `"pending"` and the
+`publishPage` entry has `status: "queued"`. The wiring is a choice of `events-queue` alone,
+`events-direct` always delivers inline. `relayPipelines` stays at its default `"all"` here, which
+still lets the relay deliver every other subscriber of the event inside the request. Set it to an
+array to narrow that (`[]` hands every subscriber to the worker); boot fails at `attach()` when
+that array names a pipeline that is also in a lane.
 
 What this does and does not change:
 
 - Only the response of the saving request is decoupled. Visitors still wait for the same renders,
   and a render still occupies the process's CPU while the lane runs it, so request latency for
   visitors is not reduced by this setting.
-- A client that needs its own write to be visible reads it back: `_events` of the save response
-  tells whether delivery is still pending, and `GET /admin/publish-status/pages/:id` shows the
-  locale as published with a `publishedAt` newer than the save once the render has been written.
-- Delivery is at least once. A render that fails is retried with the queue's backoff and ends dead
-  after `maxAttempts`; `delivery.publish` is idempotent, so a repeated run writes the same output.
+- `_events` of the save response tells whether delivery is still pending. A client that needs its
+  own write to be visible cannot conclude it from `GET /admin/publish-status/pages/:id` alone: a
+  `publishedAt` newer than the save only shows that some render finished after the save, and that
+  can be the render of an earlier save that read the document before this one. Wait until
+  `events.readQueueStatus` reports no `pending` and no `running` rows, then read the
+  status; for a single save, `publishedAt` newer than the save at that point is reliable.
+- Delivery is at least once for the queue row, not for the render. A render that fails
+  (`RENDER_FAILED`, a timeout, a reserved path, a failed blob write) is recorded on the status row
+  as `state: "error"`, keeps the previous output and is not retried: the step still succeeds and the
+  row is done. Only a failing step, such as a `TRANSIENT` from `content@1`, `site@1` or the
+  persistence, is retried with `backoffSeconds` and ends dead after `maxAttempts`.
+  `delivery.publish` is idempotent, so a repeated run writes the same output. The output stays
+  as it was until the next save or `publishAll`.
 - Without a `coalesceKey` on the event, every save writes its own row and runs its own render, so
   five quick saves of one page render five times, in order of the lane's single worker. Rows are
   not merged.

@@ -66,11 +66,11 @@ last render recorded, `null` when they are unknown).
 `delivery.publish` renders in whichever process runs the pipeline that contains it. Behind
 `events-direct`, or behind `events-queue` with `publishPage` left in the relay, that is the request
 that saved the document: the response comes back after the render. To answer the save first, give
-the publishing pipeline its own lane in `events-queue` and keep it out of `relayPipelines`; the
+the publishing pipeline its own lane in `events-queue`; the relay never claims a lane row, so the
 response then carries `_events.status: "pending"` and the lane writes the output afterwards. Visitor
-latency is unchanged, the render still runs in the same process. The wiring, the read-back through
-`delivery.readStatus` and the delivery guarantees are described in the pipelines guide under
-`events.relay`.
+latency is unchanged, the render still runs in the same process. A render failure is recorded on the
+status row and not retried. The wiring, the read-back through `delivery.readStatus` and the delivery
+guarantees are described in the pipelines guide under `events.relay`.
 
 ## Index files
 

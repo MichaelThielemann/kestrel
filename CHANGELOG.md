@@ -1927,7 +1927,7 @@ Net changes since 5.8.2.
   out) instead of preparing every call's SQL again, and binds `LIMIT` and `OFFSET` as parameters so
   pages of different sizes share one statement. A `findMany` whose page holds every match no longer
   runs a second `COUNT(*)`.
-- Docs: the pipelines guide, the `events-queue` and `delivery-static` READMEs and the pages API table now describe how to answer a save before its page is rendered (own lane for `publishPage`, kept out of `relayPipelines`), what that decouples and what it does not. The API table no longer says the `publishPage` run always happens after the response.
+- Docs: the pipelines guide, the `events-queue` and `delivery-static` READMEs and the pages API table now describe how to answer a save before its page is rendered (a lane of its own for `publishPage`), what that decouples and what it does not. The API table no longer says the `publishPage` run always happens after the response.
 
 ### Fixed
 
