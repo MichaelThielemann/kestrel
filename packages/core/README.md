@@ -63,12 +63,14 @@ for `atomic`, `cast`, `catalogue`, `context`, `defineConfig`, `defineContract`, 
 `testing/runPipeline`. `instanceLock` (`acquireInstanceLock`, `instanceLockFile`) keeps a second process off a
 database file: the lock is a sidecar `<file>.instance` next to the database, never a row inside it, so it never
 travels with a replica, snapshot or restore. A lock whose heartbeat (every 10 s) is older than 60 s is taken over,
-and so is one whose process on the same host and in the same PID namespace is gone; a lock from another PID
-namespace, such as another container with the same hostname, waits for its heartbeat to expire. Any other lock
-makes `acquireInstanceLock` throw a `KestrelBootError` with code `instance-locked` that names the holder's host, PID
-and start time. Several holders in one process share the lock, also across worker threads, and the first holder's
-options apply; `:memory:` takes none, and `health()` turns `restartRequired` once another instance took the lock
-over.
+and so is one whose process on the same machine and in the same PID namespace is gone. Any other lock makes
+`acquireInstanceLock` throw a `KestrelBootError` with code `instance-locked` at once, naming the holder's host, PID
+and start time and the time from which the lock is taken over. That includes a lock from another PID namespace,
+such as the previous run of a container restarted after a crash: its boot fails until 60 s after that run's last
+heartbeat, so a restart policy has to retry. Several holders in one process share the lock, also across worker
+threads, and the file goes with the last release; within one thread the first holder's options apply.
+In-memory and temporary databases (`:memory:`, an empty name, `file:` URIs with `mode=memory`) take none, and
+`health()` turns `restartRequired` once another instance took the lock over.
 `reads` (`observeReads`, `noteRead`, `unobserved`) lets a caller see what the providers
 answered while a function ran, in the same process and async context; `delivery-static` uses it to record what a
 render read (see `docs/contracts.md`). The core imports no contract, no module and no host framework; ESLint

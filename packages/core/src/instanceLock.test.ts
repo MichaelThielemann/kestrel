@@ -318,6 +318,24 @@ describe("acquireInstanceLock", () => {
     expect(err instanceof KestrelBootError ? err.code : undefined).toBe("instance-locked");
   });
 
+  it("tells when a refused lock is taken over, and how to start at once when it is left by an earlier run in another pid namespace", () => {
+    const heartbeatAt = new Date(Date.now() - 5_000);
+    writeRecord({ ...onThisHost, pid: 1, pidNamespace: FOREIGN_PID_NAMESPACE, heartbeatAt: heartbeatAt.toISOString() });
+    const err = thrownBy(() => take(file));
+    const reason = err instanceof KestrelBootError ? err.reason : "";
+    expect(reason).toContain(`taken over automatically from ${new Date(heartbeatAt.getTime() + 60_000).toISOString()}`);
+    expect(reason).toContain("earlier run");
+    expect(reason).toContain(`delete ${instanceLockFile(file)}`);
+  });
+
+  it("tells when a refused lock of another host is taken over, without suggesting to delete it", () => {
+    const foreign = writeRecord({ host: "web-2" });
+    const err = thrownBy(() => take(file, { ttlMs: 30_000 }));
+    const reason = err instanceof KestrelBootError ? err.reason : "";
+    expect(reason).toContain(`taken over automatically from ${new Date(Date.parse(foreign.heartbeatAt) + 30_000).toISOString()}`);
+    expect(reason).not.toContain("delete");
+  });
+
   it("refuses a fresh lock that carries this process's pid from another pid namespace on this host", () => {
     writeRecord({ ...onThisHost, pid: process.pid, pidNamespace: FOREIGN_PID_NAMESPACE, startedAt: beforeThisProcess() });
     expect(thrownBy(() => take(file))).toBeInstanceOf(KestrelBootError);

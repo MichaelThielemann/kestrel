@@ -142,10 +142,10 @@ export function instanceLockFile(file: string): string {
  * another machine or another PID namespace, such as another container with the same hostname or
  * the previous run of a restarted container, is judged by its heartbeat alone. Any lock that is
  * not taken over makes the call throw a `KestrelBootError` with code `instance-locked` at once,
- * without waiting; the reason names that process's host, PID and start time and the `optOut`
- * setting. A restarted container whose previous run left the lock therefore fails to boot until
- * `ttlMs` after that run's last heartbeat. `module` should be the calling module's name so that
- * boot reports that code.
+ * without waiting; the reason names that process's host, PID and start time, the time from which
+ * the lock is taken over and the `optOut` setting. A restarted container whose previous run left
+ * the lock therefore fails to boot until `ttlMs` after that run's last heartbeat. `module` should
+ * be the calling module's name so that boot reports that code.
  *
  * Several holders in one process share one lock, also across copies of this module and across
  * worker threads; the last of them to call `release()` deletes the lock file. A thread that
@@ -484,7 +484,12 @@ function refusal(file: string, lockPath: string, seen: Exclude<Seen, { kind: "ab
     return `${file} is locked by ${lockPath}, which is unreadable and was written within the last ${Math.round(ttlMs / 1000)} s; it is taken over once it is older. ${advice}`;
   }
   const { record } = seen;
-  return `${file} is in use by another process: host "${record.host}", pid ${record.pid}, started ${record.startedAt}, last heartbeat ${record.heartbeatAt} (lock file ${lockPath}). ${advice}`;
+  const expiry = new Date(Date.parse(record.heartbeatAt) + ttlMs).toISOString();
+  const earlierRun =
+    sameKernel(record) && record.pidNamespace !== PID_NAMESPACE
+      ? ` The lock comes from another PID namespace on this host, such as an earlier run of this container; if no process uses the database any more, delete ${lockPath} to start at once.`
+      : "";
+  return `${file} is in use by another process: host "${record.host}", pid ${record.pid}, started ${record.startedAt}, last heartbeat ${record.heartbeatAt} (lock file ${lockPath}). The lock is taken over automatically from ${expiry} if that process sends no further heartbeat.${earlierRun} ${advice}`;
 }
 
 function isAlive(pid: number): boolean {
