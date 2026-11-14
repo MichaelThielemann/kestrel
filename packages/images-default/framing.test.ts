@@ -143,6 +143,32 @@ describe("cropForRatio and centredCrop", () => {
     expect(effectiveCrop(framing({ focus: { x: 0.5, y: 0, w: 0, h: 0 } }), { width: 300, height: 200, fit: "cover" }, 1920, 1281)).toBeNull();
   });
 
+  it("cropForRatio is null for a cut within one pixel of the centred cut on its left and right edges", () => {
+    expect(centredCrop("2:3", 1281, 1920)).toEqual({ left: 1, top: 0, width: 1280, height: 1920 });
+    expect(cropForRatio(framing({ focus: { x: 0, y: 0.5, w: 0, h: 0 } }), "2:3", 1281, 1920)).toBeNull();
+    expect(cropForRatio(framing({ focus: { x: 1, y: 0.5, w: 0, h: 0 } }), "2:3", 1281, 1920)).toBeNull();
+  });
+
+  it("cropForRatio keeps a smaller cut that shares the centred cut's top-left corner", () => {
+    expect(centredCrop("1:1", 1000, 600)).toEqual({ left: 200, top: 0, width: 600, height: 600 });
+    expect(cropForRatio(framing({ crops: { "1:1": { x: 0.2, y: 0, w: 0.3, h: 0.5 } } }), "1:1", 1000, 600)).toEqual({ left: 200, top: 0, width: 300, height: 300 });
+  });
+
+  it("cropForRatio keeps a cut with one edge two pixels from the centred cut's and the other three within a pixel", () => {
+    expect(centredCrop("1:2", 1001, 2000)).toEqual({ left: 1, top: 0, width: 1000, height: 2000 });
+    expect(centredCrop("2:1", 2000, 1001)).toEqual({ left: 0, top: 1, width: 2000, height: 1000 });
+    const cuts: Array<[string, number, number, PixelCrop]> = [
+      ["1:2", 1001, 2000, { left: 1, top: 0, width: 999, height: 1998 }],
+      ["1:2", 1001, 2000, { left: 2, top: 2, width: 999, height: 1998 }],
+      ["2:1", 2000, 1001, { left: 0, top: 1, width: 1998, height: 999 }],
+      ["2:1", 2000, 1001, { left: 2, top: 1, width: 1998, height: 999 }],
+    ];
+    for (const [key, ow, oh, cut] of cuts) {
+      const manual = { x: cut.left / ow, y: cut.top / oh, w: cut.width / ow, h: cut.height / oh };
+      expect(cropForRatio(framing({ crops: { [key]: manual } }), key, ow, oh), JSON.stringify(cut)).toEqual(cut);
+    }
+  });
+
   it("cropForRatio keeps a cut two pixels off the centred cut", () => {
     expect(centredCrop("3:2", 1920, 1284)).toEqual({ left: 0, top: 2, width: 1920, height: 1280 });
     expect(cropForRatio(framing({ focus: { x: 0.5, y: 0, w: 0, h: 0 } }), "3:2", 1920, 1284)).toEqual({ left: 0, top: 0, width: 1920, height: 1280 });

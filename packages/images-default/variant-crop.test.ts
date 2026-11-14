@@ -731,6 +731,7 @@ describe("images/default variants[].crop in images.attach", () => {
 });
 
 const PHOTO: Size = { name: "photo", width: 300, height: 200, fit: "cover", format: "webp", quality: 82 };
+const TALL: Size = { name: "tall", width: 200, height: 300, fit: "cover", format: "webp", quality: 82 };
 const TOP_FOCUS = { focus: { x: 0.5, y: 0, w: 0, h: 0 } };
 
 async function photo(width: number, height: number, orientation?: number): Promise<Uint8Array> {
@@ -794,6 +795,31 @@ describe("images/default lists a cut within a pixel of the centre as the centre"
     expect(await ratiosOf(images, "top")).toEqual([{ key: "3:2", manual: false, crop: null }]);
     expect((await attached(images, "top")).get("photo")).toMatchObject({ state: "done", crop: null });
     expect(await renderedBytes(images, "top", "photo.webp")).toEqual(await renderedBytes(images, "plain", "photo.webp"));
+    await images.close();
+  });
+
+  it("lists the focus cut of a 1281 x 1920 original at its left edge as null for a 2:3 size and renders it as the centred cut", async () => {
+    const w = await world();
+    addPhotos(w, await photo(1281, 1920), ["left", "plain"]);
+    const images = await w.open([TALL]);
+    expectOk(await images.setFraming("left", { focus: { x: 0, y: 0.5, w: 0, h: 0 } }));
+    for (const id of ["left", "plain"]) expectOk(await images.generate(id));
+    expect(await ratiosOf(images, "left")).toEqual([{ key: "2:3", manual: false, crop: null }]);
+    expect((await attached(images, "left")).get("tall")).toMatchObject({ state: "done", crop: null });
+    expect(await renderedBytes(images, "left", "tall.webp")).toEqual(await renderedBytes(images, "plain", "tall.webp"));
+    await images.close();
+  });
+
+  it("keeps a smaller manual crop that shares the centred cut's top-left corner as a crop", async () => {
+    const w = await world();
+    addPhotos(w, await photo(1000, 600), ["manual", "plain"]);
+    const images = await w.open([SQUARE]);
+    expectOk(await images.setFraming("manual", { crops: { "1:1": { x: 0.2, y: 0, w: 0.3, h: 0.5 } } }));
+    for (const id of ["manual", "plain"]) expectOk(await images.generate(id));
+    const cut = { left: 200, top: 0, width: 300, height: 300 };
+    expect(await ratiosOf(images, "manual")).toEqual([{ key: "1:1", manual: true, crop: cut }]);
+    expect((await attached(images, "manual")).get("square")).toMatchObject({ state: "done", crop: cut });
+    expect(await renderedBytes(images, "manual", "square.webp")).not.toEqual(await renderedBytes(images, "plain", "square.webp"));
     await images.close();
   });
 
