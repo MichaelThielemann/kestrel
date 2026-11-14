@@ -231,6 +231,59 @@ export async function listReplica(blobs: Blobstore, prefix: string): Promise<Res
   return ok({ points, markers });
 }
 
+/** How {@link listSealedReplica} waits for a listing that lags behind a seal. */
+export interface SealedListingOptions {
+  /** How many listings at most. Default 10. */
+  attempts?: number;
+  /** Milliseconds between two listings. Default 500. */
+  delayMs?: number;
+  /** Waits between two listings. Default: a timer. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+async function readSealedSegments(blobs: Blobstore, prefix: string, generation: string): Promise<Result<number | null, BlobstoreError>> {
+  const blob = await blobs.get(markerKey(prefix, generation, "sealed"));
+  if (isErr(blob)) return blob;
+  if (blob.value === null) return ok(null);
+  try {
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(blob.value));
+    return ok(typeof parsed === "object" && parsed !== null && "segments" in parsed && Number.isSafeInteger(parsed.segments) && typeof parsed.segments === "number" && parsed.segments >= 0 ? parsed.segments : null);
+  } catch {
+    return ok(null);
+  }
+}
+
+/**
+ * Lists the replica, and lists it again while the newest generation with a snapshot has a listed `sealed.json`
+ * naming more WAL segments than the listing shows, up to `attempts` listings. `missing` is how many of those
+ * segments the last listing still lacks: 0 when it shows them all or when the generation has no listed seal.
+ */
+export async function listSealedReplica(blobs: Blobstore, prefix: string, options: SealedListingOptions = {}): Promise<Result<{ listing: ReplicaListing; generation: string | null; segments: number | null; missing: number }, BlobstoreError>> {
+  const attempts = Math.max(1, options.attempts ?? 10);
+  const delayMs = options.delayMs ?? 500;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const seals = new Map<string, number | null>();
+  for (let attempt = 1; ; attempt++) {
+    const listed = await listReplica(blobs, prefix);
+    if (isErr(listed)) return listed;
+    const listing = listed.value;
+    const generation = [...new Set(listing.points.filter((p) => p.kind === "snapshot").map((p) => p.generation))].sort().at(-1) ?? null;
+    let segments: number | null = null;
+    if (generation !== null && listing.markers.get(generation)?.has("sealed") === true) {
+      if (!seals.has(generation)) {
+        const read = await readSealedSegments(blobs, prefix, generation);
+        if (isErr(read)) return read;
+        seals.set(generation, read.value);
+      }
+      segments = seals.get(generation) ?? null;
+    }
+    const shown = listing.points.filter((p) => p.generation === generation && p.kind === "wal").length;
+    const missing = segments === null ? 0 : Math.max(0, segments - shown);
+    if (missing === 0 || attempt >= attempts) return ok({ listing, generation, segments, missing });
+    await sleep(delayMs);
+  }
+}
+
 async function listPoints(blobs: Blobstore, prefix: string): Promise<Result<Point[], BlobstoreError>> {
   const listing = await listReplica(blobs, prefix);
   if (isErr(listing)) return listing;

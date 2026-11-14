@@ -6,7 +6,7 @@ import { first, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { applyPendingRestore, createReplicationSqlite, listReplica, markerKey, readOriginNonce, restoreFromBlobs, unplacedNewerGenerations, type Applied, type Config, type Replication } from "./impl.ts";
+import { applyPendingRestore, createReplicationSqlite, listSealedReplica, markerKey, readOriginNonce, restoreFromBlobs, unplacedNewerGenerations, type Applied, type Config, type Replication } from "./impl.ts";
 import { checkSkippedRestore, markRestoredThisBoot, reportedRestoreAt } from "./restoreFreshness.ts";
 
 export const configSchema = z
@@ -37,18 +37,24 @@ function unplacedGenerationsError(file: string, prefix: string, newest: string, 
   return `replication/sqlite: refusing to restore ${file} from the replica: ${named} under ${prefix}gen/ ${one ? "is" : "are"} named by time alone without origin.json, yet sort${one ? "s" : ""} after ${newest}, the newest generation that this version wrote or that was placed with origin.json. A 5.x release, or another process writing to the same prefix, wrote ${one ? "it" : "them"}, and restoring the newest generation would start from that data. If that data is wanted, add an origin.json to ${prefix}gen/${generations.at(-1) ?? ""}/ and start again; otherwise move ${one ? "it" : "them"} out of ${prefix}gen/ to start from ${newest}.`;
 }
 
+function unlistedSegmentsError(file: string, prefix: string, generation: string, segments: number, missing: number): string {
+  return `replication/sqlite: refusing to restore ${file} from generation ${generation}: its sealed.json names ${segments} WAL segments, but repeated listings of ${prefix}gen/${generation}/wal/ show only ${segments - missing}. The blobstore lists new keys late, or segments were removed. Start again once the listing shows them all; to restore from the listed segments alone, move ${prefix}gen/${generation}/sealed.json aside.`;
+}
+
 async function restoreMissingFile(config: Config, blobs: Blobstore, logger: Logger, bootStartedAt: number): Promise<void> {
-  const listing = await listReplica(blobs, config.prefix);
-  if (isErr(listing)) throw new Error(listing.error.message, { cause: listing.error });
-  const unplaced = unplacedNewerGenerations(listing.value);
+  const listed = await listSealedReplica(blobs, config.prefix);
+  if (isErr(listed)) throw new Error(listed.error.message, { cause: listed.error });
+  const { listing, generation: newest, segments, missing } = listed.value;
+  const unplaced = unplacedNewerGenerations(listing);
   if (unplaced.newest !== null && unplaced.generations.length > 0) throw new Error(unplacedGenerationsError(config.file, config.prefix, unplaced.newest, unplaced.generations));
-  const restored = await restoreFromBlobs(blobs, config.prefix, {}, config.file, listing.value.points);
+  if (newest !== null && segments !== null && missing > 0) throw new Error(unlistedSegmentsError(config.file, config.prefix, newest, segments, missing));
+  const restored = await restoreFromBlobs(blobs, config.prefix, {}, config.file, listing.points);
   if (isErr(restored)) {
     if (restored.error.message.includes("no snapshot")) return;
     throw new Error(restored.error.message, { cause: restored.error });
   }
   const { generation } = restored.value;
-  const markers = listing.value.markers.get(generation);
+  const markers = listing.markers.get(generation);
   if (markers === undefined || !markers.has("origin")) {
     markRestoredThisBoot(config.file, bootStartedAt);
     return;

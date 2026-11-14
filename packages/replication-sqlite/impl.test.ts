@@ -12,7 +12,7 @@ import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
-import { applyPendingRestore, createReplicationSqlite, restoreFromBlobs, restoreMarker, type Replication } from "./impl.ts";
+import { applyPendingRestore, createReplicationSqlite, listSealedReplica, restoreFromBlobs, restoreMarker, type Replication } from "./impl.ts";
 import module from "./module.ts";
 
 function fakeBlobs(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }>; failNext(code: "TRANSIENT"): void } {
@@ -561,5 +561,50 @@ describe("replication/sqlite generation order, seal and other writers", () => {
     expectOk(await repl.sync());
     expect(repl.health()).toEqual({ ok: true });
     expect(log.warnings).toEqual([]);
+  });
+});
+
+describe("replication/sqlite listing against the seal", () => {
+  function sealedReplica(): { blobs: ReturnType<typeof fakeBlobs>; generation: string } {
+    const blobs = fakeBlobs();
+    const generation = "20260101T000000Z";
+    blobs.blobs.set(`replica/gen/${generation}/snapshot.db`, { data: new Uint8Array([1]), contentType: "application/vnd.sqlite3" });
+    for (let seq = 0; seq < 3; seq++) blobs.blobs.set(`replica/gen/${generation}/wal/000001-${String(seq).padStart(6, "0")}-20260101T000001Z.wal`, { data: new Uint8Array([1]), contentType: "application/octet-stream" });
+    blobs.blobs.set(`replica/gen/${generation}/sealed.json`, { data: new TextEncoder().encode(JSON.stringify({ lineage: 1, lastFrame: 9, segments: 3, at: 0 })), contentType: "application/json" });
+    return { blobs, generation };
+  }
+
+  it("lists again until the newest generation shows every segment its seal names", async () => {
+    const { blobs, generation } = sealedReplica();
+    const last = `replica/gen/${generation}/wal/000001-000002-20260101T000001Z.wal`;
+    const lagging = blobs.blobs.get(last);
+    blobs.blobs.delete(last);
+    const waits: number[] = [];
+    const listed = expectOk(await listSealedReplica(blobs, "replica/", { attempts: 5, delayMs: 100, sleep: async (ms) => {
+      waits.push(ms);
+      if (lagging && waits.length === 2) blobs.blobs.set(last, lagging);
+    } }));
+    expect(waits).toEqual([100, 100]);
+    expect(listed.missing).toBe(0);
+    expect(listed.listing.points.filter((p) => p.kind === "wal")).toHaveLength(3);
+  });
+
+  it("answers how many sealed segments the last listing still lacks once the attempts are used up", async () => {
+    const { blobs, generation } = sealedReplica();
+    blobs.blobs.delete(`replica/gen/${generation}/wal/000001-000001-20260101T000001Z.wal`);
+    const waits: number[] = [];
+    const listed = expectOk(await listSealedReplica(blobs, "replica/", { attempts: 3, delayMs: 50, sleep: async (ms) => { waits.push(ms); } }));
+    expect(waits).toEqual([50, 50]);
+    expect(listed).toMatchObject({ generation, segments: 3, missing: 1 });
+  });
+
+  it("lists once when the newest generation has no seal", async () => {
+    const { blobs, generation } = sealedReplica();
+    blobs.blobs.delete(`replica/gen/${generation}/sealed.json`);
+    blobs.blobs.delete(`replica/gen/${generation}/wal/000001-000001-20260101T000001Z.wal`);
+    const waits: number[] = [];
+    const listed = expectOk(await listSealedReplica(blobs, "replica/", { sleep: async (ms) => { waits.push(ms); } }));
+    expect(waits).toEqual([]);
+    expect(listed.missing).toBe(0);
   });
 });

@@ -668,13 +668,16 @@ Net changes since 5.8.2.
 - `replication-sqlite` documents its replica layout as a storage format (README, "Replica layout") and
   adds three files to a generation. Teardown writes `sealed.json` (`{ lineage, lastFrame, segments, at }`)
   once the frames committed since the last sync are shipped, so a generation without one shows a stop
-  that may have lost frames. A tool that places a database into the replica writes `origin.json` next to
+  that may have lost frames. A start that rebuilds the missing database lists the replica again, for up
+  to five seconds, while the newest generation's seal names more WAL segments than the listing shows,
+  and refuses to start when some are still missing. A tool that places a database into the replica writes `origin.json` next to
   its snapshot; a start that rebuilds the missing database from such a generation reports the restore
   through `replication.checkRestored`, so `delivery.checkBuild` renders every output again, and writes
   `applied.json` naming the generation and the `nonce` of `origin.json`. A later start that finds
   `applied.json` does not report the restore again. `Replication` (`./impl`) gains `seal()`, and
-  `./impl` exports `listReplica()`, `markerKey()`, `readOriginNonce()`, `unplacedNewerGenerations()`
-  and the types `Seal`, `Origin`, `Applied` and `ReplicaListing`.
+  `./impl` exports `listReplica()`, `listSealedReplica()`, `markerKey()`, `readOriginNonce()`,
+  `unplacedNewerGenerations()` and the types `Seal`, `Origin`, `Applied`, `ReplicaListing` and
+  `SealedListingOptions`.
 - `replication-sqlite` refuses to rebuild a missing database at start when a generation named by its
   time alone and without `origin.json`, as 5.x releases name every generation, sorts after the newest
   generation that this version wrote or that carries `origin.json`. Restoring it would start from data
