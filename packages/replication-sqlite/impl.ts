@@ -44,7 +44,7 @@ export interface ReplicationOptions {
 export interface PlacedRestore {
   /** What `applied.json` holds once it is written. */
   applied: Applied;
-  /** The content of the generation's `origin.json`, copied into every generation this process starts before it writes `applied.json`. */
+  /** The content of the generation's `origin.json`, copied into every generation this process starts before it writes `applied.json`, ahead of that generation's snapshot. */
   origin: string;
 }
 
@@ -297,12 +297,14 @@ const segmentSeq = (key: string): number => Number(/\/wal\/\d+-(\d+)-[0-9TZ]+\.w
 
 /**
  * Lists the replica, and lists it again, up to `attempts` listings, while the listing of the newest generation
- * with a snapshot lacks a WAL segment its `sealed.json` names, or a generation that sorts after it shows
- * `origin.json` but no snapshot. The seal is read from the blobstore whether or not a listing shows it, once
- * per generation, and again when a later listing shows a seal the read did not find. `missing` is how many of
- * the sequence numbers `0` to `segments - 1` the last listing still lacks: 0 when it shows them all or when the
- * generation has no seal. `withoutSnapshot` names the generations after the newest one with a snapshot that
- * the last listing shows with `origin.json` alone.
+ * with a snapshot lacks a WAL segment its `sealed.json` names, or a generation named by its time alone that
+ * sorts after it shows `origin.json` but no snapshot. The seal is read from the blobstore whether or not a
+ * listing shows it, once per generation, and again when a later listing shows a seal the read did not find.
+ * `missing` is how many of the sequence numbers `0` to `segments - 1` the last listing still lacks: 0 when it
+ * shows them all or when the generation has no seal. `withoutSnapshot` names the generations named by their
+ * time alone after the newest one with a snapshot that the last listing shows with `origin.json` alone; a
+ * generation named with an order key that shows `origin.json` alone is one whose process stopped while it
+ * started it, and counts nowhere.
  */
 export async function listSealedReplica(blobs: Blobstore, prefix: string, options: SealedListingOptions = {}): Promise<Result<{ listing: ReplicaListing; generation: string | null; segments: number | null; missing: number; withoutSnapshot: string[] }, BlobstoreError>> {
   const attempts = Math.max(1, options.attempts ?? 10);
@@ -327,7 +329,7 @@ export async function listSealedReplica(blobs: Blobstore, prefix: string, option
     let missing = 0;
     for (let seq = 0; segments !== null && seq < segments; seq++) if (!shown.has(seq)) missing += 1;
     const withSnapshot = new Set(listing.points.filter((p) => p.kind === "snapshot").map((p) => p.generation));
-    const withoutSnapshot = [...listing.markers].filter(([g, markers]) => markers.has("origin") && !withSnapshot.has(g) && (generation === null || g > generation)).map(([g]) => g).sort();
+    const withoutSnapshot = [...listing.markers].filter(([g, markers]) => TIME_ONLY.test(g) && markers.has("origin") && !withSnapshot.has(g) && (generation === null || g > generation)).map(([g]) => g).sort();
     if ((missing === 0 && withoutSnapshot.length === 0) || attempt >= attempts) return ok({ listing, generation, segments, missing, withoutSnapshot });
     await sleep(delayMs);
   }
@@ -477,16 +479,16 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     snapshotOrder = Math.max(at, newestListed + 1, snapshotOrder + 1);
     const gen = `${stamp(snapshotOrder)}-${orderKey(snapshotOrder)}${orderKey(at)}${randomBytes(10).toString("hex")}`;
     own.add(gen);
-    const put = await blobs.put(`${config.prefix}gen/${gen}/snapshot.db`, data, { contentType: "application/vnd.sqlite3" });
-    if (isErr(put)) return put;
     if (placedRestore) {
       const carried = await blobs.put(markerKey(config.prefix, gen, "origin"), new TextEncoder().encode(placedRestore.origin), { contentType: "application/json" });
-      if (isErr(carried)) {
-        await blobs.remove(`${config.prefix}gen/${gen}/snapshot.db`);
-        return carried;
-      }
-      unacknowledged.push(gen);
+      if (isErr(carried)) return carried;
     }
+    const put = await blobs.put(`${config.prefix}gen/${gen}/snapshot.db`, data, { contentType: "application/vnd.sqlite3" });
+    if (isErr(put)) {
+      if (placedRestore) await blobs.remove(markerKey(config.prefix, gen, "origin"));
+      return put;
+    }
+    if (placedRestore) unacknowledged.push(gen);
     generation = gen;
     seq = 0;
     cursor = wal ? { ...wal.at, frame: wal.frames, checksum: wal.checksum } : null;

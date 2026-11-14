@@ -130,7 +130,7 @@ version; it is not a contract. Every key belongs to one generation and lives und
 | `snapshot.db` | the snapshot that starts the generation | the database file with the committed WAL frames applied, in the live file's page layout |
 | `wal/<lineage>-<seq>-<time>.wal` | every sync and checkpoint | a WAL header and the committed frames after the previous segment; `lineage` (6 digits) counts the WAL resets seen by the process, `seq` (6 digits) numbers the generation's segments from `000000`, `time` is when the segment was shipped |
 | `sealed.json` | teardown, once | `{ "lineage", "lastFrame", "segments", "at" }` |
-| `origin.json` | whoever placed the generation; a copy, by a process that restored from it, in every generation it starts before writing `applied.json` | `{ "kind": "restore" \| "upgrade", "source", "requestedAt", "nonce" }`; this module reads only `nonce` |
+| `origin.json` | whoever placed the generation; a copy, by a process that restored from it, in every generation it starts before writing `applied.json`, ahead of that generation's `snapshot.db` | `{ "kind": "restore" \| "upgrade", "source", "requestedAt", "nonce" }`; this module reads only `nonce` |
 | `applied.json` | the process that restored from a generation with `origin.json`, once the restore was acted on | `{ "generation", "nonce", "restoredAt" }` |
 
 Times in names are UTC, `YYYYMMDDTHHMMSSZ`. A generation is named either by such a time alone, as
@@ -167,9 +167,11 @@ writes the snapshot into a new generation and then `origin.json`, last, which ma
 complete. Name it by its time alone, after every generation the replica lists, so that 5.x releases list
 and restore it too. Whether a generation carries `origin.json` or `applied.json`, the module reads from
 the blobstore, not from a listing, which can show a new key late. Before `setup()` rebuilds a missing
-file, it lists the replica again, as it does for a seal, while a generation that sorts after the newest
-snapshot shows `origin.json` but no `snapshot.db`, and refuses to start when the listing still shows
-none; the error names the generation.
+file, it lists the replica again, as it does for a seal, while a generation named by its time alone that
+sorts after the newest snapshot shows `origin.json` but no `snapshot.db`, and refuses to start when the
+listing still shows none; the error names the generation. A generation named with an order key that
+holds `origin.json` but no `snapshot.db` is one whose process stopped while it started it, since the
+copy of `origin.json` is written first; a start neither waits for it nor restores from it.
 
 When `restoreOnStart` rebuilds the missing file from a generation with `origin.json` and without
 `applied.json`, the restore is reported: `replication.checkRestored` answers the start of this boot. The

@@ -403,6 +403,30 @@ describe("replication/sqlite restore from a placed generation", () => {
     expect(await databaseRestoredAt(second.instance)).toBe(second.bootStartedAt);
   });
 
+  it("leaves the restore from a placed generation reported to the next start on an empty disk when the process stops while its first sync writes a generation", async () => {
+    for (const stopsAt of ["origin.json", "snapshot.db"]) {
+      const file = join(freshDir(), "live.db");
+      const blobs = fakeBlobs();
+      place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+      const stopping: Blobstore = {
+        ...blobs,
+        async put(key, data, options) {
+          if (key.endsWith(`/${stopsAt}`)) throw new Error("process stopped");
+          return blobs.put(key, data, options);
+        },
+      };
+      const first = await startOn(file, stopping);
+      await expect(first.instance.sync()).rejects.toThrow("process stopped");
+      first.instance.close();
+
+      removeDatabase(file);
+      const second = await startOn(file, blobs);
+      open.push(second.instance);
+      expect(rowsIn(file)).toBe(2);
+      expect(await databaseRestoredAt(second.instance)).toBe(second.bootStartedAt);
+    }
+  });
+
   it("leaves the restore from a placed generation reported to the next start when teardown seals a first snapshot of what the process committed before the report was handled", async () => {
     const file = join(freshDir(), "live.db");
     const blobs = fakeBlobs();
