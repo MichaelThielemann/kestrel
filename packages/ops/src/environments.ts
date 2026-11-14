@@ -78,14 +78,16 @@ export function overlaps(a: string, b: string): boolean {
   return a.startsWith(b) || b.startsWith(a);
 }
 
-/** Problems with an environment that the schema cannot see: a backup location inside an app prefix, or app prefixes inside each other. */
+/** Problems with an environment that the schema cannot see: a backup location inside an app prefix, or app prefixes (derived ones included) inside each other. */
 export function environmentProblems(env: Environment): string[] {
   const problems: string[] = [];
   const backupStorage = env.backups.storage ?? env.storage;
   const sameBucket = backupStorage.bucket === env.storage.bucket && backupStorage.endpoint === env.storage.endpoint;
   const appPrefixes = [env.app.replicaPrefix, env.app.mediaPrefix, env.app.deliveryPrefix, ...env.app.derivedPrefixes].map((p) => env.storage.prefix + p);
   if (sameBucket) for (const p of appPrefixes) if (overlaps(backupStorage.prefix + env.backups.prefix, p)) problems.push(`the backup location ${env.backups.prefix} overlaps the app prefix ${p}`);
-  if (overlaps(env.app.deliveryPrefix, env.app.mediaPrefix)) problems.push(`the delivery prefix ${env.app.deliveryPrefix} overlaps the media prefix ${env.app.mediaPrefix}`);
-  if (overlaps(env.app.replicaPrefix, env.app.deliveryPrefix)) problems.push(`the replica prefix ${env.app.replicaPrefix} overlaps the delivery prefix ${env.app.deliveryPrefix}`);
+  const named: Array<[string, string]> = [["replica", env.app.replicaPrefix], ["delivery", env.app.deliveryPrefix], ["media", env.app.mediaPrefix], ...env.app.derivedPrefixes.map((p): [string, string] => ["derived", p])];
+  named.forEach(([name, p], i) => {
+    for (const [otherName, other] of named.slice(i + 1)) if (overlaps(p, other)) problems.push(`the ${name} prefix ${p} overlaps the ${otherName} prefix ${other}`);
+  });
   return problems;
 }

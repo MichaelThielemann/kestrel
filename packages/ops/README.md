@@ -71,8 +71,11 @@ from.
   `app.credentials`, when given, are only used by `status` to prove that the app cannot delete backups.
 - `backups.prefix` is the backup location; `backups.storage` puts it in another bucket. It must lie outside
   every app prefix and outside anything served publicly: a backup holds the whole database, password hashes
-  and second factors included. Give the app's credentials an explicit deny on it; `status` reports
-  `protected from the app: yes` only when a delete with them is refused.
+  and second factors included. The app prefixes must not lie inside each other either. While either rule is
+  broken, every command but `status` and `backup list` stops with exit 2 before it writes anything, and
+  `status` lists the problem. Give the app's credentials an explicit deny on the location; `status` reports
+  `protected from the app: yes` only when a delete with them is refused. Several environments may share one
+  location: prune keeps every object a backup of any of them refers to.
 - `production` (default `true`) makes every restore ask for the `access-changes` answer.
 - A credential is `{ "env": "NAME" }` or `{ "command": ["argv", "..."] }`, run without a shell, its standard
   output taken as the value. Values stay in memory; every line the tool writes, to the terminal, the journal

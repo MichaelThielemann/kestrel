@@ -6,7 +6,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createBackup, listBackups, prune, unpin, verifyBackup } from "./backup.ts";
 import type { OpsContext } from "./context.ts";
 import { resolveCredential, type CommandRunner } from "./credentials.ts";
-import { loadEnvironments, type Environment, type StorageConfig } from "./environments.ts";
+import { ENVIRONMENTS_FILE, environmentProblems, loadEnvironments, type Environment, type StorageConfig } from "./environments.ts";
 import { OpsError } from "./errors.ts";
 import { Journal } from "./journal.ts";
 import { hex, parseJson, type BackupKind } from "./layout.ts";
@@ -197,6 +197,10 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
     const environment = environments[envName];
     if (names.length === 0) throw new OpsError("kestrel.environments.json names no environment", 2, "kestrel.environments.json");
     if (environment === undefined) throw new OpsError(envName === "" ? `--env is required (${names.join(", ")})` : `unknown environment ${envName} (${names.join(", ")})`, 2, "--env");
+    const name = command === "restore" ? "restore" : sub === undefined ? (command ?? "") : `${command ?? ""}-${sub}`;
+    const writing = name !== "status" && name !== "backup-list";
+    const problems = writing ? environmentProblems(environment) : [];
+    if (problems.length > 0) throw new OpsError(`${ENVIRONMENTS_FILE}: ${problems.join("; ")}`, 2, ENVIRONMENTS_FILE);
     const stores = options.stores ?? defaultStores;
     const toolCredentials = await credentialsOf(environment.storage.credentials, `${envName}.storage.credentials`, redactor, env, options.runCommand);
     const backupStorage = environment.backups.storage ?? environment.storage;
@@ -227,8 +231,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
       poll: options.poll ?? {},
       readyTimeoutMs: options.readyTimeoutMs ?? 300_000,
     };
-    const name = command === "restore" ? "restore" : sub === undefined ? (command ?? "") : `${command ?? ""}-${sub}`;
-    writes = name !== "status" && name !== "backup-list";
+    writes = writing;
     if (writes) {
       await journal.record("run", "started", { command: name, env: envName });
       if (parsed.flags.has("--break-lock")) await breakLocks(ctx, runId);
