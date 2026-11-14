@@ -237,7 +237,10 @@ does. `status` names an unfinished placement as a problem, and `backup create` r
 generation. The next restore warns about it, reads the generation before it as the current state, never ends as
 a no-op while it is the newest, and promotes a complete generation after it. A restore that stops after
 `origin.json` but before the app started leaves a complete placement (`placed`); the next run starts the app from
-it and ends as a no-op.
+it and ends as a no-op. A no-op that starts the app from a promoted generation the app has not acknowledged (one
+with `origin.json` and no `applied.json`, such as a placement or a promotion a runtime before 6 started from)
+waits and checks the order like a promotion (see below), so it too ends with exit 1 when the app starts a
+generation that sorts before it.
 
 ### Promotion
 A promoted generation is a `VACUUM INTO` copy without `-wal`, named `gen/<yyyymmddThhmmssZ>/snapshot.db` by

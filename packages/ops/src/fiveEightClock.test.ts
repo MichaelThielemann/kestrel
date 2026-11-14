@@ -250,3 +250,63 @@ describe("a restore onto a 5.8.1 app whose clock runs behind, while it waits for
     expect(restored.json).toMatchObject({ ok: true, ownGeneration: null });
   }, 30_000);
 });
+
+describe("a restore that ends as a no-op on a 5.8.1 app, starting it from a promoted generation", () => {
+  let cleanup: Array<() => void> = [];
+  afterEach(() => {
+    for (const run of cleanup.reverse()) run();
+    cleanup = [];
+  });
+
+  const newestOwn = async (bucket: MemoryBucket, before: ReadonlySet<string>, promoted: string): Promise<string[]> => (await listGenerations(memoryStore(bucket), FIXTURE_REPLICA)).map((g) => g.name).filter((name) => !before.has(name) && name !== promoted);
+
+  it("fails again naming both generations when the app's clock still runs behind after a failed order check", async () => {
+    const { bucket, app, project, restoreArgs } = await changedAfterBackup("noop-behind-5.8.1", () => Date.now() - 10_000, 0, cleanup);
+    const first = await project.run(restoreArgs(), { generationWaitMs: 5000 });
+    expect(first.code).toBe(1);
+    const promoted = app.restoredFrom ?? "";
+    expect(first.stderr).toContain(`which sorts before the promoted generation ${promoted}`);
+    await new Promise((done) => setTimeout(done, 1100));
+    const before = new Set((await listGenerations(memoryStore(bucket), FIXTURE_REPLICA)).map((g) => g.name));
+
+    const second = await project.run(restoreArgs(), { generationWaitMs: 5000 });
+    expect(app.restoredFrom).toBe(promoted);
+    const own = await newestOwn(bucket, before, promoted);
+    expect(own).toHaveLength(1);
+    expect(String(own[0]) < promoted).toBe(true);
+    expect(second.code).toBe(1);
+    expect(second.stderr).toContain(`the app started generation ${String(own[0])}, which sorts before the promoted generation ${promoted}`);
+    expect(second.stderr).toContain("the restore started the app again; check it");
+    expect(second.json).toMatchObject({ ok: false, element: "target" });
+  }, 30_000);
+
+  it.each([
+    ["a clock behind the store's", -10_000],
+    ["this machine's clock", 0],
+  ])("waits for the second after the promoted generation's name after a restore that stopped before the start, and checks the order, with %s", async (_label, offset) => {
+    const bucket = new MemoryBucket(`noop-placed-5.8.1-${offset}`);
+    const failing = failingOnce(memoryStore(bucket), "put", (key) => key.endsWith("-promote-done.json"));
+    const { app, project, restoreArgs } = await changedAfterBackupIn(bucket, () => Date.now() + offset, 0, cleanup);
+    failing.arm();
+    const first = await project.run(restoreArgs(), { stores: () => failing.store, generationWaitMs: 5000 });
+    expect(first.code).toBe(1);
+    expect(first.stderr).toContain("the app stays stopped");
+    const gens = await listGenerations(memoryStore(bucket), FIXTURE_REPLICA);
+    const promoted = gens.at(-1)?.name ?? "";
+    const before = new Set(gens.map((g) => g.name));
+
+    const second = await project.run(restoreArgs(), { generationWaitMs: 5000 });
+    expect(app.restoredFrom).toBe(promoted);
+    const own = await newestOwn(bucket, before, promoted);
+    expect(own).toHaveLength(1);
+    if (offset === 0) {
+      expect(second.code).toBe(0);
+      expect(String(own[0]) > promoted).toBe(true);
+      expect(second.json).toMatchObject({ ok: true, noop: true, ownGeneration: own[0] });
+    } else {
+      expect(String(own[0]) < promoted).toBe(true);
+      expect(second.code).toBe(1);
+      expect(second.stderr).toContain(`the app started generation ${String(own[0])}, which sorts before the promoted generation ${promoted}`);
+    }
+  }, 30_000);
+});

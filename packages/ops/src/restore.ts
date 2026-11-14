@@ -7,10 +7,10 @@ import { Interrupted } from "./interrupt.ts";
 import { fromJsonl, hex, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
 import { placedUnstarted, recordPlacement, unfinishedPlacements } from "./placements.ts";
-import { acknowledgement, buildDatabase, checkPromotable, completeGeneration, listGenerations, namesAfterListed, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Generation, type Promoted, type SealReport } from "./replica.ts";
+import { acknowledgement, buildDatabase, checkPromotable, completeGeneration, listGenerations, markerKey, namesAfterListed, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Generation, type Promoted, type SealReport } from "./replica.ts";
 import { appClock, type ServerClock } from "./serverTime.ts";
 import { deleteSessions, hasAccessChanges, integrityCheck, lossReport, sha256, vacuumInto, type LossReport } from "./sqlite.ts";
-import { listMap, stableList, transfer, type ObjectInfo } from "./store.ts";
+import { listMap, stableList, transfer, type ObjectInfo, type ObjectStore } from "./store.ts";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 
 /** Options of {@link restoreBackup}. */
@@ -160,7 +160,7 @@ export async function restoreBackup(ctx: OpsContext, options: RestoreOptions): P
     return await restoreStopped(ctx, manifest, stop, state, options);
   } catch (error) {
     const undo = state.safetyBackup === null ? "" : `, or restore the pre-restore backup ${state.safetyBackup}`;
-    if (state.started) ctx.out.error(`the restore changed the store and started the app again; check it${undo}`);
+    if (state.started) ctx.out.error(`the restore ${state.changed ? "changed the store and " : ""}started the app again; check it${undo}`);
     else if (state.changed) ctx.out.error(`the restore stopped after it changed the store; the app stays stopped. Run the restore again${undo}`);
     else {
       ctx.out.error(`the restore stopped before it changed the store${stop.wasRunning ? "; starting the app again" : ""}`);
@@ -235,13 +235,20 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   const base: RestoreResult = { backupId: manifest.id, noop: false, loss, safetyBackup: null, sessionsDeleted: 0, originalsRestored: originals, newerOriginals, delivery, promoted: null, acknowledgement: null, ownGeneration: null };
   if (loss?.identical === true && unchangedStore && current.unfinished.length === 0) {
     ctx.out.info("nothing differs from the backup apart from login sessions, which stay; starting the app again");
+    const from = current.kind === "readable" && ctx.target.transport === "promote" && (await isUnacknowledgedPromotion(ctx.app, ctx.env.app.replicaPrefix, current.seal.listed)) ? current.seal.listed : null;
     if (current.kind === "readable" && current.seal.state === "placed") await recordPlacement(ctx, current.seal.generation);
+    let order: OrderCheck | null = null;
+    if (from !== null) {
+      await waitUntilStartable(ctx, from.at, await appClock(ctx));
+      order = await orderCheck(ctx, from.name);
+    }
     await ctx.journal.record("start", "started", current.kind === "readable" ? { generation: current.seal.generation } : {});
     await startTarget(ctx, () => {
       state.started = true;
     });
-    await recordQuietly(ctx, "restore", "done", { backupId: manifest.id, noop: true });
-    return { ...base, noop: true };
+    const own = order === null ? null : await ownGeneration(ctx, order, ctx.clock());
+    await recordQuietly(ctx, "restore", "done", { backupId: manifest.id, noop: true, ownGeneration: own });
+    return { ...base, noop: true, ownGeneration: own };
   }
 
   const clock = ctx.target.transport === "promote" ? await appClock(ctx) : null;
@@ -315,6 +322,11 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   }
   await recordQuietly(ctx, "restore", "done", { backupId: manifest.id, safetyBackup, acknowledgement: ack, ownGeneration: own });
   return { ...base, safetyBackup, sessionsDeleted, promoted, acknowledgement: ack, ownGeneration: own };
+}
+
+async function isUnacknowledgedPromotion(store: ObjectStore, prefix: string, generation: Generation): Promise<boolean> {
+  if (generation.files["origin.json"] === undefined && (await store.get(markerKey(prefix, generation.name, "origin"))) === null) return false;
+  return generation.files["applied.json"] === undefined && (await store.get(markerKey(prefix, generation.name, "applied"))) === null;
 }
 
 async function waitUntilStartable(ctx: OpsContext, at: number, clock: ServerClock): Promise<void> {
