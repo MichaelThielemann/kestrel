@@ -1,11 +1,11 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { acceptSeal, createBackup, readManifest, readSeal, verifyBackup } from "./backup.ts";
-import { startTarget, stopTarget, type OpsContext } from "./context.ts";
+import { acceptSeal, createBackup, readManifest, verifyBackup, type BackupMode } from "./backup.ts";
+import { runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
 import { fromJsonl, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
-import { acknowledgement, buildDatabase, checkPromotable, promote, stableGenerations, type Acknowledgement, type Promoted } from "./replica.ts";
+import { acknowledgement, buildDatabase, checkPromotable, promote, sealOf, stableGenerations, type Acknowledgement, type Promoted, type SealReport } from "./replica.ts";
 import { appClock } from "./serverTime.ts";
 import { deleteSessions, hasAccessChanges, integrityCheck, lossReport, sha256, vacuumInto, type LossReport } from "./sqlite.ts";
 import { listMap, stableList, transfer, type ObjectInfo } from "./store.ts";
@@ -23,7 +23,8 @@ export interface RestoreResult {
   backupId: string;
   /** Nothing differed from the backup: the app was started again without promoting or copying anything. */
   noop: boolean;
-  loss: LossReport;
+  /** Null when the current replica could not be read, after the `unreadable-current` answer. */
+  loss: LossReport | null;
   safetyBackup: string | null;
   sessionsDeleted: number;
   originalsRestored: string[];
@@ -40,7 +41,12 @@ async function entries<T>(ctx: OpsContext, key: string): Promise<T[]> {
   return boundaryCast<T[]>(fromJsonl(data), "json");
 }
 
+function noDatabase(manifest: Manifest): OpsError {
+  return new OpsError(`backup ${manifest.id} holds no database: it was taken while the replica could not be read; blobs.jsonl and site.jsonl list its originals and delivery keys`, 1, manifest.id);
+}
+
 async function downloadDb(ctx: OpsContext, manifest: Manifest, file: string): Promise<void> {
+  if (manifest.db === null) throw noDatabase(manifest);
   const data = await ctx.backups.get(ctx.location + keys.db(manifest.id));
   if (data === null || sha256(data) !== manifest.db.sha256) throw new OpsError(`backup ${manifest.id}: db.sqlite is missing or differs from its manifest`, 1, "db.sqlite");
   mkdirSync(dirname(file), { recursive: true });
@@ -117,6 +123,7 @@ export async function restoreBackup(ctx: OpsContext, options: RestoreOptions): P
   const manifest = await readManifest(ctx, options.backupId);
   if (manifest === null) throw new OpsError(`backup ${options.backupId} does not exist or is incomplete`, 1, options.backupId);
   if (manifest.env !== ctx.envName) throw new OpsError(`backup ${options.backupId} belongs to environment ${manifest.env}, not ${ctx.envName}`, 1, options.backupId);
+  if (manifest.db === null) throw noDatabase(manifest);
   const check = await verifyBackup(ctx, manifest.id);
   if (!check.ok) throw new OpsError(`backup ${manifest.id} failed verification: ${check.problems.map((p) => `${p.element}: ${p.message}`).join("; ")}`, 1, check.problems[0]?.element);
   await ctx.journal.record("restore", "started", { backupId: manifest.id });
@@ -136,20 +143,43 @@ export async function restoreBackup(ctx: OpsContext, options: RestoreOptions): P
   }
 }
 
+type Current = { kind: "readable"; seal: SealReport; file: string } | { kind: "unreadable"; reason: string };
+
+async function readCurrent(ctx: OpsContext, stoppedAt: number): Promise<Current> {
+  const prefix = ctx.env.app.replicaPrefix;
+  const newest = (await stableGenerations(ctx.app, prefix, ctx.poll)).at(-1);
+  if (!newest) return { kind: "unreadable", reason: `the replica under ${prefix} has no generation` };
+  const seal = await sealOf(ctx.app, prefix, newest, runtimeVersion(await ctx.target.describe()));
+  await acceptSeal(ctx, seal, stoppedAt);
+  const file = ctx.workspace.path("current.db");
+  try {
+    await buildDatabase(ctx.app, prefix, seal.generation, file);
+  } catch (cause) {
+    if (cause instanceof OpsError) return { kind: "unreadable", reason: cause.message };
+    throw cause;
+  }
+  return { kind: "readable", seal, file };
+}
+
 async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stoppedAt: number }, state: { changed: boolean }, options: RestoreOptions): Promise<RestoreResult> {
   const blobs = await entries<BlobEntry>(ctx, ctx.location + keys.blobs(manifest.id));
   const site = await entries<SiteEntry>(ctx, ctx.location + keys.site(manifest.id));
-  const seal = await readSeal(ctx);
-  await acceptSeal(ctx, seal, stop.stoppedAt);
-
-  const current = ctx.workspace.path("current.db");
-  await buildDatabase(ctx.app, ctx.env.app.replicaPrefix, seal.generation, current);
   const restoredDb = ctx.workspace.path("backup.db");
   await downloadDb(ctx, manifest, restoredDb);
-  const loss = lossReport(current, restoredDb, manifest.createdAt);
-  const lines = describeLoss(ctx, loss);
-  await ctx.journal.record("loss-report", "done", { tables: loss.tables, auditEntriesAfter: loss.auditEntriesAfter, access: loss.access });
-  if (ctx.env.production || hasAccessChanges(loss)) await confirm(ctx.answers, "access-changes", [...lines, "every login session ends; everyone signs in again"].join("\n"));
+  const current = await readCurrent(ctx, stop.stoppedAt);
+  let loss: LossReport | null = null;
+  if (current.kind === "unreadable") {
+    const lines = [`the current database cannot be read: ${current.reason}`, "the restore cannot report what it discards, and its pre-restore backup holds the originals and delivery keys but no database"];
+    for (const line of lines) ctx.out.warn(line);
+    await ctx.journal.record("loss-report", "failed", { reason: current.reason });
+    await confirm(ctx.answers, "unreadable-current", lines.join("\n"));
+    if (ctx.env.production) await confirm(ctx.answers, "access-changes", [...lines, "access changes cannot be listed; every login session ends; everyone signs in again"].join("\n"));
+  } else {
+    loss = lossReport(current.file, restoredDb, manifest.createdAt);
+    const lines = describeLoss(ctx, loss);
+    await ctx.journal.record("loss-report", "done", { tables: loss.tables, auditEntriesAfter: loss.auditEntriesAfter, access: loss.access });
+    if (ctx.env.production || hasAccessChanges(loss)) await confirm(ctx.answers, "access-changes", [...lines, "every login session ends; everyone signs in again"].join("\n"));
+  }
 
   const originals = await restoreOriginals(ctx, blobs, true);
   const delivery = await restoreDelivery(ctx, site, true);
@@ -157,7 +187,7 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   const newerOriginals = [...(await listMap(ctx.app, ctx.env.app.mediaPrefix)).keys()].filter((k) => !referenced.has(k));
   if (newerOriginals.length > 0) ctx.out.info(`${newerOriginals.length} original(s) in the store are not in the backup and stay: ${newerOriginals.slice(0, 10).join(", ")}${newerOriginals.length > 10 ? ", …" : ""}`);
   const base: RestoreResult = { backupId: manifest.id, noop: false, loss, safetyBackup: null, sessionsDeleted: 0, originalsRestored: originals, newerOriginals, delivery, promoted: null, acknowledgement: null };
-  if (loss.identical && originals.length === 0 && delivery.written.length === 0 && delivery.removed.length === 0) {
+  if (loss?.identical === true && originals.length === 0 && delivery.written.length === 0 && delivery.removed.length === 0) {
     ctx.out.info("nothing differs from the backup; starting the app again");
     await startTarget(ctx);
     await ctx.journal.record("restore", "done", { backupId: manifest.id, noop: true });
@@ -171,7 +201,8 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   let safetyBackup: string | null = null;
   if (options.noSafetyBackup) ctx.out.warn("no pre-restore backup: --no-safety-backup");
   else {
-    safetyBackup = (await createBackup(ctx, { kind: "pre-restore", mode: { kind: "stopped", seal, stoppedAt: stop.stoppedAt }, pinFor: ctx.runId })).id;
+    const mode: BackupMode = current.kind === "unreadable" ? { kind: "unreadable", reason: current.reason, stoppedAt: stop.stoppedAt } : { kind: "stopped", seal: current.seal, stoppedAt: stop.stoppedAt };
+    safetyBackup = (await createBackup(ctx, { kind: "pre-restore", mode, pinFor: ctx.runId })).id;
     ctx.out.info(`pre-restore backup ${safetyBackup} written and verified`);
   }
 

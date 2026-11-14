@@ -144,8 +144,12 @@ is listed until two listings agree.
    restore drops, reverts and brings back, the audit entries since the backup, and the access changes: users
    created, deleted or deactivated, changed roles and reset second factors. A restore that would bring back
    revoked access, or any restore of a `production` environment, needs the answer `access-changes`.
+   When the stopped replica has no generation or its newest one cannot be rebuilt, there is nothing to compare:
+   the restore says so and goes on only after the answer `unreadable-current`.
 3. A `pre-restore` backup of the stopped state is written and verified, so the restore itself can be undone
-   with `restore --backup <that id>`. Only `--no-safety-backup` skips it.
+   with `restore --backup <that id>`. Only `--no-safety-backup` skips it. Over an unreadable replica it holds
+   every original under the media prefix and the delivery keys but no database (`db` is null in its
+   manifest); `restore` refuses such a backup, and its `blobs.jsonl` and `site.jsonl` name the objects.
 4. Every original of the backup whose key is missing or holds other bytes is copied back. No original is
    deleted; ones uploaded after the backup stay and are listed.
 5. The delivery prefix is set to the backup's: keys that differ are written, then keys the backup does not
@@ -182,6 +186,7 @@ passed its name.
 | `confirm` | before a restore stops the app, before `--with-media` downloads | answers yes |
 | `unsealed-stop` | a stopped replica without a seal | never |
 | `access-changes` | a restore of a production environment or one that brings back revoked access | never |
+| `unreadable-current` | a restore over a replica without a generation or with one that cannot be rebuilt | never |
 | `prune-delete` | before prune deletes | answers yes |
 | `break-lock` | `--break-lock` finds a lock another run holds | never |
 

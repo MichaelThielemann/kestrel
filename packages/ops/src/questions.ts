@@ -8,6 +8,7 @@ export const QUESTIONS = {
   confirm: { risky: false },
   "unsealed-stop": { risky: true },
   "access-changes": { risky: true },
+  "unreadable-current": { risky: true },
   "prune-delete": { risky: false },
   "break-lock": { risky: true },
 } as const;

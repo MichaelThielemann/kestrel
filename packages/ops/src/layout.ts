@@ -87,8 +87,8 @@ export interface DerivedEntry {
   etag: string;
 }
 
-/** How a backup knows the source database was complete: `sealed` (teardown wrote a seal), `unsealed` (no seal, e.g. a kill), `unsupported` (the runtime writes no seal), `unknown` (no seal, and the target cannot tell the runtime version), `live` (taken while the app ran). */
-export type SealState = "sealed" | "unsealed" | "unsupported" | "unknown" | "live";
+/** How a backup knows the source database was complete: `sealed` (teardown wrote a seal), `unsealed` (no seal, e.g. a kill), `unsupported` (the runtime writes no seal), `unknown` (no seal, and the target cannot tell the runtime version), `live` (taken while the app ran), `unreadable` (the stopped replica could not be read, so the backup has no database). */
+export type SealState = "sealed" | "unsealed" | "unsupported" | "unknown" | "live" | "unreadable";
 
 /** `manifest.json`, written once after every other file of the backup. */
 export interface Manifest {
@@ -99,11 +99,12 @@ export interface Manifest {
   createdAt: number;
   frozen: boolean;
   tool: { name: string; version: string };
-  source: { generation: string; lastFrameAt: number; seal: SealState; sealAt: number | null };
+  source: { generation: string | null; lastFrameAt: number | null; seal: SealState; sealAt: number | null };
   versions: Record<string, string>;
   node: string;
   lockfileSha256: string | null;
-  db: { bytes: number; sha256: string; integrity: string; rows: Record<string, number> };
+  /** Null for a backup taken while the replica could not be read: it holds originals and delivery keys only. */
+  db: { bytes: number; sha256: string; integrity: string; rows: Record<string, number> } | null;
   blobs: { count: number; bytes: number; missingAtBackup: string[] };
   site: { prefix: string; count: number; bytes: number; pathsSha256: string };
   derived: Record<string, { count: number; bytes: number }>;

@@ -257,7 +257,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
       if (kindFlag !== "manual" && kindFlag !== "scheduled" && kindFlag !== "cutover") throw new OpsError(`--kind must be manual, scheduled or cutover`, 2, "--kind");
       const kind: BackupKind = kindFlag;
       const result = await createBackup(ctx, { kind, mode: parsed.flags.has("--freeze") ? { kind: "freeze" } : { kind: "live" } });
-      out.info(`backup ${result.id}: db ${result.manifest.db.bytes} bytes, ${result.manifest.blobs.count} original(s), ${result.manifest.site.count} delivery key(s), seal ${result.manifest.source.seal}, verified`);
+      out.info(`backup ${result.id}: db ${result.manifest.db?.bytes ?? 0} bytes, ${result.manifest.blobs.count} original(s), ${result.manifest.site.count} delivery key(s), seal ${result.manifest.source.seal}, verified`);
       emit("backup-create", { ok: true, id: result.id, manifest: result.manifest, verification: result.verification });
       await ctx.journal.finish(true, { backupId: result.id });
       return 0;

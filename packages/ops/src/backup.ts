@@ -11,8 +11,12 @@ import { buildDatabase, SEALING_MAJOR, sealOf, stableGenerations, type SealRepor
 import { integrityCheck, referencedBlobs, sha256, sha256File, tableCounts, vacuumInto } from "./sqlite.ts";
 import { ObjectMissing, PreconditionFailed, listMap, stableList, transfer, type ObjectInfo, type ObjectStore } from "./store.ts";
 
-/** How a backup gets its database: from the replica of a running app, after stopping it, or from a stop the caller already made. */
-export type BackupMode = { kind: "live" } | { kind: "freeze" } | { kind: "stopped"; seal: SealReport; stoppedAt: number };
+/**
+ * How a backup gets its database: from the replica of a running app, after stopping it, or from a stop the caller
+ * already made. `unreadable` is a stop whose replica cannot be read: the backup holds every original under the media
+ * prefix and the delivery keys, but no database.
+ */
+export type BackupMode = { kind: "live" } | { kind: "freeze" } | { kind: "stopped"; seal: SealReport; stoppedAt: number } | { kind: "unreadable"; reason: string; stoppedAt: number };
 
 /** Options of {@link createBackup}. */
 export interface BackupOptions {
@@ -119,34 +123,39 @@ export async function createBackup(ctx: OpsContext, options: BackupOptions): Pro
   }
 }
 
-async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: { kind: "live" } | { kind: "stopped"; seal: SealReport; stoppedAt: number }): Promise<BackupResult> {
+async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: Exclude<BackupMode, { kind: "freeze" }>): Promise<BackupResult> {
   const id = backupId(ctx.envName, ctx.clock(), options.kind);
   const { app } = ctx.env;
   await ctx.journal.record("backup", "started", { backupId: id, kind: options.kind, mode: mode.kind });
   if (options.pinFor !== undefined) await ctx.backups.put(ctx.location + keys.pin(id, options.pinFor), jsonBytes({ runId: options.pinFor, at: ctx.clock() }), { contentType: "application/json" });
   const facts = await ctx.target.describe();
-  let seal: SealReport;
+  let seal: SealReport | null = null;
   if (mode.kind === "stopped") {
     seal = mode.seal;
-  } else {
+  } else if (mode.kind === "live") {
     const gens = await stableGenerations(ctx.app, app.replicaPrefix, ctx.poll);
     const newest = gens.at(-1);
     if (!newest) throw new OpsError(`the replica under ${app.replicaPrefix} has no generation`, 1, app.replicaPrefix);
     seal = { state: "live", generation: newest.name, lastFrameAt: newest.lastFrameAt, seal: null, runtime: runtimeVersion(facts) };
   }
-  const built = ctx.workspace.path(`${id}.source.db`);
-  await buildDatabase(ctx.app, app.replicaPrefix, seal.generation, built);
-  const dbFile = ctx.workspace.path(`${id}.db`);
-  vacuumInto(built, dbFile);
-  const integrity = integrityCheck(dbFile);
-  if (integrity !== "ok") throw new OpsError(`the database rebuilt from generation ${seal.generation} fails integrity_check: ${integrity}`, 1, "db.sqlite");
-  const rows = tableCounts(dbFile);
+  let dbFile: string | null = null;
+  let db: Manifest["db"] = null;
+  if (seal !== null) {
+    const built = ctx.workspace.path(`${id}.source.db`);
+    await buildDatabase(ctx.app, app.replicaPrefix, seal.generation, built);
+    dbFile = ctx.workspace.path(`${id}.db`);
+    vacuumInto(built, dbFile);
+    const integrity = integrityCheck(dbFile);
+    if (integrity !== "ok") throw new OpsError(`the database rebuilt from generation ${seal.generation} fails integrity_check: ${integrity}`, 1, "db.sqlite");
+    db = { bytes: statSync(dbFile).size, sha256: sha256File(dbFile), integrity, rows: tableCounts(dbFile) };
+  }
 
   const existing = await listMap(ctx.backups, `${ctx.location}objects/`);
   const live = await listMap(ctx.app, app.mediaPrefix);
   const blobs: BlobEntry[] = [];
   const missing: string[] = [];
-  for (const ref of referencedBlobs(dbFile, app.media)) {
+  const refs = dbFile === null ? [...live.keys()].map((key) => ({ key, sha256: null })) : referencedBlobs(dbFile, app.media);
+  for (const ref of refs) {
     const info = live.get(ref.key) ?? (await ctx.app.head(ref.key));
     const copied = info === null ? null : await copyIntoObjects(ctx, info, existing, ref.sha256);
     if (copied === null) missing.push(ref.key);
@@ -165,7 +174,7 @@ async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: { kind
     for (const info of listed) derived.push({ key: info.key, size: info.size, etag: info.etag });
   }
 
-  await putNew(ctx.backups, ctx.location + keys.db(id), new Uint8Array(readFileSync(dbFile)), "application/vnd.sqlite3");
+  if (dbFile !== null) await putNew(ctx.backups, ctx.location + keys.db(id), new Uint8Array(readFileSync(dbFile)), "application/vnd.sqlite3");
   await putNew(ctx.backups, ctx.location + keys.blobs(id), toJsonl(blobs), "application/x-ndjson");
   await putNew(ctx.backups, ctx.location + keys.site(id), toJsonl(site), "application/x-ndjson");
   await putNew(ctx.backups, ctx.location + keys.derived(id), toJsonl(derived), "application/x-ndjson");
@@ -177,11 +186,11 @@ async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: { kind
     createdAt: ctx.clock(),
     frozen: mode.kind !== "live",
     tool: ctx.tool,
-    source: { generation: seal.generation, lastFrameAt: seal.lastFrameAt, seal: seal.state, sealAt: seal.seal?.at ?? null },
+    source: seal === null ? { generation: null, lastFrameAt: null, seal: "unreadable", sealAt: null } : { generation: seal.generation, lastFrameAt: seal.lastFrameAt, seal: seal.state, sealAt: seal.seal?.at ?? null },
     versions: { ...ctx.project.versions, ...facts.packages },
     node: process.version,
     lockfileSha256: ctx.project.lockfileSha256,
-    db: { bytes: statSync(dbFile).size, sha256: sha256File(dbFile), integrity, rows },
+    db,
     blobs: { count: blobs.length, bytes: blobs.reduce((n, b) => n + b.size, 0), missingAtBackup: missing },
     site: { prefix: app.deliveryPrefix, count: site.length, bytes: site.reduce((n, s) => n + s.size, 0), pathsSha256: sha256(site.map((s) => s.key).join("\n")) },
     derived: derivedTotals,
@@ -234,7 +243,7 @@ export function sampleSize(total: number): number {
 }
 
 /**
- * Verifies a backup from what the backup location holds: the database is read back, hashed and fully
+ * Verifies a backup from what the backup location holds: the database (when the backup has one) is read back, hashed and fully
  * integrity-checked, its rows are counted against the manifest, every referenced original and every delivery key has
  * its entry and an object of the recorded size, and a sample of originals hashes to the checksum of its row. An
  * object the listing does not show yet is looked up by a HEAD before it counts as missing.
@@ -252,19 +261,24 @@ export async function verifyBackup(ctx: OpsContext, id: string): Promise<Verific
     problems.push({ element: "manifest.json", message: `backup ${id} has no manifest` });
     return finish();
   }
-  const data = await ctx.backups.get(ctx.location + keys.db(id));
-  if (data === null) problems.push({ element: "db.sqlite", message: "missing" });
-  else if (sha256(data) !== manifest.db.sha256) problems.push({ element: "db.sqlite", message: `sha256 ${sha256(data).slice(0, 12)}… differs from the manifest's ${manifest.db.sha256.slice(0, 12)}… (${data.byteLength} of ${manifest.db.bytes} bytes)` });
-  if (problems.length > 0) return finish();
-  const file = ctx.workspace.path(`${id}.verify.db`);
-  writeFileSync(file, data ?? new Uint8Array());
-  const integrity = integrityCheck(file);
-  if (integrity !== "ok") problems.push({ element: "db.sqlite", message: `integrity_check: ${integrity}` });
-  else {
-    const rows = tableCounts(file);
-    for (const [table, n] of Object.entries(manifest.db.rows)) {
-      checked.tables += 1;
-      if (rows[table] !== n) problems.push({ element: `db.sqlite:${table}`, message: `${rows[table] ?? 0} rows, the manifest says ${n}` });
+  let file: string | null = null;
+  if (manifest.db !== null) {
+    const data = await ctx.backups.get(ctx.location + keys.db(id));
+    if (data === null) problems.push({ element: "db.sqlite", message: "missing" });
+    else if (sha256(data) !== manifest.db.sha256) problems.push({ element: "db.sqlite", message: `sha256 ${sha256(data).slice(0, 12)}… differs from the manifest's ${manifest.db.sha256.slice(0, 12)}… (${data.byteLength} of ${manifest.db.bytes} bytes)` });
+    if (problems.length > 0) return finish();
+    file = ctx.workspace.path(`${id}.verify.db`);
+    writeFileSync(file, data ?? new Uint8Array());
+    const integrity = integrityCheck(file);
+    if (integrity !== "ok") {
+      problems.push({ element: "db.sqlite", message: `integrity_check: ${integrity}` });
+      file = null;
+    } else {
+      const rows = tableCounts(file);
+      for (const [table, n] of Object.entries(manifest.db.rows)) {
+        checked.tables += 1;
+        if (rows[table] !== n) problems.push({ element: `db.sqlite:${table}`, message: `${rows[table] ?? 0} rows, the manifest says ${n}` });
+      }
     }
   }
   const objects = await listMap(ctx.backups, `${ctx.location}objects/`);
@@ -272,7 +286,7 @@ export async function verifyBackup(ctx: OpsContext, id: string): Promise<Verific
   const site = await readJsonl<SiteEntry>(ctx, ctx.location + keys.site(id));
   if (blobs === null) problems.push({ element: "blobs.jsonl", message: "missing" });
   if (site === null) problems.push({ element: "site.jsonl", message: "missing" });
-  if (blobs !== null && integrity === "ok") {
+  if (blobs !== null && file !== null) {
     const byKey = new Map(blobs.map((b) => [b.key, b]));
     for (const ref of referencedBlobs(file, ctx.env.app.media)) {
       if (manifest.blobs.missingAtBackup.includes(ref.key)) continue;
