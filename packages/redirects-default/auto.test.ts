@@ -19,7 +19,7 @@ import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import { createRedirects, type Move } from "./impl.ts";
 import module from "./module.ts";
 
-const config = { type: "redirects", field: "rules", prefix: "site/", key: "redirects.json" };
+const config = { type: "redirects", field: "rules", prefix: "site/", key: "redirects.json", reservedPaths: ["/admin", "/api"] };
 
 function fakeContent(rules: unknown = []): Content {
   const doc: ContentDocument = { id: "redirects", createdAt: 1, updatedAt: 1, rules };

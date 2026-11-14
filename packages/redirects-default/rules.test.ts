@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { matchWildcardPath } from "./match.ts";
-import { compilePublishableRedirects, compileRedirects, matchRedirect, MAX_FROM_LENGTH, MAX_LOOKUP_PATH_LENGTH, MAX_RULES, MAX_WILDCARDS, normalizeTarget, patternToRegexSource, RedirectRuleError, serializeRedirects } from "./rules.ts";
+import { compilePublishableRedirects, compileRedirects, DEFAULT_RESERVED_PATHS, matchRedirect, MAX_FROM_LENGTH, MAX_LOOKUP_PATH_LENGTH, MAX_RULES, MAX_WILDCARDS, normalizeTarget, patternToRegexSource, RedirectRuleError, serializeRedirects } from "./rules.ts";
 
 describe("patternToRegexSource", () => {
   it("anchors literals, tolerates a trailing slash and escapes regex characters", () => {
@@ -154,5 +154,47 @@ describe("wildcard matching cost and limits", () => {
     const [rule] = compileRedirects([{ from: "/**", to: "/x" }]);
     expect(matchRedirect([rule!], `/${"a".repeat(MAX_LOOKUP_PATH_LENGTH - 1)}`)).toEqual({ target: "/x", status: 301 });
     expect(matchRedirect([rule!], `/${"a".repeat(MAX_LOOKUP_PATH_LENGTH)}`)).toBeNull();
+  });
+});
+
+describe("reserved paths", () => {
+  const reservedPaths = ["/admin", "/api"];
+  const compile = (from: string) => compileRedirects([{ from, to: "/t" }], { reservedPaths });
+
+  it("names the application paths a source may not take by default", () => {
+    expect(DEFAULT_RESERVED_PATHS).toEqual(["/admin", "/api", "/media"]);
+  });
+
+  it("rejects the prefix itself and everything below it, for each prefix", () => {
+    for (const prefix of reservedPaths) {
+      for (const from of [prefix, `${prefix}/`, `${prefix}/x`, `${prefix}/x/y`, `${prefix}/*`, `${prefix}/**`]) {
+        expect(() => compile(from), from).toThrow(new RegExp(`^Row 1: "From" .* the reserved path ${prefix}\\b`));
+      }
+    }
+  });
+
+  it("keeps a source that only shares the characters of a prefix", () => {
+    for (const from of ["/administration", "/admin-old/x", "/apix", "/api-docs/*", "/blog/admin", "/adminx*"]) {
+      expect(() => compile(from), from).not.toThrow();
+    }
+  });
+
+  it("rejects a wildcard that can match a reserved path", () => {
+    for (const from of ["/*", "/**", "/*/login", "/ad*/x", "/a*/*", "/**/x"]) {
+      expect(() => compile(from), from).toThrow(/reserved path/);
+    }
+    for (const from of ["/blog/*", "/*-x", "/x/*/admin", "/a*z", "/"]) {
+      expect(() => compile(from), from).not.toThrow();
+    }
+  });
+
+  it("checks nothing without a list", () => {
+    expect(compileRedirects([{ from: "/admin/x", to: "/t" }])).toHaveLength(1);
+  });
+
+  it("skips a stored rule under a reserved path when publishing and names its row", () => {
+    const { rules, skipped } = compilePublishableRedirects([{ from: "/a", to: "/b" }, { from: "/admin/login", to: "/c" }, { from: "/api", to: "/d" }], { reservedPaths });
+    expect(rules.map((rule) => rule.from)).toEqual(["/a"]);
+    expect(skipped).toEqual([expect.stringMatching(/^Row 2: .*reserved path \/admin/), expect.stringMatching(/^Row 3: .*reserved path \/api/)]);
   });
 });

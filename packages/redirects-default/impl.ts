@@ -12,6 +12,7 @@ export interface Config {
   field: string;
   prefix: string;
   key: string;
+  reservedPaths: readonly string[];
 }
 
 export type RedirectsError = KestrelError<"TRANSIENT">;
@@ -116,7 +117,7 @@ export async function createRedirects(config: Config, deps: { content: Content; 
     if (isErr(found)) return err(transientOnly(found.error, "content@1"));
     const doc = found.value;
     if (!doc) return ok({ updatedAt: -1, rules: [], skipped: [] });
-    const { rules, skipped } = compilePublishableRedirects(doc[config.field]);
+    const { rules, skipped } = compilePublishableRedirects(doc[config.field], { reservedPaths: config.reservedPaths });
     return ok({ updatedAt: doc.updatedAt, rules, skipped });
   }
 
@@ -132,7 +133,7 @@ export async function createRedirects(config: Config, deps: { content: Content; 
     if (cache && cache.updatedAt === updatedAt) return ok(cache.rules);
     let rules: RedirectRule[];
     try {
-      const compiled = doc ? compilePublishableRedirects(doc[config.field]) : { rules: [], skipped: [] };
+      const compiled = doc ? compilePublishableRedirects(doc[config.field], { reservedPaths: config.reservedPaths }) : { rules: [], skipped: [] };
       logSkipped(compiled.skipped);
       rules = compiled.rules;
     } catch (e) {
@@ -244,7 +245,7 @@ export async function createRedirects(config: Config, deps: { content: Content; 
 
   return {
     async validate(rulesInput) {
-      const compiled = compileRedirects(rulesInput);
+      const compiled = compileRedirects(rulesInput, { reservedPaths: config.reservedPaths });
       const effective = await effectiveAutoRedirects();
       if (isErr(effective)) return effective;
       const sources = new Set(effective.value.map((auto) => auto.from));

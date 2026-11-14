@@ -7,7 +7,7 @@ import type { Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { COLLECTIONS, createRedirects, requestPath, type Move, type Redirects } from "./impl.ts";
-import { RedirectRuleError } from "./rules.ts";
+import { DEFAULT_RESERVED_PATHS, RedirectRuleError } from "./rules.ts";
 
 export const configSchema = z
   .object({
@@ -15,6 +15,10 @@ export const configSchema = z
     field: z.string().min(1).default("rules"),
     prefix: z.string().default(""),
     key: z.string().min(1).default("redirects.json"),
+    reservedPaths: z
+      .array(z.string().regex(/^(\/[A-Za-z0-9._-]+)+$/))
+      .default([...DEFAULT_RESERVED_PATHS])
+      .describe("Path prefixes no redirect source may match, each the path itself and everything below it; a rule already stored under one is left out of the published list with a log line"),
   })
   .strict();
 

@@ -52,7 +52,7 @@ function fakeBlobs(): Blobstore & { blobs: Map<string, Uint8Array> } {
   };
 }
 
-async function boot(initial?: unknown) {
+async function boot(initial?: unknown, overrides: Record<string, unknown> = {}) {
   const providers = new Map<string, unknown>([[CONTENT.name, fakeContent(initial)], [BLOBSTORE.name, fakeBlobs()], [PERSISTENCE.name, createFakePersistence()]]);
   const deps: Deps = {
     get<T>(contract: Contract<T>): T {
@@ -64,7 +64,7 @@ async function boot(initial?: unknown) {
     root: process.cwd(),
     eventTriggers: [],
   };
-  const config = configSchema.parse({ prefix: "site/" });
+  const config = configSchema.parse({ prefix: "site/", ...overrides });
   const instance = await module.setup(config, deps);
   return { instance };
 }
@@ -82,6 +82,24 @@ describe("redirects/default module steps", () => {
     expect(bad.status).toBe(400);
     expect(bad.code).toBe("VALIDATION");
     expect(bad.details).toEqual({ row: 1 });
+  });
+
+  it("validate rejects a source under a reserved path, by default and as configured", async () => {
+    const { instance } = await boot();
+    for (const from of ["/admin", "/admin/login", "/api/x", "/media/a.png"]) {
+      const res = await run(["redirects.validate"], { body: { rules: [{ from, to: "/b" }] } }, instance);
+      expect(res, from).toMatchObject({ status: 400, code: "VALIDATION", details: { row: 1 } });
+    }
+    expect((await run(["redirects.validate"], { body: { rules: [{ from: "/administration", to: "/b" }] } }, instance)).status).toBe(200);
+    const custom = await boot(undefined, { reservedPaths: ["/shop"] });
+    expect((await run(["redirects.validate"], { body: { rules: [{ from: "/shop/cart", to: "/b" }] } }, custom.instance)).status).toBe(400);
+    expect((await run(["redirects.validate"], { body: { rules: [{ from: "/admin/x", to: "/b" }] } }, custom.instance)).status).toBe(200);
+  });
+
+  it("configures reservedPaths as a list of absolute path prefixes", () => {
+    expect(configSchema.parse({}).reservedPaths).toEqual(["/admin", "/api", "/media"]);
+    expect(configSchema.parse({ reservedPaths: [] }).reservedPaths).toEqual([]);
+    for (const bad of ["admin", "/admin/", "/", ""]) expect(() => configSchema.parse({ reservedPaths: [bad] }), bad).toThrow();
   });
 
   it("lookup ends the pipeline with a redirect on a hit, passes through otherwise", async () => {

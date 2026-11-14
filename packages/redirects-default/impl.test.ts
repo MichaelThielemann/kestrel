@@ -14,7 +14,7 @@ import { createRedirects, requestPath } from "./impl.ts";
 import module from "./module.ts";
 import { RedirectRuleError } from "./rules.ts";
 
-const config = { type: "redirects", field: "rules", prefix: "site/", key: "redirects.json" };
+const config = { type: "redirects", field: "rules", prefix: "site/", key: "redirects.json", reservedPaths: ["/admin", "/api"] };
 
 function fakeContent(initial?: unknown): { content: Content; reads: () => number; set(rules: unknown, updatedAt: number): void } {
   let doc: ContentDocument | null = initial === undefined ? null : ({ id: "redirects", createdAt: 1, updatedAt: 1, rules: initial } as const);
@@ -80,6 +80,26 @@ describe("validate", () => {
     expect(expectOk(await r.validate(null))).toBeUndefined();
     await expect(r.validate([{ from: "/a", to: "/b/$1" }])).rejects.toThrow(RedirectRuleError);
     await expect(r.validate([{ from: "/a", to: "/b/$1" }])).rejects.toThrow(/^Row 1:/);
+  });
+});
+
+describe("reserved paths", () => {
+  it("validate rejects a source under a reserved path with the row number", async () => {
+    const r = await createRedirects(config, { content: fakeContent().content, blobs: fakeBlobs(), db: createFakePersistence(), logger: stubLogger().logger });
+    await expect(r.validate([{ from: "/a", to: "/b" }, { from: "/admin/x", to: "/c" }])).rejects.toThrow(/^Row 2: .*reserved path \/admin/);
+  });
+  it("lookup and export leave out a stored rule under a reserved path and log it", async () => {
+    const stored = [{ from: "/admin/login", to: "/gone" }, { from: "/old", to: "/new" }];
+    const { logger, errors } = stubLogger();
+    const c = fakeContent(stored);
+    const blobs = fakeBlobs();
+    const r = await createRedirects(config, { content: c.content, blobs, db: createFakePersistence(), logger });
+    expect(expectOk(await r.lookup("/admin/login"))).toBeNull();
+    expect(expectOk(await r.lookup("/old"))).toEqual({ to: "/new", status: 301 });
+    expect(errors.some((line) => /Row 1: .*reserved path \/admin/.test(line))).toBe(true);
+    const exported = expectOk(await r.export());
+    expect(exported.rules).toBe(1);
+    expect(exported.skipped).toEqual([expect.stringMatching(/^Row 1: .*reserved path/)]);
   });
 });
 

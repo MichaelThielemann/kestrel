@@ -19,7 +19,7 @@ describe("redirects/default in a read scope", () => {
         return ok({ id: "r", createdAt: 1, updatedAt: 1, rules: [{ from: "/alt", to: "/neu", status: 301 }] });
       },
     };
-    const redirects = await createRedirects({ type: "redirects", field: "rules", prefix: "site/", key: "redirects.json" }, { content: boundaryCast<Content>(noting, "host"), blobs: boundaryCast<Blobstore>({}, "host"), db: createFakePersistence(), logger: quiet });
+    const redirects = await createRedirects({ type: "redirects", field: "rules", prefix: "site/", key: "redirects.json", reservedPaths: [] }, { content: boundaryCast<Content>(noting, "host"), blobs: boundaryCast<Blobstore>({}, "host"), db: createFakePersistence(), logger: quiet });
     const { reads } = await observeReads(async () => {
       expect(expectOk(await redirects.lookup("/alt"))).toEqual({ to: "/neu", status: 301 });
     });

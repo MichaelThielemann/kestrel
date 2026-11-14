@@ -27,6 +27,18 @@ export const MAX_RULES = 1000;
 /** A request path longer than this, in characters, matches no rule. */
 export const MAX_LOOKUP_PATH_LENGTH = 2048;
 
+/**
+ * The path prefixes a redirect source may not take unless the configuration says otherwise: the admin
+ * routes, the API mount and the public media files.
+ */
+export const DEFAULT_RESERVED_PATHS: readonly string[] = ["/admin", "/api", "/media"];
+
+/** What `compileRedirects` and `compilePublishableRedirects` check besides the shape of a row. */
+export interface CompileOptions {
+  /** Prefixes no source may match, the path itself and everything below it; none when absent. */
+  reservedPaths?: readonly string[];
+}
+
 /** A rule the editor has to fix. The message names the 1-based row so it is actionable in the UI. */
 export class RedirectRuleError extends Error {}
 
@@ -44,12 +56,29 @@ const PATH_CHAR = "[^\\\\\\x00-\\x1f\\x7f]";
 const ONE_SEGMENT = `(${SEGMENT_CHAR}+)`;
 const MANY_SEGMENTS = `(${SEGMENT_CHAR}${PATH_CHAR}*?)`;
 
+function segmentRegex(segment: string): string {
+  return segment.split("*").map(escapeLiteral).join("[^/]+");
+}
+
+function matchesReserved(from: string, reserved: string): boolean {
+  const pattern = from.split("/").slice(1);
+  const prefix = reserved.split("/").slice(1);
+  for (const [i, wanted] of prefix.entries()) {
+    const segment = pattern[i];
+    if (segment === undefined) return false;
+    const deep = segment.indexOf("**");
+    if (deep !== -1) return new RegExp(`^${segmentRegex(segment.slice(0, deep))}`).test(wanted);
+    if (!new RegExp(`^${segmentRegex(segment)}$`).test(wanted)) return false;
+  }
+  return true;
+}
+
 /**
  * Validate an authored `from` and return its canonical form: leading slash, no trailing slash. Matching is
  * path-only and case-sensitive; an authored trailing slash is dropped and one is tolerated at match time, so
- * `/blog` and `/blog/` are the same rule.
+ * `/blog` and `/blog/` are the same rule. A `from` that can match a path in `reservedPaths` is refused.
  */
-export function canonicalFrom(from: string): string {
+export function canonicalFrom(from: string, reservedPaths: readonly string[] = []): string {
   const raw = from.trim();
   if (!raw) throw new RedirectRuleError('"From" must not be blank');
   if (raw.length > MAX_FROM_LENGTH) throw new RedirectRuleError(`"From" is longer than ${MAX_FROM_LENGTH} characters`);
@@ -63,7 +92,10 @@ export function canonicalFrom(from: string): string {
   if (/\*\*\/?\*\*/.test(raw)) throw new RedirectRuleError('"From" has two `**` in a row — one already matches any number of segments');
   const wildcards = wildcardCount(raw);
   if (wildcards > MAX_WILDCARDS) throw new RedirectRuleError(`"From" has ${wildcards} wildcards, at most ${MAX_WILDCARDS} are allowed`);
-  return `/${raw.replace(/^\/+/, "").replace(/\/+$/, "")}`;
+  const canonical = `/${raw.replace(/^\/+/, "").replace(/\/+$/, "")}`;
+  const taken = reservedPaths.find((reserved) => matchesReserved(canonical, reserved));
+  if (taken !== undefined) throw new RedirectRuleError(`"From" can match the reserved path ${taken}, which the application serves itself`);
+  return canonical;
 }
 
 /** Translate an authored `from` into the anchored regex source that matches what `canonicalFrom` describes. */
@@ -145,7 +177,7 @@ function readText(value: unknown, what: string): string {
  * An empty/absent field is zero redirects, a fully supported state — not an error. A row the edge could
  * not honour throws instead of being dropped, so a typo fails the save loudly.
  */
-export function compileRedirects(rows: unknown): RedirectRule[] {
+export function compileRedirects(rows: unknown, options: CompileOptions = {}): RedirectRule[] {
   if (rows === null || rows === undefined) return [];
   if (!Array.isArray(rows)) throw new RedirectRuleError("Redirect rules must be a list");
   if (rows.length > MAX_RULES) throw new RedirectRuleError(`at most ${MAX_RULES} redirect rules are allowed, got ${rows.length}`);
@@ -165,7 +197,7 @@ export function compileRedirects(rows: unknown): RedirectRule[] {
         throw new RedirectRuleError('"To" writes a placeholder as $1, $2, … — not ${1}');
       }
       assertPlaceholdersAfterHost(target);
-      return { from: canonicalFrom(from), pattern: patternToRegexSource(from), target, status: readStatus(entry.status) };
+      return { from: canonicalFrom(from, options.reservedPaths), pattern: patternToRegexSource(from), target, status: readStatus(entry.status) };
     } catch (err) {
       throw new RedirectRuleError(`Row ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -180,7 +212,7 @@ export function compileRedirects(rows: unknown): RedirectRule[] {
  *
  * A malformed `rows` still throws: that is a read bug, not a bad row, and `[]` would be a lie.
  */
-export function compilePublishableRedirects(rows: unknown): { rules: RedirectRule[]; skipped: string[] } {
+export function compilePublishableRedirects(rows: unknown, options: CompileOptions = {}): { rules: RedirectRule[]; skipped: string[] } {
   if (rows === null || rows === undefined) return { rules: [], skipped: [] };
   if (!Array.isArray(rows)) throw new RedirectRuleError("Redirect rules must be a list");
 
@@ -192,7 +224,7 @@ export function compilePublishableRedirects(rows: unknown): { rules: RedirectRul
       return;
     }
     try {
-      rules.push(...compileRedirects([row]));
+      rules.push(...compileRedirects([row], options));
     } catch (error) {
       skipped.push(`Row ${i + 1}: ${(error instanceof Error ? error.message : String(error)).replace(/^Row 1: /, "")}`);
     }

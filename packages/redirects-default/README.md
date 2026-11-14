@@ -3,7 +3,7 @@ Admin-managed redirects, plus automatic redirects for documents that moved: the 
 (`rules: json`, list of `{ from, to, status }`, order = priority) is compiled into wildcard rules.
 `from` uses `*` (one segment) / `**` (one or more), `to` is a path or an `http(s)` URL with `$1…`; `status`
 301 (default) | 302 | 307 | 308. Config: `type` (`redirects`), `field` (`rules`), `prefix` (blobstore prefix,
-same as delivery-static), `key` (`redirects.json`). Requires `content@1`, `blobstore@1` and `persistence@1`
+same as delivery-static), `key` (`redirects.json`), `reservedPaths` (see below). Requires `content@1`, `blobstore@1` and `persistence@1`
 (own collections, reached through no other module's contract).
 Steps: `redirects.validate` before `content.set` (`VALIDATION`, `details.row`, message `Row N: …`, also for
 an editor rule that would redirect into an existing automatic redirect); `redirects.recordMoves` applies
@@ -26,6 +26,21 @@ is the same rule as an anchored regex source, for consumers that match with a re
 A `from` holds at most 8 wildcards and 512 characters; a longer one is rejected with the row number.
 A list holds at most 1000 rules (`MAX_RULES`): saving more fails with `VALIDATION`, and publishing a
 stored longer list keeps the first 1000 and logs the rest as skipped.
+
+## Reserved paths
+
+`reservedPaths` (default `["/admin", "/api", "/media"]`) lists path prefixes the application serves
+itself. A `from` that can match one of them, the path itself or anything below it, is refused with
+`Row N: "From" can match the reserved path /admin …`: that covers `/admin`, `/admin/x`, `/admin/*`, and
+also a wildcard such as `/*` or `/**/login` that reaches `/admin/login`. `/administration` shares
+characters with `/admin` but not a path segment, so it stays allowed. Entries are absolute paths without
+a trailing slash, as in `delivery-static`; pass the mounts of your own project, for instance the prefix
+the API sits under.
+
+A rule stored under a reserved path before the list was set, or after it grew, is not an error when
+publishing: `redirects.lookup`, `redirects.export` and `redirects.render` leave it out and log the row,
+like any other row they cannot honour. The edge handler in `../../examples/nginx-njs` takes the same list
+in `RESERVED_PATHS` and never redirects those paths.
 
 ## Matching
 
@@ -99,6 +114,7 @@ on every request.
 | `field` | string | no | `"rules"` |
 | `prefix` | string | no | `""` |
 | `key` | string | no | `"redirects.json"` |
+| `reservedPaths` | array | no | `["/admin","/api","/media"]` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
