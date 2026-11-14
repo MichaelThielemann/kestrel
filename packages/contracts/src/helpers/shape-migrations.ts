@@ -139,6 +139,8 @@ export interface MigrationRun {
   introducedIn: string;
   kind: MigrationKind;
   blobWrites: boolean;
+  /** The ids of an `ask` migration's questions the run has no answer for; empty for every other migration. */
+  unanswered: string[];
   state: MigrationState;
   detected: Detection;
   /**
@@ -306,8 +308,8 @@ export function orderMigrations(migrations: readonly ShapeMigration[]): ShapeMig
   return [...migrations].sort((a, b) => last(a) - last(b) || compareVersions(a.introducedIn, b.introducedIn) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-function unanswered(migration: ShapeMigration, answers: Readonly<Record<string, string>>): boolean {
-  return migration.kind === "ask" && (migration.questions ?? []).some((q) => answers[q.id] === undefined);
+function unanswered(migration: ShapeMigration, answers: Readonly<Record<string, string>>): string[] {
+  return migration.kind === "ask" ? (migration.questions ?? []).filter((q) => answers[q.id] === undefined).map((q) => q.id) : [];
 }
 
 function isStorageVersion(row: Document): row is StorageVersion {
@@ -390,7 +392,7 @@ export async function runShapeMigrations(options: RunOptions): Promise<Result<Ru
     for (const migration of candidates) {
       const detected = await migration.detect(ctx);
       if (isErr(detected)) return detected;
-      const entry: MigrationRun = { id: migration.id, introducedIn: migration.introducedIn, kind: migration.kind, blobWrites: migration.blobWrites, state: "not-needed", detected: detected.value };
+      const entry: MigrationRun = { id: migration.id, introducedIn: migration.introducedIn, kind: migration.kind, blobWrites: migration.blobWrites, unanswered: unanswered(migration, ctx.answers), state: "not-needed", detected: detected.value };
       run.migrations.push(entry);
       const selected = kinds.has(migration.kind);
       if (detected.value.pending === 0) {
@@ -403,7 +405,7 @@ export async function runShapeMigrations(options: RunOptions): Promise<Result<Ru
         : waiting ? "earlier-pending"
         : dependencyPending ? "dependency-pending"
         : migration.blobWrites && !options.blobWrites ? "blob-writes"
-        : unanswered(migration, ctx.answers) ? "needs-answer"
+        : entry.unanswered.length > 0 ? "needs-answer"
         : undefined;
       if (options.plan !== false) {
         const planned = await migration.plan(ctx);
@@ -454,7 +456,7 @@ export function refusalOf(run: ModuleRun, mode: StorageMigrationsMode): string |
   if (run.state === "too-old") return `${run.module}: the stored data has storage version ${run.stored ?? "?"}, older than this release converts; update through ${majorOf(run.version) - 1}.x first`;
   if (run.state !== "pending") return null;
   const waiting = run.migrations.filter((m) => m.state === "pending" && m.blocked !== "cleanup");
-  const offlineOnly = waiting.filter((m) => m.blobWrites || m.kind === "ask");
+  const offlineOnly = waiting.filter((m) => m.blobWrites || m.unanswered.length > 0);
   const listed = waiting.map(pendingText).join("; ");
   const offline = `run ${waiting.length === 1 ? "it" : "them"} on a copy of the data with \`${OFFLINE_COMMAND}\`, or let \`${UPDATE_COMMAND}\` run ${waiting.length === 1 ? "it" : "them"}`;
   if (mode === "apply" && offlineOnly.length > 0) return `${run.module}: the stored data needs storage migration ${listed}; a migration that ${offlineOnly.some((m) => m.blobWrites) ? "writes blobs" : "asks a question"} never runs at start-up – ${offline}, then start this release`;

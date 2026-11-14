@@ -810,7 +810,7 @@ Net changes since 5.8.2.
   second run writes nothing; data newer than the release, or older than a module converts, is
   refused (`update through <major>.x first`). A cleanup migration runs only in a run that selects
   the kind `cleanup`, also after the version was recorded; an `ask` migration waits for an answer to
-  each of its questions. Blobs are copied through an injected `BlobOps`
+  each of its questions, and the run lists those still unanswered. Blobs are copied through an injected `BlobOps`
   (`copy`, `head`); `blobOpsOf` builds one from any `blobstore@1`.
   - `media-default` exports `./storage` (`storage(config)`, `migrations`), `images-default` exports
     `./storage` (`storage()`, `migrations`).

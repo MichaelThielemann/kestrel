@@ -351,11 +351,21 @@ describe("shape-migrations: kinds", () => {
     const db = createFakePersistence();
     const storages = [storage("m/x", [{ ...rowOnly(order, "m:asked", "6.0.0", 1), kind: "ask", questions: [question] }])];
     const unanswered = expectOk(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true }));
-    expect(unanswered.modules[0]).toMatchObject({ state: "pending", migrations: [{ id: "m:asked", state: "pending", blocked: "needs-answer" }] });
+    expect(unanswered.modules[0]).toMatchObject({ state: "pending", migrations: [{ id: "m:asked", state: "pending", blocked: "needs-answer", unanswered: [question.id] }] });
     expect(order).not.toContain("apply m:asked");
     expect(expectOk(await storageVersionOf(db, "m/x"))).toBeNull();
     const answered = expectOk(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true, answers: { [question.id]: "keep" } }));
     expect(answered.modules[0]).toMatchObject({ state: "migrated", migrations: [{ id: "m:asked", state: "applied" }] });
+  });
+
+  it("suggests apply mode in check mode for an ask migration without a question, which apply mode runs at start-up", async () => {
+    const order: string[] = [];
+    const asked = (): ModuleStorage => storage("m/y", [{ ...rowOnly(order, "m:asked-without-question", "6.0.0", 1), kind: "ask" }]);
+    const checked = expectErr(await guardStorage(asked(), { db: createFakePersistence(), blobs: memoryBlobs(), mode: "check" }), "STORAGE_REFUSED");
+    expect(checked.message).toMatch(/m:asked-without-question .*set storageMigrations: "apply"/);
+    const applied = expectOk(await guardStorage(asked(), { db: createFakePersistence(), blobs: memoryBlobs(), mode: "apply" }));
+    expect(applied).toMatchObject({ state: "migrated", migrations: [{ id: "m:asked-without-question", state: "applied" }] });
+    expect(order).toContain("apply m:asked-without-question");
   });
 
   it("starts on data whose only pending migration is a cleanup, and refuses an unanswered ask migration at start-up without suggesting apply mode", async () => {

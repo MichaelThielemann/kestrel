@@ -46,7 +46,7 @@ still writes runs on a copy; `plan: false` skips `plan`. The `RunReport` lists e
 found, the `plan`, the `outcome`); a pending migration says why it was not applied in `blocked`
 (`cleanup` and `not-selected` for a kind the run did not select, `plan-only`, `earlier-pending` for an
 earlier pending migration of the module, `dependency-pending` for an unfinished module it depends on,
-`blob-writes`, `needs-answer`). Data newer than the module's version, or
+`blob-writes`, `needs-answer` with the ids of the questions in `unanswered`). Data newer than the module's version, or
 older than it converts, is left alone and reported (`update through <major>.x first`). Blobs are
 reached through an injected `BlobOps` (`copy`, `head`); `blobOpsOf(blobstore)` builds one from any
 `blobstore@1` by reading and writing the bytes, a runner with server-side copies passes its own.
