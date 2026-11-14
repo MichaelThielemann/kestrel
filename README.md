@@ -46,6 +46,7 @@ running instance with a login, a content type and a step of your own.
 | `@michaelthielemann/kestrel-media-default` | Media uploads: files in blobstore@1, metadata in persistence@1; provides media@1, read access to the ready files. |
 | `@michaelthielemann/kestrel-mfa-totp` | A second factor for any authn@1 module: time-based one-time codes (RFC 6238) with recovery codes, stored via persistence@1. |
 | `@michaelthielemann/kestrel-migrations-default` | migrations@1: applies content migrations once, per document and stored locale, with a ledger. |
+| `@michaelthielemann/kestrel-ops` | Verified backups, restore and replica promotion for a Kestrel instance with SQLite replication and S3-compatible storage. |
 | `@michaelthielemann/kestrel-persistence-sqlite` | persistence@1 on Node's built-in node:sqlite. |
 | `@michaelthielemann/kestrel-ratelimit-memory` | Step ratelimit.check:<bucket>: fixed-window rate limiting per client ip, in memory. |
 | `@michaelthielemann/kestrel-redirects-default` | Steps redirects.validate/lookup/export/render: admin-managed redirect rules, honoured in site resolution and exported as redirects.json for an edge proxy. |

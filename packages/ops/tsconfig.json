@@ -1,0 +1,33 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "declaration": true,
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "rewriteRelativeImportExtensions": true,
+    "composite": true
+  },
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "dist",
+    "**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../contracts"
+    },
+    {
+      "path": "../blobstore-s3"
+    },
+    {
+      "path": "../replication-sqlite"
+    }
+  ]
+}

@@ -1,0 +1,190 @@
+import { spawn } from "node:child_process";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { OpsError } from "./errors.ts";
+
+/** What a target reports about the app it runs. */
+export interface TargetStatus {
+  state: "started" | "stopped" | "unknown";
+  /** Running instances; a promotion needs 0. */
+  instances: number;
+}
+
+/** Facts about a target recorded in every backup manifest. */
+export interface TargetFacts {
+  kind: string;
+  /** Installed versions of the app's packages by name, as far as the target can tell. */
+  packages: Record<string, string>;
+  [fact: string]: unknown;
+}
+
+/**
+ * The platform an app runs on. A target with `transport: "promote"` starts on an empty disk and restores the newest
+ * replica generation (an ephemeral container); one with `transport: "file"` keeps its disk and takes a restored
+ * database through {@link Target.installDatabase} while stopped.
+ */
+export interface Target {
+  readonly transport: "promote" | "file";
+  describe(): Promise<TargetFacts>;
+  status(): Promise<TargetStatus>;
+  /** Stops the app and resolves once it reports stopped, with the time it stopped. */
+  stop(): Promise<{ stoppedAt: number }>;
+  start(): Promise<void>;
+  /** Waits until the app answers its readiness check; false after `timeoutMs`. */
+  waitReady(timeoutMs: number): Promise<boolean>;
+  /** Places a restored database for the next start; only for `transport: "file"`. */
+  installDatabase?(file: string): Promise<void>;
+  /** Evidence for a stop without a seal, shown next to the question whether to go on. */
+  stopEvidence?(): Promise<string[]>;
+}
+
+/** What a target factory gets besides its own configuration. */
+export interface TargetDeps {
+  /** The directory `kestrel.environments.json` lives in. */
+  root: string;
+  clock: () => number;
+}
+
+/** Builds a target from its `target` block in `kestrel.environments.json`. */
+export type TargetFactory = (config: Record<string, unknown>, deps: TargetDeps) => Target | Promise<Target>;
+
+/** `target` of an environment that runs on this machine. */
+export interface LocalTargetConfig {
+  /** The app's directory, relative to the environments file. */
+  dir: string;
+  /** The database file, relative to `dir`. */
+  database: string;
+  /** The command that starts the app, run in `dir` without a shell. */
+  command: string[];
+  /** Environment variables of the app. The tool's own environment, credentials included, is never passed on. */
+  env?: Record<string, string>;
+  /** An http(s) URL that answers 200 once the app is ready. */
+  readyUrl?: string;
+  /** `ephemeral` removes the database before each start, so the app restores the newest replica generation. */
+  disk: "ephemeral" | "persistent";
+}
+
+function parseLocal(config: Record<string, unknown>): LocalTargetConfig {
+  const { dir, database, command, env, readyUrl, disk } = config;
+  if (typeof dir !== "string" || typeof database !== "string") throw new OpsError("target local: dir and database are required", 2, "target");
+  if (!Array.isArray(command) || command.length === 0 || !command.every((c) => typeof c === "string")) throw new OpsError("target local: command must be a non-empty list of strings", 2, "target");
+  if (disk !== "ephemeral" && disk !== "persistent") throw new OpsError('target local: disk must be "ephemeral" or "persistent"', 2, "target");
+  const out: LocalTargetConfig = { dir, database, command: boundaryCast<string[]>(command, "json"), disk };
+  if (env !== undefined) {
+    if (typeof env !== "object" || env === null || !Object.values(env).every((v) => typeof v === "string")) throw new OpsError("target local: env must map names to strings", 2, "target");
+    out.env = boundaryCast<Record<string, string>>(env, "json");
+  }
+  if (readyUrl !== undefined) {
+    if (typeof readyUrl !== "string") throw new OpsError("target local: readyUrl must be a string", 2, "target");
+    out.readyUrl = readyUrl;
+  }
+  return out;
+}
+
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
+
+/** The sidecar the instance lock keeps next to a database file. Backups never contain it and restores never write it. */
+export function instanceLockSidecar(file: string): string {
+  return `${file}.instance`;
+}
+
+function installedPackages(dir: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const manifestFile = join(dir, "package.json");
+  if (!existsSync(manifestFile)) return out;
+  const manifest = boundaryCast<{ dependencies?: Record<string, string> }>(JSON.parse(readFileSync(manifestFile, "utf8")), "json");
+  for (const name of Object.keys(manifest.dependencies ?? {})) {
+    const installed = join(dir, "node_modules", name, "package.json");
+    if (!existsSync(installed)) continue;
+    const version = boundaryCast<{ version?: unknown }>(JSON.parse(readFileSync(installed, "utf8")), "json").version;
+    if (typeof version === "string") out[name] = version;
+  }
+  return out;
+}
+
+/** A target that runs the app as a background process on this machine; its pid lives in `.kestrel-ops.pid` in `dir`. */
+export const localTarget: TargetFactory = (raw, deps) => {
+  const config = parseLocal(raw);
+  const dir = resolve(deps.root, config.dir);
+  const database = resolve(dir, config.database);
+  const pidFile = join(dir, ".kestrel-ops.pid");
+  const readPid = (): number | null => {
+    if (!existsSync(pidFile)) return null;
+    const pid = Number(readFileSync(pidFile, "utf8").trim());
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  };
+  const running = (): number | null => {
+    const pid = readPid();
+    return pid !== null && alive(pid) ? pid : null;
+  };
+  const target: Target = {
+    transport: config.disk === "ephemeral" ? "promote" : "file",
+    async describe() {
+      return { kind: "local", packages: installedPackages(dir), dir: config.dir, database: config.database, disk: config.disk };
+    },
+    async status() {
+      return running() === null ? { state: "stopped", instances: 0 } : { state: "started", instances: 1 };
+    },
+    async stop() {
+      const pid = running();
+      if (pid !== null) {
+        process.kill(pid, "SIGTERM");
+        for (let waited = 0; alive(pid); waited += 100) {
+          if (waited >= 60_000) throw new OpsError(`the app (pid ${pid}) did not stop within 60 s`, 1, "target");
+          await sleep(100);
+        }
+      }
+      rmSync(pidFile, { force: true });
+      return { stoppedAt: deps.clock() };
+    },
+    async start() {
+      if (running() !== null) throw new OpsError("the app is already running", 1, "target");
+      if (config.disk === "ephemeral") for (const suffix of ["", "-wal", "-shm"]) rmSync(database + suffix, { force: true });
+      const [file, ...args] = config.command;
+      if (file === undefined) throw new OpsError("target local: empty command", 2, "target");
+      const log = openSync(join(dir, ".kestrel-ops.log"), "a");
+      try {
+        const child = spawn(file, args, { cwd: dir, env: { PATH: process.env.PATH ?? "", ...config.env }, detached: true, stdio: ["ignore", log, log] });
+        if (child.pid === undefined) throw new OpsError(`cannot start ${file}`, 1, "target");
+        writeFileSync(pidFile, String(child.pid));
+        child.unref();
+      } finally {
+        closeSync(log);
+      }
+    },
+    async waitReady(timeoutMs) {
+      const deadline = deps.clock() + timeoutMs;
+      while (deps.clock() < deadline) {
+        if (running() === null) return false;
+        if (config.readyUrl === undefined) return true;
+        try {
+          if ((await fetch(config.readyUrl, { signal: AbortSignal.timeout(5000) })).status === 200) return true;
+        } catch {
+          await sleep(250);
+          continue;
+        }
+        await sleep(250);
+      }
+      return false;
+    },
+    async installDatabase(file) {
+      if (running() !== null) throw new OpsError("refusing to place a database while the app runs", 1, "target");
+      mkdirSync(dirname(database), { recursive: true });
+      copyFileSync(file, `${database}.restore`);
+    },
+    async stopEvidence() {
+      return [`local app in ${config.dir}: stopped by the tool, no platform event log`];
+    },
+  };
+  return target;
+};

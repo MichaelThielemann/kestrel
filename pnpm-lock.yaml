@@ -625,6 +625,31 @@ importers:
         specifier: ^4.6.6
         version: 4.6.7
 
+  packages/ops:
+    dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.600.0
+        version: 3.1119.0
+      '@michaelthielemann/kestrel-blobstore-s3':
+        specifier: workspace:^
+        version: link:../blobstore-s3
+      '@michaelthielemann/kestrel-replication-sqlite':
+        specifier: workspace:^
+        version: link:../replication-sqlite
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+    devDependencies:
+      '@michaelthielemann/kestrel':
+        specifier: workspace:*
+        version: link:../core
+      '@michaelthielemann/kestrel-contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      vitest:
+        specifier: ^4.1.12
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+
   packages/persistence-sqlite:
     dependencies:
       zod:
