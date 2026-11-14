@@ -135,7 +135,10 @@ eventually consistent never serves a stale version of any of them. `manifest.jso
 without one is incomplete.
 
 The database comes from the replica, rebuilt from the newest generation, so it is the state the app shipped,
-not a file copied from a disk. The originals are the keys the media rows reference, copied server-side into
+not a file copied from a disk. The instance-lock file a running app keeps next to its database
+(`instanceLockFile()` of `@michaelthielemann/kestrel/instanceLock`) is therefore never part of a backup, and no
+restore writes or removes it: the `local` target places a restored database as `<file>.restore` and the app
+applies it at its next start. The originals are the keys the media rows reference, copied server-side into
 `objects/` through the admin client of `kestrel-blobstore-s3` (`createS3Admin().copy` with `ifMatch` set to the
 listed ETag): the store refuses the copy when the original changed in between, a store that ignores
 `x-amz-copy-source-if-match` is caught by reading the source's ETag again, and a copy whose size or ETag does not
@@ -211,8 +214,12 @@ the store's time rounded up to the next second and at least one second after the
 plain time name is listed and restored by every replication runtime, which takes the newest generation by
 name. Next to it, written after the snapshot as the last file of the placement, `origin.json` (`{ kind,
 source, requestedAt, nonce }`, `requestedAt` as ISO 8601) lets a runtime that understands it
-report the restore, so output derived from the database is rendered again, and acknowledge it with an
-`applied.json` carrying the same nonce; the tool reports `applied` or `unconfirmed`. A runtime that ignores
+report the restore through `replication.checkRestored`, so `delivery.checkBuild` renders every output again,
+and acknowledge it with an `applied.json` in the promoted generation carrying the same nonce once the run that
+read the report ended without failure. The tool reads that file after the start and reports `applied`, or
+`unconfirmed` when it does not appear; the runtime then reports the restore once more on its next start, which
+renders the output one more time. The three files follow the formats `replication-sqlite` defines (its README,
+"Replica layout"). A runtime that ignores
 `origin.json` still restores the generation; the restored delivery prefix then stands for the rendered
 output.
 

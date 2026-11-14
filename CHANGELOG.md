@@ -1011,7 +1011,11 @@ Net changes since 5.8.2.
   (which needs the explicit answer `access-changes`), takes a `pre-restore` backup, copies originals
   back without deleting any, sets the delivery prefix to the backup's, ends every login session and
   promotes the database as the newest replica generation under a plain time name from the store's
-  clock, with `origin.json` next to it. Also `status`, `backup list|verify|prune` with retention per
+  clock, with `origin.json` next to it, and reports `applied` once the runtime writes `applied.json` into that
+  generation with the same nonce. The seal, origin and acknowledgement files use the formats
+  `replication-sqlite` defines; listings, server-side copies and the store's clock go through the admin
+  client of `kestrel-blobstore-s3`. Neither a backup nor a restore holds or writes the instance-lock file
+  next to the database. Also `status`, `backup list|verify|prune` with retention per
   kind, `restore --to local`, a `local` target, credentials from environment variables or commands
   that never reach any output, a journal and lock trace in the backup location, and `writeBundle()`
   for a self-contained runner in a deploy artifact that carries the target adapters it needs.
