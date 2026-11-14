@@ -139,9 +139,12 @@ the *old* path: a record in `images_retired` remembers it, its copy is overwritt
 original's bytes, and the size's own row moves to its *new* path and is placed and rendered there.
 `images_variants.slot` (`<mediaId>/<size>`) is unique, so an item never has two rows for one size;
 changing the format back makes the old file current again instead of keeping it retired. `images.prune` does the same for a
-size that is no longer declared at all: retire, overwrite the copy with the original, delete the
-private blob and the variant row — the path stays, `images.prune`'s `{ sizes, variants }` counts what
-it touched. `images.serve` and the content rule below treat a retired file exactly like a variant row
+size that is no longer declared at all: retire, delete the variant row, overwrite the copy with the
+original and delete the private blob — the path stays, `images.prune`'s `{ sizes, variants }` counts what
+it touched. When one of the last two steps fails, the size has already left `variants[]`, so
+`images.prune` raises `images.variantsChanged` for the items it reached and answers `VALIDATION` on a
+retry; `images.syncPublic` then overwrites the copy and deletes the private blob. Without public
+copies, such a private blob stays until the item is deleted. `images.serve` and the content rule below treat a retired file exactly like a variant row
 that never got its render: always the original's bytes and type. This is what lets a page published
 before a size or format changed keep working without a republish; only `images.attach`'s own
 `variants[]` stops listing the retired path for pages rendered afterwards.
@@ -342,7 +345,7 @@ different resolutions, and a `srcset` should combine only such entries: one that
 a different picture depending on the viewport and pixel density, and one that leaves out an
 interchangeable entry looks blurry on high-density screens. `width` and `height` are whole pixels,
 so two entries have the same aspect ratio when their ranges from `(width - 0.5) / (height + 0.5)`
-to `(width + 0.5) / (height - 0.5)` overlap, as for 1000 × 563 and 320 × 180, both 16:9. The
+to `(width + 0.5) / (height - 0.5)` overlap or touch, as for 1000 × 563 and 320 × 180, both 16:9. The
 test is approximate: two entries that pass it can show cuts that differ by a few pixels at the
 smaller entry's resolution, about two pixels per side for a wide one. From a 2000 × 800 original,
 an `inside` 799 × 320 of the whole image and a `cover` 798 × 321 of its centred cut, 1989 pixels
@@ -364,10 +367,11 @@ wide, both pass it with `crop` `null`.
   keeps the earlier bytes until the item renders again.
 - After the database is restored from a backup older than the stored variants, an entry lists the
   `crop` and `?v=` of its restored row, while its path may answer a later render, until the item
-  renders again. `images.syncPublic` renders an entry again whose key holds bytes of another size
-  than its row records, or none; without public copies, a change of the item's framing or of the
-  size does. A `?v=` handed out after the backup can come back if the item rendered more than once
-  since.
+  renders again. `images.syncPublic` sets an entry pending and renders it again when its key holds
+  bytes of another size than its row records, or none; without public copies, a change of the
+  item's framing or of the size does. The pending entry lists its next `?v=` at once, which can be
+  one handed out after the backup, and any `?v=` handed out after the backup can come back once the
+  item rendered more than once since.
 
 `state` tells the `done` entries apart. Anonymous callers do not receive it with the grants of
 `examples/minimal` or the grant `kestrel upgrade` proposes, so a page built from such a read cannot

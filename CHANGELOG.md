@@ -1529,7 +1529,8 @@ Net changes since 5.8.1.
   a size registered again after a prune) ends in `?v=<token>`. The token is a short hash of the row
   and a count raised once new bytes are at the path or its public copy (a render marked `done`
   after its bytes are at the path, a failed attempt whose bytes could not be taken back, or
-  `images.syncPublic` rewriting a public copy of another byte size), so it changes only then and
+  `images.syncPublic` rewriting a public copy of another byte size) and when `images.syncPublic`
+  sets a variant pending again whose key holds bytes of another size than its row records, so it changes only then and
   never comes back for that path, also when a crop is set back to an earlier one or the framing is
   reset. The query appears from a row's second finished
   render on, or once `images.syncPublic` rewrote its public copy of another byte size; a row placed at a path that held bytes before starts its count at one, and a format
@@ -1569,6 +1570,9 @@ Net changes since 5.8.1.
 
 ### Fixed
 
+- `images/default`: `images.prune` raises `images.variantsChanged` for every item it took a size
+  from, also when a later write of the run fails, and `images.syncPublic` deletes the private render
+  a retired path still holds after such a failure while it writes the original over its public copy.
 - `insights`: a pipeline's `lastAt` and a recent failure's `at` are the whole-millisecond wall clock
   reading at the end of the run. They were the start time plus the measured duration, a fraction of a
   millisecond that could lie ahead of `Date.now()` and of the `generatedAt` of the same answer.
