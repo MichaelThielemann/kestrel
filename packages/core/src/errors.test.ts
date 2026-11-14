@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { STATUS_OF, failure, customFailure, isKestrelError, KestrelBootError, type CoreCode } from "./errors.ts";
+import { STATUS_OF, failure, customFailure, isKestrelError, isKestrelBootError, KestrelBootError, type CoreCode } from "./errors.ts";
 
 describe("STATUS_OF", () => {
   it("maps every core code to its HTTP status", () => {
@@ -66,6 +66,31 @@ describe("isKestrelError", () => {
     expect(isKestrelError({ code: "NOT_FOUND", status: 404, message: "x" })).toBe(false);
     expect(isKestrelError({ code: 404, status: 404, message: "x", retryable: false })).toBe(false);
     expect(isKestrelError(new Error("boom"))).toBe(false);
+  });
+});
+
+async function secondCopyBootError(module: string, reason: string, code: string): Promise<unknown> {
+  const copy: unknown = await import(new URL("./errors.ts?copy=second", import.meta.url).href);
+  if (typeof copy !== "object" || copy === null || !("KestrelBootError" in copy) || typeof copy.KestrelBootError !== "function") throw new Error("the second copy has no KestrelBootError");
+  const error: unknown = Reflect.construct(copy.KestrelBootError, [module, reason, code]);
+  return error;
+}
+
+describe("isKestrelBootError", () => {
+  it("recognizes a KestrelBootError of this copy of the module", () => {
+    expect(isKestrelBootError(new KestrelBootError("store/sqlite", "locked", "instance-locked"))).toBe(true);
+  });
+
+  it("recognizes a KestrelBootError created by a second copy of the module", async () => {
+    const error = await secondCopyBootError("store/sqlite", "locked", "instance-locked");
+    expect(error instanceof KestrelBootError).toBe(false);
+    expect(isKestrelBootError(error)).toBe(true);
+  });
+
+  it("does not take a plain error with the same fields for a KestrelBootError", () => {
+    expect(isKestrelBootError(Object.assign(new Error("[store/sqlite] locked"), { module: "store/sqlite", reason: "locked", code: "instance-locked" }))).toBe(false);
+    expect(isKestrelBootError({ module: "store/sqlite", reason: "locked", code: "instance-locked" })).toBe(false);
+    expect(isKestrelBootError(undefined)).toBe(false);
   });
 });
 

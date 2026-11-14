@@ -608,6 +608,23 @@ describe("module code that throws while boot registers or resolves steps is a ty
     expect(thrown).toMatchObject({ code: "instance-locked", module: "locking/one", reason: "data/app.db is in use by pid 41 on host build-7" });
   });
 
+  it("a module's setup() that throws a KestrelBootError from a second copy of the core keeps its code", async () => {
+    const copy: unknown = await import(new URL("./errors.ts?copy=second", import.meta.url).href);
+    if (typeof copy !== "object" || copy === null || !("KestrelBootError" in copy) || typeof copy.KestrelBootError !== "function") throw new Error("the second copy has no KestrelBootError");
+    const SecondBootError = copy.KestrelBootError;
+    const build = (): BootInput => {
+      const mod = simpleModule("locking/one", {
+        async setup() {
+          const error: unknown = Reflect.construct(SecondBootError, ["locking/one", "data/app.db is in use by pid 41 on host build-7", "instance-locked"]);
+          throw error;
+        },
+      });
+      return { config: { modules: [{ use: "./locking-one" }], triggers: [] }, modules: [mod], pipelines: [], logger: silentLogger };
+    };
+    const check = await checkBoot(build(), { setup: "all" });
+    expect(check.errors).toEqual([{ code: "instance-locked", owner: "locking/one", module: "locking/one", reason: "data/app.db is in use by pid 41 on host build-7" }]);
+  });
+
   it("a module's setup() that throws a plain Error is still setup-failed, naming the module", async () => {
     const build = (): BootInput => {
       const mod = simpleModule("throwing/one", {

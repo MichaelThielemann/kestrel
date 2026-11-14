@@ -292,6 +292,8 @@ A module's `setup()` that throws is `setup-failed`, naming the module, unless it
 `KestrelBootError` whose `module` is that module's name: the problem then keeps that error's code,
 module and reason. A `KestrelBootError` naming another module, such as a `load-failed` from a
 `loadModule` call inside `setup()`, stays `setup-failed` and carries its message in the reason.
+Boot recognizes a `KestrelBootError` created by another copy of the core loaded into the same
+process as well; `isKestrelBootError` from `@michaelthielemann/kestrel` makes the same check.
 `instance-locked` is one such code: a module that keeps a second process off its database file
 throws it from `setup()` through `acquireInstanceLock` (`@michaelthielemann/kestrel/instanceLock`)
 when another process holds a lock on the file that has not expired. The reason names that

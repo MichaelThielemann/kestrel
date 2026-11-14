@@ -10,7 +10,7 @@ import { stepPrefix, type ContractLookup, type Deps, type EventEntry, type Insta
 import { buildManifest, type Manifest } from "./describe.ts";
 import { pipelineSteps, type PipelineDefinition } from "./definePipeline.ts";
 import { resolveEntries } from "./resolveEntries.ts";
-import { KestrelBootError } from "./errors.ts";
+import { KestrelBootError, isKestrelBootError } from "./errors.ts";
 import { consoleLogger, logWarn, type Logger } from "./logger.ts";
 import { createObserverHub } from "./observer.ts";
 import { PLACEHOLDER_ARG, StepRegistry, type ResolvedStep, type Steps } from "./registry.ts";
@@ -492,7 +492,7 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
     try {
       instance = await mod.setup(cfg.data, deps);
     } catch (err) {
-      if (err instanceof KestrelBootError && err.module === mod.name) sink.fail(err.code, err.module, err.reason);
+      if (isKestrelBootError(err) && err.module === mod.name) sink.fail(err.code, err.module, err.reason);
       else sink.fail("setup-failed", mod.name, `setup() threw: ${err instanceof Error ? err.message : String(err)}`);
       markNotSetUp(notSetUp, mod, "setup() threw");
       continue;

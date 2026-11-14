@@ -59,6 +59,8 @@ export type BootErrorCode =
   | "config-not-object"
   | "pipelines-not-directory";
 
+const BOOT_ERROR = Symbol.for("kestrel.bootError");
+
 export class KestrelBootError extends Error {
   readonly module: string;
   readonly reason: string;
@@ -70,7 +72,18 @@ export class KestrelBootError extends Error {
     this.module = module;
     this.reason = reason;
     this.code = code;
+    Object.defineProperty(this, BOOT_ERROR, { value: true });
   }
+}
+
+/**
+ * Whether `value` is a `KestrelBootError`, also one created by another copy of this package
+ * loaded into the same process, which `instanceof` does not recognize.
+ */
+export function isKestrelBootError(value: unknown): value is KestrelBootError {
+  if (value instanceof KestrelBootError) return true;
+  if (!(value instanceof Error) || Reflect.get(value, BOOT_ERROR) !== true) return false;
+  return typeof Reflect.get(value, "module") === "string" && typeof Reflect.get(value, "reason") === "string" && typeof Reflect.get(value, "code") === "string";
 }
 
 export type CoreCode =

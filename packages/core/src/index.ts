@@ -14,7 +14,7 @@ export { definePipeline, pipelineDefiner, isAtomicGroup, pipelineSteps, type Pip
 export type { AtomicScope, AtomicScopeInfo, AtomicVerdict, AtomicOutcome } from "./atomic.ts";
 export type { StepsOf, StepCatalogue } from "./catalogue.ts";
 export { createContext, binaryResult, isBinaryResult, first, requestIdOf, stepFactory, isStepFactory, type BinaryResult, type Context, type ContextInput, type Step, type StepFactory, type StepMap, type StepResult, type Trigger, type UploadedFile } from "./context.ts";
-export { KestrelBootError, STATUS_OF, failure, customFailure, isKestrelError, type BootErrorCode, type CoreCode, type FailureOptions, type KestrelError } from "./errors.ts";
+export { KestrelBootError, STATUS_OF, failure, customFailure, isKestrelBootError, isKestrelError, type BootErrorCode, type CoreCode, type FailureOptions, type KestrelError } from "./errors.ts";
 export { ok, err, isOk, isErr, match, unwrapOr, type Ok, type Err, type Result } from "./result.ts";
 export { boundaryCast, type Boundary } from "./cast.ts";
 export { loadConfig, loadModules, loadModule, loadPipelines, loadPipelineFile, pipelineFiles } from "./load.ts";

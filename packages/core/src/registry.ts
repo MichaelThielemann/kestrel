@@ -1,6 +1,6 @@
 import { isStepFactory, type Step, type StepFactory, type StepMap } from "./context.ts";
 import type { StepDescription, StepDescriptions } from "./defineModule.ts";
-import { KestrelBootError, type BootErrorCode } from "./errors.ts";
+import { KestrelBootError, isKestrelBootError, type BootErrorCode } from "./errors.ts";
 import { throwSink, type Sink } from "./sink.ts";
 
 export interface ResolvedStep {
@@ -184,7 +184,7 @@ function attempt<T>(fn: () => T): { ok: true; value: T } | { ok: false; reason: 
   try {
     return { ok: true, value: fn() };
   } catch (err) {
-    if (err instanceof KestrelBootError) return { ok: false, reason: err.reason, code: err.code };
+    if (isKestrelBootError(err)) return { ok: false, reason: err.reason, code: err.code };
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
 }
