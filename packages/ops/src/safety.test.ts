@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { resolveCredential, withSecretFile } from "./credentials.ts";
+import { commandRunner, resolveCredential, withSecretFile } from "./credentials.ts";
 import { createHarness, LOCATION, SECRETS } from "./harness.fixture.ts";
 import { MemoryBucket, memoryStore } from "./memoryStore.ts";
 import { Redactor } from "./redact.ts";
@@ -95,6 +95,14 @@ describe("secrets", () => {
     expect(redactor.apply("from-command-123 value-from-env")).toBe("[redacted] [redacted]");
     await expect(resolveCredential({ env: "MISSING" }, "prod.key", redactor, {})).rejects.toThrow("prod.key: environment variable MISSING is not set");
     await expect(resolveCredential({ command: ["false"] }, "prod.secret", redactor, {})).rejects.toThrow(/prod\.secret: the command false failed \(exited with 1\)/);
+  });
+
+  it("names why a credential command failed: not found, too slow, too much output or its exit code", async () => {
+    const redactor = new Redactor();
+    await expect(resolveCredential({ command: ["kestrel-no-such-password-manager"] }, "prod.secret", redactor, {})).rejects.toThrow("prod.secret: the command kestrel-no-such-password-manager failed (not found on PATH)");
+    await expect(resolveCredential({ command: [process.execPath, "-e", "setTimeout(() => {}, 5000)"] }, "prod.secret", redactor, {}, commandRunner({ timeoutMs: 200 }))).rejects.toThrow(/failed \(did not finish within 0\.2 s\)/);
+    await expect(resolveCredential({ command: [process.execPath, "-e", "process.stdout.write('x'.repeat(2 * 1024 * 1024))"] }, "prod.secret", redactor, {})).rejects.toThrow(/failed \(printed more than 1 MiB\)/);
+    await expect(resolveCredential({ command: [process.execPath, "-e", "process.exit(3)"] }, "prod.secret", redactor, {})).rejects.toThrow(/failed \(exited with 3\)/);
   });
 
   it("hands a secret to a child process only as a 0600 file that is removed afterwards, also when the use fails", async () => {

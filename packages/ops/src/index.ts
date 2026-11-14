@@ -1,7 +1,7 @@
 export { acceptSeal, createBackup, listBackups, precopy, prune, readManifest, readSeal, sampleSize, unpin, verifyBackup, PRUNE_MIN_AGE_MS, type BackupMode, type BackupOptions, type BackupResult, type BackupSummary, type Problem, type PruneResult, type Verification } from "./backup.ts";
 export { writeBundle, OPS_PACKAGE, type BundleInfo } from "./bundle.ts";
 export { REPLICATION_PACKAGE, runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
-export { resolveCredential, withSecretFile, type CommandRunner, type CredentialSource } from "./credentials.ts";
+export { commandRunner, resolveCredential, withSecretFile, type CommandRunner, type CredentialSource } from "./credentials.ts";
 export { ENVIRONMENTS_FILE, environmentProblems, loadEnvironments, overlaps, type CredentialConfig, type Environment, type StorageConfig } from "./environments.ts";
 export { OpsError } from "./errors.ts";
 export { Interrupt, interruptible, Interrupted, type SignalSource } from "./interrupt.ts";

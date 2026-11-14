@@ -11,18 +11,30 @@ export type CredentialSource = { env: string } | { command: string[] };
 /** Runs a credential command; injectable for tests. */
 export type CommandRunner = (argv: readonly string[]) => Promise<string>;
 
-const runCommand: CommandRunner = (argv) =>
-  new Promise((resolve, reject) => {
-    const [file, ...args] = argv;
-    if (file === undefined) {
-      reject(new Error("empty command"));
-      return;
-    }
-    execFile(file, args, { timeout: 60_000, maxBuffer: 1024 * 1024, encoding: "utf8" }, (error, stdout) => {
-      if (error) reject(new Error(`exited with ${typeof error.code === "number" ? error.code : "an error"}`));
-      else resolve(stdout);
+const MAX_OUTPUT = 1024 * 1024;
+
+/** The runner of credential commands: without a shell, ended after `timeoutMs` (default 60 s), at most 1 MiB of output. Its errors say why a command failed, never what it printed. */
+export function commandRunner(options: { timeoutMs?: number } = {}): CommandRunner {
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  return (argv) =>
+    new Promise((resolve, reject) => {
+      const [file, ...args] = argv;
+      if (file === undefined) {
+        reject(new Error("empty command"));
+        return;
+      }
+      execFile(file, args, { timeout: timeoutMs, maxBuffer: MAX_OUTPUT, encoding: "utf8" }, (error, stdout) => {
+        if (!error) resolve(stdout);
+        else if (error.code === "ENOENT") reject(new Error("not found on PATH"));
+        else if (error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") reject(new Error("printed more than 1 MiB"));
+        else if (error.killed === true) reject(new Error(`did not finish within ${timeoutMs / 1000} s`));
+        else if (typeof error.code === "number") reject(new Error(`exited with ${error.code}`));
+        else reject(new Error(error.signal ? `ended by ${error.signal}` : `could not run: ${String(error.code ?? "unknown error")}`));
+      });
     });
-  });
+}
+
+const runCommand = commandRunner();
 
 /** Resolves a credential, registers it with the redactor and returns it. The value is never logged, not even in an error. */
 export async function resolveCredential(source: CredentialSource, label: string, redactor: Redactor, env: NodeJS.ProcessEnv, run: CommandRunner = runCommand): Promise<string> {

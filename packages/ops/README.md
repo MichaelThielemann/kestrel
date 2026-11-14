@@ -85,8 +85,11 @@ from.
   location: prune keeps every object a backup of any of them refers to.
 - `production` (default `true`) makes every restore that changes something ask for the `access-changes` answer.
 - A credential is `{ "env": "NAME" }` or `{ "command": ["argv", "..."] }`, run without a shell, its standard
-  output taken as the value. Values stay in memory; every line the tool writes, to the terminal, the journal
-  or a manifest, passes a redactor that masks them.
+  output taken as the value with one trailing newline removed. A command that is not on `PATH`, does not
+  finish within 60 s (a password manager waiting to be unlocked), prints more than 1 MiB or exits with an
+  error stops the run with exit 2, naming which of these happened but never what it printed. Values stay in
+  memory; every line the tool writes, to the terminal (questions included), the journal or a manifest,
+  passes a redactor that masks them.
 
 ## Targets
 A target stops, starts and describes the app. `local` runs it on this machine: `command` is started in `dir`
