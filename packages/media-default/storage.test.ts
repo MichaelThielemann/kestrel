@@ -305,6 +305,34 @@ describe("media-default storage: converting 5.x items to the id key layout", () 
     expect(d4).toMatchObject({ status: "trashed", location: null, trashedAt: 5, trashVersion: 1, key: "media/d4/report.pdf" });
   });
 
+  it("plans by listing the blob store, without reading a blob", async () => {
+    const { db, blobs } = await oldStore();
+    for (const answers of [{}, { [MISSING_ORIGINAL.id]: "trash" }]) {
+      const reads: string[] = [];
+      const report = expectOk(await runShapeMigrations({ storages: [storage()], db, blobs: reading(blobs, reads), apply: false, blobWrites: true, answers }));
+      expect(report.modules[0]!.migrations[0]!.plan?.counts).toMatchObject({ items: 6, copies: 4, missingOriginals: 2 });
+      expect(reads).toEqual([]);
+    }
+  });
+
+  it("moves an item whose original is missing to the trash when asked to, also while a variant of it lies under the same prefix", async () => {
+    const { db, blobs } = await oldStore([{ id: "d4", folder: "docs", filename: "report.pdf", contentType: "application/pdf" }], false);
+    expectOk(await blobs.put("media/d4/thumb.webp", bytes("a variant stored under the media prefix")));
+    const answers = { [MISSING_ORIGINAL.id]: "trash" };
+    const plan = expectOk(await runShapeMigrations({ storages: [storage()], db, blobs, apply: false, blobWrites: true, answers })).modules[0]!.migrations[0]!.plan!;
+    expect(plan.counts).toMatchObject({ items: 1, missingOriginals: 1, trashed: 1 });
+    const outcome = expectOk(await migrate(db, blobs, answers)).modules[0]!.migrations[0]!.outcome!;
+    expect(outcome.counts).toMatchObject({ trashed: 1 });
+    expect((await rowsOf(db))[0]).toMatchObject({ id: "d4", status: "trashed", location: null });
+  });
+
+  it("keeps an item whose original is gone but whose copy already lies at its new key, also when asked to trash", async () => {
+    const { db, blobs } = await oldStore([{ id: "d4", folder: "docs", filename: "report.pdf", contentType: "application/pdf" }], false);
+    expectOk(await blobs.put("media/d4/report.pdf", bytes("the copy an earlier run wrote")));
+    expectOk(await migrate(db, blobs, { [MISSING_ORIGINAL.id]: "trash" }));
+    expect((await rowsOf(db))[0]).toMatchObject({ id: "d4", status: "ready", key: "media/d4/report.pdf", location: "docs/report.pdf" });
+  });
+
   it("refuses an answer outside the question's choices", async () => {
     const { db, blobs } = await oldStore();
     expectErr(await migrate(db, blobs, { [MISSING_ORIGINAL.id]: "delete" }), "STORAGE_REFUSED");

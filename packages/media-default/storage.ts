@@ -112,6 +112,14 @@ function assign(rows: readonly Row[], prefix: string): { pending: Assignment[]; 
   return { pending, conflicts };
 }
 
+async function anyOf(exists: (key: string) => Promise<Result<boolean, ShapeMigrationError>>, keys: readonly string[]): Promise<Result<boolean, ShapeMigrationError>> {
+  for (const key of new Set(keys)) {
+    const found = await exists(key);
+    if (isErr(found) || found.value) return found;
+  }
+  return ok(false);
+}
+
 /** The storage of media/default: one migration, `media-default:id-key-layout`. */
 export function storage(config: StorageConfig = {}): ModuleStorage {
   const prefix = config.prefix ?? "media/";
@@ -124,24 +132,32 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
     return ok({ rows: rows.value, work: assign(rows.value, prefix) });
   };
 
-  const lostOriginals = async (ctx: MigrationContext, rows: readonly Row[]): Promise<Result<Set<string>, ShapeMigrationError>> => {
+  const stored = async (ctx: MigrationContext): Promise<Result<(key: string) => Promise<Result<boolean, ShapeMigrationError>>, ShapeMigrationError>> => {
+    const listed = await ctx.blobs.list(prefix);
+    if (isErr(listed)) return listed;
+    const keys = new Set(listed.value.map((b) => b.key));
+    return ok(async (key) => {
+      if (key.startsWith(prefix)) return ok(keys.has(key));
+      const head = await ctx.blobOps.head(key);
+      return isErr(head) ? head : ok(head.value !== null);
+    });
+  };
+
+  const lostOriginals = async (rows: readonly Row[], exists: (key: string) => Promise<Result<boolean, ShapeMigrationError>>): Promise<Result<Set<string>, ShapeMigrationError>> => {
     const lost = new Set<string>();
-    for (const row of rows) {
-      if (isTrashed(row) || canonicalIdOf(row.key, prefix) === row.id) continue;
-      const source = await ctx.blobOps.head(row.key);
-      if (isErr(source)) return source;
-      if (source.value !== null) continue;
-      const copies = await ctx.blobs.list(`${prefix}${row.id}/`);
-      if (isErr(copies)) return copies;
-      if (copies.value.length === 0) lost.add(row.id);
+    for (const { row, key } of assign(rows, prefix).pending) {
+      if (isTrashed(row) || key === row.key) continue;
+      const found = await anyOf(exists, [row.key, key, `${prefix}${row.id}/${nameOf(row)}`]);
+      if (isErr(found)) return found;
+      if (!found.value) lost.add(row.id);
     }
     return ok(lost);
   };
 
-  const decided = async (ctx: MigrationContext, rows: Row[]): Promise<Result<{ lost: Set<string>; work: ReturnType<typeof assign> }, ShapeMigrationError>> => {
+  const decided = async (ctx: MigrationContext, rows: Row[], exists: (key: string) => Promise<Result<boolean, ShapeMigrationError>>): Promise<Result<{ lost: Set<string>; work: ReturnType<typeof assign> }, ShapeMigrationError>> => {
     const answer = answerOf(ctx, MISSING_ORIGINAL);
     if (isErr(answer)) return answer;
-    const lost = answer.value === "trash" ? await lostOriginals(ctx, rows) : ok(new Set<string>());
+    const lost = answer.value === "trash" ? await lostOriginals(rows, exists) : ok(new Set<string>());
     if (isErr(lost)) return lost;
     const effective = rows.map((row): Row => (lost.value.has(row.id) ? { ...row, status: "trashed", location: null } : row));
     return ok({ lost: lost.value, work: assign(effective, prefix) });
@@ -189,7 +205,9 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
     async plan(ctx) {
       const state = await loaded(ctx);
       if (isErr(state)) return state;
-      const decision = await decided(ctx, state.value.rows);
+      const exists = await stored(ctx);
+      if (isErr(exists)) return exists;
+      const decision = await decided(ctx, state.value.rows, exists.value);
       if (isErr(decision)) return decision;
       const { work } = decision.value;
       const notes: MigrationNote[] = [...work.conflicts];
@@ -199,9 +217,9 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
       let svgDemoted = 0;
       for (const { row, name, key } of work.pending) {
         if (key === row.key) continue;
-        const source = await ctx.blobOps.head(row.key);
+        const source = await exists.value(row.key);
         if (isErr(source)) return source;
-        if (source.value === null) {
+        if (!source.value) {
           missing += 1;
           notes.push({ item: row.id, reason: `original ${row.key} is missing` });
         } else copies += 1;
@@ -217,7 +235,9 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
     async apply(ctx) {
       const state = await loaded(ctx);
       if (isErr(state)) return state;
-      const decision = await decided(ctx, state.value.rows);
+      const exists = await stored(ctx);
+      if (isErr(exists)) return exists;
+      const decision = await decided(ctx, state.value.rows, exists.value);
       if (isErr(decision)) return decision;
       const { lost, work } = decision.value;
       if (work.conflicts.length > 0) {
