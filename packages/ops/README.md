@@ -77,7 +77,7 @@ from.
   `status` lists the problem. Give the app's credentials an explicit deny on the location; `status` reports
   `protected from the app: yes` only when a delete with them is refused. Several environments may share one
   location: prune keeps every object a backup of any of them refers to.
-- `production` (default `true`) makes every restore ask for the `access-changes` answer.
+- `production` (default `true`) makes every restore that changes something ask for the `access-changes` answer.
 - A credential is `{ "env": "NAME" }` or `{ "command": ["argv", "..."] }`, run without a shell, its standard
   output taken as the value. Values stay in memory; every line the tool writes, to the terminal, the journal
   or a manifest, passes a redactor that masks them.
@@ -199,7 +199,7 @@ passed its name.
 |---|---|---|
 | `confirm` | before a restore stops the app, before `--with-media` downloads | answers yes |
 | `unsealed-stop` | a stopped replica without a seal | never |
-| `access-changes` | a restore of a production environment or one that brings back revoked access | never |
+| `access-changes` | a restore of a production environment that changes something, or one that brings back revoked access | never |
 | `unreadable-current` | a restore over a replica without a generation or with one that cannot be rebuilt | never |
 | `prune-delete` | before prune deletes | answers yes |
 | `break-lock` | `--break-lock` finds a lock another run holds | never |
