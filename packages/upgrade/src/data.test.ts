@@ -591,7 +591,9 @@ describe("runDataStep: data/site-media-leftovers and data/blobstore-tmp-suffix",
     expect(finding?.message).toContain("2 entries");
     expect(finding?.message).toContain("gallery/, logo.png");
     expect(finding?.message).not.toContain("m1");
-    expect(finding?.suggestion).toContain("delete these entries");
+    expect(finding?.suggestion).toContain("delete what is left of these entries");
+    expect(finding?.suggestion).toContain("removes the files exactly one folder deep");
+    expect(finding?.suggestion).not.toContain("leaves these entries in place");
     expect(finding?.suggestion).not.toContain("never touches");
     expect(finding?.suggestion).not.toContain("delete the directory");
   });

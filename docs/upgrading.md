@@ -751,8 +751,11 @@ An entry of the 5.x delivery-static media export directory (the delivery prefix 
 `media.target` under the filesystem blobstore's `root`, resolved relative to the project root) that
 is not an `<id>/` directory of an item in `media_items`. With `publicCopy`, `media.syncPublic`
 writes its copies into the same directory, one `<id>/` directory per item, so those are never
-reported. Manual: names the remaining entries (up to ten, with the count of the rest) and says to
-delete them, and only them, once every page that might still link one has been republished.
+reported. Before the first `media.syncPublic` the finding also names the 5.x copies one folder deep
+(`<folder>/<file>`); that run removes them, so a link to one of them stops working with it, while a
+copy directly under the media path or in a deeper folder stays. Manual: names the entries (up to ten,
+with the count of the rest) and says to delete what is left of them, and only that, once every page
+that might still link one has been republished.
 
 #### data-blobstore-tmp-suffix
 A stored filesystem-blobstore key already ending in `.kestrel-tmp`: 6.0.0 reserves that suffix for

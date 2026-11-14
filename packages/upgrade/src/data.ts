@@ -594,7 +594,7 @@ async function siteMediaLeftoversFindings(root: string, mediaIds: ReadonlySet<st
         tier: "data",
         where: { path: leftoversDir },
         message: `${entries.length} entr${entries.length === 1 ? "y" : "ies"} under "${leftoversDir}", the 5.x delivery-static media export directory, that are not the public copy of a media item: ${shown}`,
-        suggestion: "media.syncPublic writes the public copy of each item under <id>/ in this directory and leaves these entries in place. Republish every page that might still link one of them, then delete these entries; keep the <id>/ directories",
+        suggestion: "media.syncPublic writes the public copy of each item under <id>/ in this directory, and removes the files exactly one folder deep (<folder>/<file>) because its own copies go there, so links to those stop working with its first run; a file directly in this directory and anything in a deeper folder stays. Republish every page that might still link one of these entries, then delete what is left of these entries; keep the <id>/ directories",
         fix: { kind: "manual" },
         docs: upgradingDocs("data-site-media-leftovers"),
       },
