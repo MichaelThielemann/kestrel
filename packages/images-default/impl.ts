@@ -935,6 +935,13 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok(requeued.value !== null);
   }
 
+  async function removeRetiredRender(mediaId: string, file: string): Promise<Result<void, KestrelError>> {
+    const owner = await ownerOf(mediaId, file);
+    if (isErr(owner)) return owner;
+    if (owner.value.row !== null || owner.value.retired === null) return ok(undefined);
+    return blobs.remove(`${config.prefix}${mediaId}/${file}`);
+  }
+
   async function writeOwnedCopy(lease: Lease, media: MediaFile, file: string, heldSize?: number): Promise<Result<CopyOutcome, KestrelError>> {
     const owner = await ownerOf(media.id, file);
     if (isErr(owner)) return owner;
@@ -1938,11 +1945,18 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
           if (isErr(page)) return page;
           if (page.value.items.length === 0) break;
           for (const variant of page.value.items) {
-            const retired = await exclusive(variant.mediaId, () => retireVariant(variant.id));
-            if (isErr(retired)) return retired;
-            if (retired.value === null) continue;
-            variantsDeleted += 1;
+            const known = affectedIds.has(variant.mediaId);
             affectedIds.add(variant.mediaId);
+            const retired = await exclusive(variant.mediaId, () => retireVariant(variant.id));
+            if (isErr(retired)) {
+              raiseVariantsChanged([...affectedIds]);
+              return retired;
+            }
+            if (retired.value === null) {
+              if (!known) affectedIds.delete(variant.mediaId);
+              continue;
+            }
+            variantsDeleted += 1;
           }
           if (page.value.items.length < PAGE) break;
         }
@@ -2190,6 +2204,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const copiedRetired = await eachRow<Retired>(RETIRED, {}, async (row) => {
         const media = ready.get(row.mediaId);
         if (media === undefined || hidden.has(row.mediaId) || owned.has(copyKey(row.mediaId, row.file))) return ok(undefined);
+        if (privateSizes.has(`${config.prefix}${row.mediaId}/${row.file}`)) {
+          const dropped = await withItem(row.mediaId, () => removeRetiredRender(row.mediaId, row.file), async () => ok(undefined));
+          if (isErr(dropped)) return dropped;
+        }
         return ensureCopy(media, row.file, media.size);
       });
       if (isErr(copiedRetired)) return copiedRetired;

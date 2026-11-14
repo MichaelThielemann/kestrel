@@ -551,6 +551,73 @@ describe("images/default variants[].crop in images.attach", () => {
     for (const open of [full, small]) await open.close();
   });
 
+  it("raises images.variantsChanged for every item a failed prune took the size from, and syncPublic writes the original over the copy it left", async () => {
+    const w = await world();
+    w.media.add({ id: "m2", contentType: "image/jpeg", data: expectOk(await w.media.load("m1"))!.data, filename: "second.jpg", createdAt: 1000 });
+    const full = await w.open([THUMB, SQUARE]);
+    for (const id of ["m1", "m2"]) {
+      expectOk(await full.setFraming(id, RIGHT_CROP));
+      expectOk(await full.generate(id));
+    }
+    await full.close();
+
+    let squareCopies = 0;
+    const broken: Blobstore = {
+      ...w.blobs,
+      put: async (key, data, options) => (key.startsWith("site/") && key.endsWith("/square.webp") && (squareCopies += 1) === 2 ? err(failure("TRANSIENT", "copy store unavailable")) : w.blobs.put(key, data, options)),
+    };
+    const small = await w.open([THUMB], render, { blobs: broken });
+    w.events.emitted.length = 0;
+    expect((await small.prune(["square"])).ok).toBe(false);
+    const ids = w.events.emitted.filter(({ name }) => name === "images.variantsChanged").flatMap(({ ids }) => boundaryCast<string[]>(ids, "host"));
+    expect(ids.sort()).toEqual(["m1", "m2"]);
+    for (const id of ["m1", "m2"]) expect((await attached(small, id)).has("square")).toBe(false);
+    expect((await small.prune(["square"])).ok).toBe(false);
+
+    expectOk(await small.syncPublic());
+    const original = expectOk(await w.media.load("m1"))!.data;
+    for (const id of ["m1", "m2"]) {
+      expect(w.blobs.blobs.get(`site/media/${id}/variants/square.webp`)!.data).toEqual(original);
+      expect(w.blobs.blobs.has(`media-variants/${id}/square.webp`)).toBe(false);
+    }
+    await small.close();
+  });
+
+  it("raises images.variantsChanged when a prune fails to remove the private render, and syncPublic removes it", async () => {
+    const w = await world();
+    const full = await w.open([THUMB, SQUARE]);
+    expectOk(await full.setFraming("m1", RIGHT_CROP));
+    expectOk(await full.generate("m1"));
+    await full.close();
+
+    let failRemove = true;
+    const broken: Blobstore = {
+      ...w.blobs,
+      remove: async (key) => {
+        if (failRemove && key === "media-variants/m1/square.webp") {
+          failRemove = false;
+          return err(failure("TRANSIENT", "variant store unavailable"));
+        }
+        return w.blobs.remove(key);
+      },
+    };
+    const small = await w.open([THUMB], render, { blobs: broken });
+    w.events.emitted.length = 0;
+    expect((await small.prune(["square"])).ok).toBe(false);
+    expect(w.events.emitted).toEqual([{ name: "images.variantsChanged", ids: ["m1"] }]);
+    const served = expectOk(await small.read("m1", "square.webp"))!;
+    expect(served.fallback).toBe(true);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(served.data);
+    expect(w.blobs.blobs.has("media-variants/m1/square.webp")).toBe(true);
+
+    w.events.emitted.length = 0;
+    expect(expectOk(await small.syncPublic())).toMatchObject({ written: 0 });
+    expect(w.blobs.blobs.has("media-variants/m1/square.webp")).toBe(false);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(served.data);
+    expect(w.events.emitted).toEqual([]);
+    await small.close();
+  });
+
   it("keeps the listing, the origin and the public copy on the listed crop when the row update of a format change fails, and moves the row on a retry", async () => {
     const w = await world();
     const webp = await w.open([SQUARE]);
