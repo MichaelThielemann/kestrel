@@ -17,6 +17,7 @@ interface LockRecord {
   host: string;
   startedAt: string;
   heartbeatAt: string;
+  ttlMs: number;
   threads: Record<string, string>;
 }
 
@@ -69,12 +70,12 @@ function take(path: string, opts: Partial<Parameters<typeof acquireInstanceLock>
 function readRecord(): LockRecord {
   const parsed: unknown = JSON.parse(readFileSync(instanceLockFile(file), "utf8"));
   if (typeof parsed !== "object" || parsed === null) throw new Error("lock file is not an object");
-  return { ...{ instanceId: "", pid: 0, pidNamespace: "", processStart: "", bootId: "", host: "", startedAt: "", heartbeatAt: "", threads: {} }, ...parsed };
+  return { ...{ instanceId: "", pid: 0, pidNamespace: "", processStart: "", bootId: "", host: "", startedAt: "", heartbeatAt: "", ttlMs: 0, threads: {} }, ...parsed };
 }
 
 function writeRecord(record: Partial<LockRecord>): LockRecord {
   const now = new Date().toISOString();
-  const full: LockRecord = { instanceId: randomUUID(), pid: 4242, pidNamespace: ownPidNamespace(), processStart: "1", bootId: randomUUID(), host: "other-host", startedAt: now, heartbeatAt: now, threads: { [randomUUID()]: now }, ...record };
+  const full: LockRecord = { instanceId: randomUUID(), pid: 4242, pidNamespace: ownPidNamespace(), processStart: "1", bootId: randomUUID(), host: "other-host", startedAt: now, heartbeatAt: now, ttlMs: 60_000, threads: { [randomUUID()]: now }, ...record };
   writeFileSync(instanceLockFile(file), JSON.stringify(full));
   return full;
 }
@@ -247,13 +248,54 @@ describe("acquireInstanceLock", () => {
     expect(record.heartbeatAt).toBe("2026-03-01T10:01:01.000Z");
   });
 
-  it("honours a custom TTL", () => {
+  it("honours a custom TTL that both the holder and the caller use", () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.setSystemTime(new Date("2026-03-01T10:00:00.000Z"));
-    writeRecord({});
+    writeRecord({ ttlMs: 5_000 });
     vi.setSystemTime(new Date("2026-03-01T10:00:06.000Z"));
     take(file, { ttlMs: 5_000, heartbeatMs: 1_000 });
     expect(readRecord().pid).toBe(process.pid);
+  });
+
+  it("records its TTL in the lock file", () => {
+    take(file, { ttlMs: 30_000 });
+    expect(readRecord().ttlMs).toBe(30_000);
+  });
+
+  it("judges a lock by its holder's TTL when that is longer than the caller's", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-03-01T10:00:00.000Z"));
+    const foreign = writeRecord({ ttlMs: 60_000 });
+    vi.setSystemTime(new Date("2026-03-01T10:00:06.000Z"));
+    const err = thrownBy(() => take(file, { ttlMs: 5_000 }));
+    expect(err).toBeInstanceOf(KestrelBootError);
+    expect(err instanceof KestrelBootError ? err.reason : "").toContain("taken over automatically from 2026-03-01T10:01:00.000Z");
+    expect(readRecord()).toEqual(foreign);
+    vi.setSystemTime(new Date("2026-03-01T10:01:01.000Z"));
+    take(file, { ttlMs: 5_000 });
+    expect(readRecord().pid).toBe(process.pid);
+  });
+
+  it("keeps the longer TTL in the lock file when a thread with a shorter one joins it", () => {
+    writeRecord({ ...onThisHost, pid: process.pid, processStart: ownProcessStart(), ttlMs: 60_000 });
+    take(file, { ttlMs: 6_000 });
+    expect(readRecord().ttlMs).toBe(60_000);
+  });
+
+  it("beats at most every third of a custom TTL when no heartbeat is given", () => {
+    const setSpy = vi.spyOn(globalThis, "setInterval");
+    take(file, { ttlMs: 6_000 });
+    expect(setSpy).toHaveBeenCalledWith(expect.any(Function), 2_000);
+  });
+
+  it("rejects a TTL or heartbeat that is not a positive number, a heartbeat longer than a third of the TTL, or one beyond the timer range", () => {
+    const invalid = [{ ttlMs: 0 }, { ttlMs: -1 }, { ttlMs: Number.NaN }, { ttlMs: Number.POSITIVE_INFINITY }, { heartbeatMs: 0 }, { heartbeatMs: -5 }, { heartbeatMs: Number.NaN }, { ttlMs: 30_000, heartbeatMs: 10_001 }, { ttlMs: 2 ** 34, heartbeatMs: 2 ** 31 }];
+    for (const opts of invalid) {
+      const err = thrownBy(() => take(file, opts));
+      expect(err).toBeInstanceOf(KestrelBootError);
+      expect(err instanceof KestrelBootError ? [err.code, err.module] : []).toEqual(["invalid-module-config", "store/sqlite"]);
+    }
+    expect(existsSync(instanceLockFile(file))).toBe(false);
   });
 
   it("takes over at once a lock of a dead process on the same host", () => {
@@ -329,7 +371,7 @@ describe("acquireInstanceLock", () => {
   });
 
   it("tells when a refused lock of another host is taken over, without suggesting to delete it", () => {
-    const foreign = writeRecord({ host: "web-2" });
+    const foreign = writeRecord({ host: "web-2", ttlMs: 30_000 });
     const err = thrownBy(() => take(file, { ttlMs: 30_000 }));
     const reason = err instanceof KestrelBootError ? err.reason : "";
     expect(reason).toContain(`taken over automatically from ${new Date(Date.parse(foreign.heartbeatAt) + 30_000).toISOString()}`);
@@ -501,13 +543,13 @@ describe("acquireInstanceLock across processes", () => {
       script,
       [
         `import { acquireInstanceLock } from ${JSON.stringify(LOCK_MODULE)};`,
-        "const [file, startAt] = process.argv.slice(2);",
+        "const [file, startAt, options = \"{}\"] = process.argv.slice(2);",
         "const idle = Number(startAt) - Date.now() - 30;",
         "if (idle > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, idle);",
         "while (Date.now() < Number(startAt)) {}",
         "let line;",
         "try {",
-        "  acquireInstanceLock(file, { module: \"store/sqlite\" });",
+        "  acquireInstanceLock(file, { module: \"store/sqlite\", ...JSON.parse(options) });",
         "  line = \"won\";",
         "} catch (err) {",
         "  line = `lost:${err.code}`;",
@@ -565,9 +607,9 @@ describe("acquireInstanceLock across processes", () => {
     said(text: string): Promise<void>;
   }
 
-  function start(script: string, startAt: number, command: string[] = [process.execPath]): Racer {
+  function start(script: string, startAt: number, command: string[] = [process.execPath], extra: string[] = []): Racer {
     const [program = process.execPath, ...prefix] = command;
-    const child = spawn(program, [...prefix, "--disable-warning=ExperimentalWarning", script, file, String(startAt)], { stdio: ["pipe", "pipe", "inherit"] });
+    const child = spawn(program, [...prefix, "--disable-warning=ExperimentalWarning", script, file, String(startAt), ...extra], { stdio: ["pipe", "pipe", "inherit"] });
     children.push(child);
     let out = "";
     const waiting: { text: string; resolve: () => void }[] = [];
@@ -680,6 +722,18 @@ describe("acquireInstanceLock across processes", () => {
 
     take(file);
     expect(readRecord().pid).toBe(process.pid);
+  }, 20_000);
+
+  it("keeps another process with a shorter TTL off a live holder whose heartbeat is older than that TTL", async () => {
+    const holder = start(childScript(), 0, [process.execPath], [JSON.stringify({ ttlMs: 3_000, heartbeatMs: 1_000 })]);
+    expect(await holder.line).toBe("won");
+    for (let tries = 0; tries < 3; tries++) {
+      while (Date.now() - Date.parse(readRecord().heartbeatAt) < 400) await new Promise((resolve) => setTimeout(resolve, 20));
+      const err = thrownBy(() => take(file, { ttlMs: 300, heartbeatMs: 100 }));
+      expect(err instanceof KestrelBootError ? err.code : err).toBe("instance-locked");
+      expect(readRecord().pid).toBe(holder.child.pid);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
   }, 20_000);
 
   async function race(prepare: () => void, count = 2): Promise<string[]> {

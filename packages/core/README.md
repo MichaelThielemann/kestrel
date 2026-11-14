@@ -62,7 +62,8 @@ for `atomic`, `cast`, `catalogue`, `context`, `defineConfig`, `defineContract`, 
 `definePipeline`, `errors`, `instanceLock`, `load`, `logger`, `reads`, `result`, `runner`, `schema` and
 `testing/runPipeline`. `instanceLock` (`acquireInstanceLock`, `instanceLockFile`) keeps a second process off a
 database file: the lock is a sidecar `<file>.instance` next to the database, never a row inside it, so it never
-travels with a replica, snapshot or restore. A lock whose heartbeat (every 10 s) is older than 60 s is taken over,
+travels with a replica, snapshot or restore. A lock whose heartbeat (every 10 s) is older than its TTL (60 s; the
+lock file records the holder's, and the longer of that and the caller's applies) is taken over,
 and so is one whose process on the same machine and in the same PID namespace is gone. Any other lock makes
 `acquireInstanceLock` throw a `KestrelBootError` with code `instance-locked` at once, naming the holder's host, PID
 and start time and the time from which the lock is taken over. That includes a lock from another PID namespace,
