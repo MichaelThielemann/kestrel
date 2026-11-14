@@ -41,26 +41,37 @@ import { createS3Admin } from "@michaelthielemann/kestrel-blobstore-s3/admin";
 
 const admin = createS3Admin({ bucket: "assets", prefix: "" });
 const listed = await admin.listDetailed("media/"); // key, size, etag, lastModified (ms)
-const copied = await admin.copy("media/a.png", "backup/a.png", { ifMatch: listed.value?.[0]?.etag });
+if (!listed.ok) throw listed.error;
+const first = listed.value[0];
+if (first !== undefined) {
+  const copied = await admin.copy(first.key, `backup/${first.key}`, { ifMatch: first.etag });
+}
 ```
 
 - `listDetailed(prefix)` lists every object with `key`, `size`, `etag` (without quotes) and `lastModified`
   in epoch milliseconds, ordered by key. `head(key)` reports the same for one key and `Ok(null)` for a
   missing one; a `HEAD` reports whole seconds, and listings report at least whole seconds (some stores add
   milliseconds). A `HEAD` cannot tell a missing key from a missing bucket, so the first miss runs one
-  `HeadBucket`; a bucket that does not exist throws.
-- `copy(from, to, { ifMatch? })` copies on the server. It then reads the destination until it reports the
-  source's size and the ETag the copy returned, since an overwritten key can still answer with its old
-  metadata for a moment, and answers `VERIFY_FAILED` with the expected and actual size and ETag if it never
+  `HeadBucket`; a bucket that does not exist throws. A store that reports a truncated listing page without a
+  continuation token, or repeats a token, makes `listDetailed` throw instead of answering a partial list.
+- `copy(from, to, { ifMatch?, sourceCheck? })` copies on the server. It then reads the destination until it
+  reports the source's size and the ETag the copy returned, since an overwritten key can still answer with its
+  old metadata for a moment, and answers `VERIFY_FAILED` with the expected and actual size and ETag if it never
   does. With `ifMatch` (the ETag from a listing) it answers `PRECONDITION_FAILED` when the source changed.
-  The store's own `x-amz-copy-source-if-match` does the check where it works and writes nothing then
-  (`details.reason: "store-refused"`). When a store ignores the header or answers 501, the client compares
-  the source's ETag before the copy and again after it; a destination written from a changed source is
-  removed (`details.reason: "source-changed"` or `"source-missing"`, `details.destinationRemoved`). A
-  destination that fails verification is removed too, and an object that already existed under `to` is
-  overwritten and removed with it, so copy to keys that are free. A source that changes and returns to
-  identical content during the copy cannot be detected. A source above 5 GiB answers `PAYLOAD_TOO_LARGE`,
-  since one copy request does not move more.
+  By default the store's own `x-amz-copy-source-if-match` does the check where it works and writes nothing
+  then (`details.reason: "store-refused"`, with the ETag found in `details.foundEtag`). When a store answers
+  501 or 400 to the header, or refuses the condition although the source still has the expected ETag, the
+  client copies without the header, compares the source's ETag after the copy and removes a destination
+  written from a changed source (`details.reason: "source-changed"` or `"source-missing"`,
+  `details.destinationRemoved`). `sourceCheck: "compare"` skips the header and always compares; use it when
+  `probeCapabilities` did not report `copySourceIfMatch` as supported. A destination that fails verification
+  is removed too, and an object that already existed under `to` is overwritten and removed with it, so copy to
+  keys that are free. Copying an object onto itself throws. A source that changes and returns to identical
+  content during the copy cannot be detected. A source above 5 GiB answers `PAYLOAD_TOO_LARGE`, since one copy
+  request does not move more. A `TRANSIENT` after the destination was written (the source or the destination
+  could not be read back) removes the destination and reports `details.destinationWritten: true` and
+  `details.destinationRemoved`; when the removal failed too, the destination is unverified. A `TRANSIENT` from
+  the copy request itself carries no details, and the destination may exist.
 - `serverTime()` returns `{ serverMs, localMs, skewMs }`. It writes a probe object under `.kestrel-clock/`,
   lists until the object shows, reads its `LastModified` and removes it. Listings can lag behind a write, which
   is why it lists again, up to `observeAttempts` times. `skewMs` is accurate to about a second, because a
@@ -73,7 +84,8 @@ const copied = await admin.copy("media/a.png", "backup/a.png", { ifMatch: listed
   `"ignored"` (the store accepted the stale write), `"not-implemented"` (501) and `"error"` (`detail` names
   it). A capability nobody observed is not assumed.
 - `serverTime()` and `probeCapabilities()` remove their scratch objects and need the `DeleteObject`
-  permission for that; a denied delete throws, while a transient failure to delete is ignored.
+  permission for that; a denied delete throws, while a transient failure to delete, and a 404 for a scratch
+  key that was never written, are ignored.
 
 `createS3Admin(config, client, options)` accepts a client for tests and `S3AdminOptions`: `verifyAttempts`,
 `retryDelayMs`, `observeAttempts`, `sleep` and `now`.
