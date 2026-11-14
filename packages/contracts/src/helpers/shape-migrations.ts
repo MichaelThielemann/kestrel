@@ -130,6 +130,7 @@ export interface StorageVersion extends Document {
 /** `not-needed`: `detect` found nothing. `pending`: found, not applied by this run (`blocked` says why). `applied`: applied and verified. */
 export type MigrationState = "not-needed" | "pending" | "applied";
 
+/** One migration in a {@link ModuleRun}: its declaration, what `detect` found, and what the run did with it. */
 export interface MigrationRun {
   id: string;
   introducedIn: string;
@@ -137,8 +138,15 @@ export interface MigrationRun {
   blobWrites: boolean;
   state: MigrationState;
   detected: Detection;
+  /**
+   * Why a `pending` migration was not applied. `plan-only`: the run had `apply: false`. `earlier-pending`: an earlier
+   * migration of the same module is still pending, and migrations apply in order. `dependency-pending`: a module this
+   * one depends on is not finished. `blob-writes`: the migration writes blobs and the run had `blobWrites: false`.
+   */
   blocked?: "plan-only" | "blob-writes" | "earlier-pending" | "dependency-pending";
+  /** What `plan` counted; absent when nothing was found or the run had `plan: false`. */
   plan?: MigrationPlan;
+  /** What `apply` did; present only when the migration was applied. */
   outcome?: MigrationOutcome;
 }
 
@@ -150,6 +158,7 @@ export interface MigrationRun {
  */
 export type ModuleState = "current" | "recorded" | "unrecorded" | "migrated" | "pending" | "too-old" | "too-new";
 
+/** One module in a {@link RunReport}: the storage version it had (`stored`, `null` without a row), the version of this release, and its migrations in the order they ran. */
 export interface ModuleRun {
   module: string;
   stored: string | null;
@@ -158,6 +167,7 @@ export interface ModuleRun {
   migrations: MigrationRun[];
 }
 
+/** What {@link runShapeMigrations} found and did, one entry per module in the order the modules ran. */
 export interface RunReport {
   modules: ModuleRun[];
 }

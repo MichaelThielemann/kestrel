@@ -37,14 +37,18 @@ row in `kestrel_storage_versions` only after every pending migration has been ve
 after an abort continues, a second run writes nothing. With `apply: false` it only detects and
 plans and writes no version row unless `recordWhenCurrent` is set; `detect` and `plan` still prepare
 the collections they read, which adds the release's new fields, so a plan of data an older release
-still writes runs on a copy. Data newer than the module's version, or
+still writes runs on a copy; `plan: false` skips `plan`. The `RunReport` lists each module
+(`ModuleRun`: stored and release version, state) and each migration (`MigrationRun`: what `detect`
+found, the `plan`, the `outcome`); a pending migration says why it was not applied in `blocked`
+(`plan-only`, `earlier-pending` for an earlier pending migration of the module,
+`dependency-pending` for an unfinished module it depends on, `blob-writes`). Data newer than the module's version, or
 older than it converts, is left alone and reported (`update through <major>.x first`). Blobs are
 reached through an injected `BlobOps` (`copy`, `head`); `blobOpsOf(blobstore)` builds one from any
 `blobstore@1` by reading and writing the bytes, a runner with server-side copies passes its own.
 `guardStorage` is the start-up check behind a module's `storageMigrations` setting: `check` refuses
 data in an old form with `STORAGE_REFUSED`, naming the migrations and the command that runs them;
 `apply` also runs the migrations that write no blobs. A migration that writes blobs never runs at
-start-up.
+start-up, and the guard plans no migration, so a refusal costs only `detect`.
 `helpers/session` is what an authn module shares with the others for browser sessions:
 `requestToken` reads a request's bearer token or session cookie (`__Host-kestrel_token`, or the name
 `sessionCookieName(secure)` gives) and says which it was,
