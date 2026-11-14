@@ -104,6 +104,12 @@ describe("the ci workflow", () => {
   it("checks out without persisting the token", () => {
     for (const name of jobs(ci).keys()) expect(job(ci, name), name).toMatch(/actions\/checkout@[0-9a-f]{40}.*\n\s+with:\n\s+persist-credentials: false/);
   });
+
+  it("runs the kestrel-ops tests on macOS from a frozen install", () => {
+    const macos = job(ci, "ops-macos");
+    expect(macos).toMatch(/runs-on: macos-latest/);
+    expect(macos).toMatch(/- run: pnpm install --frozen-lockfile\n\s+- run: pnpm vitest run packages\/ops/);
+  });
 });
 
 describe("every workflow", () => {
