@@ -753,6 +753,21 @@ Net changes since 5.8.2.
   and 60000); a config that does not fails boot, since a render could outlast the lease on its item.
   `kestrel upgrade`'s `modules/images-render-timeout` reports (manual) such a config, defaults
   included.
+- `redirects-default`: a redirect source may not take a path the application serves itself. The new
+  config key `reservedPaths` (default `["/admin", "/api", "/media"]`) lists the prefixes; the editor
+  refuses a `from` that equals, lies below or, through a wildcard, can match one of them
+  (`/admin`, `/admin/x`, `/*/login`; `/administration` stays allowed) with `VALIDATION` and the row.
+  A rule already stored under such a path is left out of `redirects.json`, `redirects.lookup` and
+  `redirects.render` and logged. Set `reservedPaths` to the mounts of your own project. `kestrel
+  upgrade data`'s `data/redirect-reserved-paths` lists the stored rules an upgrade would leave out.
+- The two admin routes that repeat a user's cleanup, `POST /admin/users/:id/revisions/reassign` and
+  `POST /admin/users/:id/audit/anonymize`, answer 409 `CONFLICT` while `:id` still names a user,
+  active or not, so they can no longer rewrite the revisions or erase the audit trail of an existing
+  account. The guard is the new step `authn.requireAbsentUser`, which reads `params.id` and is
+  `atomicSafe`; a project that exposes `revisions.reassignAuthor` or `audit.anonymize` on a route of
+  its own should run it first. Each successful run raises `user.revisionsReassignRetried` or
+  `user.auditAnonymizeRetried`, which `examples/minimal` records through an `auditUsers` pipeline, so
+  the log shows who ran the repair. Both routes now end in `events.relay`, so their responses carry `_events`.
 
 ### Added
 
@@ -1650,6 +1665,14 @@ Net changes since 5.8.2.
   `deepmerge`.
 - `kestrel-contracts` declares the optional peer `vitest` as `>=4` (was `>=3`); the shipped
   `*.contract.test.ts` files are exercised against vitest 4 only.
+- `authn.updateUser` and `authn.deactivateUser` are `atomicSafe` like `authn.deleteUser`, and the
+  example pipelines run all three inside an atomic group. The last-admin guard reads the other
+  admins and then writes, so without a group two admins removing each other's permission at the same
+  time could both succeed; with one the second request answers `LAST_ADMIN`. Pipelines of your own
+  need the same `{ atomic: ["authn.deactivateUser"] }` entry.
+- `examples/nginx-njs`: the base image is pinned by digest on the nginx 1.30 stable series, and the
+  handler never redirects the paths in `RESERVED_PATHS` (default `/admin,/api,/media`), whatever the
+  rule list holds.
 
 ### Fixed
 
@@ -1790,6 +1813,10 @@ Net changes since 5.8.2.
   read once it passes the limit, instead of being buffered whole before the check. The core server
   also answers 413 to an oversized `Content-Length` up front. Both use the new export
   `readRequestBody`.
+- `kestrel upgrade`: the scratch copy of a git project applies the same filters as the copy of a project
+  without git. A tracked `.env*` file, database file or file over 10 MB no longer lands in the
+  temporary directory, a file name with non-ASCII characters is copied, and a file that git lists but
+  the working tree no longer has no longer stops the run.
 
 ## 5.8.2 – 2026-09-27
 
