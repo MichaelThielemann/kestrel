@@ -28,7 +28,7 @@ function referencedAnchors(): Set<string> {
   for (const name of readdirSync(HERE)) {
     if (!name.endsWith(".ts") || name.endsWith(".test.ts")) continue;
     const source = readFileSync(join(HERE, name), "utf8");
-    for (const m of source.matchAll(/docs\/upgrading\.md#([a-z0-9-]+)/g)) anchors.add(m[1]!);
+    for (const m of source.matchAll(/docs\/upgrading\.md#([a-z0-9-]+)|upgradingDocs\("([a-z0-9-]+)"\)/g)) anchors.add((m[1] ?? m[2])!);
   }
   return anchors;
 }
