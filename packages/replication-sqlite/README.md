@@ -142,8 +142,10 @@ whose name sorts last, by byte order, among those with a `snapshot.db`, and appl
 `lastFrame` frames of the WAL lineage `lineage`, counted from the start of the WAL, in `segments`
 segments with `seq` from `0` to `segments - 1`, so a reader can check that a listing shows all of them
 before it relies on it; `at` is when the seal was written, in epoch milliseconds. Before `setup()`
-rebuilds a missing file, it lists the replica again, up to ten times half a second apart, while the
-listing of the newest generation lacks one of the sequence numbers its seal names, and refuses to start
+rebuilds a missing file, it reads the `sealed.json` of the newest generation from the blobstore, whether
+a listing shows it or not: teardown writes the last segment and the seal one after the other, so a
+listing that shows new keys late hides both. It lists the replica again, up to ten times half a second
+apart, while the listing of the newest generation lacks one of the sequence numbers its seal names, and refuses to start
 when it still lacks some: a restore without them would lose the frames they hold. It checks sequence
 numbers, not the number of keys, since an upload that failed after the store kept the object is retried
 under a key with the same `seq` and a later `time`. The error names the

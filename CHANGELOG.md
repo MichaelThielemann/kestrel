@@ -770,7 +770,9 @@ Net changes since 5.8.2.
   generation and the `nonce` of `origin.json`; until then every generation the process starts carries a copy of
   `origin.json`, so a start that stops earlier leaves the restore reported to the next one. A start that
   restores a generation with `applied.json` does not report the restore again. Whether a generation
-  carries either file is read from the blobstore, not from a listing. `./impl` exports `listReplica()`,
+  carries `sealed.json`, `origin.json` or `applied.json` is read from the blobstore, not from a listing,
+  since teardown writes the last segment and the seal one after the other and a listing that shows new
+  keys late hides both. `./impl` exports `listReplica()`,
   `listSealedReplica()`, `markerKey()`, `readOrigin()`, `readOriginNonce()`,
   `unplacedNewerGenerations()` and the types `Seal`, `Origin`, `Applied`, `PlacedRestore`,
   `ReplicaListing` and `SealedListingOptions`; `ReplicationOptions` gains `listedBefore`,

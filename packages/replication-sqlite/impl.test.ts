@@ -805,6 +805,48 @@ describe("replication/sqlite listing against the seal", () => {
     expect(listed).toMatchObject({ generation: "20260101T000000Z", missing: 0, withoutSnapshot: ["20260102T000000Z"] });
   });
 
+  it("reads the seal of the newest generation although the listing shows neither it nor the last segment", async () => {
+    const { blobs, generation } = sealedReplica();
+    const hidden = [`replica/gen/${generation}/sealed.json`, `replica/gen/${generation}/wal/000001-000002-20260101T000001Z.wal`];
+    const late: Blobstore = {
+      ...blobs,
+      async list(prefix) {
+        const listed = await blobs.list(prefix);
+        return listed.ok ? ok(listed.value.filter((info) => !hidden.includes(info.key))) : listed;
+      },
+    };
+    const waits: number[] = [];
+    const listed = expectOk(await listSealedReplica(late, "replica/", { attempts: 3, delayMs: 50, sleep: async (ms) => { waits.push(ms); } }));
+    expect(waits).toEqual([50, 50]);
+    expect(listed).toMatchObject({ generation, segments: 3, missing: 1 });
+  });
+
+  it("reads the seal again once the listing shows it after a read found none", async () => {
+    const { blobs, generation } = sealedReplica();
+    const sealKey = `replica/gen/${generation}/sealed.json`;
+    const lastKey = `replica/gen/${generation}/wal/000001-000002-20260101T000001Z.wal`;
+    const seal = blobs.blobs.get(sealKey);
+    let reads = 0;
+    const stale: Blobstore = {
+      ...blobs,
+      async get(key) {
+        if (key === sealKey) reads += 1;
+        return blobs.get(key);
+      },
+      async list(prefix) {
+        const listed = await blobs.list(prefix);
+        return listed.ok ? ok(listed.value.filter((info) => info.key !== lastKey)) : listed;
+      },
+    };
+    blobs.blobs.delete(sealKey);
+    blobs.blobs.set(`replica/gen/20260102T000000Z/origin.json`, { data: new TextEncoder().encode("{}"), contentType: "application/json" });
+    const listed = expectOk(await listSealedReplica(stale, "replica/", { attempts: 3, delayMs: 50, sleep: async () => {
+      if (seal) blobs.blobs.set(sealKey, seal);
+    } }));
+    expect(reads).toBe(2);
+    expect(listed).toMatchObject({ generation, segments: 3, missing: 1 });
+  });
+
   it("lists once when the newest generation has no seal", async () => {
     const { blobs, generation } = sealedReplica();
     blobs.blobs.delete(`replica/gen/${generation}/sealed.json`);

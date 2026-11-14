@@ -656,6 +656,47 @@ describe("replication/sqlite restore of a sealed generation", () => {
     expect(rowsIn(file)).toBe(5);
   });
 
+  async function teardownAfterUnsyncedRows(): Promise<{ file: string; blobs: ReturnType<typeof fakeBlobs>; written: string[] }> {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    const first = await startOn(file, blobs);
+    const app = new DatabaseSync(file);
+    app.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+    app.prepare("INSERT INTO t (v) VALUES ('synced')").run();
+    expect((await first.instance.sync()).ok).toBe(true);
+    for (let i = 0; i < 4; i++) app.prepare("INSERT INTO t (v) VALUES ('after the last sync')").run();
+    app.close();
+    const before = new Set(blobs.blobs.keys());
+    await module.teardown!(first.instance);
+    removeDatabase(file);
+    const written = [...blobs.blobs.keys()].filter((key) => !before.has(key));
+    expect(written).toEqual([expect.stringMatching(/\/wal\/000001-000000-\d{8}T\d{6}Z\.wal$/), expect.stringMatching(/\/sealed\.json$/)]);
+    return { file, blobs, written };
+  }
+
+  it("lists again while the listing shows neither the last WAL segment nor the seal of the newest generation, then restores every row", async () => {
+    const { file, blobs, written } = await teardownAfterUnsyncedRows();
+    const late = listingLate(blobs, written, 1);
+    const second = await startOn(file, late);
+    open.push(second.instance);
+    expect(late.lists()).toBe(2);
+    expect(rowsIn(file)).toBe(5);
+  });
+
+  it("refuses to restore while repeated listings show neither the last WAL segment nor the seal of the newest generation", async () => {
+    const { file, blobs, written } = await teardownAfterUnsyncedRows();
+    const late = listingLate(blobs, written, 100);
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      const started = module.setup(configSchema.parse({ file, restoreOnStart: true }), moduleDeps(late, freshDir(), Date.now())).then(() => null, (error: unknown) => error);
+      await vi.runAllTimersAsync();
+      expect(String(await started)).toMatch(/sealed\.json names 1 WAL segments, but repeated listings of replica\/gen\/[^/]+\/wal\/ show only 0/);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(existsSync(file)).toBe(false);
+  });
+
   it("refuses to restore while the listing lacks a WAL segment that the newest generation's seal names", async () => {
     const file = join(freshDir(), "live.db");
     const blobs = fakeBlobs();

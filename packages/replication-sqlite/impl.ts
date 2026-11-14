@@ -297,11 +297,12 @@ const segmentSeq = (key: string): number => Number(/\/wal\/\d+-(\d+)-[0-9TZ]+\.w
 
 /**
  * Lists the replica, and lists it again, up to `attempts` listings, while the listing of the newest generation
- * with a snapshot lacks a WAL segment its listed `sealed.json` names, or a generation that sorts after it shows
- * `origin.json` but no snapshot. `missing` is how many of the sequence numbers `0` to `segments - 1` the last
- * listing still lacks: 0 when it shows them all or when the generation has no listed seal. `withoutSnapshot`
- * names the generations after the newest one with a snapshot that the last listing shows with `origin.json`
- * alone.
+ * with a snapshot lacks a WAL segment its `sealed.json` names, or a generation that sorts after it shows
+ * `origin.json` but no snapshot. The seal is read from the blobstore whether or not a listing shows it, once
+ * per generation, and again when a later listing shows a seal the read did not find. `missing` is how many of
+ * the sequence numbers `0` to `segments - 1` the last listing still lacks: 0 when it shows them all or when the
+ * generation has no seal. `withoutSnapshot` names the generations after the newest one with a snapshot that
+ * the last listing shows with `origin.json` alone.
  */
 export async function listSealedReplica(blobs: Blobstore, prefix: string, options: SealedListingOptions = {}): Promise<Result<{ listing: ReplicaListing; generation: string | null; segments: number | null; missing: number; withoutSnapshot: string[] }, BlobstoreError>> {
   const attempts = Math.max(1, options.attempts ?? 10);
@@ -314,8 +315,8 @@ export async function listSealedReplica(blobs: Blobstore, prefix: string, option
     const listing = listed.value;
     const generation = [...new Set(listing.points.filter((p) => p.kind === "snapshot").map((p) => p.generation))].sort().at(-1) ?? null;
     let segments: number | null = null;
-    if (generation !== null && listing.markers.get(generation)?.has("sealed") === true) {
-      if (!seals.has(generation)) {
+    if (generation !== null) {
+      if (!seals.has(generation) || (seals.get(generation) === null && listing.markers.get(generation)?.has("sealed") === true)) {
         const read = await readSealedSegments(blobs, prefix, generation);
         if (isErr(read)) return read;
         seals.set(generation, read.value);
