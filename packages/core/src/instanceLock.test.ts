@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
-import { hostname, tmpdir } from "node:os";
+import { hostname, tmpdir, uptime } from "node:os";
 import { join } from "node:path";
 import { threadId, Worker } from "node:worker_threads";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -482,6 +482,28 @@ describe("acquireInstanceLock", () => {
     vi.advanceTimersByTime(70_000);
     lock.release();
     expect(existsSync(lockFile(file))).toBe(false);
+  });
+
+  it.runIf(ownBootId() !== "" && uptime() < 100 * 86_400)("takes over at once a lock with this hostname and another boot id whose last heartbeat lies more than a heartbeat interval before this machine started", () => {
+    const ttlMs = Math.ceil(3 * uptime() * 1000) + 3_600_000;
+    const bootedAt = Date.now() - uptime() * 1000;
+    const heartbeatAt = new Date(bootedAt - ttlMs / 3 - 60_000).toISOString();
+    const earlier = writeRecord({ host: hostname(), bootId: randomUUID(), startedAt: heartbeatAt, heartbeatAt, ttlMs });
+    take(file, { ttlMs });
+    expect(readRecord().instanceId).not.toBe(earlier.instanceId);
+    expect(readRecord().pid).toBe(process.pid);
+  });
+
+  it.runIf(ownBootId() !== "" && uptime() < 100 * 86_400)("refuses a lock with this hostname and another boot id whose last heartbeat lies after or within a heartbeat interval before this machine started", () => {
+    const ttlMs = Math.ceil(3 * uptime() * 1000) + 3_600_000;
+    const bootedAt = Date.now() - uptime() * 1000;
+    for (const at of [bootedAt + 1_000, bootedAt - ttlMs / 6]) {
+      const heartbeatAt = new Date(at).toISOString();
+      const other = writeRecord({ host: hostname(), bootId: randomUUID(), startedAt: heartbeatAt, heartbeatAt, ttlMs });
+      const err = thrownBy(() => take(file, { ttlMs }));
+      expect(err instanceof KestrelBootError ? err.code : err).toBe("instance-locked");
+      expect(readRecord()).toEqual(other);
+    }
   });
 
   it("shares a lock of this process that records another hostname, and records this machine's hostname from then on", () => {

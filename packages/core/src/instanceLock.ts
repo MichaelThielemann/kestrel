@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { hostname } from "node:os";
+import { hostname, uptime } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, sep } from "node:path";
 import { threadId } from "node:worker_threads";
 import type { ModuleHealth } from "./defineModule.ts";
@@ -173,20 +173,24 @@ export function instanceLockFile(file: string): string | undefined {
  * zombie or has another start time than the one the lock records. Without `/proc`, as on macOS and
  * Windows, only the PID is checked, so a lock whose PID went to a new process waits for the TTL. A
  * lock from another machine or another PID namespace, such as another container with the same
- * hostname, is judged by its heartbeat alone; so is a lock left from before a restart of this machine,
- * because the boot id changes. Any lock that is not taken over makes the call throw a
- * `KestrelBootError` with code `instance-locked` at once; the reason names that process's host,
- * PID and start time, the time from which the lock is taken over and the `optOut` setting. While
- * another process is in the middle of taking over or releasing the lock, the call waits for it for
- * up to 6 s and then throws `instance-locked` naming that process; a process on this machine and
- * in this PID namespace that died in that moment is noticed at once, a thread of this process, a
- * process elsewhere or, without `/proc`, a process whose PID went to a new process after 5 s. Two processes that clear such an abandoned takeover at the same
- * moment can, in a window of two system calls, both take the lock; the one overwritten reports
- * `restartRequired` at its next heartbeat. A container restarted after its process was killed
- * usually runs in a new PID namespace and fails to boot until the TTL after the previous run's
- * last heartbeat, and a service restarted after its machine restarted waits the same way, so a
- * restart policy has to retry for longer than the TTL; only when the kernel gave the new namespace
- * the id of the old one is the lock judged by PID and start time and taken over at once.
+ * hostname, is judged by its heartbeat alone. A lock with this hostname and another boot id, as a
+ * restart of this machine leaves it, is also taken over at once when its last heartbeat lies more
+ * than a third of its TTL before this machine started by the wall clock, since a live holder on
+ * another machine of that name would have renewed it since then. Any lock that is not taken over
+ * makes the call throw a `KestrelBootError` with code `instance-locked` at once; the reason names
+ * that process's host, PID and start time, the time from which the lock is taken over and the
+ * `optOut` setting. While another process is in the middle of taking over or releasing the lock,
+ * the call waits for it for up to 6 s and then throws `instance-locked` naming that process; a
+ * process on this machine and in this PID namespace that died in that moment is noticed at once,
+ * a thread of this process, a process elsewhere and, where the system cannot show its start time,
+ * a process whose PID is in use again after 5 s. Two processes that clear such an abandoned
+ * takeover at the same moment can, in a window of two system calls, both take the lock; the one
+ * overwritten reports `restartRequired` at its next heartbeat. A container restarted after its
+ * process was killed usually runs in a new PID namespace and fails to boot until the TTL after the
+ * previous run's last heartbeat, as does a service whose machine restarted within a third of the
+ * TTL after that heartbeat, so a restart policy has to retry for longer than the TTL. Only when the
+ * kernel gave the new namespace the id of the old one is the lock of a killed container judged by
+ * PID and start time and taken over at once.
  *
  * A process that ends through the end of its event loop, `process.exit()` or an uncaught
  * exception gives up the shares of its main thread on exit as `release()` does, and a worker
@@ -617,7 +621,7 @@ function judge(seen: Exclude<Seen, { kind: "absent" }>, ttlMs: number): "stale" 
   const { record } = seen;
   if (record.pid === process.pid && record.pidNamespace === PID_NAMESPACE && record.bootId === BOOT_ID && sameProcess(record)) return "this-process";
   if (!(Date.now() - Date.parse(record.heartbeatAt) <= Math.max(ttlMs, record.ttlMs))) return "stale";
-  if (!(sameKernel(record) && record.pidNamespace === PID_NAMESPACE)) return "taken";
+  if (!(sameKernel(record) && record.pidNamespace === PID_NAMESPACE)) return fromEarlierBoot(record) ? "stale" : "taken";
   if (record.pid === process.pid) return "stale";
   return runs(record.pid, record.processStart) ? "taken" : "stale";
 }
@@ -625,6 +629,11 @@ function judge(seen: Exclude<Seen, { kind: "absent" }>, ttlMs: number): "stale" 
 function sameKernel(record: { bootId: string; host: string }): boolean {
   if (BOOT_ID !== "" && record.bootId !== "") return record.bootId === BOOT_ID;
   return record.host === hostname();
+}
+
+function fromEarlierBoot(record: LockRecord): boolean {
+  if (BOOT_ID === "" || record.bootId === "" || record.bootId === BOOT_ID || record.host !== hostname()) return false;
+  return Date.parse(record.heartbeatAt) + record.ttlMs / 3 < Date.now() - uptime() * 1000;
 }
 
 function sameProcess(record: LockRecord): boolean {
