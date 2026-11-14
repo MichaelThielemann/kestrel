@@ -5,11 +5,12 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boot, defineModule, definePipeline, type Kestrel, type RunResult } from "@michaelthielemann/kestrel";
+import { renderFailed } from "@michaelthielemann/kestrel-contracts/helpers/renderer";
 import { RENDERER, type Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { KestrelConfigInput } from "@michaelthielemann/kestrel/defineConfig";
 import { loadConfig, loadModules, loadPipelines } from "@michaelthielemann/kestrel/load";
-import { ok } from "@michaelthielemann/kestrel/result";
+import { err, ok } from "@michaelthielemann/kestrel/result";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const trigger = { kind: "http", name: "test" } as const;
@@ -29,6 +30,7 @@ interface Gate {
 
 interface ReadingRenderer {
   calls: string[];
+  failPaths: Set<string>;
   delayMs: number;
   hold(path: string): Gate;
   instance?: Kestrel;
@@ -61,6 +63,7 @@ function readingRendererModule(state: ReadingRenderer) {
     formats: () => ["html"],
     async render(input) {
       state.calls.push(input.path);
+      if (state.failPaths.has(input.path)) return err(renderFailed("template threw"));
       const locale = input.locale ?? "de";
       const page = state.via !== undefined ? await state.via(input.path) : await read("resolvePage", { params: { path: input.path.slice(1) } });
       const settings = await read("getSettings", { payload: { locale } });
@@ -103,7 +106,7 @@ function readingRendererModule(state: ReadingRenderer) {
 interface Options {
   mode: Mode;
   lanes?: Record<string, string[]>;
-  relayPipelines?: string[];
+  relayPipelines?: string[] | "all";
   pollMs?: number;
   http?: boolean;
 }
@@ -150,7 +153,7 @@ async function bootExample(options: Options): Promise<Example> {
     if (queue && m.use === "@michaelthielemann/kestrel-events-direct") return { use: "@michaelthielemann/kestrel-events-queue", config: { pollMs: options.pollMs ?? 10, maxAttempts: 3, backoffSeconds: [1], relayMs: 5000, relayPipelines: options.relayPipelines ?? ["publishPage", "unpublishPage"], delayMs: { refreshIndexes: 1000, refreshLlms: 3000 }, lanes: options.lanes ?? { pages: ["republishOutput", "refreshLlms"], indexes: ["refreshIndexes"], variants: ["generateImageVariants"] } } };
     return m;
   });
-  const reading: ReadingRenderer = { calls: [], delayMs: 0, hold: () => ({ reached: Promise.resolve(), release() {} }) };
+  const reading: ReadingRenderer = { calls: [], failPaths: new Set(), delayMs: 0, hold: () => ({ reached: Promise.resolve(), release() {} }) };
   const loaded = await loadModules(root, { ...configInput, modules: modulesConfig.filter((m) => m.use !== "renderer/reading") });
   const readingModule = readingRendererModule(reading);
   let next = 0;
@@ -528,8 +531,73 @@ describe("examples/minimal save response: publishing in its own lane", () => {
     expect(events.pipelines).toContainEqual(expect.objectContaining({ pipeline: "publishPage", status: "queued" }));
   }, 30_000);
 
+  it("a lane alone is enough: the relay never claims a lane row, whatever relayPipelines says", async () => {
+    const { answeredFirst, response } = await saveWhileRenderIsHeld({ lanes, relayPipelines: "all" });
+    expect(answeredFirst).toBe(true);
+    expect(boundaryCast<{ status: string }>(response._events, "json").status).toBe("pending");
+  }, 30_000);
+
+  it("a pipeline left out of relayPipelines is answered first from the main lane as well", async () => {
+    const { answeredFirst } = await saveWhileRenderIsHeld({ relayPipelines: [] });
+    expect(answeredFirst).toBe(true);
+  }, 30_000);
+
   it("control: with the relay delivering publishPage, the render runs before the response", async () => {
     const { answeredFirst } = await saveWhileRenderIsHeld({});
     expect(answeredFirst).toBe(false);
+  }, 30_000);
+
+  it("records a failed render on the status row without a retry or a dead letter and keeps the live output", async () => {
+    const example = await bootExample({ mode: "queue", lanes, relayPipelines: [], pollMs: 10 });
+    try {
+      const token = boundaryCast<{ token: string }>(await call(example, "login", { body: { username: "admin", password: "kestrel-demo" } }), "json").token;
+      await call(example, "setSettings", { token, body: { title: "Festival", locale: "de" } });
+      const id = String((await call(example, "createPage", { token, body: { slug: "schnell", title: "Alt", status: "published" } })).id);
+      await settled(example);
+      expect(page(example, "/schnell")).toContain("<h1>Alt</h1>");
+      const rendersBefore = example.reading.calls.filter((path) => path === "/schnell").length;
+      example.reading.failPaths.add("/schnell");
+      await call(example, "updatePage", { token, params: { id }, body: { title: "Neu", status: "published" } });
+      await settled(example);
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      const status = boundaryCast<Array<{ locale: string; state: string }>>(await call(example, "pagePublishStatus", { token, params: { id } }), "json");
+      expect(status.find((row) => row.locale === "de")?.state).toBe("error");
+      expect(example.reading.calls.filter((path) => path === "/schnell").length).toBe(rendersBefore + 1);
+      expect(page(example, "/schnell")).toContain("<h1>Alt</h1>");
+      const queue = boundaryCast<{ dead: number; pending: number }>(await call(example, "queueStatus"), "json");
+      expect(queue.dead).toBe(0);
+      expect(queue.pending).toBe(0);
+    } finally {
+      await example.dispose();
+    }
+  }, 30_000);
+
+  it("reports a locale as published after a later save while the render of the earlier save is still the one that was written", async () => {
+    const example = await bootExample({ mode: "queue", lanes, relayPipelines: [], pollMs: 10 });
+    try {
+      const token = boundaryCast<{ token: string }>(await call(example, "login", { body: { username: "admin", password: "kestrel-demo" } }), "json").token;
+      await call(example, "setSettings", { token, body: { title: "Festival", locale: "de" } });
+      const id = String((await call(example, "createPage", { token, body: { slug: "schnell", title: "Alt", status: "published" } })).id);
+      await settled(example);
+      const first = example.reading.hold("/schnell");
+      await call(example, "updatePage", { token, params: { id }, body: { title: "Eins", status: "published" } });
+      await first.reached;
+      const second = await call(example, "updatePage", { token, params: { id }, body: { title: "Zwei", status: "published" } });
+      const savedAt = Number(second.updatedAt);
+      const next = example.reading.hold("/schnell");
+      first.release();
+      await next.reached;
+      const status = boundaryCast<Array<{ locale: string; state: string; stale: boolean; publishedAt: number }>>(await call(example, "pagePublishStatus", { token, params: { id } }), "json");
+      const de = status.find((row) => row.locale === "de");
+      expect(de?.state).toBe("live");
+      expect(de?.publishedAt).toBeGreaterThan(savedAt);
+      expect(page(example, "/schnell")).toContain("<h1>Eins</h1>");
+      const queue = boundaryCast<{ pending: number; running: number }>(await call(example, "queueStatus"), "json");
+      expect(queue.pending + queue.running).toBeGreaterThan(0);
+      next.release();
+      await pollUntil(() => (page(example, "/schnell") ?? "").includes("<h1>Zwei</h1>"));
+    } finally {
+      await example.dispose();
+    }
   }, 30_000);
 });
