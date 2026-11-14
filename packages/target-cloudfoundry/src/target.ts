@@ -69,7 +69,8 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     if (org !== config.org || space !== config.space) throw new OpsError(`cf targets org ${org || "(none)"} and space ${space || "(none)"}, the environment names org ${config.org} and space ${config.space}; run cf target -o ${config.org} -s ${config.space}`, 2, "target");
     const found = await run(["app", app, "--guid"]);
     const guid = found.stdout.trim();
-    if (found.code !== 0 || !GUID.test(guid)) throw new OpsError(`the space ${config.org}/${config.space} has no app ${app} (cf app ${app} --guid exited with ${found.code})`, 2, "target");
+    if (found.code !== 0) throw new OpsError(`cf app ${app} --guid exited with ${found.code}: ${config.org}/${config.space} holds no app ${app}, or the cf session has expired (log in again with cf login)`, 2, "target");
+    if (!GUID.test(guid)) throw new OpsError(`cf app ${app} --guid answered no app guid`, 2, "target");
     return guid;
   };
 

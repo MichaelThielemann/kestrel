@@ -245,6 +245,20 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     expect(cf.actions).toEqual([]);
   });
 
+  it("runs cf without trace output, which would come before the answer on standard output", async () => {
+    const t = await target({}, { CF_TRACE: "true" });
+    expect(await t.status()).toEqual({ state: "started", instances: 1 });
+    expect(cf.traces.every((trace) => trace === "false")).toBe(true);
+  });
+
+  it("names an expired cf session next to a missing app when cf target answers but cf app --guid fails", async () => {
+    cf.sessionExpired = true;
+    const error = await failure((await target()).status());
+    expect(error.exitCode).toBe(2);
+    expect(error.message).toContain(`cf app ${API.name} --guid exited with 1`);
+    expect(error.message).toContain("cf login");
+  });
+
   it("refuses with exit 2 an app the space does not hold", async () => {
     const error = await failure((await target({ app: "missing-app" })).status());
     expect(error.exitCode).toBe(2);

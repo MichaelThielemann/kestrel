@@ -13,12 +13,12 @@ export type CfRunner = (args: readonly string[], options?: { timeoutMs?: number 
 
 const MAX_OUTPUT = 32 * 1024 * 1024;
 
-/** The runner of the `cf` found on `PATH` in `env`, with colored output switched off. */
+/** The runner of the `cf` found on `PATH` in `env`, with colored and trace output switched off. */
 export function cfRunner(env: NodeJS.ProcessEnv): CfRunner {
   return (args, options = {}) => {
     const timeoutMs = options.timeoutMs ?? 120_000;
     return new Promise((resolve, reject) => {
-      execFile("cf", [...args], { env: { ...env, CF_COLOR: "false" }, timeout: timeoutMs, maxBuffer: MAX_OUTPUT, encoding: "utf8" }, (error, stdout) => {
+      execFile("cf", [...args], { env: { ...env, CF_COLOR: "false", CF_TRACE: "false" }, timeout: timeoutMs, maxBuffer: MAX_OUTPUT, encoding: "utf8" }, (error, stdout) => {
         if (error === null) resolve({ code: 0, stdout });
         else if (error.code === "ENOENT") reject(new OpsError("the cf CLI is not on PATH; install it and log in with cf login", 2, "target"));
         else if (error.killed === true) reject(new OpsError(`cf ${args[0] ?? ""} did not finish within ${Math.round(timeoutMs / 1000)} s`, 1, "target"));
