@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { linkSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import type { ModuleHealth } from "./defineModule.ts";
@@ -20,7 +20,11 @@ export interface InstanceLockOptions {
 
 /** One holder's share of the instance lock on a database file. */
 export interface InstanceLock {
-  /** Gives up this holder's share; the lock file is removed with the last share in the process. Calling it again does nothing. */
+  /**
+   * Gives up this holder's share; the lock file is removed with the last share in the process.
+   * Calling it again does nothing. It never throws: a lock file it cannot remove is taken over
+   * once its heartbeat is older than the TTL, or at once on this host when the process has ended.
+   */
   release(): void;
   /**
    * The lock's state, synchronous and without I/O. `ok: false` with `restartRequired: true` once a
@@ -89,8 +93,9 @@ function pidNamespace(): string {
  * The lock file for a database file: the file's real path with `.instance` appended, resolved
  * through symlinks, including ones whose target does not exist yet, so that every spelling of
  * one database names the same lock before and after the database file is created. The lock also
- * writes short-lived siblings whose names start with this path. None of them belongs in a
- * replica, snapshot or backup of the database.
+ * writes short-lived siblings whose names start with this path; a process that ends abruptly
+ * can leave one behind, and the next process to take the lock removes those older than the TTL.
+ * None of them belongs in a replica, snapshot or backup of the database.
  */
 export function instanceLockFile(file: string): string {
   return `${canonicalPath(file)}.instance`;
@@ -159,16 +164,22 @@ function take(file: string, lockPath: string, opts: InstanceLockOptions): Holder
   mkdirSync(dirname(lockPath), { recursive: true });
   const now = new Date().toISOString();
   const record: LockRecord = { instanceId: randomUUID(), pid: process.pid, pidNamespace: PID_NAMESPACE, host: hostname(), startedAt: now, heartbeatAt: now };
+  const owned = claim(file, lockPath, record, ttlMs, opts);
+  sweep(lockPath, ttlMs);
+  return hold(lockPath, owned, opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
+}
+
+function claim(file: string, lockPath: string, record: LockRecord, ttlMs: number, opts: InstanceLockOptions): LockRecord {
   const content = JSON.stringify(record);
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-    if (createExclusive(lockPath, content)) return hold(lockPath, record, opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
+    if (createExclusive(lockPath, content)) return record;
     const seen = readLock(lockPath);
     if (seen.kind === "absent") continue;
     const verdict = judge(seen, ttlMs);
     if (verdict === "taken") throw new KestrelBootError(opts.module, refusal(file, lockPath, seen, ttlMs, opts.optOut ?? DEFAULT_OPT_OUT), "instance-locked");
-    if (verdict === "this-process" && seen.kind === "held") return hold(lockPath, { ...seen.record }, opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
+    if (verdict === "this-process" && seen.kind === "held") return { ...seen.record };
     const outcome = guarded(lockPath, () => replaceIf(lockPath, seen.raw, content));
-    if (outcome === "replaced" && ownedBy(lockPath, record.instanceId)) return hold(lockPath, record, opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
+    if (outcome === "replaced" && ownedBy(lockPath, record.instanceId)) return record;
     if (outcome === BUSY) pause(RETRY_PAUSE_MS);
   }
   throw new KestrelBootError(opts.module, `${file}: could not take the instance lock ${lockPath} because other processes kept changing it; retry once they have settled`, "instance-locked");
@@ -223,7 +234,35 @@ function drop(holder: Holder): void {
   const lost = !holder.health.ok;
   stop(holder);
   holders.delete(holder.lockPath);
-  if (!lost) guarded(holder.lockPath, () => removeIfOwned(holder.lockPath, holder.record.instanceId));
+  if (lost) return;
+  try {
+    guarded(holder.lockPath, () => removeIfOwned(holder.lockPath, holder.record.instanceId));
+  } catch {
+    return;
+  }
+}
+
+function sweep(lockPath: string, ttlMs: number): void {
+  const dir = dirname(lockPath);
+  const leftover = new RegExp(`^${escapeRegExp(basename(lockPath))}\\.(takeover\\.)?[0-9a-f-]{36}\\.(tmp|stale)$`);
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names.filter((n) => leftover.test(n))) {
+    const path = join(dir, name);
+    try {
+      if (Date.now() - statSync(path).mtimeMs > ttlMs) rmSync(path, { force: true });
+    } catch {
+      continue;
+    }
+  }
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function removeIfOwned(lockPath: string, instanceId: string): void {

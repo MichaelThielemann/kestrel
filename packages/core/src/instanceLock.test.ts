@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
@@ -353,6 +353,28 @@ describe("acquireInstanceLock", () => {
     vi.advanceTimersByTime(10_000);
     expect(readRecord().instanceId).toBe(id);
     expect(lock.health()).toEqual({ ok: true });
+  });
+
+  it("does not throw from release() when the lock file cannot be removed", () => {
+    const lock = take(file);
+    chmodSync(dir, 0o555);
+    try {
+      expect(() => lock.release()).not.toThrow();
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+  });
+
+  it("removes leftovers of earlier attempts older than the TTL once it holds the lock, and keeps younger ones and unrelated files", () => {
+    const lockPath = instanceLockFile(file);
+    const old = [`${lockPath}.${randomUUID()}.tmp`, `${lockPath}.${randomUUID()}.stale`, `${lockPath}.takeover.${randomUUID()}.tmp`];
+    const kept = [`${lockPath}.${randomUUID()}.tmp`, `${lockPath}.notes`, join(dir, `other.db.instance.${randomUUID()}.tmp`)];
+    const past = new Date(Date.now() - 120_000);
+    for (const path of [...old, ...kept]) writeFileSync(path, "");
+    for (const path of [...old, ...kept.slice(1)]) utimesSync(path, past, past);
+    take(file);
+    expect(old.filter((path) => existsSync(path))).toEqual([]);
+    expect(kept.filter((path) => existsSync(path))).toEqual(kept);
   });
 
   it("runs the heartbeat on an unref'd timer and stops it on the last release", () => {
