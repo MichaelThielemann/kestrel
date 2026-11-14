@@ -34,7 +34,10 @@ whether it writes blobs, and `detect` (old form present?), `plan` (counts withou
 authoritative row or blob) and an optional `verify` (default: `detect` finds nothing).
 `runShapeMigrations` runs them in dependency order and by `introducedIn`, and writes the module's
 row in `kestrel_storage_versions` only after every pending migration has been verified; a rerun
-after an abort continues, a second run writes nothing. Data newer than the module's version, or
+after an abort continues, a second run writes nothing. With `apply: false` it only detects and
+plans and writes no version row unless `recordWhenCurrent` is set; `detect` and `plan` still prepare
+the collections they read, which adds the release's new fields, so a plan of data an older release
+still writes runs on a copy. Data newer than the module's version, or
 older than it converts, is left alone and reported (`update through <major>.x first`). Blobs are
 reached through an injected `BlobOps` (`copy`, `head`); `blobOpsOf(blobstore)` builds one from any
 `blobstore@1` by reading and writing the bytes, a runner with server-side copies passes its own.

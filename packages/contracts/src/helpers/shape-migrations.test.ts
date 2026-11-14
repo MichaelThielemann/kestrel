@@ -217,11 +217,26 @@ describe("shape-migrations: the run loop", () => {
     expect(counter.writes).toBe(0);
   });
 
-  it("records the version row on data that needs no migration", async () => {
+  it("records the version row on data that needs no migration when asked to", async () => {
     const db = createFakePersistence();
-    const report = expectOk(await runShapeMigrations({ storages: [storage("things/default", [moveThings()])], db, blobs: memoryBlobs(), apply: false, blobWrites: false }));
+    const report = expectOk(await runShapeMigrations({ storages: [storage("things/default", [moveThings()])], db, blobs: memoryBlobs(), apply: false, blobWrites: false, recordWhenCurrent: true }));
     expect(report.modules[0]!.state).toBe("recorded");
     expect(expectOk(await storageVersionOf(db, "things/default"))).toMatchObject({ version: "6.0.0", migrations: ["things:new-keys"] });
+  });
+
+  it("writes no version row when apply is off and nothing is pending", async () => {
+    const db = createFakePersistence();
+    const counter = { writes: 0, crashAt: null };
+    const report = expectOk(await runShapeMigrations({ storages: [storage("things/default", [moveThings()])], db: counting(db, DB_WRITES, counter), blobs: memoryBlobs(), apply: false, blobWrites: true }));
+    expect(report.modules[0]).toMatchObject({ state: "unrecorded", stored: null, migrations: [{ id: "things:new-keys", state: "not-needed" }] });
+    expect(counter.writes).toBe(0);
+    expect(expectOk(await storageVersionOf(db, "things/default"))).toBeNull();
+  });
+
+  it("records the version row through the start-up guard in check mode on data that needs no migration", async () => {
+    const db = createFakePersistence();
+    expect(expectOk(await guardStorage(storage("things/default", [moveThings()]), { db, blobs: memoryBlobs(), mode: "check" })).state).toBe("recorded");
+    expect(expectOk(await storageVersionOf(db, "things/default"))).toMatchObject({ version: "6.0.0" });
   });
 
   it("runs only the migrations introduced after the stored version", async () => {
@@ -257,6 +272,15 @@ describe("shape-migrations: the run loop", () => {
     expectOk(await db.createOne(STORAGE_VERSIONS, { name: "someone else's row" }));
     const failed = expectErr(await runShapeMigrations({ storages: [], db, blobs: memoryBlobs(), apply: true, blobWrites: true }), "STORAGE_MIGRATION_FAILED");
     expect(failed.message).toMatch(/another component uses this collection name/);
+  });
+
+  it("fails instead of throwing when a version row holds a version of another form", async () => {
+    const db = createFakePersistence();
+    expectOk(await db.ensureCollection(STORAGE_VERSIONS, STORAGE_VERSIONS_SCHEMA));
+    expectOk(await db.createOne(STORAGE_VERSIONS, { module: "things/default", version: "6.0", migrations: [], updatedAt: 1 }));
+    const storages = [storage("things/default", [moveThings()])];
+    expect(expectErr(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true }), "STORAGE_MIGRATION_FAILED").message).toMatch(/not a storage version row; another component uses this collection name/);
+    expectErr(await guardStorage(storages[0]!, { db, blobs: memoryBlobs(), mode: "check" }), "STORAGE_MIGRATION_FAILED");
   });
 });
 

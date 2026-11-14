@@ -72,7 +72,7 @@ export interface MigrationNote {
   reason: string;
 }
 
-/** What a migration would do, counted without writing anything. */
+/** What a migration would do, counted without writing a row or a blob. */
 export interface MigrationPlan {
   counts: Record<string, number>;
   notes: MigrationNote[];
@@ -144,10 +144,11 @@ export interface MigrationRun {
 
 /**
  * `current`: the version row already matched. `recorded`: nothing was pending and the row was written.
+ * `unrecorded`: nothing was pending, and the run only planned, so the row is unchanged.
  * `migrated`: migrations were applied and the row was written. `pending`: migrations wait, the row is unchanged.
  * `too-old` / `too-new`: the stored version is outside what this release reads, nothing ran.
  */
-export type ModuleState = "current" | "recorded" | "migrated" | "pending" | "too-old" | "too-new";
+export type ModuleState = "current" | "recorded" | "unrecorded" | "migrated" | "pending" | "too-old" | "too-new";
 
 export interface ModuleRun {
   module: string;
@@ -161,13 +162,21 @@ export interface RunReport {
   modules: ModuleRun[];
 }
 
-/** What {@link runShapeMigrations} runs. `apply: false` only detects and plans. `blobWrites: false` leaves every migration with `blobWrites` pending. */
+/**
+ * What {@link runShapeMigrations} runs. `apply: false` only detects and plans, and writes no row or blob unless
+ * `recordWhenCurrent` is set. `blobWrites: false` leaves every migration with `blobWrites` pending. `detect` and `plan`
+ * still prepare the collections they read, because `persistence@1` reads only a collection it was given a schema for;
+ * on data in an older shape that adds the release's new nullable fields and unique indexes, so a plan of data that a
+ * running older release still writes belongs on a copy.
+ */
 export interface RunOptions {
   storages: readonly ModuleStorage[];
   db: Persistence;
   blobs: Blobstore;
   blobOps?: BlobOps;
   apply: boolean;
+  /** With `apply: false`, still write the version row of a module none of whose migrations found anything; the start-up guard sets it. */
+  recordWhenCurrent?: boolean;
   blobWrites: boolean;
   answers?: Readonly<Record<string, string>>;
   now?: () => number;
@@ -177,6 +186,7 @@ export interface RunOptions {
 export type StorageMigrationsMode = "check" | "apply";
 
 const PAGE = 200;
+const VERSION = /^(\d+)\.(\d+)\.(\d+)/;
 
 /** A `STORAGE_MIGRATION_FAILED` error for a migration's `apply` or `verify`. */
 export function storageMigrationFailed(message: string, details: Record<string, unknown> = {}): ShapeMigrationError {
@@ -188,7 +198,7 @@ function refused(message: string, details: Record<string, unknown>): ShapeMigrat
 }
 
 function parts(version: string): [number, number, number] {
-  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
+  const match = VERSION.exec(version);
   if (match === null) throw new Error(`shape-migrations: "${version}" is not a version of the form <major>.<minor>.<patch>`);
   return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
@@ -275,12 +285,12 @@ export function orderMigrations(migrations: readonly ShapeMigration[]): ShapeMig
 }
 
 function isStorageVersion(row: Document): row is StorageVersion {
-  return typeof row.module === "string" && typeof row.version === "string" && Array.isArray(row.migrations) && row.migrations.every((m) => typeof m === "string");
+  return typeof row.module === "string" && typeof row.version === "string" && VERSION.test(row.version) && Array.isArray(row.migrations) && row.migrations.every((m) => typeof m === "string");
 }
 
 /**
- * Prepares {@link STORAGE_VERSIONS} and returns its rows by module. A row without a string `module`, a version string and a
- * list of migration ids was not written by this helper: the collection name is taken, and the run fails instead of guessing.
+ * Prepares {@link STORAGE_VERSIONS} and returns its rows by module. A row without a string `module`, a `<major>.<minor>.<patch>`
+ * version and a list of migration ids was not written by this helper: the collection name is taken, and the run fails instead of guessing.
  */
 export async function readStorageVersions(db: Persistence): Promise<Result<Map<string, StorageVersion>, ShapeMigrationError>> {
   const prepared = await db.ensureCollection(STORAGE_VERSIONS, STORAGE_VERSIONS_SCHEMA);
@@ -317,7 +327,7 @@ function contextOf(options: RunOptions): MigrationContext {
  * than `version`, or older than `convertsFrom`, leaves the module untouched (`too-new` / `too-old`). Otherwise every
  * migration introduced after the stored version (all of them when there is no row) is detected and, when allowed,
  * planned, applied and verified. The version row is written only after every pending migration of the module has
- * been verified. A failing `apply` or `verify` ends the run with `Err`; rerunning continues where it stopped.
+ * been verified, and with `apply: false` only when `recordWhenCurrent` is set and nothing was pending. A failing `apply` or `verify` ends the run with `Err`; rerunning continues where it stopped.
  */
 export async function runShapeMigrations(options: RunOptions): Promise<Result<RunReport, ShapeMigrationError>> {
   const ctx = contextOf(options);
@@ -377,6 +387,10 @@ export async function runShapeMigrations(options: RunOptions): Promise<Result<Ru
       unfinished.add(storage.module);
       continue;
     }
+    if (!options.apply && options.recordWhenCurrent !== true) {
+      run.state = "unrecorded";
+      continue;
+    }
     const written = await writeVersion(options.db, row, storage.module, storage.version, run.migrations.map((m) => m.id), ctx.now());
     if (isErr(written)) return written;
     run.state = applied.length > 0 ? "migrated" : "recorded";
@@ -410,7 +424,7 @@ export function refusalOf(run: ModuleRun, mode: StorageMigrationsMode): string |
  * the migration ids and the command that runs them.
  */
 export async function guardStorage(storage: ModuleStorage, options: { db: Persistence; blobs: Blobstore; mode: StorageMigrationsMode; now?: () => number }): Promise<Result<ModuleRun, ShapeMigrationError>> {
-  const report = await runShapeMigrations({ storages: [storage], db: options.db, blobs: options.blobs, apply: options.mode === "apply", blobWrites: false, ...(options.now === undefined ? {} : { now: options.now }) });
+  const report = await runShapeMigrations({ storages: [storage], db: options.db, blobs: options.blobs, apply: options.mode === "apply", recordWhenCurrent: true, blobWrites: false, ...(options.now === undefined ? {} : { now: options.now }) });
   if (isErr(report)) return report;
   const run = report.value.modules[0]!;
   const refusal = refusalOf(run, options.mode);
