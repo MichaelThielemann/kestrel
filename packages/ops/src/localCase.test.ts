@@ -7,7 +7,7 @@ import { MemoryBucket, memoryStore } from "./memoryStore.ts";
 const filesystem = vi.hoisted(() => ({ caseInsensitive: false }));
 
 vi.mock("node:fs", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:fs")>();
+  const actual = await importOriginal<typeof fs>();
   const sameName = (path: fs.PathLike): boolean => {
     const dir = dirname(String(path));
     const name = basename(String(path)).toLowerCase();

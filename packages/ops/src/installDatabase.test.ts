@@ -7,7 +7,7 @@ import { localTarget } from "./target.ts";
 const copies = vi.hoisted(() => ({ cutAfter: null as number | null }));
 
 vi.mock("node:fs", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:fs")>();
+  const actual = await importOriginal<typeof fs>();
   return {
     ...actual,
     copyFileSync: (source: fs.PathLike, target: fs.PathLike, mode?: number) => {

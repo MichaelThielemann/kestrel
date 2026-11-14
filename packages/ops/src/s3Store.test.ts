@@ -14,6 +14,7 @@ function laggingBucket(): { objects: Map<string, FakeObject>; sent: string[] } {
   const objects = new Map<string, FakeObject>();
   const sent: string[] = [];
   const notFound = (): Error => Object.assign(new Error("NotFound"), { name: "NotFound", $metadata: { httpStatusCode: 404 } });
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises -- send also has callback overloads; the store only awaits its promise form
   vi.spyOn(S3Client.prototype, "send").mockImplementation(async (command: unknown) => {
     const name = boundaryCast<{ constructor: { name: string } }>(command, "host").constructor.name;
     const input = boundaryCast<{ input: { Key?: string; CopySource?: string } }>(command, "host").input;
