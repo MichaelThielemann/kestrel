@@ -26,20 +26,31 @@ export interface ObjectInfo {
  * Failures of `copy`: a stale or rewritten source (`PRECONDITION_FAILED`) and a destination that does not match
  * the source after the copy (`VERIFY_FAILED`).
  *
- * `PRECONDITION_FAILED` carries `details.expectedEtag`, `details.foundEtag` (`null` when none was read),
+ * `PRECONDITION_FAILED` carries `details.expectedEtag`, `details.foundEtag` (`null` when the source is missing),
  * `details.reason` (`"store-refused"`, `"source-changed"` or `"source-missing"`) and `details.destinationWritten`.
  * When the destination was written and then found invalid, `details.destinationRemoved` says whether the
  * cleanup succeeded. `VERIFY_FAILED` carries the expected and actual size and ETag and `details.destinationRemoved`.
+ *
+ * A `TRANSIENT` that follows a written destination (the source or the destination could not be read back)
+ * carries `details.destinationWritten: true` and `details.destinationRemoved`; the destination is unverified when
+ * it was not removed. A `TRANSIENT` from the copy request itself carries no details, and the destination may exist.
  */
 export type S3CopyError = KestrelError<"NOT_FOUND" | "TRANSIENT" | "PAYLOAD_TOO_LARGE" | "PRECONDITION_FAILED" | "VERIFY_FAILED">;
 
 export interface CopyOptions {
   /**
    * The ETag the caller listed for the source. The copy is refused when the source no longer has it. A store that
-   * enforces `x-amz-copy-source-if-match` writes nothing then. For a store that ignores the header or answers 501,
-   * the source is read again after the copy, and a destination written from a changed source is removed.
+   * enforces `x-amz-copy-source-if-match` writes nothing then. For a store that ignores the header, answers 501
+   * or 400, or refuses the condition although the source is unchanged, the copy is made without the header, the
+   * source is read again afterwards and a destination written from a changed source is removed.
    */
   ifMatch?: string;
+  /**
+   * How `ifMatch` is checked. `"header"` (default) lets the store check it and falls back to comparing when the
+   * store cannot. `"compare"` never sends the header and only compares the source's ETag before and after the
+   * copy; pass it when `probeCapabilities` did not report `copySourceIfMatch` as supported.
+   */
+  sourceCheck?: "header" | "compare";
 }
 
 export interface CopyResult {
@@ -94,7 +105,11 @@ export interface Capabilities {
 }
 
 export interface S3Admin {
-  /** Every object under `prefix` with size, ETag and server modification time, ordered by key. Keys are relative to the configured `prefix`. */
+  /**
+   * Every object under `prefix` with size, ETag and server modification time, ordered by key. Keys are relative to
+   * the configured `prefix`. A store that reports a truncated page without a continuation token, or the same token
+   * twice, makes it throw instead of answering a partial list.
+   */
   listDetailed(prefix: string): Promise<Result<ObjectInfo[], S3AdminError>>;
   /**
    * Metadata of one object, or `Ok(null)` when the key does not exist. `lastModified` has whole-second precision
@@ -106,10 +121,11 @@ export interface S3Admin {
    * Copies one object inside the bucket on the server and checks the result: the destination must report the
    * source's size and the ETag the copy returned, read again while an overwritten destination still looks stale.
    * With `ifMatch` the copy is refused when the source changed, both by the store (`x-amz-copy-source-if-match`)
-   * and, for stores that ignore or reject that header, by comparing the source's ETag before and after the copy.
-   * A destination written from a source that changed, or that fails verification, is removed again; an object that
-   * existed under `to` before is overwritten and removed too, so copy to keys that are free. A source that changed
-   * and returned to its earlier content during the copy cannot be told apart. Sources above 5 GiB are refused.
+   * and, for stores that ignore, reject or always refuse that header (see `CopyOptions.sourceCheck`), by comparing
+   * the source's ETag before and after the copy. A destination written from a source that changed, or that fails
+   * verification, is removed again; an object that existed under `to` before is overwritten and removed too, so
+   * copy to keys that are free. A source that changed and returned to its earlier content during the copy cannot
+   * be told apart. Sources above 5 GiB are refused. Copying an object onto itself throws.
    */
   copy(from: string, to: string, options?: CopyOptions): Promise<Result<CopyResult, S3CopyError>>;
   /**
@@ -229,9 +245,10 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
   function listDetailed(prefix: string): Promise<Result<ObjectInfo[], S3AdminError>> {
     return guarded(`list ${JSON.stringify(prefix)}`, async () => {
       const out: ObjectInfo[] = [];
+      const seenTokens = new Set<string>();
       let token: string | undefined;
       do {
-        const page = boundaryCast<{ Contents?: ListedItem[]; NextContinuationToken?: string }>(
+        const page = boundaryCast<{ Contents?: ListedItem[]; IsTruncated?: boolean; NextContinuationToken?: string }>(
           await client.send(new ListObjectsV2Command({ Bucket: config.bucket, Prefix: config.prefix + prefix, ContinuationToken: token })),
           "host",
         );
@@ -240,7 +257,15 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
           out.push({ key: relativeKey(item.Key), size: item.Size ?? 0, etag: normalizeEtag(item.ETag ?? ""), lastModified: item.LastModified?.getTime() ?? null });
         }
         token = page.NextContinuationToken;
-      } while (token);
+        if (token === undefined || token === "") {
+          if (page.IsTruncated === true) throw new Error(`blobstore/s3 admin: the store reported a truncated listing of ${JSON.stringify(prefix)} without a continuation token`);
+          token = undefined;
+        } else if (seenTokens.has(token)) {
+          throw new Error(`blobstore/s3 admin: the store repeated a continuation token while listing ${JSON.stringify(prefix)}`);
+        } else {
+          seenTokens.add(token);
+        }
+      } while (token !== undefined);
       return out.sort(compareKeys);
     });
   }
@@ -270,7 +295,7 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
       try {
         await remove(key);
       } catch (cause) {
-        if (!isTransient(cause)) denied ??= { cause };
+        if (!isTransient(cause) && !isNotFound(cause)) denied ??= { cause };
       }
     }
     if ("failure" in outcome) throw outcome.failure;
@@ -366,6 +391,11 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
     });
   }
 
+  async function transientAfterWrite(error: S3AdminError, destination: string): Promise<S3CopyError> {
+    const destinationRemoved = await tryRemove(destination);
+    return { ...error, details: { destinationWritten: true, destinationRemoved } };
+  }
+
   return {
     close() {
       if (client instanceof S3Client) client.destroy();
@@ -378,6 +408,7 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
     probeCapabilities,
 
     async copy(from, to, copyOptions = {}) {
+      if (fullKey(from) === fullKey(to)) throw new Error(`blobstore/s3 admin: cannot copy ${JSON.stringify(from)} onto itself`);
       const source = await head(from);
       if (!source.ok) return source;
       if (source.value === null) return err(failure("NOT_FOUND", `blobstore/s3 admin: ${JSON.stringify(from)} not found`));
@@ -399,14 +430,26 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
           MetadataDirective: "COPY",
           ...(conditionHeader && ifMatch !== undefined ? { CopySourceIfMatch: `"${ifMatch}"` } : {}),
         }));
+      const checkedByStore = ifMatch !== undefined && copyOptions.sourceCheck !== "compare";
+      const sendChecked = async (): Promise<{ response: unknown } | { refusal: S3CopyError | S3AdminError }> => {
+        if (!checkedByStore) return { response: await send(false) };
+        try {
+          return { response: await send(true) };
+        } catch (cause) {
+          const status = statusOf(cause);
+          if (status === 501 || status === 400) return { response: await send(false) };
+          if (status !== 412) throw cause;
+        }
+        const current = await head(from);
+        if (!current.ok) return { refusal: current.error };
+        if (current.value !== null && current.value.etag === ifMatch) return { response: await send(false) };
+        return { refusal: refused(current.value === null ? "source-missing" : "store-refused", current.value?.etag ?? null, false) };
+      };
       let response: unknown;
       try {
-        try {
-          response = await send(true);
-        } catch (cause) {
-          if (statusOf(cause) !== 501 || ifMatch === undefined) throw cause;
-          response = await send(false);
-        }
+        const sent = await sendChecked();
+        if ("refusal" in sent) return err(sent.refusal);
+        response = sent.response;
       } catch (cause) {
         if (statusOf(cause) === 412) return err(refused("store-refused", null, false));
         if (isNotFound(cause)) return err(failure("NOT_FOUND", `blobstore/s3 admin: ${JSON.stringify(from)} not found`, { cause }));
@@ -418,10 +461,7 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
 
       if (ifMatch !== undefined) {
         const after = await head(from);
-        if (!after.ok) {
-          await tryRemove(to);
-          return after;
-        }
+        if (!after.ok) return err(await transientAfterWrite(after.error, to));
         if (after.value === null || after.value.etag !== ifMatch) {
           const removed = await tryRemove(to);
           return err(refused(after.value === null ? "source-missing" : "source-changed", after.value?.etag ?? null, true, removed));
@@ -432,7 +472,7 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
       for (let attempt = 0; attempt < verifyAttempts; attempt += 1) {
         if (attempt > 0) await sleep(retryDelayMs);
         const destination = await head(to);
-        if (!destination.ok) return destination;
+        if (!destination.ok) return err(await transientAfterWrite(destination.error, to));
         actual = destination.value;
         if (actual !== null && actual.size === expected.size && (expectedEtag === null || actual.etag === expectedEtag)) break;
       }
