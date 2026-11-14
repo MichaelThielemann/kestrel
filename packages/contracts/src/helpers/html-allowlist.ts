@@ -62,14 +62,17 @@ function opensInOtherContext(target: string): boolean {
  * The attributes of one element after the rules every sanitizer path applies on top of the tag and attribute
  * lists: an `id` that does not match {@link HTML_ID_PATTERN} is dropped, an `href` or `src` that
  * {@link isAllowedHtmlUrl} refuses is dropped, and a link whose `target` is not `_self` gets `rel="noopener
- * noreferrer"` (`opener` removed, other tokens kept). Names are compared without regard to case; the order of the
+ * noreferrer"` (`opener` removed, other tokens kept). Names are compared without regard to case and, as in an HTML parser, only the first of two names that differ in case only is kept; the order of the
  * attributes is kept and a new `rel` comes last.
  */
 export function normalizeHtmlAttributes(tagName: string, attribs: Readonly<Record<string, string>>): Record<string, string> {
   const tag = tagName.toLowerCase();
   const kept = new Map<string, string>();
+  const seen = new Set<string>();
   for (const [name, value] of Object.entries(attribs)) {
     const lower = name.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
     if (lower === "id" && !HTML_ID_PATTERN.test(value)) continue;
     if (URL_ATTRIBUTES.has(lower) && !isAllowedHtmlUrl(tag, lower, value)) continue;
     kept.set(name, value);

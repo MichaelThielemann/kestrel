@@ -96,6 +96,13 @@ describe("normalizeHtmlAttributes", () => {
     expect(normalizeHtmlAttributes("div", { target: "_blank" })).toEqual({ target: "_blank" });
   });
 
+  it("acts on the first of two attribute names that differ only in case, as an HTML parser does", () => {
+    expect(normalizeHtmlAttributes("a", { href: "https://x", Target: "_self", target: "_blank" })).toEqual({ href: "https://x", Target: "_self" });
+    expect(normalizeHtmlAttributes("a", { href: "https://x", target: "_blank", Target: "_self" })).toEqual({ href: "https://x", target: "_blank", rel: "noopener noreferrer" });
+    expect(normalizeHtmlAttributes("a", { target: "_blank", Rel: "x", rel: "opener" })).toEqual({ target: "_blank", Rel: "noopener noreferrer x" });
+    expect(normalizeHtmlAttributes("a", { target: "_blank", rel: "opener", Rel: "x" })).toEqual({ target: "_blank", rel: "noopener noreferrer" });
+  });
+
   it("handles an attribute named like an Object.prototype member", () => {
     const attribs = Object.fromEntries([["__proto__", "x"], ["constructor", "y"], ["target", "_blank"]]);
     const out = normalizeHtmlAttributes("a", attribs);
