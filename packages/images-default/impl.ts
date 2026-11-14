@@ -906,15 +906,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return isErr(undone) ? undone : ok(false);
   }
 
-  async function writeRowCopy(lease: Lease, item: MediaFile, row: Variant, replacing = false): Promise<Result<CopyOutcome, KestrelError>> {
+  async function writeRowCopy(lease: Lease, item: MediaFile, row: Variant, heldSize?: number): Promise<Result<CopyOutcome, KestrelError>> {
     const content = await contentFor(item, row);
     if (isErr(content) || content.value === null) return isErr(content) ? content : ok("missing");
-    let heldOther = false;
-    if (replacing) {
-      const held = await blobs.get(copyKey(item.id, fileOf(row)));
-      if (isErr(held)) return held;
-      heldOther = held.value !== null && held.value.byteLength !== content.value.data.byteLength;
-    }
+    const heldOther = heldSize !== undefined && heldSize !== content.value.data.byteLength;
     const put = await putCopyHeld(lease, fileOf(row), content.value.data, content.value.contentType);
     if (isErr(put) || put.value !== true) return isErr(put) ? put : ok("skipped");
     const kept = await keepCopyOwned(lease, fileOf(row), true);
@@ -940,10 +935,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok(requeued.value !== null);
   }
 
-  async function writeOwnedCopy(lease: Lease, media: MediaFile, file: string, replacing = false): Promise<Result<CopyOutcome, KestrelError>> {
+  async function writeOwnedCopy(lease: Lease, media: MediaFile, file: string, heldSize?: number): Promise<Result<CopyOutcome, KestrelError>> {
     const owner = await ownerOf(media.id, file);
     if (isErr(owner)) return owner;
-    if (owner.value.row !== null) return writeRowCopy(lease, media, owner.value.row, replacing);
+    if (owner.value.row !== null) return writeRowCopy(lease, media, owner.value.row, heldSize);
     if (owner.value.retired === null) return ok("skipped");
     const original = await contentFor(media, null);
     if (isErr(original) || original.value === null) return isErr(original) ? original : ok("missing");
@@ -2174,7 +2169,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         owned.add(key);
         const entry = files.get(key);
         if (entry !== undefined && (expectedSize === null || expectedSize === undefined || entry.size === expectedSize)) return ok(undefined);
-        const kept = await withItem(media.id, (lease) => writeOwnedCopy(lease, media, file, entry !== undefined), async (): Promise<Result<CopyOutcome, KestrelError>> => ok("skipped"));
+        const kept = await withItem(media.id, (lease) => writeOwnedCopy(lease, media, file, entry?.size), async (): Promise<Result<CopyOutcome, KestrelError>> => ok("skipped"));
         if (isErr(kept)) return kept;
         if (kept.value === "written") written += 1;
         if (kept.value === "missing") missing += 1;
