@@ -212,12 +212,14 @@ export function instanceLockFile(file: string): string | undefined {
  * lock from another machine or another PID namespace, such as another container with the same
  * hostname, or from this machine before it restarted, is judged by its heartbeat alone. Any lock
  * that is not taken over makes the call throw a `KestrelBootError` with code `instance-locked` at
- * once; the reason names that process's host, PID and start time, the time from which the lock is
- * taken over and the `optOut` setting. While another process is in the middle of taking over or releasing the lock,
- * the call waits for it for up to 6 s and then throws `instance-locked` naming that process; a
- * process on this machine and in this PID namespace that died in that moment is noticed at once,
- * a thread of this process, a process elsewhere and, where the system cannot show its start time,
- * a process whose PID is in use again after 5 s. Two processes that clear such an abandoned
+ * once; the reason names the `optOut` setting and, for a readable lock, that process's host, PID
+ * and start time and the time from which the lock is taken over. An unreadable lock file is refused
+ * while it was written within the TTL, and the reason names it and says so. While another process
+ * is in the middle of taking over or releasing the lock, the call waits for it for up to 6 s and
+ * then throws `instance-locked` naming that process; a process on this machine and in this PID
+ * namespace that died in that moment is noticed at once, a thread of this process, a process
+ * elsewhere and, where the system cannot show its start time, a process whose PID is in use again
+ * after 5 s. Two processes that clear such an abandoned
  * takeover at the same moment can, in a window of two system calls, both take the lock; the one
  * overwritten reports `restartRequired` at its next heartbeat. A container restarted after its
  * process was killed usually runs in a new PID namespace and fails to boot until the TTL after the
