@@ -1296,6 +1296,22 @@ describe("acquireInstanceLock across processes", () => {
     expect(result).toEqual({ outcome: "won", fast: true });
   }, 30_000);
 
+  it.runIf(ownProcessStart() !== "")("clears a takeover marker by its age when the system hides the start of the live process that has its pid", () => {
+    const stale = new Date(Date.now() - 3_600_000).toISOString();
+    writeRecord({ ...onThisHost, pid: deadPid(), startedAt: stale, heartbeatAt: stale });
+    writeGuard({ pid: process.pid, processStart: "12345" }, 3_600_000);
+    const result = patchedRun(
+      [
+        `const hidden = (path) => typeof path === "string" && path.startsWith(${JSON.stringify(`/proc/${process.pid}/`)});`,
+        "const missing = (path) => Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: \"ENOENT\" });",
+        "const readFile = fs.readFileSync;",
+        "fs.readFileSync = function (path, ...rest) { if (hidden(path)) throw missing(path); return readFile.call(this, path, ...rest); };",
+      ],
+      ["const began = performance.now();", "const { outcome } = attempt();", "process.stdout.write(JSON.stringify({ outcome, fast: performance.now() - began < 3_000 }));"],
+    );
+    expect(result).toEqual({ outcome: "won", fast: true });
+  }, 30_000);
+
   it("shares a lock of this process after the hostname changed, whatever its heartbeat age, where the system offers no boot id", () => {
     const result = patchedRun(
       [...HIDE_PROC, "os.hostname = () => \"laptop.home.example\";"],

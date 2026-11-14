@@ -630,7 +630,7 @@ function clearAbandonedGuard(guard: string): void {
 function guardAbandoned(label: GuardLabel | undefined, mtimeMs: number): boolean {
   const aged = Date.now() - mtimeMs > GUARD_STALE_MS;
   if (label === undefined || !sameKernel(label) || label.pidNamespace !== PID_NAMESPACE) return aged;
-  if (label.pid !== process.pid) return !runs(label.pid, label.processStart) || (aged && !(PROC_SHOWS_PIDS && label.processStart !== ""));
+  if (label.pid !== process.pid) return !runs(label.pid, label.processStart) || (aged && !startCheckable(label.pid, label.processStart));
   if (PROCESS_START !== "" && label.processStart !== "" && label.processStart !== PROCESS_START) return true;
   return label.threadId === threadId || aged;
 }
@@ -733,6 +733,10 @@ function runs(pid: number, start: string): boolean {
   if (stat === undefined) return true;
   if (stat.state === "Z" || stat.state === "X") return false;
   return start === "" || stat.start === start;
+}
+
+function startCheckable(pid: number, start: string): boolean {
+  return PROC_SHOWS_PIDS && start !== "" && statOf(pid) !== undefined;
 }
 
 function isAlive(pid: number): boolean {
