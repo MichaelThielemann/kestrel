@@ -22,7 +22,10 @@ used by the editor for UX and by Kestrel for enforcement.
 `validate.sanitize:<type>.<field>` rewrites strings at schema positions marked `format: "html"`
 through an allowlist (`HTML_ALLOWLIST` in `sanitize.ts`: text/list/table tags, `a[href|title|target|rel]`,
 `img[src|alt|…]`, `id`/`class`/`lang`/`dir` on every element, schemes http/https/mailto/tel/kestrel,
-`data-kestrel-broken` on links; everything else is dropped). An `id` is kept only when it starts with an
+`data-kestrel-broken` on links; everything else is dropped; the lists and the rules below live in
+`@michaelthielemann/kestrel-contracts/helpers/html-allowlist`, which a renderer in a browser can use as well).
+A link `target` other than `_self` (any case) gets `rel="noopener noreferrer"`, `opener` is removed from `rel`,
+`data:` is kept only in `img[src]`, and an `href` or `src` starting with `//` or a backslash pair is dropped. An `id` is kept only when it starts with an
 ASCII letter and holds at most 64 ASCII letters, digits, `-` and `_`, so stored content never takes an id
 starting with `_` or a digit; the element itself stays) – run it before `validate.check`. `validate.sanitizeHtml:<field>` does the same for a
 whole string field (richtext content fields). `oneOf` unions whose branches carry `properties.type.const` (block libraries) are turned into ajv

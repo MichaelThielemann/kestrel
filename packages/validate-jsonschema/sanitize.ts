@@ -1,37 +1,20 @@
+import { HTML_ALLOWED_ATTRIBUTES, HTML_ALLOWED_SCHEMES, HTML_ALLOWED_TAGS, HTML_ID_PATTERN, HTML_IMG_SCHEMES, normalizeHtmlAttributes } from "@michaelthielemann/kestrel-contracts/helpers/html-allowlist";
 import { declaresType, isSchemaNode, resolveSchema, typeTag, type SchemaNode } from "@michaelthielemann/kestrel-contracts/helpers/json-schema";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import sanitizeHtml from "sanitize-html";
 
-/** The ids the HTML sanitizer keeps: an ASCII letter, then up to 63 ASCII letters, digits, `-` or `_`. Any other `id` is dropped, so stored content cannot take an id that starts like a framework's own (`__…`). */
-export const HTML_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
-
-function withoutBadId(attribs: Record<string, string>): Record<string, string> {
-  if (attribs.id === undefined || HTML_ID_PATTERN.test(attribs.id)) return attribs;
-  return Object.fromEntries(Object.entries(attribs).filter(([name]) => name !== "id"));
-}
+export { HTML_ID_PATTERN };
 
 export const HTML_ALLOWLIST = {
-  allowedTags: [
-    "p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "code", "em", "strong", "b", "i", "u", "s", "sub", "sup", "small", "mark",
-    "ul", "ol", "li", "dl", "dt", "dd", "a", "img", "figure", "figcaption", "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption", "span", "div",
-  ],
-  allowedAttributes: {
-    a: ["href", "title", "target", "rel", "data-kestrel-broken"],
-    img: ["src", "alt", "title", "width", "height", "loading"],
-    th: ["colspan", "rowspan", "scope"],
-    td: ["colspan", "rowspan"],
-    "*": ["id", "class", "lang", "dir"],
-  },
-  allowedSchemes: ["http", "https", "mailto", "tel", "kestrel"],
-  allowedSchemesByTag: { img: ["http", "https", "data"] },
+  allowedTags: [...HTML_ALLOWED_TAGS],
+  allowedAttributes: Object.fromEntries(Object.entries(HTML_ALLOWED_ATTRIBUTES).map(([tag, names]) => [tag, [...names]])),
+  allowedSchemes: [...HTML_ALLOWED_SCHEMES],
+  allowedSchemesByTag: { img: [...HTML_IMG_SCHEMES] },
   allowedSchemesAppliedToAttributes: ["href", "src"],
   allowProtocolRelative: false,
   disallowedTagsMode: "discard" as const,
   transformTags: {
-    "*": (tagName: string, attribs: Record<string, string>) => {
-      const kept = withoutBadId(attribs);
-      return { tagName, attribs: tagName === "a" && kept.target === "_blank" ? { ...kept, rel: "noopener noreferrer" } : kept };
-    },
+    "*": (tagName: string, attribs: Record<string, string>) => ({ tagName, attribs: normalizeHtmlAttributes(tagName, attribs) }),
   },
 };
 

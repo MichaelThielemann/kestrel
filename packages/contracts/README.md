@@ -82,6 +82,14 @@ TIFF, BMP, ICO, JPEG XL, PDF, SVG, other XML, HTML) or `null`; `verifiedMediaTyp
 upload is treated as — the identified type when a declared image type or PDF has bytes of another
 type, the declared value otherwise — and `contentMatchesMediaType` whether the bytes are the declared
 type.
+`helpers/html-allowlist` is not a contract either: it holds the one allowlist for HTML that is shown to
+visitors — `HTML_ALLOWED_TAGS`, `HTML_ALLOWED_ATTRIBUTES`, the URL schemes, `HTML_ID_PATTERN` — and the rules every
+sanitizer applies to an element on top of it, so that a server, a server-rendered page and a browser keep the same
+markup. `normalizeHtmlAttributes(tag, attribs)` drops an `id` outside the pattern, drops an `href` or `src` that
+`isAllowedHtmlUrl` refuses (`data:` only in `img` `src`, no `//host` or backslash form, a scheme read as a
+browser reads it, so `java<tab>script:` is `javascript`), and gives a link whose `target` is anything but `_self`
+(any case) `rel="noopener noreferrer"` with `opener` removed. The file has no imports, so a browser bundle can load
+it; `validate-jsonschema` builds its `sanitize-html` options from it.
 `helpers/content-locale` is not a contract either: `satisfiesFilter`, `publishedLocale` and
 `narrowListTranslations` implement one rule on top of `content@1` — a locale that fails a filter is
 never a fallback source and never counted in `_translations` — for every module that builds a

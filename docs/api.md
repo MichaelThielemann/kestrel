@@ -252,13 +252,14 @@ contains the sanitized HTML.
 
 Allowed by the sanitizer: text/list/table tags (`p br hr h1–h6 blockquote pre code em strong b i u
 s sub sup small mark ul ol li dl dt dd figure figcaption table thead tbody tfoot tr th td caption
-span div`), `a[href title target rel data-kestrel-broken]` (`target=_blank` gets
-`rel="noopener noreferrer"`), `img[src alt title width height loading]`, `th`/`td[colspan
-rowspan]`, `id class lang dir` on any tag, and the schemes `http https mailto tel kestrel` (`img`
-also `data`). Everything else — `script`, `iframe`, `style`, event handlers, `javascript:` — is
-removed. The same list lives in
-[`../packages/validate-jsonschema/sanitize.ts`](../packages/validate-jsonschema/sanitize.ts)
-(`HTML_ALLOWLIST`) and is reused when rendering.
+span div`), `a[href title target rel data-kestrel-broken]` (every `target` except `_self`, in any
+case, gets `rel="noopener noreferrer"`, and `opener` is removed from `rel`), `img[src alt title width height loading]`, `th`/`td[colspan
+rowspan]`, `id class lang dir` on any tag, and the schemes `http https mailto tel kestrel` (`data` only
+in `img[src]`; a link starting with `//` or a backslash pair is removed). Everything else — `script`, `iframe`, `style`, event handlers, `javascript:` — is
+removed. The list and these rules live in
+[`../packages/contracts/src/helpers/html-allowlist.ts`](../packages/contracts/src/helpers/html-allowlist.ts)
+(`@michaelthielemann/kestrel-contracts/helpers/html-allowlist`), which has no imports and is meant for
+the code that renders the HTML as well; `validate-jsonschema` builds `HTML_ALLOWLIST` from it.
 `status = published` can only be set for a language once that language's localized required fields
 (`slug`, `title`) are present — otherwise `400 pages: status cannot be "published" for en: slug,
 title missing` (model rule `completeWhen`). Documents always carry `id`, and `createdAt` and
