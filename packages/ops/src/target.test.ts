@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -181,6 +183,27 @@ describe("workspace", () => {
 });
 
 describe("bundle", () => {
+  it("runs from a directory whose path holds spaces and non-ASCII letters", () => {
+    const base = mkdtempSync(join(tmpdir(), "kestrel-ops-bundle-path-"));
+    const project = join(base, "Sites and Übungen");
+    try {
+      const self = join(project, "node_modules", "@michaelthielemann");
+      mkdirSync(self, { recursive: true });
+      symlinkSync(join(import.meta.dirname, ".."), join(self, "kestrel-ops"));
+      writeFileSync(join(project, "package.json"), JSON.stringify({ name: "site", dependencies: { "@michaelthielemann/kestrel-ops": "5.8.1" } }));
+      writeFileSync(join(project, "kestrel.environments.json"), JSON.stringify({ environments: {} }));
+      const { dir } = writeBundle(project, project, {}, () => 1);
+      const stub = join(base, "stub.mjs");
+      writeFileSync(stub, `import { existsSync } from "node:fs";\nexport const terminalPrompt = () => undefined;\nexport async function runOps(argv, options) { process.stdout.write(JSON.stringify({ cwd: options.cwd, found: existsSync(options.cwd + "/kestrel.environments.json") })); return 0; }\n`);
+      const runner = join(dir, "run.mjs");
+      writeFileSync(runner, readFileSync(runner, "utf8").replace('"@michaelthielemann/kestrel-ops/run"', JSON.stringify(pathToFileURL(stub).href)));
+      const out = execFileSync(process.execPath, [runner, "status"], { encoding: "utf8" });
+      expect(JSON.parse(out)).toEqual({ cwd: `${dir}/`, found: true });
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("writes run.mjs, bundle.json, the environments file and kestrel-ops with the packages it needs", () => {
     const project = mkdtempSync(join(tmpdir(), "kestrel-ops-bundle-"));
     try {

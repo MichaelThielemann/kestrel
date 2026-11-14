@@ -29,6 +29,7 @@ interface Manifest {
 }
 
 const RUNNER = `import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const emitWarning = process.emitWarning.bind(process);
 process.emitWarning = (warning, ...rest) => {
@@ -41,7 +42,7 @@ const { runOps, terminalPrompt } = await import("${OPS_PACKAGE}/run");
 const dir = new URL(".", import.meta.url);
 const info = JSON.parse(readFileSync(new URL("bundle.json", dir), "utf8"));
 const prompt = terminalPrompt();
-process.exitCode = await runOps(process.argv.slice(2), { cwd: dir.pathname, project: { versions: info.packages, lockfileSha256: info.lockfileSha256 }, ...(prompt ? { prompt } : {}) });
+process.exitCode = await runOps(process.argv.slice(2), { cwd: fileURLToPath(dir), project: { versions: info.packages, lockfileSha256: info.lockfileSha256 }, ...(prompt ? { prompt } : {}) });
 `;
 
 /**
