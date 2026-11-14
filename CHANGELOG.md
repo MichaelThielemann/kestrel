@@ -936,7 +936,9 @@ Net changes since 5.8.2.
     holds, from the `./storage` export of the module package the project has installed (found from the
     project or one of its direct dependencies), through the project's own `persistence-sqlite` and
     `blobstore-filesystem`. Old blobs stay where they are; a second run changes nothing; a run after an
-    interruption continues where it stopped. `--plan` only detects and counts. It neither takes nor
+    interruption continues where it stopped. `--plan` only detects and counts. An item whose original is
+    not under `--blobs-dir` stops the run before anything is converted, with exit `2`, until
+    `--answers` answers `media-default:id-key-layout:missing-original` with `keep` or `trash`. It neither takes nor
     honours the instance lock, so a lock file left next to the copy does not stop it. Exit `0` when
     every module is in this release's shape, `1` when a migration is still pending, `2` when the run
     could not start or a migration failed. `docs/upgrading.md` § "Converting the stored media".

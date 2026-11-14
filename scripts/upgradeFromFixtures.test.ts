@@ -110,8 +110,15 @@ afterAll(() => {
 });
 
 describe("upgrading the data of 5.8.1 to this release", () => {
-  it("converts a copy with kestrel upgrade migrate, past the lock file of the stopped instance", async () => {
-    const run = await cli(["migrate", "--root", PROJECT, "--db", db, "--blobs-dir", blobs, "--json"]);
+  it("converts a copy with kestrel upgrade migrate once the missing original is answered, past the lock file of the stopped instance", async () => {
+    const unanswered = await cli(["migrate", "--root", PROJECT, "--db", db, "--blobs-dir", blobs, "--json"]);
+    expect(unanswered.code).toBe(2);
+    expect(unanswered.errors).toContain(manifest.missingOriginal);
+    expect(unanswered.errors).toContain("nothing was converted");
+    expect(files(blobs)).toEqual(originalsBefore);
+    const answers = join(work, "answers.json");
+    writeFileSync(answers, JSON.stringify({ "media-default:id-key-layout:missing-original": "keep" }));
+    const run = await cli(["migrate", "--root", PROJECT, "--db", db, "--blobs-dir", blobs, "--answers", answers, "--json"]);
     expect(run.code, run.errors).toBe(0);
     const report = boundaryCast<MigrateReport>(JSON.parse(run.out), "json");
     expect(report.modules.map((m) => [m.module, m.state])).toEqual([

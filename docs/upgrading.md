@@ -150,7 +150,8 @@ kestrel upgrade migrate --db <copy of the database> --blobs-dir <copy of the blo
    instance) and the root of the filesystem blob store with everything below it. Keep the originals
    as they are; they are the backup that 5.8 starts on again if the update is abandoned.
 3. With the 6.0.0 packages installed, run `migrate --plan` on the copy to see what it would
-   convert, then `migrate` without `--plan` to convert it.
+   convert, then `migrate` without `--plan` to convert it. When the plan names items whose original
+   is missing, decide for them with `--answers` (see below).
 4. Run `kestrel upgrade data --db <copy> --root <project>`; `data/media-layout` no longer appears.
 5. Start 6.0.0 on the converted copy. Run `media.syncPublic` and `images.syncPublic` (with
    `publicCopy`) and publish the site again, so that the public copies and the exported pages use
@@ -171,7 +172,12 @@ module then gets a storage version row, which the start-up check of 6.0.0 reads.
   the 6.0.0 columns to the copy, which a 5.8 instance would not mind.
 - `--answers <file>` answers the questions of a migration, for example
   `{ "media-default:id-key-layout:missing-original": "trash" }` to move an item whose original is
-  missing to the trash instead of keeping it (`keep`, the default).
+  missing to the trash, or `"keep"` to switch it to its new key anyway.
+- An item whose original is not under `--blobs-dir` stops the run before it converts anything,
+  with exit code `2`, the number of such items and a few of them, unless `--answers` answers
+  `media-default:id-key-layout:missing-original`. When none of the originals is there, `--blobs-dir`
+  most likely names another directory than the copy of the blob store's root, such as a directory
+  one level too deep. `--plan` reports the same as a note.
 - `--json` prints the report (`schema: 1`, one entry per module with its migrations, what they found
   and what they did).
 - Exit codes: `0` every module is in the 6.0.0 shape, `1` a migration is still pending (always

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import dns from "node:dns";
-import { copyFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
@@ -23,6 +23,8 @@ const FIXTURE = join(REPO, "fixtures", "upgrade", "5.8.1");
 const PROJECT = join(REPO, "examples", "minimal");
 const NOW = 1_800_000_000_000;
 const MISSING = "8146a3f1-ee9b-4fbb-a394-290634519fd9";
+const MISSING_ORIGINAL = "media-default:id-key-layout:missing-original";
+const KEEP = { [MISSING_ORIGINAL]: "keep" };
 
 const copies: string[] = [];
 afterEach(() => {
@@ -42,6 +44,16 @@ function fixtureCopy(): Copy {
   copyFileSync(join(FIXTURE, "kestrel.db"), join(dir, "kestrel.db"));
   cpSync(join(FIXTURE, "blobs"), join(dir, "blobs"), { recursive: true });
   return { dir, db: join(dir, "kestrel.db"), blobs: join(dir, "blobs") };
+}
+
+function keepFile(copy: Copy): string {
+  const file = join(copy.dir, "answers.json");
+  writeFileSync(file, JSON.stringify(KEEP));
+  return file;
+}
+
+function tableRows(file: string, table: string): Array<Record<string, unknown>> {
+  return rows(file, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${table}'`).length === 0 ? [] : rows(file, `SELECT * FROM "${table}"`);
 }
 
 function files(dir: string): Record<string, string> {
@@ -150,7 +162,7 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
     const lock = JSON.stringify({ host: "another-host", pid: 4242, startedAt: Date.now(), heartbeatAt: Date.now(), ttlMs: 60_000 });
     writeFileSync(sidecar, lock);
     const before = files(copy.blobs);
-    const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs]);
+    const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
     expect(run.errors).toBe("");
     expect(run.code).toBe(0);
     expect(run.out).toContain("note: ");
@@ -178,7 +190,7 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
 
   it("does nothing on a second run", async () => {
     const copy = fixtureCopy();
-    expect((await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs])).code).toBe(0);
+    expect((await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)])).code).toBe(0);
     const once = state(copy);
     const again = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--json"]);
     expect(again.code).toBe(0);
@@ -192,7 +204,7 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
 
   it("ends with the same data after runs that stop at three different places and a run that finishes", async () => {
     const clean = fixtureCopy();
-    expect((await runMigrateStep({ dbFile: clean.db, blobsDir: clean.blobs, root: PROJECT, now: () => NOW })).exitCode).toBe(0);
+    expect((await runMigrateStep({ dbFile: clean.db, blobsDir: clean.blobs, root: PROJECT, answers: KEEP, now: () => NOW })).exitCode).toBe(0);
     const expected = state(clean);
 
     const stops: Array<{ name: string; wrap: (stores: { db: Persistence; blobs: Blobstore }) => { db: Persistence; blobs: Blobstore } }> = [
@@ -203,20 +215,20 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
     const copy = fixtureCopy();
     const original = files(copy.blobs);
     for (const stop of stops) {
-      const stopped = await runMigrateStep({ dbFile: copy.db, blobsDir: copy.blobs, root: PROJECT, now: () => NOW, wrap: stop.wrap });
+      const stopped = await runMigrateStep({ dbFile: copy.db, blobsDir: copy.blobs, root: PROJECT, answers: KEEP, now: () => NOW, wrap: stop.wrap });
       expect(stopped.exitCode, stop.name).toBe(2);
       expect(stopped.error, stop.name).toContain("running migrate again continues from here");
       const now = files(copy.blobs);
       for (const [path, sha] of Object.entries(original)) expect(now[path], `${stop.name}: ${path}`).toBe(sha);
     }
-    const finished = await runMigrateStep({ dbFile: copy.db, blobsDir: copy.blobs, root: PROJECT, now: () => NOW });
+    const finished = await runMigrateStep({ dbFile: copy.db, blobsDir: copy.blobs, root: PROJECT, answers: KEEP, now: () => NOW });
     expect(finished.exitCode).toBe(0);
     expect(state(copy)).toEqual(expected);
   });
 
   it("answers exit code 2 and how to continue when the blob store throws, and a later run finishes the conversion", async () => {
     const clean = fixtureCopy();
-    expect((await runMigrateStep({ dbFile: clean.db, blobsDir: clean.blobs, root: PROJECT, now: () => NOW })).exitCode).toBe(0);
+    expect((await runMigrateStep({ dbFile: clean.db, blobsDir: clean.blobs, root: PROJECT, answers: KEEP, now: () => NOW })).exitCode).toBe(0);
     const expected = state(clean);
     const copy = fixtureCopy();
     const throwing = (blobs: Blobstore): Blobstore =>
@@ -227,12 +239,59 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
           return typeof value === "function" ? boundaryCast<(...args: unknown[]) => unknown>(value, "host").bind(target) : value;
         },
       });
-    const stopped = await runMigrateStep({ dbFile: copy.db, blobsDir: copy.blobs, root: PROJECT, now: () => NOW, wrap: (s) => ({ db: s.db, blobs: throwing(s.blobs) }) });
+    const stopped = await runMigrateStep({ dbFile: copy.db, blobsDir: copy.blobs, root: PROJECT, answers: KEEP, now: () => NOW, wrap: (s) => ({ db: s.db, blobs: throwing(s.blobs) }) });
     expect(stopped.exitCode).toBe(2);
     expect(stopped.error).toContain("ENOSPC: no space left on device");
     expect(stopped.error).toContain("running migrate again continues from here");
-    expect((await runMigrateStep({ dbFile: copy.db, blobsDir: copy.blobs, root: PROJECT, now: () => NOW })).exitCode).toBe(0);
+    expect((await runMigrateStep({ dbFile: copy.db, blobsDir: copy.blobs, root: PROJECT, answers: KEEP, now: () => NOW })).exitCode).toBe(0);
     expect(state(copy)).toEqual(expected);
+  });
+
+  it("refuses to switch an item whose original it cannot find until the answers say keep or trash, and converts nothing", async () => {
+    const copy = fixtureCopy();
+    const pristine = fixtureCopy();
+    const before = files(copy.blobs);
+    const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs]);
+    expect(run.code).toBe(2);
+    expect(run.errors).toContain("1 of 7 item(s) of media/default have no original");
+    expect(run.errors).toContain(MISSING);
+    expect(run.errors).toContain(MISSING_ORIGINAL);
+    expect(files(copy.blobs)).toEqual(before);
+    expect(rows(copy.db, "SELECT id, key, filename, size, checksum, status FROM media_items ORDER BY id")).toEqual(rows(pristine.db, "SELECT id, key, filename, size, checksum, status FROM media_items ORDER BY id"));
+    expect(tableRows(copy.db, "kestrel_storage_versions")).toEqual([]);
+    expect(tableRows(copy.db, "media_legacy_keys")).toEqual([]);
+  });
+
+  it("refuses a --blobs-dir under which no original is found, even one directory too deep, and converts nothing", async () => {
+    const copy = fixtureCopy();
+    const pristine = fixtureCopy();
+    const before = files(copy.blobs);
+    for (const blobsDir of [join(copy.blobs, "media"), join(copy.dir, "empty")]) {
+      mkdirSync(blobsDir, { recursive: true });
+      const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", blobsDir]);
+      expect(run.code, blobsDir).toBe(2);
+      expect(run.errors, blobsDir).toContain("7 of 7 item(s) of media/default have no original");
+      expect(run.errors, blobsDir).toContain("none of the originals is there");
+    }
+    expect(files(copy.blobs)).toEqual(before);
+    expect(rows(copy.db, "SELECT id, key, filename, size, checksum, status FROM media_items ORDER BY id")).toEqual(rows(pristine.db, "SELECT id, key, filename, size, checksum, status FROM media_items ORDER BY id"));
+    expect(tableRows(copy.db, "kestrel_storage_versions")).toEqual([]);
+  });
+
+  it("names the missing originals in a plan and that applying needs an answer for them", async () => {
+    const copy = fixtureCopy();
+    const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--plan"]);
+    expect(run.code).toBe(1);
+    expect(run.out).toContain(`note: 1 of 7 item(s) of media/default have no original`);
+    expect(run.out).toContain(MISSING_ORIGINAL);
+  });
+
+  it("keeps an item whose original is missing when the answer says so", async () => {
+    const copy = fixtureCopy();
+    const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(run.code).toBe(0);
+    expect(rows(copy.db, `SELECT status FROM media_items WHERE id = '${MISSING}'`)).toEqual([{ status: "ready" }]);
+    expect(String(rows(copy.db, `SELECT key FROM media_items WHERE id = '${MISSING}'`)[0]?.key)).toMatch(new RegExp(`^media/${MISSING}/`));
   });
 
   it("moves an item whose original is missing to the trash when the answer says so", async () => {
@@ -258,7 +317,7 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(deny("fetch"));
     const copy = fixtureCopy();
     expect((await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--plan"])).code).toBe(1);
-    expect((await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs])).code).toBe(0);
+    expect((await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)])).code).toBe(0);
     expect((await cli(["data", "--root", PROJECT, "--db", copy.db])).code).toBe(0);
     expect(attempts).toEqual([]);
     expect(existsSync(join(copy.dir, "kestrel.db"))).toBe(true);

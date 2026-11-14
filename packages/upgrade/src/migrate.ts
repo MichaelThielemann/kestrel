@@ -89,6 +89,23 @@ async function guarded<T>(task: () => Promise<Result<T, { message: string }>>): 
   }
 }
 
+const MISSING_ORIGINALS = { migration: "media-default:id-key-layout", question: "media-default:id-key-layout:missing-original" } as const;
+
+function missingOriginals(modules: readonly ModuleRun[], answers: Readonly<Record<string, string>> | undefined, blobsDir: string): string | undefined {
+  if (answers?.[MISSING_ORIGINALS.question] !== undefined) return undefined;
+  for (const module of modules) {
+    for (const migration of module.migrations) {
+      const counts = migration.id === MISSING_ORIGINALS.migration ? migration.plan?.counts : undefined;
+      const missing = counts?.missingOriginals ?? 0;
+      if (counts === undefined || missing === 0) continue;
+      const examples = (migration.plan?.notes ?? []).filter((n) => n.reason.endsWith(" is missing")).slice(0, 3).map((n) => `${n.item} (${n.reason})`);
+      const nowhere = (counts.copies ?? 0) === 0 ? "; none of the originals is there, so --blobs-dir most likely names another directory than the root of the copied blob store" : "";
+      return `${missing} of ${counts.items ?? missing} item(s) of ${module.module} have no original under --blobs-dir "${blobsDir}", e.g. ${examples.join(", ")}${nowhere}; check that --blobs-dir is the copy of the directory the project's blobstore-filesystem root points at, and when the originals are gone for good, answer ${MISSING_ORIGINALS.question} in an --answers file: "keep" switches the items anyway and media.reconcile lists them, "trash" moves them to the trash`;
+    }
+  }
+  return undefined;
+}
+
 function finished(run: ModuleRun): boolean {
   return run.state === "current" || run.state === "recorded" || run.state === "migrated" || run.state === "unrecorded";
 }
@@ -101,8 +118,12 @@ function finished(run: ModuleRun): boolean {
  * before rows switch to them and leaves the blobs it converted from in place, and a run after an
  * abort continues where it stopped. The instance lock of the database is neither taken nor honoured, so a
  * lock file another process left next to the copy does not stop the run. Nothing reaches the network.
+ * Before it applies anything, a plan of the same run looks for items whose original is not under
+ * `blobsDir`; unless `answers` answers `media-default:id-key-layout:missing-original`, such an item
+ * stops the run with nothing converted, and a `plan` run names them in a note.
  * Exit code `0` when every module is in this release's shape, `1` when a migration is still pending
- * or the stored data is too old or too new, `2` when the run could not start or a migration failed.
+ * or the stored data is too old or too new, `2` when the run could not start, an original is missing
+ * without an answer, or a migration failed or threw.
  */
 export async function runMigrateStep(options: MigrateStepOptions): Promise<MigrateStepResult> {
   const { dbFile, blobsDir, root } = options;
@@ -124,8 +145,19 @@ export async function runMigrateStep(options: MigrateStepOptions): Promise<Migra
   try {
     const stores: { db: Persistence; blobs: Blobstore } = { db: opened, blobs: filesystem.createBlobstoreFilesystem({ root: blobsDir }) };
     const { db, blobs } = options.wrap === undefined ? stores : options.wrap(stores);
-    const run = await guarded(() => runShapeMigrations({ storages, db, blobs, apply: options.plan !== true, blobWrites: true, ...(options.answers === undefined ? {} : { answers: options.answers }), ...(options.now === undefined ? {} : { now: options.now }) }));
+    const shared = { storages, db, blobs, blobWrites: true, ...(options.answers === undefined ? {} : { answers: options.answers }), ...(options.now === undefined ? {} : { now: options.now }) };
+    if (options.plan !== true) {
+      const preview = await guarded(() => runShapeMigrations({ ...shared, apply: false }));
+      if (isErr(preview)) return { exitCode: 2, error: `${preview.error}; nothing was converted` };
+      const unanswered = missingOriginals(preview.value.modules, options.answers, blobsDir);
+      if (unanswered !== undefined) return { exitCode: 2, error: `${unanswered}; nothing was converted` };
+    }
+    const run = await guarded(() => runShapeMigrations({ ...shared, apply: options.plan !== true }));
     if (isErr(run)) return { exitCode: 2, error: `${run.error}; nothing that ran before this is undone, so running migrate again continues from here` };
+    if (options.plan === true) {
+      const unanswered = missingOriginals(run.value.modules, options.answers, blobsDir);
+      if (unanswered !== undefined) notes.push(`${unanswered}; migrate without --plan refuses to convert anything until then`);
+    }
     const report: MigrateReport = { schema: 1, tool: { name: "kestrel-upgrade", version: toolVersion() }, command: "migrate", db: dbFile, blobsDir, applied: options.plan !== true, modules: run.value.modules, notes };
     return { exitCode: run.value.modules.every(finished) ? 0 : 1, report };
   } finally {
