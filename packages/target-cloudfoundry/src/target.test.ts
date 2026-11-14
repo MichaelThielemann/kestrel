@@ -70,8 +70,7 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
   it("reads a started app with one running instance and a stopped app with no instance", async () => {
     const t = await target();
     expect(await t.status()).toEqual({ state: "started", instances: 1 });
-    const app = cf.apps.get(API.name);
-    if (app === undefined) throw new Error("no app");
+    const app = cf.app(API.name);
     app.state = "STOPPED";
     app.running = 0;
     app.ready = 0;
@@ -79,15 +78,13 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
   });
 
   it("counts a starting instance as running", async () => {
-    const app = cf.apps.get(API.name);
-    if (app === undefined) throw new Error("no app");
+    const app = cf.app(API.name);
     app.ready = 0;
     expect(await (await target()).status()).toEqual({ state: "started", instances: 1 });
   });
 
   it("refuses with exit 1 an app scaled to more than one instance, naming the count", async () => {
-    const app = cf.apps.get(API.name);
-    if (app === undefined) throw new Error("no app");
+    const app = cf.app(API.name);
     app.instances = 2;
     app.running = 2;
     const t = await target();
@@ -96,12 +93,11 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     expect(error.message).toContain("2 instances");
     expect(error.message).toContain(`cf scale ${API.name} -i 1`);
     await failure(t.stop());
-    expect(cf.calls.some((argv) => argv[0] === "stop")).toBe(false);
+    expect(cf.actions).toEqual([]);
   });
 
   it("refuses with exit 1 a stopped app scaled to more than one instance", async () => {
-    const app = cf.apps.get(API.name);
-    if (app === undefined) throw new Error("no app");
+    const app = cf.app(API.name);
     Object.assign(app, { state: "STOPPED", instances: 3, running: 0, ready: 0 });
     expect((await failure((await target()).status())).exitCode).toBe(1);
   });
@@ -113,26 +109,27 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     expect(error.exitCode).toBe(1);
     expect(error.message).toContain("deployment");
     await failure(t.start());
-    expect(cf.calls.some((argv) => argv[0] === "start")).toBe(false);
+    expect(cf.actions).toEqual([]);
   });
 
-  it("stops and starts the app, waits until an instance runs, and never names another app", async () => {
+  it("stops and starts the app by its guid, waits until an instance runs, and never names another app", async () => {
     const t = await target();
     const stopped = await t.stop();
     expect(stopped.stoppedAt).toBeGreaterThan(0);
     expect(await t.status()).toEqual({ state: "stopped", instances: 0 });
     await t.start();
     expect(await t.waitReady(5000)).toBe(true);
-    expect(cf.calls).toContainEqual(["stop", API.name]);
-    expect(cf.calls).toContainEqual(["start", API.name]);
+    expect(cf.actions).toEqual([{ app: API.name, space: "dev", action: "stop" }, { app: API.name, space: "dev", action: "start" }]);
+    expect(cf.calls).toContainEqual(["curl", `/v3/apps/${API.guid}/actions/stop`, "-X", "POST"]);
+    expect(cf.calls).toContainEqual(["curl", `/v3/apps/${API.guid}/actions/start`, "-X", "POST"]);
+    expect(cf.calls.some((argv) => argv[0] === "stop" || argv[0] === "start")).toBe(false);
     expect(namesOtherApp()).toEqual([]);
     expect(cf.colors.every((color) => color === "false")).toBe(true);
   });
 
   it("answers false when no instance runs before the timeout", async () => {
     const t = await target();
-    const app = cf.apps.get(API.name);
-    if (app === undefined) throw new Error("no app");
+    const app = cf.app(API.name);
     app.ready = 0;
     expect(await t.waitReady(50)).toBe(false);
   });
@@ -157,15 +154,35 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     }
   });
 
-  it("ends with exit 1 naming the app when cf start fails", async () => {
-    cf.failures.set("start", 1);
+  it("ends with exit 1 naming the app when the platform refuses the start", async () => {
+    cf.rejectedActions.add("start");
     const t = await target();
-    const app = cf.apps.get(API.name);
-    if (app === undefined) throw new Error("no app");
+    const app = cf.app(API.name);
     Object.assign(app, { state: "STOPPED", running: 0, ready: 0 });
     const error = await failure(t.start());
     expect(error.exitCode).toBe(1);
-    expect(error.message).toContain(`cf start ${API.name}`);
+    expect(error.message).toContain(`starting ${API.name} failed`);
+    expect(error.message).toContain(`cf logs ${API.name} --recent`);
+  });
+
+  it("acts only on the app of the configured space after cf was switched to another space with an app of the same name", async () => {
+    const twin = cf.addApp({ name: API.name, guid: "0d4b8f2a-6c1e-4a7d-b3f5-9e2c7a1d0b48", space: "staging" });
+    writeFileSync(join(root, "manifest.yml"), MANIFEST);
+    const t = await target({ manifest: "manifest.yml", vars: { storage_secret: { env: "APP_STORAGE_SECRET" }, session_secret: { env: "APP_SESSION_SECRET" } } }, { APP_STORAGE_SECRET: SECRET, APP_SESSION_SECRET: OTHER_SECRET });
+    expect(await t.status()).toEqual({ state: "started", instances: 1 });
+    cf.space = "staging";
+    await t.stop();
+    const switched = await failure(t.applyManifest());
+    expect(switched.exitCode).toBe(2);
+    expect(switched.message).toContain("cf target -o example-org -s dev");
+    expect(cf.applied).toEqual([]);
+    await t.setDroplet("0b1e9d4c-2f3a-4e5b-8c6d-7a8b9c0d1e2f");
+    const evidence = (await t.stopEvidence?.()) ?? [];
+    expect(evidence.some((line) => line.includes("logs") && line.includes("cf target -o example-org -s dev"))).toBe(true);
+    await t.start();
+    expect(cf.actions.map((action) => `${action.space} ${action.action}`)).toEqual(["dev stop", "dev set-droplet", "dev start"]);
+    expect(twin).toMatchObject({ state: "STARTED", running: 1, droplet: "d7c1a3e0-0000-4000-8000-000000000001" });
+    expect(cf.calls.some((argv) => argv[0] === "logs" || argv[0] === "apply-manifest")).toBe(false);
   });
 
   it("refuses with exit 2 when cf targets another org or space, or is not logged in, and never acts", async () => {
@@ -178,7 +195,7 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     const loggedOut = await failure((await target()).status());
     expect(loggedOut.exitCode).toBe(2);
     expect(loggedOut.message).toContain("cf login");
-    expect(cf.calls.some((argv) => argv[0] === "stop")).toBe(false);
+    expect(cf.actions).toEqual([]);
   });
 
   it("refuses with exit 2 an app the space does not hold", async () => {
@@ -211,8 +228,7 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
   });
 
   it("shows stop and crash events and teardown error lines as evidence for a stop without a seal", async () => {
-    const app = cf.apps.get(API.name);
-    if (app === undefined) throw new Error("no app");
+    const app = cf.app(API.name);
     app.events = [{ type: "audit.app.stop", created_at: "2026-11-14T10:00:00Z" }, { type: "audit.app.update", created_at: "2026-11-14T09:00:00Z" }, { type: "app.crash", created_at: "2026-11-14T08:00:00Z" }];
     app.logs = ["2026-11-14T10:00:01Z [APP/PROC/WEB/0] OUT listening", "2026-11-14T10:00:02Z [APP/PROC/WEB/0] ERR replication: teardown sync failed: timeout", "2026-11-14T10:00:03Z [CELL/0] OUT Stopping instance"];
     const evidence = await (await target()).stopEvidence?.();
@@ -222,8 +238,8 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
   describe("manifest", () => {
     beforeEach(() => {
       writeFileSync(join(root, "manifest.yml"), MANIFEST);
-      const app = cf.apps.get(API.name);
-      if (app !== undefined) Object.assign(app, { state: "STOPPED", running: 0, ready: 0 });
+      const app = cf.app(API.name);
+      Object.assign(app, { state: "STOPPED", running: 0, ready: 0 });
     });
 
     const vars = { storage_secret: { env: "APP_STORAGE_SECRET" }, session_secret: { command: [process.execPath, "-e", `process.stdout.write(${JSON.stringify(OTHER_SECRET)} + "\\n")`] }, upstream_host: { env: "UPSTREAM_HOST" } };
@@ -261,8 +277,8 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     });
 
     it("refuses with exit 1 while the app runs", async () => {
-      const app = cf.apps.get(API.name);
-      if (app !== undefined) Object.assign(app, { state: "STARTED", running: 1, ready: 1 });
+      const app = cf.app(API.name);
+      Object.assign(app, { state: "STARTED", running: 1, ready: 1 });
       const error = await failure((await target({ manifest: "manifest.yml", vars }, { APP_STORAGE_SECRET: SECRET })).applyManifest());
       expect(error.exitCode).toBe(1);
       expect(cf.applied).toEqual([]);
@@ -282,9 +298,10 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     it("sets a droplet only while the app is stopped", async () => {
       const t = await target();
       await t.setDroplet("0b1e9d4c-2f3a-4e5b-8c6d-7a8b9c0d1e2f");
-      expect(cf.calls).toContainEqual(["set-droplet", API.name, "0b1e9d4c-2f3a-4e5b-8c6d-7a8b9c0d1e2f"]);
-      const app = cf.apps.get(API.name);
-      if (app !== undefined) Object.assign(app, { state: "STARTED", running: 1, ready: 1 });
+      expect(cf.app(API.name).droplet).toBe("0b1e9d4c-2f3a-4e5b-8c6d-7a8b9c0d1e2f");
+      expect(cf.actions).toEqual([{ app: API.name, space: "dev", action: "set-droplet" }]);
+      const app = cf.app(API.name);
+      Object.assign(app, { state: "STARTED", running: 1, ready: 1 });
       expect((await failure(t.setDroplet("0b1e9d4c-2f3a-4e5b-8c6d-7a8b9c0d1e2f"))).exitCode).toBe(1);
       expect((await failure(t.setDroplet("not a guid"))).exitCode).toBe(2);
     });

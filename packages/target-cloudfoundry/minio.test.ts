@@ -152,7 +152,7 @@ describe.skipIf(!endpoint)("kestrel backup, restore and status on a Cloud Foundr
     expect(created.json.manifest).toMatchObject({ kind: "manual", frozen: true, source: { seal: "sealed" }, blobs: { count: 3 }, site: { count: 4 }, target: { kind: "cloudfoundry", app: API.name, appGuid: API.guid, envNames: ["STORAGE_SECRET"] } });
     expect(app.running).toBe(true);
     expect(api.state).toBe("STARTED");
-    expect(cf.calls.filter((argv) => argv[0] === "stop" || argv[0] === "start")).toEqual([["stop", API.name], ["start", API.name]]);
+    expect(cf.actions).toEqual([{ app: API.name, space: "dev", action: "stop" }, { app: API.name, space: "dev", action: "start" }]);
 
     expect((await kestrel(["backup", "verify", id])).code).toBe(0);
     const listed = await kestrel(["backup", "list", "--json"]);
@@ -213,7 +213,7 @@ describe.skipIf(!endpoint)("kestrel backup, restore and status on a Cloud Foundr
     const created = await kestrel(["backup", "create", "--freeze"]);
     expect(created.code).toBe(1);
     expect(created.stderr).toContain(`cf scale ${API.name} -i 1`);
-    expect(cf.calls.some((argv) => argv[0] === "stop")).toBe(false);
+    expect(cf.actions).toEqual([]);
     expect(app.running).toBe(true);
   }, 120_000);
 });

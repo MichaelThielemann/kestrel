@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { z } from "zod";
 // eslint-disable-next-line no-restricted-imports -- a target adapter implements the Target interface of kestrel-ops and resolves credentials the way it does
 import { commandRunner, OpsError, Redactor, resolveCredential, type Target, type TargetDeps, type TargetFacts, type TargetFactory, type TargetStatus } from "@michaelthielemann/kestrel-ops";
-import { cfRunner, type CfRunner } from "./cf.ts";
+import { cfRunner, type CfResult, type CfRunner } from "./cf.ts";
 import { parseConfig, type CloudFoundryConfig } from "./config.ts";
 import { appManifest, withManifestFiles } from "./manifest.ts";
 import { installedPackages } from "./packages.ts";
@@ -38,10 +38,12 @@ const processSchema = z.object({ instances: z.number().int() });
 const statsSchema = z.object({ resources: z.array(z.object({ state: z.string() })) });
 const listSchema = z.object({ resources: z.array(z.unknown()) });
 const dropletSchema = z.object({ guid: z.string() });
+const currentDropletSchema = z.object({ data: z.object({ guid: z.string() }).nullable() });
 const envSchema = z.object({ var: z.record(z.string(), z.unknown()).nullish() });
 const eventsSchema = z.object({ resources: z.array(z.object({ type: z.string(), created_at: z.string() })) });
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
+const messageOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
 const EVIDENCE_EVENT = /stop|crash/;
 const TEARDOWN_LINE = /teardown|seal|replication/i;
@@ -80,9 +82,16 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     }
   };
 
-  const api = async <T>(path: string, schema: z.ZodType<T>): Promise<T> => {
-    const result = await run(["curl", path]);
-    if (result.code !== 0) throw exited(["curl", path], result.code);
+  const confirmTarget = async (): Promise<void> => {
+    const guid = await appGuid();
+    const now = await resolveGuid();
+    if (now !== guid) throw new OpsError(`the app ${app} in ${config.org}/${config.space} has the guid ${now}, not ${guid} as when this run began; check it with cf target -o ${config.org} -s ${config.space} and cf app ${app}`, 2, "target");
+  };
+
+  const api = async <T>(path: string, schema: z.ZodType<T>, method = "GET", data?: string): Promise<T> => {
+    const args = method === "GET" ? ["curl", path] : ["curl", path, "-X", method, ...(data === undefined ? [] : ["-d", data])];
+    const result = await run(args);
+    if (result.code !== 0) throw exited(method === "GET" ? ["curl", path] : ["curl", "-X", method, path], result.code);
     let body: unknown;
     try {
       body = JSON.parse(result.stdout);
@@ -146,9 +155,7 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
 
     async stop() {
       await status();
-      const args = ["stop", app];
-      const result = await run(args, { timeoutMs: 600_000 });
-      if (result.code !== 0) throw exited(args, result.code);
+      await api(`/v3/apps/${await appGuid()}/actions/stop`, appSchema, "POST");
       const deadline = deps.clock() + (options.stopTimeoutMs ?? 120_000);
       for (;;) {
         const now = await status();
@@ -161,9 +168,11 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     async start() {
       const now = await status();
       if (now.state === "started" && now.instances > 0) throw new OpsError(`${app} is already running`, 1, "target");
-      const args = ["start", app];
-      const result = await run(args, { timeoutMs: 900_000 });
-      if (result.code !== 0) throw new OpsError(`cf start ${app} exited with ${result.code}; cf logs ${app} --recent shows why`, 1, "target");
+      try {
+        await api(`/v3/apps/${await appGuid()}/actions/start`, appSchema, "POST");
+      } catch (error) {
+        throw new OpsError(`starting ${app} failed: ${messageOf(error)}; cf logs ${app} --recent shows why`, 1, "target");
+      }
     },
 
     async waitReady(timeoutMs) {
@@ -182,9 +191,16 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
         const events = await api(`/v3/audit_events?target_guids=${guid}&order_by=-created_at&per_page=20`, eventsSchema);
         for (const event of events.resources.filter((e) => EVIDENCE_EVENT.test(e.type)).slice(0, 5)) lines.push(`${event.created_at} ${event.type}`);
       } catch (error) {
-        lines.push(`the platform events of ${app} could not be read: ${error instanceof Error ? error.message : String(error)}`);
+        lines.push(`the platform events of ${app} could not be read: ${messageOf(error)}`);
       }
-      const logs = await run(["logs", app, "--recent"], { timeoutMs: 60_000 });
+      let logs: CfResult | null = null;
+      try {
+        await confirmTarget();
+        logs = await run(["logs", app, "--recent"], { timeoutMs: 60_000 });
+      } catch (error) {
+        lines.push(`the logs of ${app} were not read: ${messageOf(error)}`);
+      }
+      if (logs === null) return lines;
       if (logs.code !== 0) lines.push(`cf logs ${app} --recent exited with ${logs.code}`);
       else for (const line of logs.stdout.split("\n").filter((l) => TEARDOWN_LINE.test(l) && FAILURE_WORD.test(l)).slice(-5)) lines.push(line.trim().slice(0, 300));
       return lines;
@@ -204,6 +220,7 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
         if (source !== undefined) values[name] = await resolveCredential(source, `target.vars.${name}`, redactor, env, runCommand);
       }
       await withManifestFiles(text, values, async (manifestFile, varsFile) => {
+        await confirmTarget();
         const args = ["apply-manifest", "-f", manifestFile, "--vars-file", varsFile];
         const result = await run(args, { timeoutMs: 600_000 });
         if (result.code !== 0) throw new OpsError(`cf apply-manifest for ${app} exited with ${result.code}`, 1, "target");
@@ -213,9 +230,7 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     async setDroplet(guid) {
       if (!GUID.test(guid)) throw new OpsError(`${guid} is not a droplet guid`, 2, "target");
       await requireStopped("set the droplet");
-      const args = ["set-droplet", app, guid];
-      const result = await run(args);
-      if (result.code !== 0) throw exited(args, result.code);
+      await api(`/v3/apps/${await appGuid()}/relationships/current_droplet`, currentDropletSchema, "PATCH", JSON.stringify({ data: { guid } }));
     },
   };
   return target;
