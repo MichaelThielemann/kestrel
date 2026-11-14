@@ -223,10 +223,13 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
         if (key === row.key) continue;
         const source = await exists.value(row.key);
         if (isErr(source)) return source;
-        if (!source.value) {
+        const target = source.value ? ok(true) : await exists.value(key);
+        if (isErr(target)) return target;
+        if (source.value) copies += 1;
+        else if (!target.value) {
           missing += 1;
           notes.push({ item: row.id, reason: `original ${row.key} is missing` });
-        } else copies += 1;
+        }
         if (name !== nameOf(row)) renamed += 1;
         if (isDemotedSvg(row)) {
           svgDemoted += 1;
@@ -270,6 +273,13 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
           if (isErr(target)) return target;
           if (source.value === null && target.value === null) {
             notes.push({ item: row.id, reason: `original ${row.key} is missing` });
+          } else if (source.value === null && target.value !== null) {
+            const targetSha = await blobSha256(ctx, key, target.value);
+            if (isErr(targetSha)) return targetSha;
+            if (target.value.size !== row.size || (row.checksum !== null && targetSha.value !== row.checksum)) {
+              notes.push({ item: row.id, reason: `the bytes at ${key} differ from the item's recorded size or checksum, and its original ${row.key} is gone; the item records those of ${key}` });
+            }
+            Object.assign(patch, { size: target.value.size, checksum: targetSha.value });
           } else if (source.value !== null) {
             const sourceSha = await blobSha256(ctx, row.key, source.value);
             if (isErr(sourceSha)) return sourceSha;

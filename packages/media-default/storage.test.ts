@@ -333,6 +333,19 @@ describe("media-default storage: converting 5.x items to the id key layout", () 
     expect((await rowsOf(db))[0]).toMatchObject({ id: "d4", status: "ready", key: "media/d4/report.pdf", location: "docs/report.pdf" });
   });
 
+  it("records the size and sha256 of the copy at the new key when the original is gone, and plans the same missing originals it reports", async () => {
+    const { db, blobs } = await oldStore([{ id: "d4", folder: "docs", filename: "report.pdf", contentType: "application/pdf" }], false);
+    const copy = bytes("the copy an earlier run wrote");
+    expectOk(await blobs.put("media/d4/report.pdf", copy));
+    const plan = expectOk(await runShapeMigrations({ storages: [storage()], db, blobs, apply: false, blobWrites: true })).modules[0]!.migrations[0]!.plan!;
+    const outcome = expectOk(await migrate(db, blobs)).modules[0]!.migrations[0]!.outcome!;
+    expect([plan.counts.missingOriginals, plan.counts.copies]).toEqual([0, 0]);
+    expect([outcome.counts.missingOriginals, outcome.counts.copied]).toEqual([0, 0]);
+    expect(outcome.notes.map((n) => [n.item, n.reason])).toEqual([["d4", "the bytes at media/d4/report.pdf differ from the item's recorded size or checksum, and its original media/docs/report.pdf is gone; the item records those of media/d4/report.pdf"]]);
+    const row = (await rowsOf(db))[0]!;
+    expect([row.key, row.size, row.checksum]).toEqual(["media/d4/report.pdf", copy.byteLength, sha(copy)]);
+  });
+
   it("fails on a copy whose bytes differ from the original, keeps the 5.x key, and converts on a run whose copies are right", async () => {
     const { db, blobs } = await oldStore([{ id: "b2", folder: "events", filename: "photo.jpg", contentType: "image/jpeg", blob: "summer photo" }], false);
     for (const written of [bytes("summer"), bytes("winter photo")]) {
