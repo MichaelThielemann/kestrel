@@ -64,12 +64,15 @@ for `atomic`, `cast`, `catalogue`, `context`, `defineConfig`, `defineContract`, 
 database file: the lock is a sidecar `<file>.instance` next to the database, never a row inside it, so it never
 travels with a replica, snapshot or restore. A lock whose heartbeat (every 10 s) is older than its TTL (60 s; the
 lock file records the holder's, and the longer of that and the caller's applies) is taken over,
-and so is one whose process on the same machine and in the same PID namespace is gone. Any other lock makes
-`acquireInstanceLock` throw a `KestrelBootError` with code `instance-locked` at once, naming the holder's host, PID
-and start time and the time from which the lock is taken over. That includes a lock from another PID namespace,
-such as the previous run of a container restarted after a crash: its boot fails until 60 s after that run's last
-heartbeat, so a restart policy has to retry. Several holders in one process share the lock, also across worker
-threads, and the file goes with the last release; within one thread the first holder's options apply.
+and so is one whose process on the same machine and in the same PID namespace is gone (judged by PID and process
+start time). Any other lock makes `acquireInstanceLock` throw a `KestrelBootError` with code `instance-locked` at
+once, naming the holder's host, PID and start time and the time from which the lock is taken over. That includes a
+lock from another PID namespace, such as the previous run of a container restarted after its process was killed:
+its boot fails until 60 s after that run's last heartbeat, so a restart policy has to retry, unless the kernel gave
+the new namespace the old one's id. A process that exits on its own, through `process.exit()` or an uncaught
+exception gives up its lock on exit; only a killed process leaves it behind. Several holders in one process share
+the lock, also across worker threads, and the file goes with the last release; within one thread the first holder's
+options apply.
 In-memory and temporary databases (`:memory:`, an empty name, `file:` URIs with `mode=memory`) take none, and
 `health()` turns `restartRequired` once another instance took the lock over.
 `reads` (`observeReads`, `noteRead`, `unobserved`) lets a caller see what the providers

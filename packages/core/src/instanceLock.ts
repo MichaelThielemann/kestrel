@@ -61,6 +61,7 @@ interface Holder {
   ttlMs: number;
   refs: number;
   timer: ReturnType<typeof setInterval> | undefined;
+  onExit: () => void;
   health: ModuleHealth;
 }
 
@@ -79,7 +80,8 @@ const HOLDERS_KEY = Symbol.for("kestrel.instanceLocks");
 
 const holders = sharedHolders();
 const PID_NAMESPACE = pidNamespace();
-const PROCESS_START = processStart();
+const PROCESS_START = statOf("self")?.start ?? "";
+const PROC_SHOWS_PIDS = PROCESS_START !== "" && statOf(process.pid)?.start === PROCESS_START;
 const BOOT_ID = bootId();
 const PROCESS_STARTED_AT = Date.now() - process.uptime() * 1000;
 
@@ -104,12 +106,13 @@ function pidNamespace(): string {
   }
 }
 
-function processStart(): string {
+function statOf(pid: number | "self"): { state: string; start: string } | undefined {
   try {
-    const stat = readFileSync("/proc/self/stat", "utf8");
-    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? "";
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    return { state: fields[0] ?? "", start: fields[19] ?? "" };
   } catch {
-    return "";
+    return undefined;
   }
 }
 
@@ -141,17 +144,22 @@ export function instanceLockFile(file: string): string {
  * `:memory:`, the empty name, and a `file:` URI with the path `:memory:`, an empty path or
  * `mode=memory`.
  *
- * A lock is taken over when its heartbeat is older than `ttlMs`. A lock written on this machine
- * (the same Linux boot id, or the same hostname where the system has none) in this PID namespace
- * is also taken over at once when its process no longer runs, or when it carries this process's
- * PID but another process start time (an earlier process under the same PID). A lock from
- * another machine or another PID namespace, such as another container with the same hostname or
- * the previous run of a restarted container, is judged by its heartbeat alone. Any lock that is
- * not taken over makes the call throw a `KestrelBootError` with code `instance-locked` at once,
- * without waiting; the reason names that process's host, PID and start time, the time from which
- * the lock is taken over and the `optOut` setting. A restarted container whose previous run left
- * the lock therefore fails to boot until `ttlMs` after that run's last heartbeat. `module` should
- * be the calling module's name so that boot reports that code.
+ * A lock is taken over when its heartbeat is older than the longer of `ttlMs` and the TTL the
+ * lock file records. A lock written on this machine (the same Linux boot id, or the same hostname
+ * where the system has none) in this PID namespace is also taken over at once when its process no
+ * longer runs: no process has its PID, or, where `/proc` shows it, the process under that PID is a
+ * zombie or has another start time than the one the lock records. A lock from another machine or
+ * another PID namespace, such as another container with the same hostname, is judged by its
+ * heartbeat alone. Any lock that is not taken over makes the call throw a `KestrelBootError` with
+ * code `instance-locked` at once; the reason names that process's host, PID and start time, the
+ * time from which the lock is taken over and the `optOut` setting. A container restarted after
+ * its process was killed usually runs in a new PID namespace and fails to boot until the TTL
+ * after the previous run's last heartbeat; only when the kernel gave the new namespace the id of
+ * the old one is the lock judged by PID and start time and taken over at once. A process that
+ * ends through the end of its event loop, `process.exit()` or an uncaught exception gives up its
+ * shares on exit as `release()` does. Invalid `ttlMs` or `heartbeatMs` throw a `KestrelBootError`
+ * with code `invalid-module-config`. `module` should be the calling module's name so that boot
+ * reports these codes.
  *
  * Several holders in one process share one lock, also across copies of this module and across
  * worker threads; the last of them to call `release()` deletes the lock file. A thread that
@@ -292,9 +300,10 @@ function renewed(record: LockRecord, token: string, ttlMs: number): LockRecord {
 }
 
 function hold(lockPath: string, record: LockRecord, token: string, ttlMs: number, heartbeatMs: number): Holder {
-  const holder: Holder = { lockPath, record, token, ttlMs, refs: 0, timer: undefined, health: { ok: true } };
+  const holder: Holder = { lockPath, record, token, ttlMs, refs: 0, timer: undefined, onExit: () => drop(holder), health: { ok: true } };
   holder.timer = setInterval(() => beat(holder), heartbeatMs);
   holder.timer.unref();
+  process.on("exit", holder.onExit);
   holders.set(lockPath, holder);
   return holder;
 }
@@ -334,6 +343,7 @@ function lose(holder: Holder, foreign: LockRecord): void {
 function stop(holder: Holder): void {
   if (holder.timer !== undefined) clearInterval(holder.timer);
   holder.timer = undefined;
+  process.off("exit", holder.onExit);
 }
 
 function drop(holder: Holder): void {
@@ -492,7 +502,7 @@ function judge(seen: Exclude<Seen, { kind: "absent" }>, ttlMs: number): "stale" 
   if (!(Date.now() - Date.parse(record.heartbeatAt) <= Math.max(ttlMs, record.ttlMs))) return "stale";
   if (!sameKernel(record) || record.pidNamespace !== PID_NAMESPACE) return "taken";
   if (record.pid === process.pid) return sameProcess(record) ? "this-process" : "stale";
-  return isAlive(record.pid) ? "taken" : "stale";
+  return runs(record.pid, record.processStart) ? "taken" : "stale";
 }
 
 function sameKernel(record: LockRecord): boolean {
@@ -517,6 +527,14 @@ function refusal(file: string, lockPath: string, seen: Exclude<Seen, { kind: "ab
       ? ` The lock comes from another PID namespace on this host, such as an earlier run of this container; if no process uses the database any more, delete ${lockPath} to start at once.`
       : "";
   return `${file} is in use by another process: host "${record.host}", pid ${record.pid}, started ${record.startedAt}, last heartbeat ${record.heartbeatAt} (lock file ${lockPath}). The lock is taken over automatically from ${expiry} if that process sends no further heartbeat.${earlierRun} ${advice}`;
+}
+
+function runs(pid: number, start: string): boolean {
+  if (!isAlive(pid)) return false;
+  const stat = PROC_SHOWS_PIDS ? statOf(pid) : undefined;
+  if (stat === undefined) return true;
+  if (stat.state === "Z" || stat.state === "X") return false;
+  return start === "" || stat.start === start;
 }
 
 function isAlive(pid: number): boolean {
