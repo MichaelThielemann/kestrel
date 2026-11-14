@@ -573,6 +573,38 @@ describe("acquireInstanceLock", () => {
     expect(readRecord()).toEqual(foreign);
   });
 
+  it("refuses a fresh foreign lock after this process lost the lock, instead of handing out the lost share", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    const lost = take(file);
+    writeRecord({ host: "web-2", pid: 311 });
+    vi.advanceTimersByTime(10_000);
+    expect(lost.health().ok).toBe(false);
+    const err = thrownBy(() => take(file));
+    expect(err instanceof KestrelBootError ? err.code : err).toBe("instance-locked");
+    expect(readRecord().host).toBe("web-2");
+  });
+
+  it("takes the lock anew after losing it once the foreign lock has expired, and the lost share's release leaves the new one alone", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-03-01T10:00:00.000Z"));
+    const lost = take(file);
+    writeRecord({ host: "web-2", pid: 311 });
+    vi.advanceTimersByTime(10_000);
+    expect(lost.health().ok).toBe(false);
+    vi.advanceTimersByTime(60_000);
+    const renewed = take(file);
+    const id = readRecord().instanceId;
+    expect(readRecord().pid).toBe(process.pid);
+    expect(renewed.health()).toEqual({ ok: true });
+    lost.release();
+    const joined = take(file);
+    expect(readRecord().instanceId).toBe(id);
+    renewed.release();
+    expect(existsSync(instanceLockFile(file))).toBe(true);
+    joined.release();
+    expect(existsSync(instanceLockFile(file))).toBe(false);
+  });
+
   it("recreates its sidecar when the file disappears while it holds the lock", () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     const lock = take(file);

@@ -177,7 +177,9 @@ export function instanceLockFile(file: string): string {
  * reports these codes.
  *
  * Several holders in one process share one lock, also across copies of this module and across
- * worker threads; the last of them to call `release()` deletes the lock file. A thread that
+ * worker threads; the last of them to call `release()` deletes the lock file. Once another
+ * instance took the lock over, the next call does not join the lost share but takes the lock
+ * anew or throws like a first call. A thread that
  * ends without releasing stops counting once its share is older than `ttlMs`. The heartbeat runs
  * on a timer that does not keep the process alive.
  */
@@ -186,7 +188,9 @@ export function acquireInstanceLock(file: string, opts: InstanceLockOptions): In
   const path = databasePath(file);
   if (path === undefined) return UNLOCKED;
   const lockPath = `${canonicalPath(path)}.instance`;
-  const holder = holders.get(lockPath) ?? take(file, lockPath, opts, timing);
+  const current = holders.get(lockPath);
+  if (current !== undefined && !current.health.ok) holders.delete(lockPath);
+  const holder = current?.health.ok === true ? current : take(file, lockPath, opts, timing);
   holder.refs++;
   let released = false;
   return {
@@ -394,7 +398,7 @@ function stop(holder: Holder): void {
 function drop(holder: Holder): void {
   const lost = !holder.health.ok;
   stop(holder);
-  holders.delete(holder.lockPath);
+  if (holders.get(holder.lockPath) === holder) holders.delete(holder.lockPath);
   if (lost) return;
   const deadline = performance.now() + GUARD_WAIT_MS;
   for (;;) {
