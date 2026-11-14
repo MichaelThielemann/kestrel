@@ -174,6 +174,9 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   const restoredDb = ctx.workspace.path("backup.db");
   await downloadDb(ctx, manifest, restoredDb);
   const current = await readCurrent(ctx, stop.stoppedAt);
+  const originals = await restoreOriginals(ctx, blobs, true);
+  const delivery = await restoreDelivery(ctx, site, true);
+  const unchangedStore = originals.length === 0 && delivery.written.length === 0 && delivery.removed.length === 0;
   let loss: LossReport | null = null;
   if (current.kind === "unreadable") {
     const lines = [`the current database cannot be read: ${current.reason}`, "the restore cannot report what it discards, and its pre-restore backup holds the originals and delivery keys but no database"];
@@ -185,17 +188,16 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
     loss = lossReport(current.file, restoredDb, manifest.source.lastFrameAt ?? manifest.createdAt);
     const lines = describeLoss(ctx, loss);
     await ctx.journal.record("loss-report", "done", { tables: loss.tables, auditEntriesAfter: loss.auditEntriesAfter, access: loss.access });
-    if (ctx.env.production || hasAccessChanges(loss)) await confirm(ctx.answers, "access-changes", [...lines, "every login session ends; everyone signs in again"].join("\n"));
+    const noop = loss.identical && unchangedStore;
+    if (!noop && (ctx.env.production || hasAccessChanges(loss))) await confirm(ctx.answers, "access-changes", [...lines, "every login session ends; everyone signs in again"].join("\n"));
   }
 
-  const originals = await restoreOriginals(ctx, blobs, true);
-  const delivery = await restoreDelivery(ctx, site, true);
   const referenced = new Set(blobs.map((b) => b.key));
   const newerOriginals = [...(await listMap(ctx.app, ctx.env.app.mediaPrefix)).keys()].filter((k) => !referenced.has(k));
   if (newerOriginals.length > 0) ctx.out.info(`${newerOriginals.length} original(s) in the store are not in the backup and stay: ${newerOriginals.slice(0, 10).join(", ")}${newerOriginals.length > 10 ? ", …" : ""}`);
   const base: RestoreResult = { backupId: manifest.id, noop: false, loss, safetyBackup: null, sessionsDeleted: 0, originalsRestored: originals, newerOriginals, delivery, promoted: null, acknowledgement: null };
-  if (loss?.identical === true && originals.length === 0 && delivery.written.length === 0 && delivery.removed.length === 0) {
-    ctx.out.info("nothing differs from the backup; starting the app again");
+  if (loss?.identical === true && unchangedStore) {
+    ctx.out.info("nothing differs from the backup apart from login sessions, which stay; starting the app again");
     await startTarget(ctx);
     await ctx.journal.record("restore", "done", { backupId: manifest.id, noop: true });
     return { ...base, noop: true };

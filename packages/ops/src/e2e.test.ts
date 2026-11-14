@@ -151,6 +151,24 @@ describe("backup and restore against an in-memory store", () => {
     }
   });
 
+  it("restores to a no-op without asking access-changes when only login sessions differ, and leaves the sessions", async () => {
+    const h = createHarness({ store: memoryStore(new MemoryBucket("sessions-only")) });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const backup = await h.run(["backup", "create", "--freeze", "--json"]);
+      h.app.run(`INSERT INTO authn_sessions VALUES ('s2', 'u2', 9999999999999, 2)`);
+      await h.app.sync();
+      const restored = await h.run(["restore", "--backup", String(backup.json.id), "--yes", "--json"]);
+      expect(restored.stderr).toBe("");
+      expect(restored.code).toBe(0);
+      expect(restored.json).toMatchObject({ noop: true, sessionsDeleted: 0, safetyBackup: null });
+      expect(h.app.rows("authn_sessions")).toHaveLength(2);
+    } finally {
+      await h.dispose();
+    }
+  });
+
   it("names a truncated db.sqlite and a missing object when verification fails, with exit 1", async () => {
     const bucket = new MemoryBucket("verify");
     const h = createHarness({ store: memoryStore(bucket) });
