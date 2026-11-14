@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, sep } from "node:path";
+import { threadId } from "node:worker_threads";
 import type { ModuleHealth } from "./defineModule.ts";
 import { boundaryCast } from "./cast.ts";
 import { KestrelBootError } from "./errors.ts";
@@ -61,6 +62,7 @@ type Seen = { kind: "absent" } | { kind: "held"; raw: string; record: LockRecord
 interface GuardLabel {
   token: string;
   pid: number;
+  threadId: number;
   pidNamespace: string;
   processStart: string;
   bootId: string;
@@ -334,7 +336,7 @@ function claim(file: string, lockPath: string, fresh: () => LockRecord, token: s
     if (verdict === "taken") throw new KestrelBootError(opts.module, refusal(file, lockPath, seen, ttlMs, opts.optOut ?? DEFAULT_OPT_OUT), "instance-locked");
     const joining = verdict === "this-process" && seen.kind === "held";
     const next = joining ? renewed(seen.record, token, ttlMs) : record;
-    const outcome = guarded(lockPath, () => replaceIf(lockPath, seen.raw, JSON.stringify(next)));
+    const outcome = guarded(lockPath, (held) => replaceIf(lockPath, seen.raw, JSON.stringify(next), held));
     if (outcome === BUSY) {
       if (performance.now() >= deadline) throw new KestrelBootError(opts.module, guardRefusal(file, lockPath), "instance-locked");
       pause(RETRY_PAUSE_MS);
@@ -384,7 +386,7 @@ function beat(holder: Holder): void {
       }
       const next = renewed(seen.kind === "held" ? seen.record : { ...holder.record, threads: {} }, holder.token, holder.ttlMs);
       const content = JSON.stringify(next);
-      const outcome = seen.kind === "absent" ? createExclusive(holder.lockPath, content) : guarded(holder.lockPath, () => replaceIf(holder.lockPath, seen.raw, content));
+      const outcome = seen.kind === "absent" ? createExclusive(holder.lockPath, content) : guarded(holder.lockPath, (held) => replaceIf(holder.lockPath, seen.raw, content, held));
       if (outcome === BUSY) return;
       if (outcome === true || outcome === "replaced") {
         holder.health = { ok: true };
@@ -421,7 +423,7 @@ function drop(holder: Holder): void {
   const deadline = performance.now() + GUARD_WAIT_MS;
   for (;;) {
     try {
-      if (guarded(holder.lockPath, () => leave(holder)) !== BUSY) return;
+      if (guarded(holder.lockPath, (held) => leave(holder, held)) === "done") return;
     } catch {
       return;
     }
@@ -430,14 +432,16 @@ function drop(holder: Holder): void {
   }
 }
 
-function leave(holder: Holder): void {
+function leave(holder: Holder, held: () => boolean): "done" | "retry" {
   const seen = readLock(holder.lockPath);
-  if (seen.kind !== "held" || seen.record.instanceId !== holder.record.instanceId) return;
+  if (seen.kind !== "held" || seen.record.instanceId !== holder.record.instanceId) return "done";
   const now = Date.now();
   const ttl = Math.max(holder.ttlMs, seen.record.ttlMs);
   const others = Object.entries(seen.record.threads).filter(([token, at]) => token !== holder.token && now - Date.parse(at) <= ttl);
-  if (others.length === 0) rmSync(holder.lockPath, { force: true });
-  else replaceIf(holder.lockPath, seen.raw, JSON.stringify({ ...seen.record, threads: Object.fromEntries(others) }));
+  if (others.length > 0) return replaceIf(holder.lockPath, seen.raw, JSON.stringify({ ...seen.record, threads: Object.fromEntries(others) }), held) === "replaced" ? "done" : "retry";
+  if (!held()) return "retry";
+  rmSync(holder.lockPath, { force: true });
+  return "done";
 }
 
 function sweep(lockPath: string, ttlMs: number): void {
@@ -496,18 +500,19 @@ function guardPath(lockPath: string): string {
   return `${lockPath}.takeover`;
 }
 
-function guarded<T>(lockPath: string, fn: () => T): T | typeof BUSY {
+function guarded<T>(lockPath: string, fn: (held: () => boolean) => T): T | typeof BUSY {
   const guard = guardPath(lockPath);
-  const label: GuardLabel = { token: randomUUID(), pid: process.pid, pidNamespace: PID_NAMESPACE, processStart: PROCESS_START, bootId: BOOT_ID, host: hostname() };
+  const label: GuardLabel = { token: randomUUID(), pid: process.pid, threadId, pidNamespace: PID_NAMESPACE, processStart: PROCESS_START, bootId: BOOT_ID, host: hostname() };
   const content = JSON.stringify(label);
   if (!createExclusive(guard, content)) {
     clearAbandonedGuard(guard);
     return BUSY;
   }
+  const held = (): boolean => readQuietly(guard) === content;
   try {
-    return fn();
+    return fn(held);
   } finally {
-    if (readQuietly(guard) === content) rmSync(guard, { force: true });
+    if (held()) rmSync(guard, { force: true });
   }
 }
 
@@ -537,9 +542,11 @@ function clearAbandonedGuard(guard: string): void {
 }
 
 function guardAbandoned(label: GuardLabel | undefined, mtimeMs: number): boolean {
-  if (label === undefined || !sameKernel(label) || label.pidNamespace !== PID_NAMESPACE) return Date.now() - mtimeMs > GUARD_STALE_MS;
+  const aged = Date.now() - mtimeMs > GUARD_STALE_MS;
+  if (label === undefined || !sameKernel(label) || label.pidNamespace !== PID_NAMESPACE) return aged;
   if (label.pid !== process.pid) return !runs(label.pid, label.processStart);
-  return PROCESS_START !== "" && label.processStart !== "" && label.processStart !== PROCESS_START;
+  if (PROCESS_START !== "" && label.processStart !== "" && label.processStart !== PROCESS_START) return true;
+  return label.threadId === threadId || aged;
 }
 
 function parseGuard(raw: string): GuardLabel | undefined {
@@ -550,18 +557,19 @@ function parseGuard(raw: string): GuardLabel | undefined {
     return undefined;
   }
   if (typeof value !== "object" || value === null) return undefined;
-  if (!("token" in value && "pid" in value && "pidNamespace" in value && "processStart" in value && "bootId" in value && "host" in value)) return undefined;
-  const { token, pid, pidNamespace, processStart, bootId, host } = value;
+  if (!("token" in value && "pid" in value && "threadId" in value && "pidNamespace" in value && "processStart" in value && "bootId" in value && "host" in value)) return undefined;
+  const { token, pid, threadId: thread, pidNamespace, processStart, bootId, host } = value;
   if (typeof token !== "string" || typeof pidNamespace !== "string" || typeof processStart !== "string" || typeof bootId !== "string" || typeof host !== "string") return undefined;
-  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return undefined;
-  return { token, pid, pidNamespace, processStart, bootId, host };
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0 || typeof thread !== "number" || !Number.isInteger(thread) || thread < 0) return undefined;
+  return { token, pid, threadId: thread, pidNamespace, processStart, bootId, host };
 }
 
-function replaceIf(lockPath: string, expected: string, content: string): "replaced" | "changed" {
+function replaceIf(lockPath: string, expected: string, content: string, held: () => boolean): "replaced" | "changed" {
   if (readQuietly(lockPath) !== expected) return "changed";
   const tmp = siblingPath(lockPath, "tmp");
   try {
     writeFileSync(tmp, content, { flag: "wx" });
+    if (!held()) return "changed";
     renameSync(tmp, lockPath);
   } finally {
     rmSync(tmp, { force: true });

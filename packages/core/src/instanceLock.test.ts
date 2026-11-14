@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
-import { Worker } from "node:worker_threads";
+import { threadId, Worker } from "node:worker_threads";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KestrelBootError } from "./errors.ts";
 import { acquireInstanceLock, instanceLockFile, type InstanceLock } from "./instanceLock.ts";
@@ -597,6 +597,40 @@ describe("acquireInstanceLock", () => {
     expect(existsSync(guard)).toBe(false);
   });
 
+  it("clears at once a takeover marker that this thread left behind", () => {
+    const stale = new Date(Date.now() - 120_000).toISOString();
+    writeRecord({ startedAt: stale, heartbeatAt: stale });
+    const guard = writeGuard({ pid: process.pid, processStart: ownProcessStart(), threadId });
+    const began = performance.now();
+    take(file);
+    expect(performance.now() - began).toBeLessThan(1_000);
+    expect(readRecord().pid).toBe(process.pid);
+    expect(existsSync(guard)).toBe(false);
+  });
+
+  it("clears a takeover marker of another thread of this process once it is older than 5 s, also when it names no process start time", () => {
+    for (const processStart of [ownProcessStart(), ""]) {
+      const stale = new Date(Date.now() - 120_000).toISOString();
+      writeRecord({ startedAt: stale, heartbeatAt: stale });
+      const guard = writeGuard({ pid: process.pid, processStart, threadId: threadId + 1 }, 60_000);
+      const lock = take(file);
+      expect(readRecord().pid).toBe(process.pid);
+      expect(existsSync(guard)).toBe(false);
+      lock.release();
+    }
+  }, 30_000);
+
+  it("waits for a young takeover marker of another thread of this process", () => {
+    const stale = new Date(Date.now() - 120_000).toISOString();
+    writeRecord({ startedAt: stale, heartbeatAt: stale });
+    const guard = writeGuard({ pid: process.pid, processStart: ownProcessStart(), threadId: threadId + 1 }, 4_500);
+    const began = performance.now();
+    take(file);
+    expect(performance.now() - began).toBeGreaterThanOrEqual(300);
+    expect(readRecord().pid).toBe(process.pid);
+    expect(existsSync(guard)).toBe(false);
+  }, 20_000);
+
   it("removes its lock file on release although a process on this host died holding the takeover marker", () => {
     const lock = take(file);
     const guard = writeGuard({ pid: deadPid() });
@@ -925,6 +959,83 @@ describe("acquireInstanceLock across processes", () => {
     } finally {
       await worker.terminate();
     }
+  }, 20_000);
+
+  it("removes its lock file on release although a worker thread was terminated while holding the takeover marker", async () => {
+    const main = take(file);
+    const script = join(dir, `stuck-worker-${randomUUID()}.mjs`);
+    writeFileSync(
+      script,
+      [
+        "import fs from \"node:fs\";",
+        "import { syncBuiltinESMExports } from \"node:module\";",
+        "import { parentPort, workerData } from \"node:worker_threads\";",
+        "const rename = fs.renameSync;",
+        "fs.renameSync = (from, to) => {",
+        "  if (to !== `${workerData}.instance`) return rename(from, to);",
+        "  parentPort.postMessage(\"stuck\");",
+        "  for (;;) {}",
+        "};",
+        "syncBuiltinESMExports();",
+        `const { acquireInstanceLock } = await import(${JSON.stringify(LOCK_MODULE)});`,
+        "acquireInstanceLock(workerData, { module: \"store/sqlite\" });",
+      ].join("\n"),
+    );
+    const worker = new Worker(script, { workerData: file });
+    await new Promise((resolve, reject) => {
+      worker.once("message", resolve);
+      worker.once("error", reject);
+    });
+    await worker.terminate();
+    const guard = `${lockFile(file)}.takeover`;
+    expect(existsSync(guard)).toBe(true);
+    main.release();
+    expect(existsSync(lockFile(file))).toBe(false);
+    expect(existsSync(guard)).toBe(false);
+    take(file);
+    expect(readRecord().pid).toBe(process.pid);
+  }, 20_000);
+
+  it("does not write over a lock that another process took while this one's takeover marker was moved away", async () => {
+    const stale = new Date(Date.now() - 120_000).toISOString();
+    writeRecord({ startedAt: stale, heartbeatAt: stale });
+    const now = new Date().toISOString();
+    const other = { instanceId: randomUUID(), pid: 311, pidNamespace: ownPidNamespace(), processStart: "1", clockStart: 1, bootId: randomUUID(), host: "web-2", startedAt: now, heartbeatAt: now, ttlMs: 60_000, threads: { [randomUUID()]: now } };
+    const script = join(dir, `meddled-${randomUUID()}.mjs`);
+    writeFileSync(
+      script,
+      [
+        "import fs from \"node:fs\";",
+        "import { syncBuiltinESMExports } from \"node:module\";",
+        "const [file, , other] = process.argv.slice(2);",
+        "const lockPath = `${file}.instance`;",
+        "const guard = `${lockPath}.takeover`;",
+        "const write = fs.writeFileSync;",
+        "let meddled = false;",
+        "fs.writeFileSync = function (path, ...rest) {",
+        "  write(path, ...rest);",
+        "  if (meddled || typeof path !== \"string\" || !path.startsWith(`${lockPath}.`) || path.startsWith(guard) || !fs.existsSync(guard)) return;",
+        "  meddled = true;",
+        "  fs.rmSync(guard);",
+        "  write(lockPath, other);",
+        "};",
+        "syncBuiltinESMExports();",
+        `const { acquireInstanceLock } = await import(${JSON.stringify(LOCK_MODULE)});`,
+        "let line;",
+        "try {",
+        "  acquireInstanceLock(file, { module: \"store/sqlite\" });",
+        "  line = \"won\";",
+        "} catch (err) {",
+        "  line = `lost:${err.code}`;",
+        "}",
+        "process.stdout.write(line + \"\\n\");",
+        "process.stdin.resume();",
+        "process.stdin.on(\"end\", () => process.exit(0));",
+      ].join("\n"),
+    );
+    const racer = start(script, 0, [process.execPath], [JSON.stringify(other)]);
+    expect(await racer.line).toBe("lost:instance-locked");
+    expect(readRecord()).toEqual(other);
   }, 20_000);
 
   it("lets a new process take the lock at once after the holder was killed with SIGKILL", async () => {
