@@ -620,6 +620,20 @@ describe("module code that throws while boot registers or resolves steps is a ty
     await expectLoud(build, { code: "setup-failed", owner: "throwing/one", mentions: ["setup() threw", "disk full"] });
   });
 
+  it("a module's setup() that throws a KestrelBootError naming another module is setup-failed, naming the module whose setup() threw", async () => {
+    const build = (): BootInput => {
+      const mod = simpleModule("plugins/host", {
+        async setup() {
+          throw new KestrelBootError("./missing-plugin.mjs", "cannot load ./missing-plugin.mjs: not found", "load-failed");
+        },
+      });
+      return { config: { modules: [{ use: "./plugins-host" }], triggers: [] }, modules: [mod], pipelines: [], logger: silentLogger };
+    };
+    await expectLoud(build, { code: "setup-failed", owner: "plugins/host", mentions: ["setup() threw", "cannot load ./missing-plugin.mjs"] });
+    const check = await checkBoot(build(), { setup: "all" });
+    expect(check.errors.map((e) => e.code)).toEqual(["setup-failed"]);
+  });
+
   it("a module's describe() that throws names the module, and its pipelines are left unchecked rather than reported as unknown steps", async () => {
     const build = () =>
       withPipeline(

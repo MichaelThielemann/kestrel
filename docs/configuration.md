@@ -289,7 +289,9 @@ code it does not recognize rather than assume this list is complete.
 | Loading (`loadConfig`/`loadModule`/`loadPipelineFile`) | `load-failed`, `no-default-export`, `not-a-module`, `not-a-pipeline`, `module-unresolved`, `config-not-object`, `pipelines-not-directory` |
 
 A module's `setup()` that throws is `setup-failed`, naming the module, unless it throws a
-`KestrelBootError` of its own: the problem then keeps that error's code, module and reason.
+`KestrelBootError` whose `module` is that module's name: the problem then keeps that error's code,
+module and reason. A `KestrelBootError` naming another module, such as a `load-failed` from a
+`loadModule` call inside `setup()`, stays `setup-failed` and carries its message in the reason.
 `instance-locked` is one such code: a module that keeps a second process off its database file
 throws it from `setup()` through `acquireInstanceLock` (`@michaelthielemann/kestrel/instanceLock`)
 when another live process holds the file. The reason names that process's host, PID and start
