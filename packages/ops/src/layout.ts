@@ -137,3 +137,12 @@ export function jsonBytes(value: unknown): Uint8Array {
 export function parseJson(data: Uint8Array): unknown {
   return JSON.parse(new TextDecoder().decode(data));
 }
+
+/** {@link parseJson}, or null for bytes that are no valid JSON. */
+export function parseJsonOrNull(data: Uint8Array): unknown {
+  try {
+    return parseJson(data);
+  } catch {
+    return null;
+  }
+}

@@ -7,7 +7,7 @@ import { markerKey, restoreFromBlobs, type Applied, type Origin, type Seal } fro
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, isErr, ok } from "@michaelthielemann/kestrel/result";
 import { OpsError } from "./errors.ts";
-import { hex, jsonBytes, parseJson, stamp, unstamp, type SealState } from "./layout.ts";
+import { hex, jsonBytes, parseJsonOrNull, stamp, unstamp, type SealState } from "./layout.ts";
 import { integrityCheck, sha256, sha256File, vacuumInto } from "./sqlite.ts";
 import type { ObjectInfo, ObjectStore } from "./store.ts";
 import type { Target, TargetStatus } from "./target.ts";
@@ -345,12 +345,4 @@ export async function acknowledgement(store: ObjectStore, prefix: string, promot
     await sleep(poll.delayMs ?? 1000);
   }
   return "unconfirmed";
-}
-
-function parseJsonOrNull(data: Uint8Array): unknown {
-  try {
-    return parseJson(data);
-  } catch {
-    return null;
-  }
 }

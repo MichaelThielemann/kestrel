@@ -5,7 +5,7 @@ import { messageOf, REPLICATION_PACKAGE, runtimeVersion, startTarget, stopTarget
 import { OpsError } from "./errors.ts";
 import { openRuns, listRuns } from "./journal.ts";
 import { heldLocks } from "./lock.ts";
-import { BACKUP_KINDS, backupId, fromJsonl, jsonBytes, keys, parseBackupId, parseJson, stamp, toJsonl, type BackupKind, type BlobEntry, type DerivedEntry, type Manifest, type SiteEntry } from "./layout.ts";
+import { BACKUP_KINDS, backupId, fromJsonl, jsonBytes, keys, parseBackupId, parseJson, parseJsonOrNull, stamp, toJsonl, type BackupKind, type BlobEntry, type DerivedEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { placedUnstarted, refuseUnfinishedPlacement } from "./placements.ts";
 import { confirm } from "./questions.ts";
 import { buildDatabase, completeGeneration, SEALING_MAJOR, sealOf, stableGenerations, type SealReport } from "./replica.ts";
@@ -260,15 +260,29 @@ function isManifest(value: unknown): value is Manifest {
 export async function readManifest(ctx: Pick<OpsContext, "backups" | "location">, id: string): Promise<Manifest | null> {
   const data = await ctx.backups.get(ctx.location + keys.manifest(id));
   if (data === null) return null;
-  const value = parseJson(data);
+  let value: unknown;
+  try {
+    value = parseJson(data);
+  } catch (cause) {
+    throw new OpsError(`backup ${id}: manifest.json is no valid JSON: ${messageOf(cause)}`, 1, "manifest.json");
+  }
   if (!isManifest(value)) throw new OpsError(`backup ${id}: manifest.json has an unknown format`, 1, "manifest.json");
   return value;
 }
 
-async function readJsonl<T>(ctx: OpsContext, key: string): Promise<T[] | null> {
+type JsonLines<T> = { entries: T[] } | { missing: true } | { unreadable: string };
+
+async function readJsonl<T>(ctx: OpsContext, key: string): Promise<JsonLines<T>> {
   const data = await ctx.backups.get(key);
-  return data === null ? null : boundaryCast<T[]>(fromJsonl(data), "json");
+  if (data === null) return { missing: true };
+  try {
+    return { entries: boundaryCast<T[]>(fromJsonl(data), "json") };
+  } catch (cause) {
+    return { unreadable: `no valid JSON lines: ${messageOf(cause)}` };
+  }
 }
+
+const problemOf = (list: JsonLines<unknown>): string | null => ("missing" in list ? "missing" : "unreadable" in list ? list.unreadable : null);
 
 /** How many originals verification hashes: 25 or 2 %, whichever is more, at most 200. */
 export function sampleSize(total: number): number {
@@ -300,7 +314,14 @@ export async function verifyBackup(ctx: OpsContext, id: string): Promise<Verific
     await ctx.backups.put(ctx.location + keys.verification(id, result.at), jsonBytes(result), { contentType: "application/json" });
     return result;
   };
-  const manifest = await readManifest(ctx, id);
+  let manifest: Manifest | null;
+  try {
+    manifest = await readManifest(ctx, id);
+  } catch (cause) {
+    if (!(cause instanceof OpsError) || cause.element !== "manifest.json") throw cause;
+    problems.push({ element: "manifest.json", message: cause.message });
+    return finish();
+  }
   if (manifest === null) {
     if ((await ctx.backups.list(ctx.location + keys.backupDir(id))).length === 0) return { id, at: ctx.clock(), ok: false, checked, problems: [{ element: "manifest.json", message: `backup ${id} does not exist` }] };
     problems.push({ element: "manifest.json", message: `backup ${id} has no manifest` });
@@ -327,10 +348,14 @@ export async function verifyBackup(ctx: OpsContext, id: string): Promise<Verific
     }
   }
   const objects = await listMap(ctx.backups, `${ctx.location}objects/`);
-  const blobs = await readJsonl<BlobEntry>(ctx, ctx.location + keys.blobs(id));
-  const site = await readJsonl<SiteEntry>(ctx, ctx.location + keys.site(id));
-  if (blobs === null) problems.push({ element: "blobs.jsonl", message: "missing" });
-  if (site === null) problems.push({ element: "site.jsonl", message: "missing" });
+  const blobList = await readJsonl<BlobEntry>(ctx, ctx.location + keys.blobs(id));
+  const siteList = await readJsonl<SiteEntry>(ctx, ctx.location + keys.site(id));
+  for (const [list, element] of [[blobList, "blobs.jsonl"], [siteList, "site.jsonl"]] as const) {
+    const problem = problemOf(list);
+    if (problem !== null) problems.push({ element, message: problem });
+  }
+  const blobs = "entries" in blobList ? blobList.entries : null;
+  const site = "entries" in siteList ? siteList.entries : null;
   if (blobs !== null && file !== null) {
     const byKey = new Map(blobs.map((b) => [b.key, b]));
     for (const ref of referencedBlobs(file, ctx.env.app.media)) {
@@ -371,31 +396,36 @@ export interface BackupSummary {
 
 /** Every backup of the environment, oldest first. */
 export async function listBackups(ctx: Pick<OpsContext, "backups" | "location" | "envName">): Promise<BackupSummary[]> {
-  const byId = new Map<string, BackupSummary & { verifyKey: string | null; verifyRest: string; pins: Set<string>; released: Set<string> }>();
+  const byId = new Map<string, BackupSummary & { verifyKeys: string[]; verifyStamp: string; pins: Set<string>; released: Set<string> }>();
   for (const info of await ctx.backups.list(`${ctx.location}backups/`)) {
     const m = /^backups\/([^/]+)\/(.+)$/.exec(info.key.slice(ctx.location.length));
     const parsed = m ? parseBackupId(m[1] ?? "") : null;
     if (!m || !parsed || parsed.env !== ctx.envName) continue;
     const id = m[1] ?? "";
     const rest = m[2] ?? "";
-    const entry = byId.get(id) ?? { id, kind: parsed.kind, at: parsed.at, complete: false, verified: null, pinnedBy: [], newestWrite: 0, verifyKey: null, verifyRest: "", pins: new Set<string>(), released: new Set<string>() };
+    const entry = byId.get(id) ?? { id, kind: parsed.kind, at: parsed.at, complete: false, verified: null, pinnedBy: [], newestWrite: 0, verifyKeys: [], verifyStamp: "", pins: new Set<string>(), released: new Set<string>() };
     entry.newestWrite = Math.max(entry.newestWrite, info.lastModified);
     if (rest === "manifest.json") entry.complete = true;
-    if (rest.startsWith("verify/") && (entry.verifyKey === null || rest > entry.verifyRest)) {
-      entry.verifyKey = info.key;
-      entry.verifyRest = rest;
-    }
+    const verifyStamp = /^verify\/(\d{8}T\d{6}Z)-/.exec(rest)?.[1];
+    if (verifyStamp !== undefined && verifyStamp > entry.verifyStamp) {
+      entry.verifyKeys = [info.key];
+      entry.verifyStamp = verifyStamp;
+    } else if (verifyStamp !== undefined && verifyStamp === entry.verifyStamp) entry.verifyKeys.push(info.key);
     const pin = /^pins\/([^/]+?)(\.released)?\.json$/.exec(rest);
     if (pin) (pin[2] ? entry.released : entry.pins).add(pin[1] ?? "");
     byId.set(id, entry);
   }
   const out: BackupSummary[] = [];
   for (const entry of byId.values()) {
-    if (entry.verifyKey !== null) {
-      const data = await ctx.backups.get(entry.verifyKey);
-      const value: unknown = data === null ? null : parseJson(data);
-      entry.verified = typeof value === "object" && value !== null && Reflect.get(value, "ok") === true;
+    let newest: { at: number; ok: boolean } | null = null;
+    for (const key of entry.verifyKeys) {
+      const data = await ctx.backups.get(key);
+      const value: unknown = data === null ? null : parseJsonOrNull(data);
+      const at: unknown = typeof value === "object" && value !== null ? Reflect.get(value, "at") : null;
+      const record = { at: typeof at === "number" ? at : 0, ok: typeof value === "object" && value !== null && Reflect.get(value, "ok") === true };
+      if (newest === null || record.at > newest.at || (record.at === newest.at && !record.ok)) newest = record;
     }
+    if (newest !== null) entry.verified = newest.ok;
     out.push({ id: entry.id, kind: entry.kind, at: entry.at, complete: entry.complete, verified: entry.verified, newestWrite: entry.newestWrite, pinnedBy: [...entry.pins].filter((p) => !entry.released.has(p)) });
   }
   return out.sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1));
@@ -476,7 +506,10 @@ export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResu
   const keep = new Set<string>();
   const remove: string[] = [];
   const manifests = new Map<string, Manifest | null>();
-  for (const b of all) manifests.set(b.id, b.complete ? await readManifest(ctx, b.id) : null);
+  for (const b of all) manifests.set(b.id, b.complete ? await readManifest(ctx, b.id).catch((cause: unknown) => {
+    if (cause instanceof OpsError && cause.element === "manifest.json") return null;
+    throw cause;
+  }) : null);
   for (const kind of BACKUP_KINDS) {
     const count = ctx.env.backups.retention[kind];
     const ofKind = all.filter((b) => b.kind === kind && b.complete).reverse();
@@ -501,7 +534,10 @@ export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResu
   const recent = await recentBackupIds(ctx, now);
   for (const id of new Set([...(await backupIdsAtLocation(ctx)), ...recent])) {
     if (removing.has(id) && !recent.includes(id)) continue;
-    for (const list of [await readJsonl<BlobEntry>(ctx, ctx.location + keys.blobs(id)), await readJsonl<SiteEntry>(ctx, ctx.location + keys.site(id))]) for (const entry of list ?? []) referenced.add(ctx.location + entry.object);
+    for (const [list, file] of [[await readJsonl<BlobEntry>(ctx, ctx.location + keys.blobs(id)), "blobs.jsonl"], [await readJsonl<SiteEntry>(ctx, ctx.location + keys.site(id)), "site.jsonl"]] as const) {
+      if ("unreadable" in list) throw new OpsError(`refusing to prune: ${file} of backup ${id} holds ${list.unreadable}, so the objects it refers to are unknown`, 1, file);
+      if ("entries" in list) for (const entry of list.entries) referenced.add(ctx.location + entry.object);
+    }
   }
   const objects = (await ctx.backups.list(`${ctx.location}objects/`)).filter((o) => !referenced.has(o.key) && now - o.lastModified >= PRUNE_MIN_AGE_MS).map((o) => o.key);
   const result: PruneResult = { dryRun, backups: remove, objects, kept: [...keep].sort() };

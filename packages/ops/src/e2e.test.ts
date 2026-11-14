@@ -227,6 +227,38 @@ describe("backup and restore against an in-memory store", () => {
     }
   });
 
+  it.each(["manifest.json", "blobs.jsonl", "site.jsonl"])("names a truncated %s when verification fails, records the failure and lists the backup as failed", async (file) => {
+    const bucket = new MemoryBucket(`truncated-${file}`);
+    const h = createHarness({ store: memoryStore(bucket) });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const id = String((await h.run(["backup", "create", "--json"])).json.id);
+      const key = `${LOCATION}backups/${id}/${file}`;
+      const bytes = bucket.objects.get(key)?.data ?? new Uint8Array();
+      expect(bytes.byteLength).toBeGreaterThan(0);
+      bucket.tamper(key, bytes.slice(0, Math.floor(bytes.byteLength / 2)));
+      const records = (): string[] => [...bucket.objects.keys()].filter((k) => k.startsWith(`${LOCATION}backups/${id}/verify/`));
+      const before = records().length;
+
+      const verified = await h.run(["backup", "verify", id, "--json"]);
+      expect(verified.code).toBe(1);
+      expect(verified.stderr).toContain(`${file}: `);
+      expect(verified.json).toMatchObject({ ok: false, verification: { ok: false, problems: [expect.objectContaining({ element: file })] } });
+      expect(records().length).toBe(before + 1);
+      const listed = await h.run(["backup", "list", "--json"]);
+      expect(listed.json.backups).toContainEqual(expect.objectContaining({ id, verified: false }));
+      const pruned = await h.run(["backup", "prune", "--dry-run", "--json"]);
+      if (file === "manifest.json") expect(pruned.code).toBe(0);
+      else {
+        expect(pruned.code).toBe(1);
+        expect(pruned.stderr).toContain(`refusing to prune: ${file} of backup ${id} holds no valid JSON lines`);
+      }
+    } finally {
+      await h.dispose();
+    }
+  });
+
   it("reports a stop without teardown as unsealed with the time of the last segment, and --yes alone does not accept it", async () => {
     const h = createHarness({ store: memoryStore(new MemoryBucket("unsealed")) });
     try {
