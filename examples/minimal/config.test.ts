@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import { boot, defineModule, definePipeline, err, failure, KestrelBootError } from "@michaelthielemann/kestrel";
 import { loadConfig, loadModules, loadPipelines } from "@michaelthielemann/kestrel/load";
 import type { RevisionPage } from "@michaelthielemann/kestrel-contracts/revisions";
-import type { Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Document, Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
 import { STATUS as DELIVERY_STATUS_COLLECTION } from "@michaelthielemann/kestrel-delivery-static/impl";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { KestrelConfigInput } from "@michaelthielemann/kestrel/defineConfig";
@@ -1358,7 +1358,7 @@ describe("the retry routes act only on the id of a deleted user", () => {
   }
 
   async function auditRows(capture: { persistence?: Persistence }): Promise<AuditRow[]> {
-    const found = await capture.persistence!.findMany<AuditRow & { id: string }>("audit_entries", {}, { sort: { at: "asc" } });
+    const found = await capture.persistence!.findMany<AuditRow & Document>("audit_entries", {}, { sort: { at: "asc" } });
     expect(found.ok).toBe(true);
     return found.ok ? found.value.items.map(({ event, identityId, params }) => ({ event, identityId, params })) : [];
   }
