@@ -1605,13 +1605,16 @@ Net changes since 5.8.2.
 - `events-queue` quiesces at the start of `stop()`: the main loop, every lane and `events.relay`
   claim no further row, fan out nothing and scan for no lane, so no listener pipeline starts while
   the instance drains. A row already running finishes. Rows the main loop claimed in its batch but
-  had not started go back to `pending`, unlocked, with their `attempts` and `coalesceKey` as before.
+  had not started go back to `pending`, unlocked, with their `attempts` and `coalesceKey` as before;
+  a row whose `coalesceKey` a newer pending row took meanwhile goes back without it, and both rows
+  are delivered.
   Everything left pending is delivered after the next start, or by another process on the same
   store. `emit` keeps writing rows meanwhile.
 - `kestrel.config` takes `stepLog`: `"all"` (the default) writes one `step` log line per step,
   `"errors"` only for a step whose outcome is not `ok`, `"off"` none. Run observers, such as the ones
   of insights and audit, are unaffected in every mode, and the error lines for a thrown step or a
-  failure with a cause are written as before. `runPipeline` takes the same `stepLog` option.
+  failure with a cause are written as before. `runPipeline` from `@michaelthielemann/kestrel/runner`
+  takes the same `stepLog` option.
 
 ### Changed
 

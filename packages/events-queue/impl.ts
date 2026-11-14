@@ -107,8 +107,9 @@ export interface EventsQueue {
    * Stops claiming, synchronously: the worker's timers are cleared, and from now on `tick()`,
    * `tickLane()` and `relay()` claim no row, fan out nothing and scan for no lane. A row already
    * running finishes; the rest of a batch the main loop claimed but has not started goes back to
-   * `pending`, unlocked, with its `attempts` and `coalesceKey` as before the claim. `enqueue` keeps
-   * writing rows. `startWorker()` claims again.
+   * `pending`, unlocked, with its `attempts` and `coalesceKey` as before the claim; if a newer pending
+   * row took that `coalesceKey` meanwhile, the row goes back without it and both rows are delivered.
+   * `enqueue` keeps writing rows. `startWorker()` claims again.
    */
   quiesce(): void;
   stopWorker(): Promise<void>;

@@ -94,7 +94,7 @@ line and is echoed as the `x-request-id` response header next to `x-kestrel-run-
 
 ## Logging
 The runner writes one `logger.step` entry per step. The top-level config `stepLog` (or the
-`stepLog` option of `runPipeline`) narrows that to the steps whose outcome is not `ok` (`"errors"`)
+`stepLog` option of `runPipeline` from `@michaelthielemann/kestrel/runner`) narrows that to the steps whose outcome is not `ok` (`"errors"`)
 or to none (`"off"`); the default `"all"` writes every one. Run observers and the `logger.error`
 lines for a thrown step or a failure with a cause do not depend on it.
 

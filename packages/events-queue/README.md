@@ -34,12 +34,14 @@ module before anything else: from that moment the main loop, every lane and `eve
 further row, fan out nothing and scan for no lane, so no listener pipeline starts while the instance
 drains its in-flight runs. A row already running finishes and is marked as usual. Rows the main loop
 claimed in its batch but had not started go back to `pending`, unlocked, with their `attempts` and
-`coalesceKey` as before the claim; a relay reports the rows it did not reach as `pending`. Every row
-left pending is delivered after the next `start()`, or by another process on the same store, and
-`events.emit` keeps writing rows during the shutdown. The worker itself stops in the module's
-teardown, after the drain. Without any event trigger in the whole manifest, `setup()` installs an empty delivery table right
-away (`start()` never gets the chance to), so `events.emit` drops the event instead of writing a row
-nothing could ever fan out, and the worker never starts.
+`coalesceKey` as before the claim; a row whose `coalesceKey` a newer pending row took meanwhile goes
+back without it, and both rows are delivered. A relay reports the rows it did not reach as
+`pending`. Every row left pending is delivered after the next `start()`, or by another process on
+the same store, and `events.emit` keeps writing rows during the shutdown. The quiesce also ends the
+worker's loops; the module's teardown waits for any tick still in progress and drops the bus
+subscriptions. Without any event trigger in the whole manifest, `setup()` installs an empty delivery
+table right away (`start()` never gets the chance to), so `events.emit` drops the event instead of
+writing a row nothing could ever fan out, and the worker never starts.
 Config (all optional): `pollMs` 500, `batch` 20, `maxAttempts` 5, `backoffSeconds`
 `[5, 30, 120, 600]`, `lockTtlSeconds` 300, `retentionDays` 7, `relayMs` 5000, `relayPipelines`
 `"all"`, `lanes` `{}`, `delayMs` `{}`.
@@ -88,7 +90,9 @@ has not started — a later `enqueue` with the same key hits a `CONFLICT` on the
 `coalesceKey` column and writes nothing, instead of failing the run. A claim, whether by the
 worker, a lane's own loop or the relay, clears the row's `coalesceKey` the moment it starts
 running, so a fresh event with the same key can be enqueued again once that row is merely running,
-before it has finished. If the key's holder is found to be some other, non-pending state (for
+before it has finished. A claimed row that `stop()` hands back unstarted gets its key back, unless
+such a fresh row holds the key by then; the handed-back row then returns to `pending` without a
+`coalesceKey`, and both rows are delivered. If the key's holder is found to be some other, non-pending state (for
 example a row a pre-6.0 process claimed without knowing the column), `enqueue` clears it and
 writes the row instead of silently doing nothing. An event with no `coalesceKey` is never
 coalesced, and a `CONFLICT` on any other column still fails `emit` as before. `coalesceKey` is a
