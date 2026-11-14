@@ -333,6 +333,22 @@ describe("media-default storage: converting 5.x items to the id key layout", () 
     expect((await rowsOf(db))[0]).toMatchObject({ id: "d4", status: "ready", key: "media/d4/report.pdf", location: "docs/report.pdf" });
   });
 
+  it("finds nothing to convert in a 6.x store whose purge stopped after marking an item removing, also next to an item of the same name", async () => {
+    const root = await mkdtemp(join(tmpdir(), "kestrel-media-storage-"));
+    tempDirs.push(root);
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    const blobs = createBlobstoreFilesystem({ root });
+    const media = await createMediaDefault(CONFIG, blobs, db, silentLogger);
+    const first = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: bytes("first") }, "x")).item;
+    expectOk(await media.trash([first.id]));
+    expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: bytes("second") }, "x"));
+    expectOk(await db.updateOne(COLLECTION, first.id, { status: "removing" }));
+    const planned = expectOk(await runShapeMigrations({ storages: [storage()], db, blobs, apply: false, blobWrites: true }));
+    expect(planned.modules[0]!.migrations.map((m) => [m.id, m.state])).toEqual([[ID_KEY_LAYOUT, "not-needed"]]);
+    await expect(module.setup(configSchema.parse({}), deps(db, blobs))).resolves.toBeDefined();
+    expect(expectOk(await storageVersionOf(db, MODULE))).toMatchObject({ version: STORAGE_VERSION });
+  });
+
   it("refuses an answer outside the question's choices", async () => {
     const { db, blobs } = await oldStore();
     expectErr(await migrate(db, blobs, { [MISSING_ORIGINAL.id]: "delete" }), "STORAGE_REFUSED");

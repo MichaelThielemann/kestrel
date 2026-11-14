@@ -52,6 +52,10 @@ function isTrashed(row: Row): boolean {
   return row.status === "trashed";
 }
 
+function holdsNoName(row: Row): boolean {
+  return row.status === "trashed" || row.status === "removing";
+}
+
 function isReadyLike(row: Row): boolean {
   return row.status === "ready" || row.status === null;
 }
@@ -82,7 +86,7 @@ async function allRows<T extends Document>(db: Persistence, collection: string):
 
 function assign(rows: readonly Row[], prefix: string): { pending: Assignment[]; conflicts: MigrationNote[] } {
   const inLayout = (row: Row): boolean => canonicalIdOf(row.key, prefix) === row.id;
-  const needsWork = (row: Row): boolean => !inLayout(row) || (!isTrashed(row) && row.location === null);
+  const needsWork = (row: Row): boolean => !inLayout(row) || (!holdsNoName(row) && row.location === null);
   const taken = new Set<string>();
   for (const row of rows) if (!needsWork(row) && row.location !== null) taken.add(row.location);
   const pending: Assignment[] = [];
