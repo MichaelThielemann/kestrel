@@ -141,10 +141,11 @@ original's bytes, and the size's own row moves to its *new* path and is placed a
 changing the format back makes the old file current again instead of keeping it retired. `images.prune` does the same for a
 size that is no longer declared at all: retire, delete the variant row, overwrite the copy with the
 original and delete the private blob — the path stays, `images.prune`'s `{ sizes, variants }` counts what
-it touched. When one of the last two steps fails, the size has already left `variants[]`, so
-`images.prune` raises `images.variantsChanged` for the items it reached and answers `VALIDATION` on a
-retry; `images.syncPublic` then overwrites the copy and deletes the private blob. Without public
-copies, such a private blob stays until the item is deleted. `images.serve` and the content rule below treat a retired file exactly like a variant row
+it touched. When one of the last two steps fails for an item, the size has already left that item's
+`variants[]`: `images.prune` raises `images.variantsChanged` for the items it reached, and a retry
+goes on with the items it did not reach and answers `VALIDATION` once no row of the size is left.
+`images.syncPublic` puts the item whose step failed right: it overwrites the copy and deletes the
+private blob. Without public copies, such a private blob stays until the item is deleted. `images.serve` and the content rule below treat a retired file exactly like a variant row
 that never got its render: always the original's bytes and type. This is what lets a page published
 before a size or format changed keep working without a republish; only `images.attach`'s own
 `variants[]` stops listing the retired path for pages rendered afterwards.
@@ -362,9 +363,10 @@ wide, both pass it with `crop` `null`.
 - After a storage fault or an instance that stalled past `staleAfterMs`, an entry, `done` ones
   included, can list another `crop` or `?v=` than the bytes its path or its public copy answers,
   until the item renders again or `images.syncPublic` writes its public copies. `images.syncPublic`
-  gives the path a new `?v=` when it rewrites a public copy of another byte size; a copy put right
-  by another write, or at an unchanged size, keeps its `?v=`, so a cache that fetched it meanwhile
-  keeps the earlier bytes until the item renders again.
+  gives the path a new `?v=` when it rewrites a public copy of another byte size. A copy put right
+  by another write before `images.syncPublic` lists the public copies, or rewritten at an unchanged
+  size, keeps its `?v=`, so a cache that fetched it meanwhile keeps the earlier bytes until the item
+  renders again; one put right while it lists gets one more `?v=`.
 - After the database is restored from a backup older than the stored variants, an entry lists the
   `crop` and `?v=` of its restored row, while its path may answer a later render, until the item
   renders again. `images.syncPublic` sets an entry pending and renders it again when its key holds
