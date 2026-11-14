@@ -911,11 +911,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(content) || content.value === null) return isErr(content) ? content : ok("missing");
     let heldOther = false;
     if (replacing) {
-      const key = copyKey(item.id, fileOf(row));
-      const held = await blobs.list(key);
+      const held = await blobs.get(copyKey(item.id, fileOf(row)));
       if (isErr(held)) return held;
-      const copy = held.value.find((info) => info.key === key);
-      heldOther = copy !== undefined && copy.size !== content.value.data.byteLength;
+      heldOther = held.value !== null && held.value.byteLength !== content.value.data.byteLength;
     }
     const put = await putCopyHeld(lease, fileOf(row), content.value.data, content.value.contentType);
     if (isErr(put) || put.value !== true) return isErr(put) ? put : ok("skipped");

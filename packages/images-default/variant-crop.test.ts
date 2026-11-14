@@ -620,13 +620,17 @@ describe("images/default variants[].crop in images.attach", () => {
     const w = await world();
     const inside = await w.open([THUMB]);
     expectOk(await inside.generate("m1"));
-    const added = await w.open([THUMB, SQUARE]);
+    const listed: string[] = [];
+    const listing: Blobstore = { ...w.blobs, list: async (prefix) => { listed.push(prefix); return w.blobs.list(prefix); } };
+    const added = await w.open([THUMB, SQUARE], render, { blobs: listing });
     expectOk(await added.plan(["m1"]));
     expect((await attached(added)).get("square")).toMatchObject({ state: "pending", path: SQUARE_PATH });
     w.blobs.blobs.set("site/media/m1/variants/square.webp", { data: new Uint8Array([1, 2, 3]), contentType: "image/webp" });
 
     w.events.emitted.length = 0;
+    listed.length = 0;
     expectOk(await added.syncPublic());
+    expect(listed).toEqual(["site/media/", CONFIG.prefix]);
     const synced = (await attached(added)).get("square")!;
     expect(synced).toMatchObject({ state: "pending", crop: null });
     expect(synced.path).toMatch(VERSIONED_SQUARE);
