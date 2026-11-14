@@ -198,9 +198,11 @@ the directory the tool is called in, and a file that is missing or not JSON stop
 without an answer, the run stops at the question with exit 1.
 
 ## Retention and prune
-`backup prune` keeps the newest backups of each kind (default `cutover` 5, `scheduled` 14, `manual` 10,
-`pre-restore` 5), every pinned backup and the newest backup of each Kestrel major, then removes the objects no
-kept backup refers to. Nothing younger than a day is removed. It refuses while another run is open (a journal
+`backup prune` keeps the newest verified backups of each kind (default `cutover` 5, `scheduled` 14, `manual`
+10, `pre-restore` 5); only verified backups count. A failed or unverified backup stays while it is newer than the
+oldest verified one kept, or, when its kind has no verified backup, while it is among the newest of the count.
+Prune also keeps every pinned backup and the newest verified backup of each Kestrel major, then removes the
+objects no kept backup refers to. Nothing younger than a day is removed. It refuses while another run is open (a journal
 without an end entry, active in the last two hours) or holds the lock. Interactive runs ask before deleting;
 `--dry-run` only lists.
 
