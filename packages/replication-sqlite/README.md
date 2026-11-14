@@ -10,13 +10,15 @@ restore = snapshot + segments up to the requested time, applied page by page; th
 opened and passes `PRAGMA quick_check` before it is handed over, otherwise the restore fails with
 `TRANSIENT` naming the generation.
 
-A generation is named by a time, then 12 hex digits of the same time in milliseconds, then 32 random
-hex digits (`20260927T101500Z-0192…9f…`), and every key of it lives under `<prefix>gen/<generation>/`,
-so a snapshot key cannot be derived from the time it was taken. The time is when the snapshot was
-taken, raised where needed to one millisecond past the newest generation the replica lists and kept
-strictly increasing within a process: a new generation sorts after every generation listed before it,
-even one placed by a process whose clock runs ahead, and a restore without a target picks the newest.
-A generation named by the time alone is listed and restored as well. The snapshot holds the whole
+A generation is named by a time, then 12 hex digits of the same time in milliseconds, 12 hex digits of
+the time the snapshot was taken in milliseconds and 20 random hex digits (`20260927T101500Z-0192…9f…`),
+and every key of it lives under `<prefix>gen/<generation>/`, so a snapshot key cannot be derived from
+the time it was taken. The time the name starts with is when the snapshot was taken, raised where
+needed to one millisecond past the newest generation the replica lists and kept strictly increasing
+within a process: a new generation sorts after every generation listed before it, even one placed by a
+process whose clock runs ahead, and a restore without a target picks the newest. The snapshot's restore
+point keeps the time it was taken, so a restore to a point in time finds it however far its name was
+raised. A generation named by the time alone is listed and restored as well, its snapshot at that time. The snapshot holds the whole
 database, sessions and password hashes included: `prefix` must lie outside anything a bucket or static
 host serves publicly.
 
@@ -127,8 +129,9 @@ version; it is not a contract. Every key belongs to one generation and lives und
 | `applied.json` | the start that restored from a generation with `origin.json` | `{ "generation", "nonce", "restoredAt" }` |
 
 Times in names are UTC, `YYYYMMDDTHHMMSSZ`. A generation is named either by such a time alone, as
-5.x releases name every generation, or by the time, a hyphen, 12 hex digits of milliseconds and 32
-random hex digits, as this version names its own. A restore without a target rebuilds the generation
+5.x releases name every generation, or by the time, a hyphen, 12 hex digits of the same time in
+milliseconds, 12 hex digits of the time its snapshot was taken and 20 random hex digits, as this
+version names its own. A restore without a target rebuilds the generation
 whose name sorts last, by byte order, among those with a `snapshot.db`, and applies its segments in
 `lineage`, then `seq` order. Neither `origin.json` nor any other marker changes that choice.
 

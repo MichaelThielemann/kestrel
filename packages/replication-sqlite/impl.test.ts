@@ -435,6 +435,22 @@ describe("replication/sqlite generation order, seal and other writers", () => {
     expect(await restoredCount({})).toMatchObject({ generation: own, n: 3, ok: "ok" });
   });
 
+  it("lists the snapshot of a generation named after one placed ahead of its clock at the time it was taken, so a restore to a time before that name finds it", async () => {
+    const { repl, blobs, insert, clock, restoredCount } = setup();
+    place(blobs, stampOf(clock.now() - 24 * 3600_000), image(1), false);
+    place(blobs, stampOf(clock.now() + 10 * 60_000), image(2), true);
+    const takenAt = clock.now();
+    insert(3);
+    const own = expectOk(await repl.sync()).generation;
+    clock.advance(60_000);
+    insert(4);
+    expectOk(await repl.sync());
+    const points = expectOk(await repl.points()).filter((point) => point.generation === own);
+    expect(points.map((point) => [point.kind, point.at])).toEqual([["snapshot", takenAt], ["wal", clock.now()]]);
+    expect(await restoredCount({ at: takenAt + 30_000 })).toMatchObject({ generation: own, n: 3, ok: "ok" });
+    expect(await restoredCount({ at: clock.now() })).toMatchObject({ generation: own, n: 7, ok: "ok" });
+  });
+
   it("names a later snapshot after a newer generation listed meanwhile", async () => {
     const { repl, blobs, insert, clock } = setup();
     insert(1);

@@ -118,6 +118,14 @@ const generationTime = (generation: string): number => {
   const time = unstamp(generation.slice(0, 16));
   return order === undefined ? time : Math.max(time, Number.parseInt(order, 16));
 };
+const snapshotTime = (generation: string): number => {
+  const parts = /^([0-9a-f]{12})([0-9a-f]{12})/.exec(generation.slice(17));
+  const time = unstamp(generation.slice(0, 16));
+  if (!parts) return time;
+  const order = Number.parseInt(parts[1] ?? "", 16);
+  const taken = Number.parseInt(parts[2] ?? "", 16);
+  return order >= time && order < time + 1000 && taken <= order ? taken : time;
+};
 
 /** The key of a marker file of `generation`. */
 export function markerKey(prefix: string, generation: string, marker: GenerationMarker): string {
@@ -224,7 +232,7 @@ export async function listReplica(blobs: Blobstore, prefix: string): Promise<Res
     const generation = m[1] ?? "";
     const marker = m[6];
     if (isMarker(marker)) markers.set(generation, (markers.get(generation) ?? new Set<GenerationMarker>()).add(marker));
-    else if (m[2] === "snapshot.db") points.push({ generation, at: unstamp(generation.slice(0, 16)), kind: "snapshot", key: info.key });
+    else if (m[2] === "snapshot.db") points.push({ generation, at: snapshotTime(generation), kind: "snapshot", key: info.key });
     else points.push({ generation, at: unstamp(m[5] ?? ""), kind: "wal", key: info.key });
   }
   points.sort((a, b) => a.generation.localeCompare(b.generation) || (a.kind === "snapshot" ? -1 : b.kind === "snapshot" ? 1 : a.key.localeCompare(b.key)));
@@ -429,7 +437,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     const wal = readCommittedSync(fromStart);
     if (wal && wal.frames > 0) data = applySegment(data, wal.segment);
     snapshotOrder = Math.max(at, newestListed + 1, snapshotOrder + 1);
-    const gen = `${stamp(snapshotOrder)}-${orderKey(snapshotOrder)}${randomBytes(16).toString("hex")}`;
+    const gen = `${stamp(snapshotOrder)}-${orderKey(snapshotOrder)}${orderKey(at)}${randomBytes(10).toString("hex")}`;
     own.add(gen);
     const put = await blobs.put(`${config.prefix}gen/${gen}/snapshot.db`, data, { contentType: "application/vnd.sqlite3" });
     if (isErr(put)) return put;
