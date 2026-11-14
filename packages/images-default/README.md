@@ -243,16 +243,16 @@ placed with the item's framing. When re-planning fails after the framing was sto
 Until the new render is at the path, the origin and the public copy serve the old variant, never the
 original's bytes. Once it is there, `variants[].path` ends in a new `?v=<token>`, and
 `images.variantsChanged` is raised for the item, so pages that show it render again with the new
-URL. The token is a short hash of the variant's row and the number of its finished renders
-(`renders`), which a render raises in the same conditional update that marks the row `done` or
-records a failed attempt whose bytes stayed at the path, and which `images.syncPublic` raises when
-it rewrites a public copy of another byte size. So the query changes only once new bytes are at the
+URL. The token is a short hash of the variant's row and a count kept with it (`renders`), which a
+render raises in the same conditional update that marks the row `done` or records a failed attempt
+whose bytes stayed at the path, and which `images.syncPublic` raises when it rewrites a public copy
+of another byte size or finds other bytes at the variant's key than its row records. So the query changes only once new bytes are at the
 path, and it never comes back for that path: a crop
 set back to an earlier one, or a framing reset to the centre, gets a URL of its own, and a URL
 that a cache filled stays bound to the bytes it got then. The same holds for any later render at
 the path, after a changed size or format, a repair by `images.resume`, or a size registered again
 after a prune, whose path held bytes before. The query appears from a row's second finished render
-on, and a row placed at a path that held bytes before starts its count at one. A format change
+on, or once `images.syncPublic` rewrote its public copy of another byte size, and a row placed at a path that held bytes before starts its count at one. A format change
 moves the row to another path and keeps its count, one more when that path held bytes before (a
 change back to the row's earlier format, for example), so the first render at the new path of a
 variant that rendered before already has a query, and a URL listed while it renders is not one the
@@ -314,7 +314,7 @@ and a render of a hidden item writes no public copy. `images.remove`, `images.re
 start's sweep of items `media@1` no longer has delete it with the variants. The framing is stored in
 `images_framing`, one row per media id; `images_variants` keeps the crop of each row and the crop of
 its last finished render as `"left,top,width,height"`, where an empty or missing value is the
-centre, and the number of its finished renders in `renders`.
+centre, and in `renders` the count its `?v=` token is made from.
 
 The crop rules live in `@michaelthielemann/kestrel-images-default/framing`, a subpath that imports
 nothing, so an editor that runs in the browser can preview exactly what this module renders:

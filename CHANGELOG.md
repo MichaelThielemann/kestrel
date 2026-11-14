@@ -1532,7 +1532,7 @@ Net changes since 5.8.1.
   `images.syncPublic` rewriting a public copy of another byte size), so it changes only then and
   never comes back for that path, also when a crop is set back to an earlier one or the framing is
   reset. The query appears from a row's second finished
-  render on; a row placed at a path that held bytes before starts its count at one, and a format
+  render on, or once `images.syncPublic` rewrote its public copy of another byte size; a row placed at a path that held bytes before starts its count at one, and a format
   change keeps the count, one more when it moves the row to a path that held bytes before, so only
   a row's first render, at a path that never held other bytes, keeps the plain path. Such a render
   raises `images.variantsChanged` for the item, so
