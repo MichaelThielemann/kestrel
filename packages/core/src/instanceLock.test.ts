@@ -871,6 +871,25 @@ describe("acquireInstanceLock", () => {
     lock.release();
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it("adds one exit listener for all the locks a thread holds, and removes it with the last release", async () => {
+    const before = process.listenerCount("exit");
+    const warnings: Error[] = [];
+    const onWarning = (warning: Error): void => {
+      warnings.push(warning);
+    };
+    process.on("warning", onWarning);
+    try {
+      const locks = Array.from({ length: 12 }, (_, i) => take(join(dir, `app-${i}.db`)));
+      expect(process.listenerCount("exit")).toBe(before + 1);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(warnings.map((w) => w.name)).not.toContain("MaxListenersExceededWarning");
+      for (const lock of locks) lock.release();
+      expect(process.listenerCount("exit")).toBe(before);
+    } finally {
+      process.off("warning", onWarning);
+    }
+  });
 });
 
 describe("acquireInstanceLock across processes", () => {

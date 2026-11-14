@@ -97,8 +97,10 @@ const CLOCK_SAMPLES = 5;
 const MAX_LINK_HOPS = 40;
 const MAX_TIMER_MS = 2 ** 31 - 1;
 const HOLDERS_KEY = Symbol.for("kestrel.instanceLocks");
+const EXIT_KEY = Symbol.for("kestrel.instanceLocks.exit");
 
 const holders = sharedHolders();
+const exitWatch = sharedExitWatch();
 const PID_NAMESPACE = pidNamespace();
 const PROCESS_START = statOf("self")?.start ?? "";
 const PROC_SHOWS_PIDS = PROCESS_START !== "" && statOf(process.pid)?.start === PROCESS_START;
@@ -116,6 +118,33 @@ function sharedHolders(): Map<string, Holder> {
   const created = new Map<string, Holder>();
   Reflect.set(globalThis, HOLDERS_KEY, created);
   return created;
+}
+
+interface ExitWatch {
+  listener: (() => void) | undefined;
+}
+
+function sharedExitWatch(): ExitWatch {
+  const existing: unknown = Reflect.get(globalThis, EXIT_KEY);
+  if (typeof existing === "object" && existing !== null && "listener" in existing) return boundaryCast<ExitWatch>(existing, "host");
+  const created: ExitWatch = { listener: undefined };
+  Reflect.set(globalThis, EXIT_KEY, created);
+  return created;
+}
+
+function watchExit(): void {
+  if (exitWatch.listener !== undefined) return;
+  const listener = (): void => {
+    for (const holder of [...holders.values()]) holder.onExit();
+  };
+  exitWatch.listener = listener;
+  process.on("exit", listener);
+}
+
+function unwatchExitWhenIdle(): void {
+  if (holders.size > 0 || exitWatch.listener === undefined) return;
+  process.off("exit", exitWatch.listener);
+  exitWatch.listener = undefined;
 }
 
 function pidNamespace(): string {
@@ -221,7 +250,10 @@ export function acquireInstanceLock(file: string, opts: InstanceLockOptions): In
   const lockPath = instanceLockFile(file);
   if (lockPath === undefined) return UNLOCKED;
   const current = holders.get(lockPath);
-  if (current !== undefined && !current.health.ok) holders.delete(lockPath);
+  if (current !== undefined && !current.health.ok) {
+    holders.delete(lockPath);
+    unwatchExitWhenIdle();
+  }
   const holder = current?.health.ok === true ? current : take(file, lockPath, opts, timing);
   holder.refs++;
   let released = false;
@@ -390,8 +422,8 @@ function hold(lockPath: string, record: LockRecord, token: string, ttlMs: number
   const holder: Holder = { lockPath, record, token, ttlMs, leaseMs: record.ttlMs, renewedAt: Date.now(), refs: 0, timer: undefined, onExit: () => drop(holder), health: { ok: true } };
   holder.timer = setInterval(() => beat(holder), heartbeatMs);
   holder.timer.unref();
-  process.on("exit", holder.onExit);
   holders.set(lockPath, holder);
+  watchExit();
   return holder;
 }
 
@@ -436,13 +468,13 @@ function lose(holder: Holder, what: string): void {
 function stop(holder: Holder): void {
   if (holder.timer !== undefined) clearInterval(holder.timer);
   holder.timer = undefined;
-  process.off("exit", holder.onExit);
 }
 
 function drop(holder: Holder): void {
   const lost = !holder.health.ok;
   stop(holder);
   if (holders.get(holder.lockPath) === holder) holders.delete(holder.lockPath);
+  unwatchExitWhenIdle();
   if (lost) return;
   const deadline = performance.now() + GUARD_WAIT_MS;
   for (;;) {
