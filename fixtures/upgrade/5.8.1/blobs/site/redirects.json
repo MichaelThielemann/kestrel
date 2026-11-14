@@ -1,0 +1,1 @@
+[{"pattern":"^/old\\-about/?$","target":"/about","status":301},{"pattern":"^/team/?$","target":"/about","status":302}]

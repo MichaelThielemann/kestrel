@@ -1,0 +1,150 @@
+{
+  "version": "5.8.1",
+  "password": {
+    "admin": "kestrel-demo",
+    "editor": "fixture-editor-pw"
+  },
+  "packages": {
+    "@michaelthielemann/kestrel": "5.8.1",
+    "@michaelthielemann/kestrel-audit-persistence": "5.8.1",
+    "@michaelthielemann/kestrel-authn-multi": "5.8.1",
+    "@michaelthielemann/kestrel-authz-roles": "5.8.1",
+    "@michaelthielemann/kestrel-blobstore-filesystem": "5.8.1",
+    "@michaelthielemann/kestrel-content-default": "5.8.1",
+    "@michaelthielemann/kestrel-contracts": "5.8.1",
+    "@michaelthielemann/kestrel-delivery-static": "5.8.1",
+    "@michaelthielemann/kestrel-events-inmemory": "5.8.1",
+    "@michaelthielemann/kestrel-images-default": "5.8.1",
+    "@michaelthielemann/kestrel-insights": "5.8.1",
+    "@michaelthielemann/kestrel-links-default": "5.8.1",
+    "@michaelthielemann/kestrel-media-default": "5.8.1",
+    "@michaelthielemann/kestrel-migrations-default": "5.8.1",
+    "@michaelthielemann/kestrel-openapi": "5.8.1",
+    "@michaelthielemann/kestrel-persistence-sqlite": "5.8.1",
+    "@michaelthielemann/kestrel-ratelimit-memory": "5.8.1",
+    "@michaelthielemann/kestrel-redirects-default": "5.8.1",
+    "@michaelthielemann/kestrel-references-default": "5.8.1",
+    "@michaelthielemann/kestrel-renderer-plain": "5.8.1",
+    "@michaelthielemann/kestrel-replication-sqlite": "5.8.1",
+    "@michaelthielemann/kestrel-revisions-default": "5.8.1",
+    "@michaelthielemann/kestrel-sanitize-svg": "5.8.1",
+    "@michaelthielemann/kestrel-site-default": "5.8.1",
+    "@michaelthielemann/kestrel-validate-jsonschema": "5.8.1",
+    "sharp": "0.35.5",
+    "zod": "3.25.76"
+  },
+  "media": {
+    "logo": {
+      "id": "86f24ce7-42b4-49ad-9be9-e3ebfe6eb01f",
+      "key": "media/logo.png",
+      "folder": "",
+      "filename": "logo.png"
+    },
+    "galleryPhoto": {
+      "id": "4af3c64d-d72e-4669-92d2-3635dc36c87c",
+      "key": "media/gallery/photo.png",
+      "folder": "gallery",
+      "filename": "photo.png"
+    },
+    "teamPhoto": {
+      "id": "d10ea766-137b-47a3-b170-422a37c84f49",
+      "key": "media/team/photo.png",
+      "folder": "team",
+      "filename": "photo.png"
+    },
+    "beach": {
+      "id": "178a531b-1c3e-4bd3-9df0-f073889cb9e1",
+      "key": "media/gallery/2026/summer/beach.png",
+      "folder": "gallery/2026/summer",
+      "filename": "beach.png"
+    },
+    "guide": {
+      "id": "407fc37a-afb9-4567-a062-c3f9be58cdb2",
+      "key": "media/docs/guide.pdf",
+      "folder": "docs",
+      "filename": "guide.pdf"
+    },
+    "mark": {
+      "id": "be3e4721-d326-4359-b8b6-b9bf76c5e63c",
+      "key": "media/mark.svg",
+      "folder": "",
+      "filename": "mark.svg"
+    },
+    "lost": {
+      "id": "54896455-a1f1-4e64-87ce-bd2a4c0279be",
+      "key": "media/gallery/lost.png",
+      "folder": "gallery",
+      "filename": "lost.png"
+    }
+  },
+  "missingOriginal": "54896455-a1f1-4e64-87ce-bd2a4c0279be",
+  "duplicatedVariant": {
+    "mediaId": "4af3c64d-d72e-4669-92d2-3635dc36c87c",
+    "size": "thumb",
+    "rows": 3
+  },
+  "pages": {
+    "home": "c19ddb91-c799-4635-868a-d4d8c3585535",
+    "about": "0d42e159-066d-451b-b39d-62eddc1ec3bc",
+    "gallery": "c5d91fa4-e1a9-4160-9187-ae4ea2acf83e",
+    "draft": "f770f54c-e7c1-45eb-bf2c-516c92daf62f"
+  },
+  "imageSizes": [
+    "thumb",
+    "small",
+    "wide"
+  ],
+  "collections": {
+    "audit_entries": 3,
+    "authn_sessions": 1,
+    "authn_users": 2,
+    "content_migrations": 1,
+    "delivery_publish_status": 8,
+    "images_jobs": 1,
+    "images_sizes": 0,
+    "images_variants": 17,
+    "links_index": 1,
+    "media_folders": 6,
+    "media_items": 7,
+    "pages": 4,
+    "redirects": 1,
+    "references_index": 3,
+    "revisions_entries": 9,
+    "revisions_heads": 5,
+    "settings": 1
+  },
+  "blobs": [
+    "media-variants/178a531b-1c3e-4bd3-9df0-f073889cb9e1/small.webp",
+    "media-variants/178a531b-1c3e-4bd3-9df0-f073889cb9e1/thumb.webp",
+    "media-variants/178a531b-1c3e-4bd3-9df0-f073889cb9e1/wide.png",
+    "media-variants/4af3c64d-d72e-4669-92d2-3635dc36c87c/small.webp",
+    "media-variants/4af3c64d-d72e-4669-92d2-3635dc36c87c/thumb.webp",
+    "media-variants/4af3c64d-d72e-4669-92d2-3635dc36c87c/wide.png",
+    "media-variants/54896455-a1f1-4e64-87ce-bd2a4c0279be/small.webp",
+    "media-variants/54896455-a1f1-4e64-87ce-bd2a4c0279be/thumb.webp",
+    "media-variants/54896455-a1f1-4e64-87ce-bd2a4c0279be/wide.png",
+    "media-variants/86f24ce7-42b4-49ad-9be9-e3ebfe6eb01f/small.webp",
+    "media-variants/86f24ce7-42b4-49ad-9be9-e3ebfe6eb01f/thumb.webp",
+    "media-variants/86f24ce7-42b4-49ad-9be9-e3ebfe6eb01f/wide.png",
+    "media-variants/d10ea766-137b-47a3-b170-422a37c84f49/small.webp",
+    "media-variants/d10ea766-137b-47a3-b170-422a37c84f49/thumb.webp",
+    "media-variants/d10ea766-137b-47a3-b170-422a37c84f49/wide.png",
+    "media/docs/guide.pdf",
+    "media/gallery/2026/summer/beach.png",
+    "media/gallery/photo.png",
+    "media/logo.png",
+    "media/mark.svg",
+    "media/team/photo.png",
+    "replica/gen/20261114T143608Z/snapshot.db",
+    "replica/gen/20261114T143608Z/wal/000000-000000-20261114T143608Z.wal",
+    "replica/gen/20261114T143608Z/wal/000001-000001-20261114T143608Z.wal",
+    "replica/gen/20261114T143608Z/wal/000001-000002-20261114T143608Z.wal",
+    "site/about/index.html",
+    "site/en/index.html",
+    "site/gallery/index.html",
+    "site/index.html",
+    "site/llms-full.txt",
+    "site/llms.txt",
+    "site/redirects.json"
+  ]
+}

@@ -1,0 +1,198 @@
+# Beispielseite
+
+> Erfundene Inhalte
+
+## Pages
+
+### Startseite (neu)
+
+Source: /
+
+#### Startseite (neu)
+
+{
+  "id": "c19ddb91-c799-4635-868a-d4d8c3585535",
+  "createdAt": 1794666968247,
+  "updatedAt": 1794666968305,
+  "slug": "home",
+  "title": "Startseite (neu)",
+  "body": \[
+    {
+      "id": "h1",
+      "type": "hero",
+      "props": {
+        "heading": "Willkommen",
+        "image": "86f24ce7-42b4-49ad-9be9-e3ebfe6eb01f"
+      }
+    },
+    {
+      "id": "p-70",
+      "type": "prose",
+      "props": {
+        "body": "<p>Eine erfundene Startseite. <a href=\\"https://example.com/info\\">Mehr</a></p>"
+      }
+    }
+  \],
+  "status": "published",
+  "hero": "4af3c64d-d72e-4669-92d2-3635dc36c87c",
+  "seo": null,
+  "\_locales": {
+    "slug": "de",
+    "title": "de",
+    "body": "de",
+    "status": "de"
+  },
+  "\_translations": {
+    "de": true,
+    "en": true
+  }
+}
+
+### Über uns
+
+Source: /about
+
+#### Über uns
+
+{
+  "id": "0d42e159-066d-451b-b39d-62eddc1ec3bc",
+  "createdAt": 1794666968276,
+  "updatedAt": 1794666968313,
+  "slug": "about",
+  "title": "Über uns",
+  "body": \[
+    {
+      "id": "p-20",
+      "type": "prose",
+      "props": {
+        "body": "<p>Das Team, erweitert.</p>"
+      }
+    },
+    {
+      "id": "i-d10ea766",
+      "type": "image",
+      "props": {
+        "image": "d10ea766-137b-47a3-b170-422a37c84f49",
+        "alt": "Fixture image"
+      }
+    },
+    {
+      "id": "i-86f24ce7",
+      "type": "image",
+      "props": {
+        "image": "86f24ce7-42b4-49ad-9be9-e3ebfe6eb01f",
+        "alt": "Fixture image"
+      }
+    }
+  \],
+  "status": "published",
+  "hero": "d10ea766-137b-47a3-b170-422a37c84f49",
+  "seo": null,
+  "\_locales": {
+    "slug": "de",
+    "title": "de",
+    "body": "de",
+    "status": "de"
+  },
+  "\_translations": {
+    "de": true,
+    "en": false
+  }
+}
+
+### Home
+
+Source: /en
+
+#### Home
+
+{
+  "id": "c19ddb91-c799-4635-868a-d4d8c3585535",
+  "createdAt": 1794666968247,
+  "updatedAt": 1794666968305,
+  "slug": "home",
+  "title": "Home",
+  "body": \[
+    {
+      "id": "h1",
+      "type": "hero",
+      "props": {
+        "heading": "Welcome",
+        "image": "86f24ce7-42b4-49ad-9be9-e3ebfe6eb01f"
+      }
+    },
+    {
+      "id": "p-23",
+      "type": "prose",
+      "props": {
+        "body": "<p>An invented start page.</p>"
+      }
+    }
+  \],
+  "status": "published",
+  "hero": "4af3c64d-d72e-4669-92d2-3635dc36c87c",
+  "seo": null,
+  "\_locales": {
+    "slug": "en",
+    "title": "en",
+    "body": "en",
+    "status": "en"
+  },
+  "\_translations": {
+    "de": true,
+    "en": true
+  }
+}
+
+### Galerie
+
+Source: /gallery
+
+#### Galerie
+
+{
+  "id": "c5d91fa4-e1a9-4160-9187-ae4ea2acf83e",
+  "createdAt": 1794666968281,
+  "updatedAt": 1794666968318,
+  "slug": "gallery",
+  "title": "Galerie",
+  "body": \[
+    {
+      "id": "i-4af3c64d",
+      "type": "image",
+      "props": {
+        "image": "4af3c64d-d72e-4669-92d2-3635dc36c87c",
+        "alt": "Fixture image"
+      }
+    },
+    {
+      "id": "i-178a531b",
+      "type": "image",
+      "props": {
+        "image": "178a531b-1c3e-4bd3-9df0-f073889cb9e1",
+        "alt": "Fixture image"
+      }
+    },
+    {
+      "id": "i-54896455",
+      "type": "image",
+      "props": {
+        "image": "54896455-a1f1-4e64-87ce-bd2a4c0279be",
+        "alt": "Fixture image"
+      }
+    }
+  \],
+  "status": "published",
+  "hero": "54896455-a1f1-4e64-87ce-bd2a4c0279be",
+  "seo": null,
+  "\_locales": {
+    "slug": "de",
+    "title": "de",
+    "body": "de",
+    "status": "de"
+  },
+  "\_translations": {
+    "de": true,
+    "en": false
+  }
+}

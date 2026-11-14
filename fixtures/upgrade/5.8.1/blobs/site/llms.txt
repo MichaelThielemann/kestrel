@@ -1,0 +1,10 @@
+# Beispielseite
+
+> Erfundene Inhalte
+
+## Pages
+
+- [Startseite (neu)](/)
+- [Über uns](/about)
+- [Home](/en)
+- [Galerie](/gallery)
