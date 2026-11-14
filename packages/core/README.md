@@ -66,23 +66,31 @@ travels with a replica, snapshot or restore. A lock whose heartbeat (every 10 s)
 365 days; the lock file records the holder's, and the longer of that and the caller's applies) is taken over,
 and so is one whose process on the same machine and in the same PID namespace is gone. On Linux that is judged by
 PID and process start time; on macOS and Windows by the PID alone, so a lock whose PID went to a new process waits for
-the TTL. Any other lock makes `acquireInstanceLock` throw a `KestrelBootError` with code `instance-locked` at
-once, naming the holder's host, PID and start time and the time from which the lock is taken over. That includes a
-lock from another PID namespace, such as the previous run of a container restarted after its process was killed,
-and a lock left from before a restart of the machine, since "the same machine" means the same Linux boot: the boot fails
-until 60 s after the previous run's last heartbeat, so a restart policy has to keep retrying for longer than the TTL,
-unless the kernel gave the new namespace the old one's id. A process that exits on its own, through `process.exit()`
+the TTL. "The same machine" means the same Linux boot id, or the same hostname where the system has none. A lock that
+was written under this hostname with another boot id, as a restart of the machine leaves it, is taken over at once
+when its last heartbeat lies more than a third of its TTL before the machine started by the wall clock. Any other
+lock makes `acquireInstanceLock` throw a `KestrelBootError` with code `instance-locked` at once, naming the holder's
+host, PID and start time and the time from which the lock is taken over. That includes a lock from another PID
+namespace, such as the previous run of a container restarted after its process was killed, and a lock whose machine
+restarted within a third of the TTL (20 s) after its last heartbeat: the boot fails until 60 s after that heartbeat, so a restart policy has
+to keep retrying for longer than the TTL. Only when the kernel gave a restarted container's new namespace the old
+one's id is its lock judged by PID and start time and taken over at once. A process that exits on its own, through `process.exit()`
 or an uncaught exception gives up the lock of its main thread on exit, and a worker thread that ends on its own gives
 up its share. A share that a worker thread still holds when it is terminated or when the process ends stays behind,
-as does the lock of a killed process. Several holders in one process share the lock, also across worker threads, and
-the file goes with the last release; within one thread the first holder's options apply.
-In-memory and temporary databases (`:memory:`, an empty name, `file:` URIs with `mode=memory` or `vfs=memdb`) take
-none and `instanceLockFile` returns `undefined` for them. `health()` turns `restartRequired` once another instance
+as does the lock of a killed process. Several holders in one process share the lock, also across worker threads and
+whatever hostname the lock records, since the process is told by its PID and start time; the file goes with the last
+release, and within one thread the first holder's options apply.
+In-memory and temporary databases (`:memory:`, an empty name, `file:` URIs whose last `mode` is `memory` or whose
+last `vfs` is `memdb`, as SQLite reads them) take none and `instanceLockFile` returns `undefined` for them; on Windows
+`file:///C:/data/app.db` names the same lock as `C:\data\app.db`. `health()` turns `restartRequired` once another instance
 took the lock over, or once the lock file was gone at a heartbeat that came more than the TTL after the previous one
 (a suspended or blocked process), since another process may have taken the lock and released it in between. Processes
-that take over an abandoned lock at the same moment are kept apart by a takeover marker; only while a marker left
-behind by a dead process is being cleared can two of them both win, in a window of two system calls, and the one
-overwritten reports `restartRequired` at its next heartbeat.
+that take over an abandoned lock at the same moment are kept apart by a takeover marker. A marker of a process on this
+machine is cleared once that process is gone, and after 5 s where the system cannot show the start time of the process
+that now has its PID; only while a marker left behind is being cleared can two processes both win, in a window of two
+system calls, and the one overwritten reports `restartRequired` at its next heartbeat. The lock file and the marker
+appear complete through a hard link; on a file system without hard links, such as FAT or exFAT, they are written in
+place, and a process that reads the lock file in that moment refuses as for an unreadable one.
 `reads` (`observeReads`, `noteRead`, `unobserved`) lets a caller see what the providers
 answered while a function ran, in the same process and async context; `delivery-static` uses it to record what a
 render read (see `docs/contracts.md`). The core imports no contract, no module and no host framework; ESLint
