@@ -449,11 +449,10 @@ describe("examples/minimal: sorting and query parameters over HTTP", () => {
   });
 
   it("ignores a cache-busting query key on a content write", async () => {
-    const created = await request(base(), "POST", "/pages?_=1", { token, json: { slug: "buster", title: "Buster", status: "draft" } });
-    expect(created.status, created.text).toBe(200);
+    const created = await ok(base(), "POST", "/pages?_=1", { token, json: { slug: "buster", title: "Buster", status: "draft" } });
     const withLocale = await request(base(), "POST", "/pages?locale=en&_=1", { token, json: { slug: "buster-en", title: "Buster", status: "draft" } });
     expect(withLocale.status, withLocale.text).toBe(200);
-    const id = String(JSON.parse(created.text).id);
+    const id = String(created.id);
     const updated = await request(base(), "PATCH", `/pages/${id}?_=1`, { token, json: { title: "Buster 2" } });
     expect(updated.status, updated.text).toBe(200);
   });
