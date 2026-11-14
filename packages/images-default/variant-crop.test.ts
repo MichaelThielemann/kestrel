@@ -583,6 +583,52 @@ describe("images/default variants[].crop in images.attach", () => {
     await small.close();
   });
 
+  it("goes on with the items a failed prune did not reach on a retry, and syncPublic writes the original over the copy of the item that failed", async () => {
+    const w = await world();
+    w.media.add({ id: "m2", contentType: "image/jpeg", data: expectOk(await w.media.load("m1"))!.data, filename: "second.jpg", createdAt: 1000 });
+    const full = await w.open([THUMB, SQUARE]);
+    for (const id of ["m1", "m2"]) {
+      expectOk(await full.setFraming(id, RIGHT_CROP));
+      expectOk(await full.generate(id));
+    }
+    await full.close();
+
+    let squareCopies = 0;
+    let failed: string | null = null;
+    const broken: Blobstore = {
+      ...w.blobs,
+      put: async (key, data, options) => {
+        if (key.startsWith("site/") && key.endsWith("/square.webp") && (squareCopies += 1) === 1) {
+          failed = key;
+          return err(failure("TRANSIENT", "copy store unavailable"));
+        }
+        return w.blobs.put(key, data, options);
+      },
+    };
+    const small = await w.open([THUMB], render, { blobs: broken });
+    w.events.emitted.length = 0;
+    expect((await small.prune(["square"])).ok).toBe(false);
+    const failedId = ["m1", "m2"].find((id) => failed === `site/media/${id}/variants/square.webp`)!;
+    const otherId = failedId === "m1" ? "m2" : "m1";
+    expect(w.events.emitted).toEqual([{ name: "images.variantsChanged", ids: [failedId] }]);
+    expect((await attached(small, failedId)).has("square")).toBe(false);
+    expect((await attached(small, otherId)).has("square")).toBe(true);
+
+    w.events.emitted.length = 0;
+    expect(expectOk(await small.prune(["square"]))).toEqual({ sizes: 1, variants: 1 });
+    expect(w.events.emitted).toEqual([{ name: "images.variantsChanged", ids: [otherId] }]);
+    expect((await attached(small, otherId)).has("square")).toBe(false);
+    expect((await small.prune(["square"])).ok).toBe(false);
+
+    expectOk(await small.syncPublic());
+    const original = expectOk(await w.media.load("m1"))!.data;
+    for (const id of ["m1", "m2"]) {
+      expect(w.blobs.blobs.get(`site/media/${id}/variants/square.webp`)!.data).toEqual(original);
+      expect(w.blobs.blobs.has(`media-variants/${id}/square.webp`)).toBe(false);
+    }
+    await small.close();
+  });
+
   it("raises images.variantsChanged when a prune fails to remove the private render, and syncPublic removes it", async () => {
     const w = await world();
     const full = await w.open([THUMB, SQUARE]);
