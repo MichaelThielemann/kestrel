@@ -97,6 +97,15 @@ const liveness = (pid: number): Liveness => {
   }
 };
 
+const groupLiveness = (pid: number): Liveness => {
+  try {
+    process.kill(-pid, 0);
+    return "alive";
+  } catch (cause) {
+    return cause instanceof Error && Reflect.get(cause, "code") === "EPERM" ? "foreign" : "gone";
+  }
+};
+
 function startedAt(pid: number): string | null {
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -175,7 +184,7 @@ export const localTarget: TargetFactory = (raw, deps) => {
     const recorded = readPid();
     if (recorded === null) return null;
     const state = liveness(recorded.pid);
-    if (state === "gone") return null;
+    if (state === "gone") return groupLiveness(recorded.pid) === "alive" ? { pid: recorded.pid, state: "alive" } : null;
     if (state === "foreign") return { pid: recorded.pid, state };
     const now = startedAt(recorded.pid);
     if (recorded.started === null || now === null) return { pid: recorded.pid, state: "unverified" };
@@ -196,7 +205,7 @@ export const localTarget: TargetFactory = (raw, deps) => {
       if (app?.state === "unverified") throw new OpsError(`cannot tell whether pid ${app.pid} in ${pidFile} is the app: the start time of that process is unknown; stop the app yourself and remove ${pidFile}`, 1, "target");
       if (app !== null) {
         signalGroup(app.pid, "SIGTERM");
-        for (let waited = 0; liveness(app.pid) !== "gone"; waited += 100) {
+        for (let waited = 0; liveness(app.pid) !== "gone" || groupLiveness(app.pid) !== "gone"; waited += 100) {
           if (waited >= 60_000) throw new OpsError(`the app (pid ${app.pid}) did not stop within 60 s`, 1, "target");
           await sleep(100);
         }
@@ -212,7 +221,14 @@ export const localTarget: TargetFactory = (raw, deps) => {
       const log = openSync(join(dir, ".kestrel-ops.log"), "a");
       try {
         const child = spawn(file, args, { cwd: dir, env: { PATH: process.env.PATH ?? "", ...config.env }, detached: true, stdio: ["ignore", log, log] });
-        if (child.pid === undefined) throw new OpsError(`cannot start ${file}`, 1, "target");
+        const failure = await new Promise<Error | null>((settle) => {
+          child.on("error", settle);
+          child.once("spawn", () => settle(null));
+        });
+        if (failure !== null || child.pid === undefined) {
+          const code: unknown = failure === null ? undefined : Reflect.get(failure, "code");
+          throw new OpsError(`cannot start ${file} in ${dir}: ${failure?.message ?? "no process"}`, code === "ENOENT" || code === "EACCES" ? 2 : 1, "target");
+        }
         writeFileSync(pidFile, JSON.stringify({ pid: child.pid, started: startedAt(child.pid) }));
         child.unref();
       } finally {

@@ -101,7 +101,10 @@ from.
 A target stops, starts and describes the app. `local` runs it on this machine: `command` is started in `dir`
 in the background as its own process group with only the variables in `env` (and `PATH`), its pid kept in
 `.kestrel-ops.pid` with the process's start time (from `/proc` on Linux, from `ps` elsewhere, such as macOS). A
-stop sends SIGTERM to the whole group, so a wrapper such as a package manager ends with the app. A pid file
+stop sends SIGTERM to the whole group and resolves once no process of the group is left, so a wrapper that ends
+at once, such as `sh -c` running several commands, does not hide an app still in its teardown; while any process
+of the group runs, the app counts as started. A command that cannot be started, such as a missing program, ends
+the run with an error instead of a crash, exit 2 when the program is missing or not executable. A pid file
 written before the machine last booted, or whose pid now belongs to a process that started at another time,
 names no running app and nothing is signalled. A pid of another user's process, or one whose start time is
 missing in the file or cannot be read, reads as `unknown`, and the tool refuses to stop it or to restore over it.
