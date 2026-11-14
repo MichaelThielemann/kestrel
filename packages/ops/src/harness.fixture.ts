@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -32,6 +32,8 @@ export interface Harness {
   outputs: string[];
   run(args: string[], extra?: Partial<RunOptions>): Promise<RunOutcome>;
   answers(values: Record<string, string>): string;
+  /** Rewrites `kestrel.environments.json` through `edit`. */
+  editEnvironments(edit: (file: { environments: Record<string, Record<string, unknown>> }) => void): void;
   dispose(): Promise<void>;
 }
 
@@ -40,6 +42,8 @@ export interface HarnessOptions {
   store: ObjectStore;
   runtime?: string;
   production?: boolean;
+  /** The backup location; default {@link LOCATION}. */
+  location?: string;
 }
 
 /** Builds a harness whose tool and app share `store`. */
@@ -53,7 +57,7 @@ export function createHarness(options: HarnessOptions): Harness {
         target: { adapter: "fake" },
         storage: { bucket: "kestrel-test", credentials: { accessKeyId: { env: "OPS_ACCESS_KEY" }, secretAccessKey: { env: "OPS_SECRET_KEY" } } },
         app: { replicaPrefix: PREFIXES.replica, mediaPrefix: PREFIXES.media, deliveryPrefix: PREFIXES.delivery, derivedPrefixes: [PREFIXES.derived] },
-        backups: { prefix: LOCATION },
+        backups: { prefix: options.location ?? LOCATION },
       },
     },
   };
@@ -95,6 +99,12 @@ export function createHarness(options: HarnessOptions): Harness {
       const file = join(root, `answers-${answerFiles}.json`);
       writeFileSync(file, JSON.stringify(values));
       return file;
+    },
+    editEnvironments(edit) {
+      const file = join(root, "kestrel.environments.json");
+      const value = boundaryCast<{ environments: Record<string, Record<string, unknown>> }>(JSON.parse(readFileSync(file, "utf8")), "json");
+      edit(value);
+      writeFileSync(file, JSON.stringify(value, null, 2));
     },
     async dispose() {
       if ((await app.status()).state === "started") await app.stop();

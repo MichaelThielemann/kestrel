@@ -6,11 +6,12 @@ import { MemoryBucket, memoryStore } from "./memoryStore.ts";
 
 const DAY = 24 * 60 * 60 * 1000;
 
-function writeFakeBackup(bucket: MemoryBucket, id: string, kestrel: string): void {
+function writeFakeBackup(bucket: MemoryBucket, id: string, kestrel: string, verified: boolean | null = true): void {
   const manifest = { schema: "kestrel-ops/backup@1", id, versions: { "@michaelthielemann/kestrel": kestrel } };
   bucket.write(LOCATION + keys.manifest(id), jsonBytes(manifest), "put");
   bucket.write(LOCATION + keys.blobs(id), new Uint8Array(), "put");
   bucket.write(LOCATION + keys.site(id), new Uint8Array(), "put");
+  if (verified !== null) bucket.write(LOCATION + keys.verification(id, bucket.now()), jsonBytes({ ok: verified }), "put");
 }
 
 describe("backup prune", () => {
@@ -106,6 +107,91 @@ describe("backup prune", () => {
       expect(stamp(0)).toBe("19700101T000000Z");
     } finally {
       await h.dispose();
+    }
+  });
+});
+
+describe("backup prune at a location shared by environments", () => {
+  it("keeps the objects another environment's backups refer to", async () => {
+    const bucket = new MemoryBucket("shared");
+    const h = createHarness({ store: memoryStore(bucket) });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const prod = await h.run(["backup", "create", "--freeze", "--env", "prod", "--json"]);
+      expect(prod.code).toBe(0);
+      h.editEnvironments((file) => {
+        const stage = boundaryCast<Record<string, unknown>>(JSON.parse(JSON.stringify(file.environments.prod)), "json");
+        stage.production = false;
+        stage.app = { replicaPrefix: "stage/database/", mediaPrefix: "stage/media/", deliveryPrefix: "stage/www/", derivedPrefixes: ["stage/media-variants/"] };
+        file.environments.stage = stage;
+      });
+      const later = () => Date.now() + 3 * DAY;
+      const pruned = await h.run(["backup", "prune", "--env", "stage", "--yes", "--json"], { clock: later });
+      expect(pruned.code).toBe(0);
+      expect(pruned.json.objects).toEqual([]);
+      expect((await h.run(["backup", "verify", String(prod.json.id), "--env", "prod"])).code).toBe(0);
+    } finally {
+      await h.dispose();
+    }
+  });
+});
+
+describe("backup prune and verification", () => {
+  it("counts only verified backups towards the retention of their kind and keeps failed ones newer than the oldest kept verified one", async () => {
+    let now = Date.parse("2026-09-01T00:00:00Z");
+    const bucket = new MemoryBucket("verified-retention", { clock: () => now });
+    const h = createHarness({ store: memoryStore(bucket) });
+    try {
+      const cutover = [false, true, true, true, true, true, true, false].map((ok, i) => {
+        const id = backupId("prod", now + i * 60_000, "cutover", (i + 16).toString(16).padStart(4, "0"));
+        writeFakeBackup(bucket, id, "6.0.0", ok);
+        return id;
+      });
+      for (let i = 0; i < 16; i++) writeFakeBackup(bucket, backupId("prod", now + (i + 10) * 60_000, "scheduled", (i + 16).toString(16).padStart(4, "0")), "6.0.0", i < 2);
+      now += 3 * DAY;
+      const dry = await h.run(["backup", "prune", "--dry-run", "--json"], { clock: () => now });
+      expect(dry.code).toBe(0);
+      expect(dry.json.backups).toEqual([cutover[0], cutover[1]]);
+    } finally {
+      await h.dispose();
+    }
+  });
+
+  it("keeps the newest verified backup of each Kestrel major, not a newer failed one", async () => {
+    let now = Date.parse("2026-09-01T00:00:00Z");
+    const bucket = new MemoryBucket("verified-major", { clock: () => now });
+    const h = createHarness({ store: memoryStore(bucket) });
+    try {
+      writeFakeBackup(bucket, backupId("prod", now, "manual", "0010"), "5.8.1");
+      const failed = backupId("prod", now + 60_000, "manual", "0011");
+      writeFakeBackup(bucket, failed, "5.8.1", false);
+      for (let i = 0; i < 10; i++) writeFakeBackup(bucket, backupId("prod", now + (i + 2) * 60_000, "manual", (i + 32).toString(16).padStart(4, "0")), "6.0.0");
+      now += 3 * DAY;
+      const dry = await h.run(["backup", "prune", "--dry-run", "--json"], { clock: () => now });
+      expect(dry.code).toBe(0);
+      expect(dry.json.backups).toEqual([failed]);
+    } finally {
+      await h.dispose();
+    }
+  });
+});
+
+describe("backup list", () => {
+  it("reports the newest verification of a backup whatever the location prefix sorts like", async () => {
+    for (const location of ["kestrel-backups/", "zz-backups/"]) {
+      const bucket = new MemoryBucket(`list-${location}`);
+      const h = createHarness({ store: memoryStore(bucket), location });
+      try {
+        const id = backupId("prod", Date.parse("2026-11-14T12:00:00Z"), "manual", "00ab");
+        bucket.write(location + keys.manifest(id), jsonBytes({ schema: "kestrel-ops/backup@1", id, versions: {} }), "put");
+        bucket.write(`${location}backups/${id}/verify/20261114T120100Z-0001.json`, jsonBytes({ ok: true }), "put");
+        bucket.write(`${location}backups/${id}/verify/20261114T130000Z-0002.json`, jsonBytes({ ok: false }), "put");
+        const list = await h.run(["backup", "list", "--json"]);
+        expect(list.json.backups, location).toMatchObject([{ id, verified: false }]);
+      } finally {
+        await h.dispose();
+      }
     }
   });
 });

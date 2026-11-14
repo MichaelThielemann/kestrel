@@ -298,17 +298,20 @@ export interface BackupSummary {
 
 /** Every backup of the environment, oldest first. */
 export async function listBackups(ctx: Pick<OpsContext, "backups" | "location" | "envName">): Promise<BackupSummary[]> {
-  const byId = new Map<string, BackupSummary & { verifyKey: string | null; pins: Set<string>; released: Set<string> }>();
+  const byId = new Map<string, BackupSummary & { verifyKey: string | null; verifyRest: string; pins: Set<string>; released: Set<string> }>();
   for (const info of await ctx.backups.list(`${ctx.location}backups/`)) {
     const m = /^backups\/([^/]+)\/(.+)$/.exec(info.key.slice(ctx.location.length));
     const parsed = m ? parseBackupId(m[1] ?? "") : null;
     if (!m || !parsed || parsed.env !== ctx.envName) continue;
     const id = m[1] ?? "";
     const rest = m[2] ?? "";
-    const entry = byId.get(id) ?? { id, kind: parsed.kind, at: parsed.at, complete: false, verified: null, pinnedBy: [], newestWrite: 0, verifyKey: null, pins: new Set<string>(), released: new Set<string>() };
+    const entry = byId.get(id) ?? { id, kind: parsed.kind, at: parsed.at, complete: false, verified: null, pinnedBy: [], newestWrite: 0, verifyKey: null, verifyRest: "", pins: new Set<string>(), released: new Set<string>() };
     entry.newestWrite = Math.max(entry.newestWrite, info.lastModified);
     if (rest === "manifest.json") entry.complete = true;
-    if (rest.startsWith("verify/") && (entry.verifyKey === null || rest > entry.verifyKey)) entry.verifyKey = info.key;
+    if (rest.startsWith("verify/") && (entry.verifyKey === null || rest > entry.verifyRest)) {
+      entry.verifyKey = info.key;
+      entry.verifyRest = rest;
+    }
     const pin = /^pins\/([^/]+?)(\.released)?\.json$/.exec(rest);
     if (pin) (pin[2] ? entry.released : entry.pins).add(pin[1] ?? "");
     byId.set(id, entry);
@@ -346,9 +349,21 @@ const majorOfKestrel = (manifest: Manifest | null): string | null => {
   return version === undefined ? null : (version.split(".")[0] ?? null);
 };
 
+async function backupIdsAtLocation(ctx: Pick<OpsContext, "backups" | "location">): Promise<Set<string>> {
+  const ids = new Set<string>();
+  for (const info of await ctx.backups.list(`${ctx.location}backups/`)) {
+    const m = /^backups\/([^/]+)\//.exec(info.key.slice(ctx.location.length));
+    if (m?.[1] !== undefined) ids.add(m[1]);
+  }
+  return ids;
+}
+
 /**
- * Removes backups beyond the retention count of their kind and the objects no remaining backup refers to. It keeps
- * pinned backups and the newest backup of every Kestrel major, never removes anything younger than a day, and refuses
+ * Removes backups beyond the retention count of their kind and the objects no remaining backup refers to. Only
+ * verified backups count towards the retention; a failed or unverified one is kept while it is newer than the oldest
+ * verified backup the count keeps (or, when its kind has no verified backup, while it is among the newest of the
+ * count). It keeps pinned backups and the newest verified backup of every Kestrel major, never removes anything
+ * younger than a day, keeps every object a backup of any environment at the same location refers to, and refuses
  * while a run is open or another run holds the lock.
  */
 export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResult> {
@@ -363,13 +378,18 @@ export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResu
   const manifests = new Map<string, Manifest | null>();
   for (const b of all) manifests.set(b.id, b.complete ? await readManifest(ctx, b.id) : null);
   for (const kind of BACKUP_KINDS) {
+    const count = ctx.env.backups.retention[kind];
     const ofKind = all.filter((b) => b.kind === kind && b.complete).reverse();
-    ofKind.slice(0, ctx.env.backups.retention[kind]).forEach((b) => keep.add(b.id));
+    const verified = ofKind.filter((b) => b.verified === true).slice(0, count);
+    verified.forEach((b) => keep.add(b.id));
+    const oldest = verified.at(-1);
+    const others = ofKind.filter((b) => b.verified !== true);
+    (oldest === undefined ? others.slice(0, count) : others.filter((b) => b.at > oldest.at)).forEach((b) => keep.add(b.id));
   }
   const newestPerMajor = new Map<string, string>();
   for (const b of all) {
     const major = majorOfKestrel(manifests.get(b.id) ?? null);
-    if (b.complete && major !== null) newestPerMajor.set(major, b.id);
+    if (b.complete && b.verified === true && major !== null) newestPerMajor.set(major, b.id);
   }
   newestPerMajor.forEach((id) => keep.add(id));
   for (const b of all) {
@@ -377,9 +397,10 @@ export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResu
     if (!keep.has(b.id)) remove.push(b.id);
   }
   const referenced = new Set<string>();
-  for (const b of all) {
-    if (!keep.has(b.id)) continue;
-    for (const list of [await readJsonl<BlobEntry>(ctx, ctx.location + keys.blobs(b.id)), await readJsonl<SiteEntry>(ctx, ctx.location + keys.site(b.id))]) for (const entry of list ?? []) referenced.add(ctx.location + entry.object);
+  const removing = new Set(remove);
+  for (const id of await backupIdsAtLocation(ctx)) {
+    if (removing.has(id)) continue;
+    for (const list of [await readJsonl<BlobEntry>(ctx, ctx.location + keys.blobs(id)), await readJsonl<SiteEntry>(ctx, ctx.location + keys.site(id))]) for (const entry of list ?? []) referenced.add(ctx.location + entry.object);
   }
   const objects = (await ctx.backups.list(`${ctx.location}objects/`)).filter((o) => !referenced.has(o.key) && now - o.lastModified >= PRUNE_MIN_AGE_MS).map((o) => o.key);
   const result: PruneResult = { dryRun, backups: remove, objects, kept: [...keep].sort() };
