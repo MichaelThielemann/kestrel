@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -90,7 +91,7 @@ describe("the 5.8.1 upgrade fixture: provenance", () => {
     const files = tree(FIXTURE);
     expect(files.filter((file) => file.startsWith("blobs/")).map((file) => file.slice("blobs/".length)).sort()).toEqual([...manifest.blobs].sort());
     const bytes = files.reduce((sum, file) => sum + statSync(join(FIXTURE, file)).size, 0);
-    expect(bytes).toBeLessThan(1_500_000);
+    expect(bytes).toBeLessThan(2_000_000);
     for (const file of files.filter((name) => name.startsWith("blobs/media/") && /\.(png|pdf|svg)$/.test(name))) expect(statSync(join(FIXTURE, file)).size).toBeLessThan(64 * 1024);
   });
 
@@ -137,6 +138,16 @@ describe("the 5.8.1 upgrade fixture: database", () => {
     for (const row of rows<MediaRow>("select * from media_items")) expect(row.key).toBe(row.folder === "" ? `media/${row.filename}` : `media/${row.folder}/${row.filename}`);
   });
 
+  it("records the sha256 of every original that is present", () => {
+    const present = rows<MediaRow>("select * from media_items").filter((row) => existsSync(join(BLOBS, row.key)));
+    expect(present.length).toBeGreaterThanOrEqual(6);
+    for (const row of present) expect(createHash("sha256").update(readFileSync(join(BLOBS, row.key))).digest("hex"), row.key).toBe(row.checksum);
+  });
+
+  it("is protected from line-ending conversion on checkout", () => {
+    expect(readFileSync(join(ROOT, ".gitattributes"), "utf8").split("\n")).toContain("fixtures/** -text");
+  });
+
   it("has variants in three sizes whose files exist", () => {
     const variants = rows<{ size: string; key: string }>("select size, key from images_variants");
     expect([...new Set(variants.map((row) => row.size))].sort()).toEqual([...manifest.imageSizes].sort());
@@ -176,6 +187,12 @@ describe("the 5.8.1 upgrade fixture: blob tree", () => {
       ["llms.txt", /^site\/llms\.txt$/],
       ["llms-full.txt", /^site\/llms-full\.txt$/],
       ["redirect rules", /^site\/redirects\.json$/],
+      ["exported media original", /^site\/media\/(?:[^/]+\/)*[^/]+\.(?:png|pdf|svg)$/],
+      ["exported media original in a nested folder", /^site\/media\/gallery\/2026\/summer\/beach\.png$/],
+      ["exported media variant", /^site\/media\/(?:[^/]+\/)*[^/]+\.(?:thumb|small)\.webp$/],
+      ["exported media variant in the original format", /^site\/media\/(?:[^/]+\/)*[^/]+\.wide\.png$/],
+      ["backup", /^backups\/kestrel\.db$/],
+      ["backup version", /^backups\/kestrel\.db\.[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{3}Z$/],
       ["replica snapshot", /^replica\/gen\/[0-9]{8}T[0-9]{6}Z\/snapshot\.db$/],
       ["replica segment", /^replica\/gen\/[0-9]{8}T[0-9]{6}Z\/wal\/[0-9]{6}-[0-9]{6}-[0-9]{8}T[0-9]{6}Z\.wal$/],
     ];
@@ -183,7 +200,51 @@ describe("the 5.8.1 upgrade fixture: blob tree", () => {
   });
 
   it("holds no other key family", () => {
-    for (const key of keys("")) expect(/^(?:media|media-variants|site|replica)\//.test(key), key).toBe(true);
+    for (const key of keys("")) expect(/^(?:media|media-variants|site|replica|backups)\//.test(key), key).toBe(true);
+  });
+
+  it("exports the same filename from two folders as two separate copies of the right originals", () => {
+    const photos = rows<MediaRow>("select * from media_items where filename = ?", "photo.png");
+    expect(photos).toHaveLength(2);
+    const copies = photos.map((row) => `site/media/${row.folder}/${row.filename}`);
+    expect(new Set(copies).size).toBe(2);
+    for (const [index, row] of photos.entries()) {
+      const copy = readFileSync(join(BLOBS, copies[index] ?? ""));
+      expect(copy.equals(readFileSync(join(BLOBS, row.key))), copies[index]).toBe(true);
+    }
+  });
+
+  it("copies every exported media file from the original or variant its key names", () => {
+    const items = rows<MediaRow>("select * from media_items");
+    const variants = rows<{ mediaId: string; size: string; key: string }>("select mediaId, size, key from images_variants");
+    const exported = keys("site/media/");
+    expect(exported.length).toBeGreaterThanOrEqual(8);
+    for (const key of exported) {
+      const rest = key.slice("site/media/".length);
+      const original = items.find((row) => `${row.folder === "" ? "" : `${row.folder}/`}${row.filename}` === rest);
+      if (original !== undefined) {
+        expect(readFileSync(join(BLOBS, key)).equals(readFileSync(join(BLOBS, original.key))), key).toBe(true);
+        continue;
+      }
+      const variant = items.flatMap((row) => variants.filter((v) => v.mediaId === row.id && rest.startsWith(`${row.folder === "" ? "" : `${row.folder}/`}${row.filename}.${v.size}.`)));
+      expect(variant.length, key).toBeGreaterThan(0);
+      expect(readFileSync(join(BLOBS, key)).equals(readFileSync(join(BLOBS, variant[0]?.key ?? ""))), key).toBe(true);
+    }
+  });
+
+  it("links the exported pages to the exported media files and leaves no media id in a url", () => {
+    const html = readFileSync(join(BLOBS, "site", "about", "index.html"), "utf8");
+    expect(html).toContain("/media/gallery/photo.png");
+    expect(html).toContain("/media/team/photo.png");
+    for (const key of keys("site/").filter((name) => name.endsWith(".html"))) expect(readFileSync(join(BLOBS, key), "utf8"), key).not.toMatch(/\/media\/[0-9a-f-]{36}\//);
+  });
+
+  it("holds a backup of the database and at least two versions of it", () => {
+    const database = readFileSync(join(FIXTURE, "kestrel.db"));
+    expect(readFileSync(join(BLOBS, "backups", "kestrel.db")).equals(database)).toBe(true);
+    const versions = keys("backups/kestrel.db.");
+    expect(versions.length).toBeGreaterThanOrEqual(2);
+    for (const key of versions) expect(readFileSync(join(BLOBS, key)).equals(database), key).toBe(true);
   });
 });
 

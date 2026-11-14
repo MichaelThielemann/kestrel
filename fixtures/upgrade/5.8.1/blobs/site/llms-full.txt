@@ -11,9 +11,9 @@ Source: /
 #### Startseite (neu)
 
 {
-  "id": "c19ddb91-c799-4635-868a-d4d8c3585535",
-  "createdAt": 1794666968247,
-  "updatedAt": 1794666968305,
+  "id": "f662a987-fb9f-41fa-ad7e-cb7f3df88222",
+  "createdAt": 1794667851398,
+  "updatedAt": 1794667851620,
   "slug": "home",
   "title": "Startseite (neu)",
   "body": \[
@@ -22,7 +22,7 @@ Source: /
       "type": "hero",
       "props": {
         "heading": "Willkommen",
-        "image": "86f24ce7-42b4-49ad-9be9-e3ebfe6eb01f"
+        "image": "5cc26e56-ae71-45a0-b0ac-6ea57b0336cb"
       }
     },
     {
@@ -34,7 +34,7 @@ Source: /
     }
   \],
   "status": "published",
-  "hero": "4af3c64d-d72e-4669-92d2-3635dc36c87c",
+  "hero": "b945be40-7dd4-4fbd-8eaf-40482a062ef9",
   "seo": null,
   "\_locales": {
     "slug": "de",
@@ -55,9 +55,9 @@ Source: /about
 #### Über uns
 
 {
-  "id": "0d42e159-066d-451b-b39d-62eddc1ec3bc",
-  "createdAt": 1794666968276,
-  "updatedAt": 1794666968313,
+  "id": "f6a802d8-23fb-4c26-aaae-84b1df5d1c77",
+  "createdAt": 1794667851470,
+  "updatedAt": 1794667851692,
   "slug": "about",
   "title": "Über uns",
   "body": \[
@@ -69,24 +69,31 @@ Source: /about
       }
     },
     {
-      "id": "i-d10ea766",
+      "id": "i-93eb5d0b",
       "type": "image",
       "props": {
-        "image": "d10ea766-137b-47a3-b170-422a37c84f49",
+        "image": "93eb5d0b-08d3-4930-a4c2-cf49ef6142a2",
         "alt": "Fixture image"
       }
     },
     {
-      "id": "i-86f24ce7",
+      "id": "i-5cc26e56",
       "type": "image",
       "props": {
-        "image": "86f24ce7-42b4-49ad-9be9-e3ebfe6eb01f",
+        "image": "5cc26e56-ae71-45a0-b0ac-6ea57b0336cb",
         "alt": "Fixture image"
+      }
+    },
+    {
+      "id": "m-about",
+      "type": "prose",
+      "props": {
+        "body": "<p><img src=\\"/media/team/photo.png\\" alt=\\"Team\\" /> <img src=\\"/media/gallery/photo.png\\" alt=\\"Gallery\\" /></p><p><img src=\\"/media/team/photo.png.thumb.webp\\" alt=\\"Team thumbnail\\" /> <img src=\\"/media/gallery/photo.png.thumb.webp\\" alt=\\"Gallery thumbnail\\" /></p><p><img src=\\"/media/gallery/2026/summer/beach.png.small.webp\\" alt=\\"Beach\\" /> <img src=\\"/media/gallery/2026/summer/beach.png.wide.png\\" alt=\\"Beach, wide\\" /></p><p><img src=\\"/media/gallery/2026/summer/beach.png\\" alt=\\"Beach original\\" /> <img src=\\"/media/mark.svg\\" alt=\\"Mark\\" /> <a href=\\"/media/docs/guide.pdf\\">Guide</a></p>"
       }
     }
   \],
   "status": "published",
-  "hero": "d10ea766-137b-47a3-b170-422a37c84f49",
+  "hero": "93eb5d0b-08d3-4930-a4c2-cf49ef6142a2",
   "seo": null,
   "\_locales": {
     "slug": "de",
@@ -107,9 +114,9 @@ Source: /en
 #### Home
 
 {
-  "id": "c19ddb91-c799-4635-868a-d4d8c3585535",
-  "createdAt": 1794666968247,
-  "updatedAt": 1794666968305,
+  "id": "f662a987-fb9f-41fa-ad7e-cb7f3df88222",
+  "createdAt": 1794667851398,
+  "updatedAt": 1794667851620,
   "slug": "home",
   "title": "Home",
   "body": \[
@@ -118,7 +125,7 @@ Source: /en
       "type": "hero",
       "props": {
         "heading": "Welcome",
-        "image": "86f24ce7-42b4-49ad-9be9-e3ebfe6eb01f"
+        "image": "5cc26e56-ae71-45a0-b0ac-6ea57b0336cb"
       }
     },
     {
@@ -127,10 +134,17 @@ Source: /en
       "props": {
         "body": "<p>An invented start page.</p>"
       }
+    },
+    {
+      "id": "m-home-en",
+      "type": "prose",
+      "props": {
+        "body": "<p><img src=\\"/media/logo.png\\" alt=\\"Logo\\" /> <img src=\\"/media/logo.png.small.webp\\" alt=\\"Logo, small\\" /></p>"
+      }
     }
   \],
   "status": "published",
-  "hero": "4af3c64d-d72e-4669-92d2-3635dc36c87c",
+  "hero": "b945be40-7dd4-4fbd-8eaf-40482a062ef9",
   "seo": null,
   "\_locales": {
     "slug": "en",
@@ -151,39 +165,46 @@ Source: /gallery
 #### Galerie
 
 {
-  "id": "c5d91fa4-e1a9-4160-9187-ae4ea2acf83e",
-  "createdAt": 1794666968281,
-  "updatedAt": 1794666968318,
+  "id": "f05662f2-02ac-4198-98a2-db9b6848c567",
+  "createdAt": 1794667851487,
+  "updatedAt": 1794667851718,
   "slug": "gallery",
   "title": "Galerie",
   "body": \[
     {
-      "id": "i-4af3c64d",
+      "id": "i-b945be40",
       "type": "image",
       "props": {
-        "image": "4af3c64d-d72e-4669-92d2-3635dc36c87c",
+        "image": "b945be40-7dd4-4fbd-8eaf-40482a062ef9",
         "alt": "Fixture image"
       }
     },
     {
-      "id": "i-178a531b",
+      "id": "i-f0fa04f5",
       "type": "image",
       "props": {
-        "image": "178a531b-1c3e-4bd3-9df0-f073889cb9e1",
+        "image": "f0fa04f5-45be-478e-84da-64f96869a4d5",
         "alt": "Fixture image"
       }
     },
     {
-      "id": "i-54896455",
+      "id": "i-8146a3f1",
       "type": "image",
       "props": {
-        "image": "54896455-a1f1-4e64-87ce-bd2a4c0279be",
+        "image": "8146a3f1-ee9b-4fbb-a394-290634519fd9",
         "alt": "Fixture image"
+      }
+    },
+    {
+      "id": "m-gallery",
+      "type": "prose",
+      "props": {
+        "body": "<p><img src=\\"/media/gallery/lost.png.thumb.webp\\" alt=\\"Missing original\\" /> <img src=\\"/media/gallery/photo.png.wide.png\\" alt=\\"Gallery, wide\\" /></p>"
       }
     }
   \],
   "status": "published",
-  "hero": "54896455-a1f1-4e64-87ce-bd2a4c0279be",
+  "hero": "8146a3f1-ee9b-4fbb-a394-290634519fd9",
   "seo": null,
   "\_locales": {
     "slug": "de",

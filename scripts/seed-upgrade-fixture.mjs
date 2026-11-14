@@ -21,6 +21,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
 const DEFAULT_OUT = join(REPO, "fixtures", "upgrade", VERSION);
 const SEED_COPY = "seed-upgrade-fixture.mjs";
+const SCOPE = "@michaelthielemann";
+export const BACKUP_KEY = "backups/kestrel.db";
 
 function fail(message) {
   console.error(`seed-upgrade-fixture: ${message}`);
@@ -67,6 +69,7 @@ function prepareProject(work) {
   const manifest = JSON.parse(readFileSync(join(project, "package.json"), "utf8"));
   const dependencies = {};
   for (const name of Object.keys(manifest.dependencies)) dependencies[name] = VERSION;
+  dependencies[`${SCOPE}/kestrel-backup-blobstore`] = VERSION;
   writeFileSync(join(project, "package.json"), `${JSON.stringify({ name: "upgrade-fixture-project", private: true, type: "module", dependencies }, null, 2)}\n`);
   return project;
 }
@@ -208,13 +211,24 @@ async function seed() {
 
   const page = (slug, title, body, extra = {}) => ({ slug, title, body, status: "published", ...extra });
   const prose = (text) => ({ id: `p-${text.length}`, type: "prose", props: { body: `<p>${text}</p>` } });
+  const file = (item) => `/media/${item.id}/file`;
+  const variant = (item, size, ext) => `/media/${item.id}/variants/${size}.${ext}`;
+  const markup = (id, html) => ({ id, type: "prose", props: { body: html } });
+  const aboutMedia = markup("m-about", [
+    `<p><img src="${file(media.teamPhoto)}" alt="Team"> <img src="${file(media.galleryPhoto)}" alt="Gallery"></p>`,
+    `<p><img src="${variant(media.teamPhoto, "thumb", "webp")}" alt="Team thumbnail"> <img src="${variant(media.galleryPhoto, "thumb", "webp")}" alt="Gallery thumbnail"></p>`,
+    `<p><img src="${variant(media.beach, "small", "webp")}" alt="Beach"> <img src="${variant(media.beach, "wide", "png")}" alt="Beach, wide"></p>`,
+    `<p><img src="${file(media.beach)}" alt="Beach original"> <img src="${file(media.mark)}" alt="Mark"> <a href="${file(media.guide)}">Guide</a></p>`,
+  ].join(""));
+  const galleryMedia = markup("m-gallery", `<p><img src="${variant(media.lost, "thumb", "webp")}" alt="Missing original"> <img src="${variant(media.galleryPhoto, "wide", "png")}" alt="Gallery, wide"></p>`);
+  const homeEnMedia = markup("m-home-en", `<p><img src="${file(media.logo)}" alt="Logo"> <img src="${variant(media.logo, "small", "webp")}" alt="Logo, small"></p>`);
   const imageBlock = (id) => ({ id: `i-${id.slice(0, 8)}`, type: "image", props: { image: id, alt: "Fixture image" } });
 
   const create = async (token, body) => (await call("createPage", { body }, token)).document;
   const home = await create(admin, { locale: "de", ...page("home", "Startseite", [{ id: "h1", type: "hero", props: { heading: "Willkommen", image: media.logo.id } }, prose('Eine erfundene Startseite. <a href="https://example.com/info">Mehr</a>')], { hero: media.logo.id }) });
-  await call("updatePage", { params: { id: home.id }, body: { locale: "en", ...page("home", "Home", [{ id: "h1", type: "hero", props: { heading: "Welcome", image: media.logo.id } }, prose("An invented start page.")], { hero: media.logo.id }) } }, admin);
+  await call("updatePage", { params: { id: home.id }, body: { locale: "en", ...page("home", "Home", [{ id: "h1", type: "hero", props: { heading: "Welcome", image: media.logo.id } }, prose("An invented start page."), homeEnMedia], { hero: media.logo.id }) } }, admin);
   const about = await create(admin, { locale: "de", ...page("about", "Über uns", [prose("Das Team."), imageBlock(media.teamPhoto.id)], { hero: media.teamPhoto.id }) });
-  const gallery = await create(admin, { locale: "de", ...page("gallery", "Galerie", [imageBlock(media.galleryPhoto.id), imageBlock(media.beach.id), imageBlock(media.lost.id)], { hero: media.beach.id }) });
+  const gallery = await create(admin, { locale: "de", ...page("gallery", "Galerie", [imageBlock(media.galleryPhoto.id), imageBlock(media.beach.id), imageBlock(media.lost.id), galleryMedia], { hero: media.beach.id }) });
   const draft = await create(editor, { locale: "de", ...page("entwurf", "Entwurf", [prose("Noch nicht fertig.")], { status: "draft" }) });
 
   await call("setSettings", { body: { locale: "de", title: "Beispielseite", description: "Erfundene Inhalte", navigation: [{ label: "Start", path: "/" }, { label: "Über uns", path: "/about" }] } }, admin);
@@ -226,7 +240,7 @@ async function seed() {
   await call("updatePage", { params: { id: home.id }, body: { locale: "de", title: "Startseite (neu)", hero: media.galleryPhoto.id } }, admin);
   const revisions = await call("pageRevisions", { params: { id: home.id }, body: {}, query: { locale: "de" } }, admin);
   await call("labelPageRevision", { params: { id: home.id, revisionId: revisions.items.at(-1).id }, body: { label: "first version" } }, admin);
-  await call("updatePage", { params: { id: about.id }, body: { locale: "de", body: [prose("Das Team, erweitert."), imageBlock(media.teamPhoto.id), imageBlock(media.logo.id)] } }, admin);
+  await call("updatePage", { params: { id: about.id }, body: { locale: "de", body: [prose("Das Team, erweitert."), imageBlock(media.teamPhoto.id), imageBlock(media.logo.id), aboutMedia] } }, admin);
   await call("updatePage", { params: { id: gallery.id }, body: { locale: "de", hero: media.lost.id } }, admin);
   await call("updatePage", { params: { id: draft.id }, body: { locale: "de", title: "Entwurf 2" } }, editor);
   await call("replicate", {});
@@ -259,6 +273,17 @@ async function seed() {
   for (const table of tables) counts[table] = db.prepare(`select count(*) as n from "${table}"`).get().n;
   db.close();
 
+  const { createBackupBlobstore } = await import(`${SCOPE}/kestrel-backup-blobstore/impl`);
+  const { createBlobstoreFilesystem } = await import(`${SCOPE}/kestrel-blobstore-filesystem/impl`);
+  let backupClock = Date.now();
+  const backup = createBackupBlobstore({ file: join(root, "data", "kestrel.db"), key: BACKUP_KEY, restoreOnStart: false, versions: 3 }, createBlobstoreFilesystem({ root: blobs }), () => backupClock);
+  let backedUp;
+  for (let i = 0; i < 2; i++) {
+    backedUp = await backup.backup();
+    if (isErr(backedUp)) throw new Error(`cannot back up the database: ${backedUp.error.message}`);
+    backupClock += 60_000;
+  }
+
   const summary = {
     media: Object.fromEntries(Object.entries(media).map(([name, item]) => [name, { id: item.id, key: item.key, folder: item.folder, filename: item.filename }])),
     missingOriginal: media.lost.id,
@@ -266,6 +291,7 @@ async function seed() {
     pages: { home: home.id, about: about.id, gallery: gallery.id, draft: draft.id },
     imageSizes: IMAGE_SIZES.map((size) => size.name),
     collections: counts,
+    backup: { key: BACKUP_KEY, versions: backedUp.value.versions },
   };
   writeFileSync(join(root, "seed-summary.json"), JSON.stringify(summary));
 }

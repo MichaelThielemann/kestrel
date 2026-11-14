@@ -9,6 +9,7 @@
     "@michaelthielemann/kestrel-audit-persistence": "5.8.1",
     "@michaelthielemann/kestrel-authn-multi": "5.8.1",
     "@michaelthielemann/kestrel-authz-roles": "5.8.1",
+    "@michaelthielemann/kestrel-backup-blobstore": "5.8.1",
     "@michaelthielemann/kestrel-blobstore-filesystem": "5.8.1",
     "@michaelthielemann/kestrel-content-default": "5.8.1",
     "@michaelthielemann/kestrel-contracts": "5.8.1",
@@ -35,59 +36,59 @@
   },
   "media": {
     "logo": {
-      "id": "86f24ce7-42b4-49ad-9be9-e3ebfe6eb01f",
+      "id": "5cc26e56-ae71-45a0-b0ac-6ea57b0336cb",
       "key": "media/logo.png",
       "folder": "",
       "filename": "logo.png"
     },
     "galleryPhoto": {
-      "id": "4af3c64d-d72e-4669-92d2-3635dc36c87c",
+      "id": "b945be40-7dd4-4fbd-8eaf-40482a062ef9",
       "key": "media/gallery/photo.png",
       "folder": "gallery",
       "filename": "photo.png"
     },
     "teamPhoto": {
-      "id": "d10ea766-137b-47a3-b170-422a37c84f49",
+      "id": "93eb5d0b-08d3-4930-a4c2-cf49ef6142a2",
       "key": "media/team/photo.png",
       "folder": "team",
       "filename": "photo.png"
     },
     "beach": {
-      "id": "178a531b-1c3e-4bd3-9df0-f073889cb9e1",
+      "id": "f0fa04f5-45be-478e-84da-64f96869a4d5",
       "key": "media/gallery/2026/summer/beach.png",
       "folder": "gallery/2026/summer",
       "filename": "beach.png"
     },
     "guide": {
-      "id": "407fc37a-afb9-4567-a062-c3f9be58cdb2",
+      "id": "45300116-9363-4500-a726-af954d4cd925",
       "key": "media/docs/guide.pdf",
       "folder": "docs",
       "filename": "guide.pdf"
     },
     "mark": {
-      "id": "be3e4721-d326-4359-b8b6-b9bf76c5e63c",
+      "id": "0a73541a-1b50-4492-af2f-8dff9ccf216c",
       "key": "media/mark.svg",
       "folder": "",
       "filename": "mark.svg"
     },
     "lost": {
-      "id": "54896455-a1f1-4e64-87ce-bd2a4c0279be",
+      "id": "8146a3f1-ee9b-4fbb-a394-290634519fd9",
       "key": "media/gallery/lost.png",
       "folder": "gallery",
       "filename": "lost.png"
     }
   },
-  "missingOriginal": "54896455-a1f1-4e64-87ce-bd2a4c0279be",
+  "missingOriginal": "8146a3f1-ee9b-4fbb-a394-290634519fd9",
   "duplicatedVariant": {
-    "mediaId": "4af3c64d-d72e-4669-92d2-3635dc36c87c",
+    "mediaId": "b945be40-7dd4-4fbd-8eaf-40482a062ef9",
     "size": "thumb",
     "rows": 3
   },
   "pages": {
-    "home": "c19ddb91-c799-4635-868a-d4d8c3585535",
-    "about": "0d42e159-066d-451b-b39d-62eddc1ec3bc",
-    "gallery": "c5d91fa4-e1a9-4160-9187-ae4ea2acf83e",
-    "draft": "f770f54c-e7c1-45eb-bf2c-516c92daf62f"
+    "home": "f662a987-fb9f-41fa-ad7e-cb7f3df88222",
+    "about": "f6a802d8-23fb-4c26-aaae-84b1df5d1c77",
+    "gallery": "f05662f2-02ac-4198-98a2-db9b6848c567",
+    "draft": "c17b1fd8-344f-4bd7-864a-abc5ad51874c"
   },
   "imageSizes": [
     "thumb",
@@ -113,38 +114,61 @@
     "revisions_heads": 5,
     "settings": 1
   },
+  "backup": {
+    "key": "backups/kestrel.db",
+    "versions": [
+      "backups/kestrel.db.2026-11-14T14-51-51-843Z",
+      "backups/kestrel.db.2026-11-14T14-50-51-843Z"
+    ]
+  },
   "blobs": [
-    "media-variants/178a531b-1c3e-4bd3-9df0-f073889cb9e1/small.webp",
-    "media-variants/178a531b-1c3e-4bd3-9df0-f073889cb9e1/thumb.webp",
-    "media-variants/178a531b-1c3e-4bd3-9df0-f073889cb9e1/wide.png",
-    "media-variants/4af3c64d-d72e-4669-92d2-3635dc36c87c/small.webp",
-    "media-variants/4af3c64d-d72e-4669-92d2-3635dc36c87c/thumb.webp",
-    "media-variants/4af3c64d-d72e-4669-92d2-3635dc36c87c/wide.png",
-    "media-variants/54896455-a1f1-4e64-87ce-bd2a4c0279be/small.webp",
-    "media-variants/54896455-a1f1-4e64-87ce-bd2a4c0279be/thumb.webp",
-    "media-variants/54896455-a1f1-4e64-87ce-bd2a4c0279be/wide.png",
-    "media-variants/86f24ce7-42b4-49ad-9be9-e3ebfe6eb01f/small.webp",
-    "media-variants/86f24ce7-42b4-49ad-9be9-e3ebfe6eb01f/thumb.webp",
-    "media-variants/86f24ce7-42b4-49ad-9be9-e3ebfe6eb01f/wide.png",
-    "media-variants/d10ea766-137b-47a3-b170-422a37c84f49/small.webp",
-    "media-variants/d10ea766-137b-47a3-b170-422a37c84f49/thumb.webp",
-    "media-variants/d10ea766-137b-47a3-b170-422a37c84f49/wide.png",
+    "backups/kestrel.db",
+    "backups/kestrel.db.2026-11-14T14-50-51-843Z",
+    "backups/kestrel.db.2026-11-14T14-51-51-843Z",
+    "media-variants/5cc26e56-ae71-45a0-b0ac-6ea57b0336cb/small.webp",
+    "media-variants/5cc26e56-ae71-45a0-b0ac-6ea57b0336cb/thumb.webp",
+    "media-variants/5cc26e56-ae71-45a0-b0ac-6ea57b0336cb/wide.png",
+    "media-variants/8146a3f1-ee9b-4fbb-a394-290634519fd9/small.webp",
+    "media-variants/8146a3f1-ee9b-4fbb-a394-290634519fd9/thumb.webp",
+    "media-variants/8146a3f1-ee9b-4fbb-a394-290634519fd9/wide.png",
+    "media-variants/93eb5d0b-08d3-4930-a4c2-cf49ef6142a2/small.webp",
+    "media-variants/93eb5d0b-08d3-4930-a4c2-cf49ef6142a2/thumb.webp",
+    "media-variants/93eb5d0b-08d3-4930-a4c2-cf49ef6142a2/wide.png",
+    "media-variants/b945be40-7dd4-4fbd-8eaf-40482a062ef9/small.webp",
+    "media-variants/b945be40-7dd4-4fbd-8eaf-40482a062ef9/thumb.webp",
+    "media-variants/b945be40-7dd4-4fbd-8eaf-40482a062ef9/wide.png",
+    "media-variants/f0fa04f5-45be-478e-84da-64f96869a4d5/small.webp",
+    "media-variants/f0fa04f5-45be-478e-84da-64f96869a4d5/thumb.webp",
+    "media-variants/f0fa04f5-45be-478e-84da-64f96869a4d5/wide.png",
     "media/docs/guide.pdf",
     "media/gallery/2026/summer/beach.png",
     "media/gallery/photo.png",
     "media/logo.png",
     "media/mark.svg",
     "media/team/photo.png",
-    "replica/gen/20261114T143608Z/snapshot.db",
-    "replica/gen/20261114T143608Z/wal/000000-000000-20261114T143608Z.wal",
-    "replica/gen/20261114T143608Z/wal/000001-000001-20261114T143608Z.wal",
-    "replica/gen/20261114T143608Z/wal/000001-000002-20261114T143608Z.wal",
+    "replica/gen/20261114T145051Z/snapshot.db",
+    "replica/gen/20261114T145051Z/wal/000000-000000-20261114T145051Z.wal",
+    "replica/gen/20261114T145051Z/wal/000001-000001-20261114T145051Z.wal",
+    "replica/gen/20261114T145051Z/wal/000001-000002-20261114T145051Z.wal",
     "site/about/index.html",
     "site/en/index.html",
     "site/gallery/index.html",
     "site/index.html",
     "site/llms-full.txt",
     "site/llms.txt",
+    "site/media/docs/guide.pdf",
+    "site/media/gallery/2026/summer/beach.png",
+    "site/media/gallery/2026/summer/beach.png.small.webp",
+    "site/media/gallery/2026/summer/beach.png.wide.png",
+    "site/media/gallery/lost.png.thumb.webp",
+    "site/media/gallery/photo.png",
+    "site/media/gallery/photo.png.thumb.webp",
+    "site/media/gallery/photo.png.wide.png",
+    "site/media/logo.png",
+    "site/media/logo.png.small.webp",
+    "site/media/mark.svg",
+    "site/media/team/photo.png",
+    "site/media/team/photo.png.thumb.webp",
     "site/redirects.json"
   ]
 }
