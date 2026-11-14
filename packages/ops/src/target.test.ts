@@ -8,6 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { writeBundle } from "./bundle.ts";
+import { OpsError } from "./errors.ts";
 import { createHarness, LOCATION } from "./harness.fixture.ts";
 import { MemoryBucket, memoryStore } from "./memoryStore.ts";
 import { probeProtection } from "./status.ts";
@@ -266,7 +267,14 @@ describe("bundle", () => {
       symlinkSync(join(import.meta.dirname, ".."), join(project, "node_modules", "@michaelthielemann", "kestrel-ops"));
       writeFileSync(join(project, "package.json"), JSON.stringify({ name: "site" }));
       writeFileSync(join(project, "kestrel.environments.json"), JSON.stringify({ environments: { prod: { target: { adapter: "@example/absent-target" }, storage: { bucket: "b" }, app: { replicaPrefix: "database/", mediaPrefix: "media/", deliveryPrefix: "www/" }, backups: { prefix: "kestrel-backups/" } } } }));
-      expect(() => writeBundle(project, project, {}, () => 1)).toThrow(expect.objectContaining({ exitCode: 2, message: expect.stringContaining("@example/absent-target") }));
+      let error: unknown = null;
+      try {
+        writeBundle(project, project, {}, () => 1);
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(OpsError);
+      expect(error instanceof OpsError ? [error.exitCode, error.message] : []).toEqual([2, expect.stringContaining("@example/absent-target")]);
     } finally {
       rmSync(project, { recursive: true, force: true });
     }
