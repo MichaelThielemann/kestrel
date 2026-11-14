@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { uptime } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { REPLICATION_PACKAGE } from "./context.ts";
@@ -84,14 +85,33 @@ function parseLocal(config: Record<string, unknown>): LocalTargetConfig {
   return out;
 }
 
-const alive = (pid: number): boolean => {
+type Liveness = "alive" | "gone" | "foreign";
+
+const liveness = (pid: number): Liveness => {
   try {
     process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
+    return "alive";
+  } catch (cause) {
+    return cause instanceof Error && Reflect.get(cause, "code") === "EPERM" ? "foreign" : "gone";
   }
 };
+
+function startedAt(pid: number): string | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function signalGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    process.kill(pid, signal);
+  }
+}
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
 
@@ -125,20 +145,39 @@ function installedPackages(dir: string): Record<string, string> {
   return out;
 }
 
-/** A target that runs the app as a background process on this machine; its pid lives in `.kestrel-ops.pid` in `dir`. */
+/**
+ * A target that runs the app as a background process group on this machine; its pid, with the process's start
+ * time where the system tells it, lives in `.kestrel-ops.pid` in `dir`. A pid file older than the last boot, or
+ * whose process started at another time, names no app; a pid that belongs to another user reads as `unknown` and is
+ * never signalled.
+ */
 export const localTarget: TargetFactory = (raw, deps) => {
   const config = parseLocal(raw);
   const dir = resolve(deps.root, config.dir);
   const database = resolve(dir, config.database);
   const pidFile = join(dir, ".kestrel-ops.pid");
-  const readPid = (): number | null => {
+  const readPid = (): { pid: number; started: string | null } | null => {
     if (!existsSync(pidFile)) return null;
-    const pid = Number(readFileSync(pidFile, "utf8").trim());
-    return Number.isInteger(pid) && pid > 0 ? pid : null;
+    if (statSync(pidFile).mtimeMs < Date.now() - uptime() * 1000) return null;
+    const text = readFileSync(pidFile, "utf8").trim();
+    let value: unknown = Number(text);
+    try {
+      if (text.startsWith("{")) value = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    const pid: unknown = typeof value === "number" ? value : Reflect.get(Object(value), "pid");
+    const started: unknown = typeof value === "number" ? null : Reflect.get(Object(value), "started");
+    return typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? { pid, started: typeof started === "string" ? started : null } : null;
   };
-  const running = (): number | null => {
-    const pid = readPid();
-    return pid !== null && alive(pid) ? pid : null;
+  const running = (): { pid: number; state: "alive" | "foreign" } | null => {
+    const recorded = readPid();
+    if (recorded === null) return null;
+    const state = liveness(recorded.pid);
+    if (state === "gone") return null;
+    const now = startedAt(recorded.pid);
+    if (recorded.started !== null && now !== null && now !== recorded.started) return null;
+    return { pid: recorded.pid, state };
   };
   const target: Target = {
     transport: config.disk === "ephemeral" ? "promote" : "file",
@@ -146,14 +185,16 @@ export const localTarget: TargetFactory = (raw, deps) => {
       return { kind: "local", packages: installedPackages(dir), dir: config.dir, database: config.database, disk: config.disk };
     },
     async status() {
-      return running() === null ? { state: "stopped", instances: 0 } : { state: "started", instances: 1 };
+      const app = running();
+      return app === null ? { state: "stopped", instances: 0 } : { state: app.state === "alive" ? "started" : "unknown", instances: 1 };
     },
     async stop() {
-      const pid = running();
-      if (pid !== null) {
-        process.kill(pid, "SIGTERM");
-        for (let waited = 0; alive(pid); waited += 100) {
-          if (waited >= 60_000) throw new OpsError(`the app (pid ${pid}) did not stop within 60 s`, 1, "target");
+      const app = running();
+      if (app?.state === "foreign") throw new OpsError(`pid ${app.pid} in ${pidFile} belongs to another user; stop the app as that user`, 1, "target");
+      if (app !== null) {
+        signalGroup(app.pid, "SIGTERM");
+        for (let waited = 0; liveness(app.pid) !== "gone"; waited += 100) {
+          if (waited >= 60_000) throw new OpsError(`the app (pid ${app.pid}) did not stop within 60 s`, 1, "target");
           await sleep(100);
         }
       }
@@ -169,7 +210,7 @@ export const localTarget: TargetFactory = (raw, deps) => {
       try {
         const child = spawn(file, args, { cwd: dir, env: { PATH: process.env.PATH ?? "", ...config.env }, detached: true, stdio: ["ignore", log, log] });
         if (child.pid === undefined) throw new OpsError(`cannot start ${file}`, 1, "target");
-        writeFileSync(pidFile, String(child.pid));
+        writeFileSync(pidFile, JSON.stringify({ pid: child.pid, started: startedAt(child.pid) }));
         child.unref();
       } finally {
         closeSync(log);

@@ -1,7 +1,7 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
+import { tmpdir, uptime } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
@@ -65,6 +65,71 @@ describe("local target", () => {
     await target.stop();
     expect(["", "-wal", "-shm"].map((s) => existsSync(database + s))).toEqual([false, false, false]);
     expect(target.transport).toBe("promote");
+  });
+
+  const foreign = async (): Promise<{ pid: number; alive: () => boolean; end: () => void }> => {
+    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    await new Promise((done) => child.once("spawn", done));
+    const pid = child.pid ?? 0;
+    return {
+      pid,
+      alive: () => child.exitCode === null && child.signalCode === null,
+      end: () => {
+        child.kill("SIGKILL");
+      },
+    };
+  };
+
+  it("ignores a pid file written before the machine booted and sends no signal", async () => {
+    const other = await foreign();
+    try {
+      const target = await localTarget({ dir: "app", database: "kestrel.db", command: [process.execPath, "server.mjs"], disk: "persistent" }, { root, clock: Date.now });
+      const pidFile = join(root, "app", ".kestrel-ops.pid");
+      writeFileSync(pidFile, String(other.pid));
+      const beforeBoot = (Date.now() - uptime() * 1000 - 60_000) / 1000;
+      utimesSync(pidFile, beforeBoot, beforeBoot);
+      expect(await target.status()).toEqual({ state: "stopped", instances: 0 });
+      await target.stop();
+      await new Promise((done) => setTimeout(done, 100));
+      expect(other.alive()).toBe(true);
+    } finally {
+      other.end();
+    }
+  });
+
+  it.skipIf(process.platform !== "linux")("ignores a pid file whose process started at another time than the one it recorded", async () => {
+    const other = await foreign();
+    try {
+      const target = await localTarget({ dir: "app", database: "kestrel.db", command: [process.execPath, "server.mjs"], disk: "persistent" }, { root, clock: Date.now });
+      writeFileSync(join(root, "app", ".kestrel-ops.pid"), JSON.stringify({ pid: other.pid, started: "1" }));
+      expect(await target.status()).toEqual({ state: "stopped", instances: 0 });
+      await target.stop();
+      await new Promise((done) => setTimeout(done, 100));
+      expect(other.alive()).toBe(true);
+    } finally {
+      other.end();
+    }
+  });
+
+  it("stops the whole process group, so a wrapper's child ends with it", async () => {
+    writeFileSync(join(root, "app", "child.mjs"), "import { writeFileSync } from 'node:fs';\nwriteFileSync('child.pid', String(process.pid));\nsetInterval(() => {}, 1000);\n");
+    writeFileSync(join(root, "app", "wrapper.mjs"), "import { spawn } from 'node:child_process';\nspawn(process.execPath, ['child.mjs'], { stdio: 'inherit' });\nsetInterval(() => {}, 1000);\n");
+    const target = await localTarget({ dir: "app", database: "kestrel.db", command: [process.execPath, "wrapper.mjs"], disk: "persistent" }, { root, clock: Date.now });
+    await target.start();
+    const childPid = join(root, "app", "child.pid");
+    for (let i = 0; i < 250 && !existsSync(childPid); i++) await new Promise((done) => setTimeout(done, 20));
+    const pid = Number(readFileSync(childPid, "utf8"));
+    await target.stop();
+    let gone = false;
+    for (let i = 0; i < 100 && !gone; i++) {
+      try {
+        process.kill(pid, 0);
+        await new Promise((done) => setTimeout(done, 20));
+      } catch {
+        gone = true;
+      }
+    }
+    expect(gone).toBe(true);
   });
 
   it("rejects an incomplete target block as a configuration error", async () => {
