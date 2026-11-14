@@ -1533,6 +1533,17 @@ Net changes since 5.8.2.
   default.
 - `pnpm test:s3` runs every `packages/*/minio.test.ts` against the MinIO container, not only the one
   in `blobstore-s3`.
+- `persistence@1`: `findMany` takes `withTotal` (type `FindManyOptions`, beside `FindOptions`). With
+  `withTotal: false` the page has no `total` and the provider runs no count (`PageWithoutTotal`); the
+  default and `true` count as before, so existing callers are unaffected. A caller that passes a
+  boolean it only knows at run time gets `total?: number`. A custom `Persistence` provider or a
+  wrapper that forwards `findMany` takes the new options and leaves `total` out when `withTotal` is
+  `false`; `ownedPersistence` and `fakePersistence` do, and the contract suite checks it.
+  `delivery/static`'s prefix scan passes `withTotal: false`.
+- An atomic group that ran past `scopeTimeoutMs` answers `TRANSIENT` (503) with
+  `details: { reason: "scope-timeout", pipeline }` in `persistence/sqlite` and in `fakePersistence`, so
+  a client can tell it from the answer for a call that gave up waiting for the connection, which has
+  no `reason`.
 
 ### Changed
 
@@ -1699,6 +1710,10 @@ Net changes since 5.8.2.
 - `examples/nginx-njs`: the base image is pinned by digest on the nginx 1.30 stable series, and the
   handler never redirects the paths in `RESERVED_PATHS` (default `/admin,/api,/media`), whatever the
   rule list holds.
+- `persistence/sqlite` keeps up to 256 prepared statements per connection (least recently used first
+  out) instead of preparing every call's SQL again, and binds `LIMIT` and `OFFSET` as parameters so
+  pages of different sizes share one statement. A `findMany` whose page holds every match no longer
+  runs a second `COUNT(*)`.
 
 ### Fixed
 
@@ -1843,6 +1858,9 @@ Net changes since 5.8.2.
   as the copy of a project without git. A tracked `.env*` file, database file or file over 10 MB no longer lands in the
   temporary directory, a file name with non-ASCII characters is copied, and a file that git lists but
   the working tree no longer has no longer stops the run.
+- `persistence/sqlite` and `fakePersistence` look fields up by their own name, so a sort or filter on a
+  name `Object.prototype` defines (`constructor`, `toString`) is an unknown field like any other, and
+  an object with such a key is an equality value instead of a condition.
 
 ## 5.8.2 – 2026-09-27
 
