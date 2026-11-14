@@ -49,6 +49,14 @@ export async function listGenerations(store: ObjectStore, prefix: string): Promi
   return [...byName.values()].filter((g) => g.snapshot !== null).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
+/**
+ * True for a generation a promotion began but did not finish: a plain time name with a snapshot but neither
+ * `origin.json` nor WAL segments. A runtime that understands `origin.json` refuses to start from it.
+ */
+export function isUnfinishedPlacement(generation: Generation): boolean {
+  return /^\d{8}T\d{6}Z$/.test(generation.name) && generation.segments.length === 0 && generation.files["origin.json"] === undefined;
+}
+
 const fingerprint = (gens: Generation[]): string => {
   const head = gens.at(-1);
   return head ? `${head.name}|${head.segments.map((s) => `${s.key}:${s.etag}`).join(",")}|${Object.keys(head.files).sort().join(",")}` : "";

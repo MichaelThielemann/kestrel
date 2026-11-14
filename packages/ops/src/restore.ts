@@ -5,7 +5,7 @@ import { runtimeVersion, startTarget, stopTarget, type OpsContext } from "./cont
 import { OpsError } from "./errors.ts";
 import { fromJsonl, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
-import { acknowledgement, buildDatabase, checkPromotable, completeGeneration, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Promoted, type SealReport } from "./replica.ts";
+import { acknowledgement, buildDatabase, checkPromotable, completeGeneration, isUnfinishedPlacement, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Promoted, type SealReport } from "./replica.ts";
 import { appClock } from "./serverTime.ts";
 import { deleteSessions, hasAccessChanges, integrityCheck, lossReport, sha256, vacuumInto, type LossReport } from "./sqlite.ts";
 import { listMap, stableList, transfer, type ObjectInfo } from "./store.ts";
@@ -156,17 +156,22 @@ export async function restoreBackup(ctx: OpsContext, options: RestoreOptions): P
   }
 }
 
-type Current = { kind: "readable"; seal: SealReport; file: string } | { kind: "unreadable"; reason: string };
+type Current = ({ kind: "readable"; seal: SealReport; file: string } | { kind: "unreadable"; reason: string }) & { unfinished: string[] };
 
 async function readCurrent(ctx: OpsContext, stoppedAt: number): Promise<Current> {
   const prefix = ctx.env.app.replicaPrefix;
+  let unfinished: string[] = [];
   let seal: SealReport;
   try {
-    const newest = (await stableGenerations(ctx.app, prefix, ctx.poll)).at(-1);
-    if (!newest) return { kind: "unreadable", reason: `the replica under ${prefix} has no generation` };
+    const gens = await stableGenerations(ctx.app, prefix, ctx.poll);
+    const finished = gens.findLastIndex((g) => !isUnfinishedPlacement(g)) + 1;
+    unfinished = gens.slice(finished).map((g) => g.name);
+    for (const name of unfinished) ctx.out.warn(`generation ${name} is an unfinished placement of an earlier restore (a snapshot without origin.json); this restore reads the generation before it and places a complete one after it`);
+    const newest = gens[finished - 1];
+    if (!newest) return { kind: "unreadable", reason: `the replica under ${prefix} has no generation${unfinished.length > 0 ? " besides the unfinished placement" : ""}`, unfinished };
     seal = await sealOf(ctx.app, prefix, newest, runtimeVersion(await ctx.target.describe()), ctx.poll);
   } catch (cause) {
-    if (cause instanceof OpsError) return { kind: "unreadable", reason: cause.message };
+    if (cause instanceof OpsError) return { kind: "unreadable", reason: cause.message, unfinished };
     throw cause;
   }
   await acceptSeal(ctx, seal, stoppedAt);
@@ -174,10 +179,10 @@ async function readCurrent(ctx: OpsContext, stoppedAt: number): Promise<Current>
   try {
     await buildDatabase(ctx.app, prefix, seal.listed, file);
   } catch (cause) {
-    if (cause instanceof OpsError) return { kind: "unreadable", reason: cause.message };
+    if (cause instanceof OpsError) return { kind: "unreadable", reason: cause.message, unfinished };
     throw cause;
   }
-  return { kind: "readable", seal, file };
+  return { kind: "readable", seal, file, unfinished };
 }
 
 async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stoppedAt: number }, state: { changed: boolean }, options: RestoreOptions): Promise<RestoreResult> {
@@ -200,7 +205,7 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
     loss = lossReport(current.file, restoredDb, manifest.source.lastFrameAt ?? manifest.createdAt);
     const lines = describeLoss(ctx, loss);
     await ctx.journal.record("loss-report", "done", { tables: loss.tables, auditEntriesAfter: loss.auditEntriesAfter, access: loss.access });
-    const noop = loss.identical && unchangedStore;
+    const noop = loss.identical && unchangedStore && current.unfinished.length === 0;
     if (!noop && (ctx.env.production || hasAccessChanges(loss))) await confirm(ctx.answers, "access-changes", [...lines, "every login session ends; everyone signs in again"].join("\n"));
   }
 
@@ -208,7 +213,7 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   const newerOriginals = [...(await listMap(ctx.app, ctx.env.app.mediaPrefix)).keys()].filter((k) => !referenced.has(k));
   if (newerOriginals.length > 0) ctx.out.info(`${newerOriginals.length} original(s) in the store are not in the backup and stay: ${newerOriginals.slice(0, 10).join(", ")}${newerOriginals.length > 10 ? ", …" : ""}`);
   const base: RestoreResult = { backupId: manifest.id, noop: false, loss, safetyBackup: null, sessionsDeleted: 0, originalsRestored: originals, newerOriginals, delivery, promoted: null, acknowledgement: null };
-  if (loss?.identical === true && unchangedStore) {
+  if (loss?.identical === true && unchangedStore && current.unfinished.length === 0) {
     ctx.out.info("nothing differs from the backup apart from login sessions, which stay; starting the app again");
     await startTarget(ctx);
     await ctx.journal.record("restore", "done", { backupId: manifest.id, noop: true });

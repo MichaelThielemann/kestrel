@@ -176,6 +176,11 @@ before step 4, it starts the app again; after that, until step 7 started the app
 output says so. A check that fails once the app runs again, such as reading its acknowledgement, is a warning:
 the restore ends with exit 0 and `unconfirmed`.
 
+A restore that stops between the snapshot and `origin.json` of its promotion leaves an unfinished placement:
+a plain time name with a snapshot and nothing else, which a runtime that understands `origin.json` refuses to
+start from. `status` names it as a problem. The next restore warns about it, reads the generation before it as
+the current state, never ends as a no-op while it is the newest, and promotes a complete generation after it.
+
 ### Promotion
 A promoted generation is a `VACUUM INTO` copy without `-wal`, named `gen/<yyyymmddThhmmssZ>/snapshot.db` by
 the store's time rounded up to the next second and at least one second after the newest generation. That

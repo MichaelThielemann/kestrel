@@ -4,7 +4,7 @@ import { environmentProblems } from "./environments.ts";
 import { listRuns, openRuns, type RunSummary } from "./journal.ts";
 import { keys } from "./layout.ts";
 import { heldLocks, type HeldLock } from "./lock.ts";
-import { listGenerations } from "./replica.ts";
+import { isUnfinishedPlacement, listGenerations } from "./replica.ts";
 import { appClock } from "./serverTime.ts";
 import type { ObjectStore } from "./store.ts";
 import type { TargetFacts, TargetStatus } from "./target.ts";
@@ -59,6 +59,7 @@ export async function status(ctx: OpsContext, appCredentialStore: ObjectStore | 
   const problems = environmentProblems(ctx.env);
   const protectedFromApp = await probeProtection(ctx.backups, appCredentialStore, ctx.location, ctx.runId);
   if (protectedFromApp === "no") problems.push("the app's credentials can delete backups");
+  if (newest !== null && isUnfinishedPlacement(newest)) problems.push(`generation ${newest.name} is an unfinished placement of a restore that failed (a snapshot without origin.json); run that restore again`);
   if (targetStatus.instances > 1) problems.push(`the target runs ${targetStatus.instances} instances; backup and restore need exactly one writer`);
   return {
     env: ctx.envName,
