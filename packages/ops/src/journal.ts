@@ -63,7 +63,7 @@ export const RUN_STALE_MS = 2 * 60 * 60 * 1000;
 export async function listRuns(store: ObjectStore, location: string): Promise<RunSummary[]> {
   const byRun = new Map<string, RunSummary>();
   for (const info of await store.list(`${location}runs/`)) {
-    const m = /runs\/([^/]+)\/(\d{6})-(.+)-(started|done|failed|skipped)\.json$/.exec(info.key);
+    const m = /^runs\/([^/]+)\/(\d{6})-(.+)-(started|done|failed|skipped)\.json$/.exec(info.key.slice(location.length));
     if (!m) continue;
     const runId = m[1] ?? "";
     const step = m[3] ?? "";

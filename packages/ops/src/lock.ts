@@ -21,7 +21,7 @@ const BEAT_MS = 10 * 60 * 1000;
 export async function heldLocks(store: ObjectStore, location: string, now: number): Promise<HeldLock[]> {
   const byRun = new Map<string, { start: string | null; released: boolean; since: number; lastBeat: number }>();
   for (const info of await store.list(`${location}locks/`)) {
-    const m = /locks\/([^/]+)\/\d{8}T\d{6}Z-(start|beat|released)-[0-9a-f]{4}\.json$/.exec(info.key);
+    const m = /^locks\/([^/]+)\/\d{8}T\d{6}Z-(start|beat|released)-[0-9a-f]{4}\.json$/.exec(info.key.slice(location.length));
     if (!m) continue;
     const runId = m[1] ?? "";
     const entry = byRun.get(runId) ?? { start: null, released: false, since: info.lastModified, lastBeat: info.lastModified };

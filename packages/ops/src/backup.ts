@@ -300,7 +300,7 @@ export interface BackupSummary {
 export async function listBackups(ctx: Pick<OpsContext, "backups" | "location" | "envName">): Promise<BackupSummary[]> {
   const byId = new Map<string, BackupSummary & { verifyKey: string | null; pins: Set<string>; released: Set<string> }>();
   for (const info of await ctx.backups.list(`${ctx.location}backups/`)) {
-    const m = /backups\/([^/]+)\/(.+)$/.exec(info.key);
+    const m = /^backups\/([^/]+)\/(.+)$/.exec(info.key.slice(ctx.location.length));
     const parsed = m ? parseBackupId(m[1] ?? "") : null;
     if (!m || !parsed || parsed.env !== ctx.envName) continue;
     const id = m[1] ?? "";

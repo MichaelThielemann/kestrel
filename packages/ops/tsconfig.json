@@ -14,7 +14,8 @@
   ],
   "exclude": [
     "dist",
-    "**/*.test.ts"
+    "**/*.test.ts",
+    "**/*.fixture.ts"
   ],
   "references": [
     {
