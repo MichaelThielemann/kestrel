@@ -25,6 +25,7 @@ interface Manifest {
   dependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
 }
 
 const RUNNER = `import { readFileSync } from "node:fs";
@@ -65,16 +66,19 @@ export function writeBundle(projectRoot: string, outDir: string, hostFacts: Reco
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, "node_modules"), { recursive: true });
   const packages: Record<string, string> = {};
-  const queue: Array<{ name: string; from: string }> = [{ name: OPS_PACKAGE, from: projectRoot }];
+  const queue: Array<{ name: string; from: string; optional: boolean }> = [{ name: OPS_PACKAGE, from: projectRoot, optional: false }];
   while (queue.length > 0) {
     const next = queue.shift();
     if (next === undefined || packages[next.name] !== undefined) continue;
     const source = next.name === OPS_PACKAGE ? ops : packageDir(next.name, next.from);
+    if (source === null && next.optional) continue;
     if (source === null) throw new OpsError(`cannot resolve ${next.name} from ${next.from}`, 2, next.name);
     const manifest = boundaryCast<Manifest>(JSON.parse(readFileSync(join(source, "package.json"), "utf8")), "json");
     packages[next.name] = manifest.version;
     cpSync(source, join(dir, "node_modules", next.name), { recursive: true, dereference: true, filter: (path) => !/[\\/]node_modules([\\/]|$)/.test(path.slice(source.length)) });
-    for (const dep of Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies, ...manifest.optionalDependencies })) queue.push({ name: dep, from: source });
+    for (const dep of Object.keys(manifest.dependencies ?? {})) queue.push({ name: dep, from: source, optional: false });
+    for (const dep of Object.keys(manifest.optionalDependencies ?? {})) queue.push({ name: dep, from: source, optional: true });
+    for (const dep of Object.keys(manifest.peerDependencies ?? {})) if (manifest.peerDependenciesMeta?.[dep]?.optional !== true) queue.push({ name: dep, from: source, optional: false });
   }
   cpSync(environments, join(dir, ENVIRONMENTS_FILE));
   const lock = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock"].map((f) => join(projectRoot, f)).find((f) => existsSync(f));

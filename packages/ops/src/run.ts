@@ -173,8 +173,9 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
   const out = createOutput(redactor, stdout, stderr, json);
   const [command, sub, ...rest] = parsed.positional;
   const unknown = [...parsed.flags.keys()].filter((f) => !KNOWN_FLAGS.has(f));
-  const valid = (command === "status" && sub === undefined) || (command === "backup" && ["create", "list", "verify", "prune"].includes(sub ?? "")) || (command === "restore" && sub === undefined);
-  if (!valid || unknown.length > 0 || (rest.length > 0 && !(command === "backup" && sub === "verify" && rest.length === 1)) || (command === "backup" && sub === "verify" && rest.length !== 1)) {
+  const toLocal = command === "restore" && parsed.flags.has("--to");
+  const valid = (command === "status" && sub === undefined) || (command === "backup" && ["create", "list", "verify", "prune"].includes(sub ?? "") && rest.length === (sub === "verify" ? 1 : 0)) || (command === "restore" && rest.length === 0 && (sub === undefined || toLocal));
+  if (!valid || unknown.length > 0) {
     stderr(`${unknown.length > 0 ? `error: unknown option ${unknown.join(", ")}\n` : ""}${USAGE}\n`);
     return 2;
   }
@@ -224,7 +225,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
       poll: options.poll ?? {},
       readyTimeoutMs: options.readyTimeoutMs ?? 300_000,
     };
-    const name = sub === undefined ? (command ?? "") : `${command ?? ""}-${sub}`;
+    const name = command === "restore" ? "restore" : sub === undefined ? (command ?? "") : `${command ?? ""}-${sub}`;
     writes = name !== "status" && name !== "backup-list";
     if (writes) {
       await journal.record("run", "started", { command: name, env: envName });
@@ -274,8 +275,8 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
     }
     const to = value(parsed, "--to");
     if (to !== null) {
-      if (to !== "local" || rest.length > 0) throw new OpsError("--to takes local <dir>", 2, "--to");
-      const dir = parsed.positional[1];
+      if (to !== "local") throw new OpsError("--to takes local <dir>", 2, "--to");
+      const dir = sub;
       if (dir === undefined) throw new OpsError("restore --to local needs a directory", 2, "--to");
       const backupId = value(parsed, "--backup");
       if ((backupId === null) === !parsed.flags.has("--latest")) throw new OpsError("restore --to local needs --backup <id> or --latest", 2, "--backup");
