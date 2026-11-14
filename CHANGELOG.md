@@ -1014,7 +1014,7 @@ Net changes since 5.8.2.
   clock, with `origin.json` next to it. Also `status`, `backup list|verify|prune` with retention per
   kind, `restore --to local`, a `local` target, credentials from environment variables or commands
   that never reach any output, a journal and lock trace in the backup location, and `writeBundle()`
-  for a self-contained runner in a deploy artifact.
+  for a self-contained runner in a deploy artifact that carries the target adapters it needs.
 - `kestrel-h3`'s `createKestrelHandler` takes a `logger` and writes one `http` line per request
   with the fields of the core server's line (`runId`, `requestId`, `method`, `path`, `pipeline`,
   `status`, `ms`, `ip`). A request refused before its pipeline (unknown route, dot segment, body too
