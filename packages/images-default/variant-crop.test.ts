@@ -585,7 +585,9 @@ describe("images/default variants[].crop in images.attach", () => {
 
   it("renders an entry again with a new ?v= when syncPublic finds other bytes at its key than its restored row records", async () => {
     const w = await world();
-    const images = await w.open([SQUARE]);
+    let clock = 1000;
+    const tick = (): number => (clock += 1);
+    const images = await w.open([SQUARE], render, { now: tick });
     expectOk(await images.setFraming("m1", RIGHT_CROP));
     expectOk(await images.generate("m1"));
     const backup = await Promise.all([VARIANTS, FRAMING].map(async (collection) => ({ collection, rows: expectOk(await w.db.findMany<{ id: string }>(collection, {}, {})).items.map((row) => ({ ...row })) })));
@@ -598,10 +600,16 @@ describe("images/default variants[].crop in images.attach", () => {
     for (const { collection, rows } of backup) {
       for (const { id, ...fields } of rows) expectOk(await w.db.updateOne(collection, id, fields));
     }
-    const restored = await w.open([SQUARE]);
+    const next = heldNext();
+    const restored = await w.open([SQUARE], next.renderer, { now: tick });
     expect((await attached(restored)).get("square")).toMatchObject({ state: "done", crop: RIGHT, path: SQUARE_PATH });
     w.events.emitted.length = 0;
+    next.arm();
     expectOk(await restored.syncPublic());
+    await next.held.reached;
+    expect(w.events.emitted).toEqual([{ name: "images.variantsChanged", ids: ["m1"] }]);
+    expect((await attached(restored)).get("square")).toMatchObject({ state: "pending", crop: RIGHT, path: recropped.path });
+    next.held.open();
     await whenIdle(restored);
     const rendered = (await attached(restored)).get("square")!;
     expect(rendered).toMatchObject({ state: "done", crop: RIGHT });
@@ -609,7 +617,6 @@ describe("images/default variants[].crop in images.attach", () => {
     expect(rendered.path).not.toBe(recropped.path);
     expect(await leftEdgeIsBlue(restored, "square.webp")).toBe(true);
     expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(await renderedBytes(restored, "m1", "square.webp"));
-    expect(w.events.emitted.some(({ name }) => name === "images.variantsChanged")).toBe(true);
 
     w.events.emitted.length = 0;
     expectOk(await restored.syncPublic());
@@ -617,6 +624,74 @@ describe("images/default variants[].crop in images.attach", () => {
     expect((await attached(restored)).get("square")).toEqual(rendered);
     expect(w.events.emitted).toEqual([]);
     await restored.close();
+  });
+
+  it("leaves a row alone in syncPublic that another instance rendered again after the private listing", async () => {
+    const w = await world();
+    let clock = 1000;
+    const tick = (): number => (clock += 1);
+    let afterPrivateList: (() => Promise<void>) | null = null;
+    let privateReads = 0;
+    const racing: Blobstore = {
+      ...w.blobs,
+      get: async (key) => {
+        if (afterPrivateList === null && key.startsWith(CONFIG.prefix)) privateReads += 1;
+        return w.blobs.get(key);
+      },
+      list: async (prefix) => {
+        const listed = await w.blobs.list(prefix);
+        if (prefix === CONFIG.prefix && afterPrivateList !== null) {
+          const run = afterPrivateList;
+          await run();
+          afterPrivateList = null;
+        }
+        return listed;
+      },
+    };
+    let renders = 0;
+    const counting: Renderer = async (data, size, planned, options) => {
+      renders += 1;
+      return render(data, size, planned, options);
+    };
+    const syncing = await w.open([SQUARE], counting, { blobs: racing, now: tick });
+    const other = await w.open([SQUARE], counting, { now: tick });
+    expectOk(await syncing.setFraming("m1", RIGHT_CROP));
+    expectOk(await syncing.generate("m1"));
+    let afterOther: AttachedVariant | undefined;
+    afterPrivateList = async () => {
+      expectOk(await other.setFraming("m1", LEFT_CROP));
+      expectOk(await other.generate("m1"));
+      afterOther = (await attached(other)).get("square");
+    };
+    renders = 0;
+    privateReads = 0;
+    w.events.emitted.length = 0;
+    expectOk(await syncing.syncPublic());
+    await whenIdle(syncing);
+    await whenIdle(other);
+    expect(afterOther).toMatchObject({ state: "done", crop: LEFT });
+    expect((await attached(syncing)).get("square")).toEqual(afterOther);
+    expect(renders).toBe(1);
+    expect(privateReads).toBe(0);
+    expect(w.events.emitted.filter(({ name }) => name === "images.variantsChanged")).toHaveLength(1);
+    for (const open of [syncing, other]) await open.close();
+  });
+
+  it("leaves a row of a size no longer declared alone in syncPublic when its key holds other bytes", async () => {
+    const w = await world();
+    const full = await w.open([THUMB, SQUARE]);
+    expectOk(await full.setFraming("m1", RIGHT_CROP));
+    expectOk(await full.generate("m1"));
+    const row = (expectOk(await full.variantsOf(["m1"])).get("m1") ?? []).find((variant) => variant.size === "square")!;
+    await full.close();
+
+    w.blobs.blobs.set("media-variants/m1/square.webp", { data: new Uint8Array([1, 2, 3]), contentType: "image/webp" });
+    const small = await w.open([THUMB]);
+    expectOk(await small.syncPublic());
+    await whenIdle(small);
+    const after = (expectOk(await small.variantsOf(["m1"])).get("m1") ?? []).find((variant) => variant.size === "square")!;
+    expect(after).toMatchObject({ state: "done", bytes: row.bytes, attempts: row.attempts, renderedCrop: row.renderedCrop });
+    await small.close();
   });
 
   it("gives the path one more ?v= when syncPublic rewrites a public copy another instance put right while it listed", async () => {

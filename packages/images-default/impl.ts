@@ -2159,6 +2159,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         if (parts.length !== 3 || parts[1] !== "variants" || parts[0] === "" || parts[2] === "") continue;
         files.set(info.key, { mediaId: parts[0]!, file: parts[2]!, size: info.size });
       }
+      const privateListedAt = now();
       const privateListed = await blobs.list(config.prefix);
       if (isErr(privateListed)) return privateListed;
       const privateSizes = new Map(privateListed.value.map((info) => [info.key, info.size]));
@@ -2178,7 +2179,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const copiedRows = await eachRow<Variant>(VARIANTS, {}, async (row) => {
         const media = ready.get(row.mediaId);
         if (media === undefined || row.state === "planned" || hidden.has(row.mediaId)) return ok(undefined);
-        if (row.bytes > 0 && privateSizes.get(row.key) !== row.bytes && names.includes(row.size)) {
+        if (row.bytes > 0 && row.updatedAt < privateListedAt && privateSizes.get(row.key) !== row.bytes && names.includes(row.size)) {
           const requeued = await withItem(row.mediaId, (lease) => requeueUnrecorded(lease, row.id), async () => ok(false));
           if (isErr(requeued)) return requeued;
           if (requeued.value) renderOutstanding = true;
