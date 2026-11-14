@@ -136,12 +136,13 @@ without one is incomplete.
 
 The database comes from the replica, rebuilt from the newest generation, so it is the state the app shipped,
 not a file copied from a disk. The originals are the keys the media rows reference, copied server-side into
-`objects/` with `x-amz-copy-source-if-match` set to the listed ETag; when the original changed in between,
-the copy is refused, the key is listed again and the new version is copied. A store that ignores the header is
-caught by a HEAD on the copy: a copy whose ETag differs while the source still has the listed one is kept (a
-multipart or KMS-encrypted source has no MD5 ETag), any other mismatch removes the copy and copies the new
-version. `objectEtag` in `blobs.jsonl` and `site.jsonl` records the ETag the copy got. When `backups.storage`
-names another store, the bytes are read with `If-Match` and written with the source's Content-Type, and an
+`objects/` through the admin client of `kestrel-blobstore-s3` (`createS3Admin().copy` with `ifMatch` set to the
+listed ETag): the store refuses the copy when the original changed in between, a store that ignores
+`x-amz-copy-source-if-match` is caught by reading the source's ETag again, and a copy whose size or ETag does not
+match is removed. The key is then listed again and the new version is copied. A copy whose ETag differs while the
+source still has the listed one is kept (a multipart or KMS-encrypted source has no MD5 ETag). `objectEtag` in
+`blobs.jsonl` and `site.jsonl` records the ETag the copy got. When `backups.storage` names another bucket or
+other credentials, the bytes are read with `If-Match` and written with the source's Content-Type, and an
 original that does not hash to the checksum of its row stops the backup. A referenced original missing in the
 store is recorded in `missingAtBackup`.
 With `--freeze` the originals and the delivery prefix are copied once while the app runs and only the
@@ -219,7 +220,8 @@ Promotion refuses unless the target is stopped with no running instance, when th
 than 30 s off the store's, and when the newest generation is stamped more than 30 s after the store's time,
 since the app could only start once the store's time passed the new name; the restore checks all three before it writes the `pre-restore` backup, so a
 refusal leaves the store as it was and starts the app again. The store's time comes from the `LastModified` of
-a probe object found by listing, since some stores send no usable `Date` header. It is measured at the store
+a probe object found by listing (`createS3Admin().serverTime`, the probe lies under `.kestrel-clock/` and is
+removed again), since some stores send no usable `Date` header. It is measured at the store
 the replica lives in: in the backup location when that shares the app's store, otherwise below the replica
 prefix, outside the keys a runtime reads. `status` shows the same measurement. The generation is listed until it is the newest in
 consecutive listings, then read back, hashed and integrity-checked; the app starts once the store's time has

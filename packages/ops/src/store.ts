@@ -43,6 +43,11 @@ export interface ObjectStore {
   delete(key: string): Promise<void>;
   /** Server-side key of `key` for {@link CopyOptions.from}: the store-level key including the store's prefix. */
   locate(key: string): { bucket: string; key: string };
+  /**
+   * Measures the store's clock with a probe object below `prefix` that is removed again; `skewMs` is the local
+   * clock minus the store's. A store without it is measured by `serverClock` through `put`, `list` and `delete`.
+   */
+  serverTime?(prefix: string, clock: () => number, poll?: PollOptions): Promise<{ skewMs: number }>;
 }
 
 /** The source of a copy no longer has the ETag the copy was asked to match. */

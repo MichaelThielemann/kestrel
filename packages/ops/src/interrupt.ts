@@ -85,6 +85,7 @@ export class Interrupt {
 
 /** `store` with {@link Interrupt.check} before every operation. */
 export function interruptible(store: ObjectStore, interrupt: Interrupt): ObjectStore {
+  const serverTime = store.serverTime?.bind(store);
   const guarded = <A extends unknown[], R>(op: (...args: A) => Promise<R>) =>
     async (...args: A): Promise<R> => {
       interrupt.check();
@@ -100,5 +101,6 @@ export function interruptible(store: ObjectStore, interrupt: Interrupt): ObjectS
     put: guarded((key: string, data: Uint8Array, options?: { contentType?: string }) => store.put(key, data, options)),
     copy: guarded((sourceKey: string, key: string, options?: Parameters<ObjectStore["copy"]>[2]) => store.copy(sourceKey, key, options)),
     delete: guarded((key: string) => store.delete(key)),
+    ...(serverTime === undefined ? {} : { serverTime: guarded(serverTime) }),
   };
 }

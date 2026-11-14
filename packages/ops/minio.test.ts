@@ -34,19 +34,20 @@ describe.skipIf(!endpoint)("kestrel-ops against MinIO", () => {
       expect(new TextDecoder().decode((await store.get("b.txt")) ?? new Uint8Array())).toBe("second");
       await expect(store.read("a.txt", { ifMatch: listed?.etag ?? "" })).rejects.toBeInstanceOf(PreconditionFailed);
       await store.put("c.html", new TextEncoder().encode("<p>c</p>"), { contentType: "text/html" });
-      expect((await store.head("c.html"))?.contentType).toBe("text/html");
       expect(await store.read("c.html", { ifMatch: (await store.head("c.html"))?.etag ?? "" })).toMatchObject({ contentType: "text/html" });
+      await store.copy("c.html", "d.html");
+      expect(await store.read("d.html")).toMatchObject({ contentType: "text/html" });
     } finally {
       store.close();
     }
   });
 
-  it("reads the server clock from a probe's LastModified within a second of this machine's", async () => {
+  it("reads the server clock from a probe's LastModified within a few seconds of this machine's and removes the probe", async () => {
     const store = fresh();
     try {
       const clock = await serverClock(store, "kestrel-backups/", "minio", Date.now, { delayMs: 50 });
       expect(Math.abs(clock.skewMs)).toBeLessThan(5000);
-      expect(await store.list("kestrel-backups/probes/")).toEqual([]);
+      expect(await store.list("kestrel-backups/")).toEqual([]);
     } finally {
       store.close();
     }

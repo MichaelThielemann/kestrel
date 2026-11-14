@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
-import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-// eslint-disable-next-line no-restricted-imports -- kestrel-ops is a tool, not a module; it reaches S3 through the client options of the blobstore package it depends on
-import { clientOptions } from "@michaelthielemann/kestrel-blobstore-s3/impl";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+// eslint-disable-next-line no-restricted-imports -- kestrel-ops is a tool, not a module; it reaches S3 through the admin client of the blobstore package it depends on
+import { createS3Admin, type S3Admin } from "@michaelthielemann/kestrel-blobstore-s3/admin";
+// eslint-disable-next-line no-restricted-imports -- kestrel-ops is a tool, not a module; it builds its S3 client with the options of the blobstore package it depends on
+import { clientOptions, type Config } from "@michaelthielemann/kestrel-blobstore-s3/impl";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { ObjectMissing, PreconditionFailed, unquote, type ObjectInfo, type ObjectStore } from "./store.ts";
+import type { KestrelError } from "@michaelthielemann/kestrel/errors";
+import type { Result } from "@michaelthielemann/kestrel/result";
+import { ObjectMissing, PreconditionFailed, type ObjectInfo, type ObjectStore } from "./store.ts";
 
 /** Where and how an {@link s3Store} reaches its bucket. Credentials are resolved values, never written anywhere. */
 export interface S3StoreConfig {
@@ -31,84 +35,76 @@ interface ServiceError {
 const statusOf = (cause: unknown): number | undefined => boundaryCast<ServiceError>(cause, "host").$metadata?.httpStatusCode;
 const nameOf = (cause: unknown): string | undefined => boundaryCast<ServiceError>(cause, "host").name;
 
-/** An {@link ObjectStore} on an S3-compatible bucket below `config.prefix`. */
+function unwrap<T>(what: string, result: Result<T, KestrelError>): T {
+  if (result.ok) return result.value;
+  if (result.error.code === "PRECONDITION_FAILED") throw new PreconditionFailed(`${what}: ${result.error.message}`, { cause: result.error });
+  if (result.error.code === "NOT_FOUND") throw new ObjectMissing(`${what}: ${result.error.message}`, { cause: result.error });
+  throw new Error(`${what}: ${result.error.message}`, { cause: result.error });
+}
+
+/**
+ * An {@link ObjectStore} on an S3-compatible bucket below `config.prefix`. Listings, HEADs, server-side copies and
+ * the server clock go through the admin client of `kestrel-blobstore-s3`; a copy is verified against the source's
+ * size and ETag and refused when the source no longer has the listed ETag. Reads and writes of whole objects use the
+ * same S3 client. Two stores copy server-side only within one bucket reached with the same credentials.
+ */
 export function s3Store(config: S3StoreConfig): S3Store {
-  const options = clientOptions({ ...config, timeoutMs: 60_000 });
-  if (config.requestChecksumCalculation !== undefined) {
-    options.requestChecksumCalculation = config.requestChecksumCalculation;
-    options.responseChecksumValidation = config.requestChecksumCalculation;
-  }
+  const base: Config = { ...config, timeoutMs: 60_000 };
+  const options = clientOptions(base);
+  if (config.requestChecksumCalculation !== undefined) options.responseChecksumValidation = config.requestChecksumCalculation;
   const client = new S3Client(options);
   const full = (key: string): string => config.prefix + key;
-  const id = `s3:${createHash("sha256").update(`${config.endpoint ?? "aws"}\n${config.region ?? ""}\n${config.accessKeyId ?? ""}`).digest("hex").slice(0, 16)}`;
+  const adminAt = (prefix: string, extra: Parameters<typeof createS3Admin>[2] = {}): S3Admin => createS3Admin({ ...base, prefix }, client, extra);
+  const admin = adminAt(config.prefix);
+  const bucketAdmin = adminAt("");
+  const id = `s3:${createHash("sha256").update(`${config.endpoint ?? "aws"}\n${config.region ?? ""}\n${config.bucket}\n${config.accessKeyId ?? ""}`).digest("hex").slice(0, 16)}`;
+  const toInfo = (info: { key: string; size: number; etag: string; lastModified: number | null }): ObjectInfo => ({ key: info.key, size: info.size, etag: info.etag, lastModified: info.lastModified ?? 0 });
+  const getObject = async (key: string, ifMatch?: string): Promise<{ data: Uint8Array; contentType?: string } | null> => {
+    try {
+      const out = boundaryCast<{ Body?: { transformToByteArray(): Promise<Uint8Array> }; ContentType?: string }>(
+        await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: full(key), ...(ifMatch === undefined ? {} : { IfMatch: `"${ifMatch}"` }) })),
+        "host",
+      );
+      if (!out.Body) return null;
+      return { data: await out.Body.transformToByteArray(), ...(out.ContentType === undefined ? {} : { contentType: out.ContentType }) };
+    } catch (cause) {
+      if (statusOf(cause) === 412 || nameOf(cause) === "PreconditionFailed") throw new PreconditionFailed(`${key} changed since it was listed`, { cause });
+      if (statusOf(cause) === 404 || nameOf(cause) === "NoSuchKey") return null;
+      throw cause;
+    }
+  };
   const store: S3Store = {
     id,
     close: () => client.destroy(),
     locate: (key) => ({ bucket: config.bucket, key: full(key) }),
     async list(prefix) {
-      const out: ObjectInfo[] = [];
-      let token: string | undefined;
-      do {
-        const page = boundaryCast<{ Contents?: Array<{ Key?: string; Size?: number; ETag?: string; LastModified?: Date }>; NextContinuationToken?: string }>(
-          await client.send(new ListObjectsV2Command({ Bucket: config.bucket, Prefix: full(prefix), ContinuationToken: token })),
-          "host",
-        );
-        for (const item of page.Contents ?? []) {
-          if (item.Key === undefined) continue;
-          out.push({ key: item.Key.slice(config.prefix.length), size: item.Size ?? 0, etag: unquote(item.ETag), lastModified: item.LastModified?.getTime() ?? 0 });
-        }
-        token = page.NextContinuationToken;
-      } while (token);
-      return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+      return unwrap(`list ${prefix}`, await admin.listDetailed(prefix)).map(toInfo);
     },
     async head(key) {
-      try {
-        const out = boundaryCast<{ ContentLength?: number; ETag?: string; LastModified?: Date; ContentType?: string }>(await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: full(key) })), "host");
-        return { key, size: out.ContentLength ?? 0, etag: unquote(out.ETag), lastModified: out.LastModified?.getTime() ?? 0, ...(out.ContentType === undefined ? {} : { contentType: out.ContentType }) };
-      } catch (cause) {
-        if (statusOf(cause) === 404 || nameOf(cause) === "NotFound" || nameOf(cause) === "NoSuchKey") return null;
-        throw cause;
-      }
+      const info = unwrap(`head ${key}`, await admin.head(key));
+      return info === null ? null : toInfo(info);
     },
     async get(key) {
-      try {
-        const out = boundaryCast<{ Body?: { transformToByteArray(): Promise<Uint8Array> } }>(await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: full(key) })), "host");
-        return out.Body ? await out.Body.transformToByteArray() : null;
-      } catch (cause) {
-        if (statusOf(cause) === 404 || nameOf(cause) === "NoSuchKey") return null;
-        throw cause;
-      }
+      return (await getObject(key))?.data ?? null;
     },
     async read(key, readOptions = {}) {
-      try {
-        const out = boundaryCast<{ Body?: { transformToByteArray(): Promise<Uint8Array> }; ContentType?: string }>(
-          await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: full(key), ...(readOptions.ifMatch === undefined ? {} : { IfMatch: `"${readOptions.ifMatch}"` }) })),
-          "host",
-        );
-        if (!out.Body) return null;
-        return { data: await out.Body.transformToByteArray(), ...(out.ContentType === undefined ? {} : { contentType: out.ContentType }) };
-      } catch (cause) {
-        if (statusOf(cause) === 412 || nameOf(cause) === "PreconditionFailed") throw new PreconditionFailed(`${key} changed since it was listed`, { cause });
-        if (statusOf(cause) === 404 || nameOf(cause) === "NoSuchKey") return null;
-        throw cause;
-      }
+      return getObject(key, readOptions.ifMatch);
     },
     async put(key, data, putOptions = {}) {
       await client.send(new PutObjectCommand({ Bucket: config.bucket, Key: full(key), Body: data, ...(putOptions.contentType === undefined ? {} : { ContentType: putOptions.contentType }) }));
     },
     async copy(sourceKey, key, copyOptions = {}) {
       const source = (copyOptions.from ?? store).locate(sourceKey);
-      const copySource = `${source.bucket}/${source.key.split("/").map(encodeURIComponent).join("/")}`;
-      try {
-        await client.send(new CopyObjectCommand({ Bucket: config.bucket, Key: full(key), CopySource: copySource, MetadataDirective: "COPY", ...(copyOptions.ifMatch === undefined ? {} : { CopySourceIfMatch: `"${copyOptions.ifMatch}"` }) }));
-      } catch (cause) {
-        if (statusOf(cause) === 412 || nameOf(cause) === "PreconditionFailed") throw new PreconditionFailed(`${sourceKey} changed since it was listed`, { cause });
-        if (statusOf(cause) === 404 || nameOf(cause) === "NoSuchKey") throw new ObjectMissing(`${sourceKey} does not exist`, { cause });
-        throw cause;
-      }
+      if (source.bucket !== config.bucket) throw new Error(`s3 store: cannot copy from bucket ${source.bucket} into ${config.bucket} on the server`);
+      unwrap(`copy ${sourceKey}`, await bucketAdmin.copy(source.key, full(key), copyOptions.ifMatch === undefined ? {} : { ifMatch: copyOptions.ifMatch }));
     },
     async delete(key) {
       await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: full(key) }));
+    },
+    async serverTime(prefix, clock, poll = {}) {
+      const probe = adminAt(full(prefix), { now: clock, observeAttempts: poll.attempts ?? 30, retryDelayMs: poll.delayMs ?? 1000, ...(poll.sleep === undefined ? {} : { sleep: poll.sleep }) });
+      const measured = unwrap(`clock probe below ${prefix}`, await probe.serverTime());
+      return { skewMs: measured.localMs - measured.serverMs };
     },
   };
   return store;

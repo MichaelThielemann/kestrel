@@ -13,11 +13,15 @@ export interface ServerClock {
 }
 
 /**
- * Measures the store's clock from the `LastModified` of a freshly written probe, found by listing (a listing reports
- * milliseconds, a HEAD only seconds) and listed again until it shows up, since a listing may lag behind the write.
- * The probe is deleted afterwards.
+ * Measures the store's clock from the `LastModified` of a freshly written probe below `location`, found by listing (a
+ * listing reports milliseconds, a HEAD only seconds) and listed again until it shows up, since a listing may lag
+ * behind the write. The probe is deleted afterwards. A store with its own `serverTime` measures it that way.
  */
 export async function serverClock(store: ObjectStore, location: string, runId: string, clock: () => number, poll: PollOptions = {}): Promise<ServerClock> {
+  if (store.serverTime !== undefined) {
+    const { skewMs } = await store.serverTime(location, clock, poll);
+    return { skewMs, now: () => clock() - skewMs };
+  }
   const key = location + keys.probe(runId);
   const before = clock();
   await store.put(key, new TextEncoder().encode(String(before)), { contentType: "text/plain" });
