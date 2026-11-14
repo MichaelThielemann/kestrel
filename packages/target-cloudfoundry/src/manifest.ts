@@ -10,6 +10,18 @@ const asCfReads = (tags: Tags): Tags => tags.filter((tag) => typeof tag === "str
 
 const PLACEHOLDER = /\(\((!?[-/.\w\p{L}]+)\)\)/gu;
 
+const isRawJson = (value: unknown): value is (text: string) => unknown => typeof value === "function";
+
+const rawJson: unknown = Reflect.get(JSON, "rawJSON");
+
+const exactIntegers = (_key: string, value: unknown): unknown => {
+  if (typeof value !== "bigint") return value;
+  if (!isRawJson(rawJson)) throw new OpsError("this Node version has no JSON.rawJSON; the target needs Node 22.18 or later", 2, "target");
+  return rawJson(value.toString());
+};
+
+const toJson = (value: unknown, indent?: number): string => JSON.stringify(value, exactIntegers, indent);
+
 /**
  * The manifest reduced to its `version` and the entry of `app`, as JSON (which every YAML reader takes), and the
  * placeholder names that entry uses, without a leading `!`. A name with a dot, or an entry that scales the web process
@@ -19,7 +31,7 @@ const PLACEHOLDER = /\(\((!?[-/.\w\p{L}]+)\)\)/gu;
 export function appManifest(file: string, app: string): { text: string; vars: string[] } {
   let doc: unknown;
   try {
-    doc = parse(readFileSync(file, "utf8"), { version: "1.1", merge: true, customTags: asCfReads });
+    doc = parse(readFileSync(file, "utf8"), { version: "1.1", merge: true, intAsBigInt: true, customTags: asCfReads });
   } catch (cause) {
     throw new OpsError(`${file}: cannot read the manifest: ${cause instanceof Error ? cause.message : String(cause)}`, 2, "target");
   }
@@ -29,11 +41,11 @@ export function appManifest(file: string, app: string): { text: string; vars: st
   const processes: unknown = Reflect.get(Object(entry), "processes");
   const web: unknown = Array.isArray(processes) ? processes.find((p: unknown) => Reflect.get(Object(p), "type") === "web") : undefined;
   for (const instances of [Reflect.get(Object(entry), "instances"), Reflect.get(Object(web), "instances")]) {
-    if (instances !== undefined && instances !== 1) throw new OpsError(`${file}: the entry of ${app} sets ${String(instances)} instances of its web process; backup and restore need exactly one, so the entry sets 1 or leaves the count out`, 2, "target");
+    if (instances !== undefined && instances !== 1n) throw new OpsError(`${file}: the entry of ${app} sets ${String(instances)} instances of its web process; backup and restore need exactly one, so the entry sets 1 or leaves the count out`, 2, "target");
   }
   const version: unknown = Reflect.get(Object(doc), "version");
-  const text = JSON.stringify({ ...(version === undefined ? {} : { version }), applications: [entry] }, null, 2);
-  const vars = [...new Set([...JSON.stringify(entry).matchAll(PLACEHOLDER)].map((m) => (m[1] ?? "").replace(/^!/, "")))].sort();
+  const text = toJson({ ...(version === undefined ? {} : { version }), applications: [entry] }, 2);
+  const vars = [...new Set([...toJson(entry).matchAll(PLACEHOLDER)].map((m) => (m[1] ?? "").replace(/^!/, "")))].sort();
   const dotted = vars.filter((name) => name.includes("."));
   if (dotted.length > 0) throw new OpsError(`${file}: the entry of ${app} uses ${dotted.map((name) => `((${name}))`).join(", ")}, which cf reads as a field of the variable before the first dot; target.vars fills only names without a dot`, 2, "target");
   return { text, vars };

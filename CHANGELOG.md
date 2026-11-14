@@ -1793,7 +1793,8 @@ Net changes since 5.8.2.
   the app may stay stopped, and a start whose request failed counts
   as done once the app reads started. A backup records the app's guid, droplet (null only when the app has
   none), newest revision and the names, never the values, of its environment variables. `applyManifest()`
-  reads the manifest as YAML 1.1 with merge keys and with dates and clock times kept as strings, as cf does,
+  reads the manifest as YAML 1.1 with merge keys, with dates and clock times kept as strings and integers
+  kept digit for digit, as cf does,
   and applies only its version and the app's resolved entry through `cf apply-manifest --vars-file`, with
   the values in a 0600 file removed afterwards, also on failure, on exit and on SIGINT, SIGTERM or SIGHUP; no
   value is passed on a command line and `cf set-env` is never used. A placeholder without a source or with

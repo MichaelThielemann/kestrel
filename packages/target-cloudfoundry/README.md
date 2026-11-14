@@ -76,7 +76,8 @@ missing app or an expired cf session, which `cf target` does not reveal.
 ## Manifest and variables
 `applyManifest()` (an update step; the target refuses unless the app is stopped) reads the manifest as cf
 does, as YAML 1.1 with `<<` merge keys and `yes`/`no` booleans, with unquoted dates and clock times such as
-`2026-11-14` and `03:00` kept as strings, and reduces it to its `version` and the app's resolved entry, so the
+`2026-11-14` and `03:00` kept as strings and integers kept digit for digit, also beyond the exact range of a
+JavaScript number, and reduces it to its `version` and the app's resolved entry, so the
 other applications and blocks a shared manifest describes stay untouched. Placeholders are found as cf finds
 them, `((name))` and `((!name))`. It runs `cf apply-manifest -f <manifest> --vars-file <vars>`. The values of
 the placeholders that entry uses are resolved from `vars`, written into a file only the current user can read

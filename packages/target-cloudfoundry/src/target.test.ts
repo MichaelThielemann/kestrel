@@ -179,12 +179,12 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
 
   it("waits while the stopped app's instance reports STOPPING until its shutdown ended, without the stop grace", async () => {
     let shutDown = false;
-    cf.stopLag = 0;
+    cf.stopLag = 2;
     cf.hooks.stop = async () => {
       await new Promise((done) => setTimeout(done, 400));
       shutDown = true;
     };
-    const t = await target({ stopGraceSeconds: 60 });
+    const t = await target({ stopGraceSeconds: 50 });
     const began = Date.now();
     await t.stop();
     expect(shutDown).toBe(true);
@@ -564,6 +564,31 @@ applications:
       const [applied] = cf.applied;
       if (applied === undefined) throw new Error("nothing applied");
       expect(JSON.parse(applied.manifest)).toEqual({ applications: [{ name: API.name, env: { RELEASE_DATE: "2026-11-14", RELEASED_AT: "2026-11-14 10:00:00", BACKUP_TIME: "03:00", WINDOW: "12:30", PRECISE: "1:30.5", UMASK: 493 } }] });
+    });
+
+    it("keeps unquoted integers beyond the exact range of a JavaScript number digit for digit, as cf reads them", async () => {
+      writeFileSync(join(root, "large.yml"), `applications:
+- name: site-api
+  instances: 1
+  env:
+    CHAT_ID: 123456789012345678
+    LIMIT: 9007199254740993
+    NEGATIVE: -99999999999999999999
+    SMALL: 42
+    RATIO: 0.25
+  processes:
+  - type: web
+    instances: 1
+`);
+      await (await target({ manifest: "large.yml" })).applyManifest();
+      const [applied] = cf.applied;
+      if (applied === undefined) throw new Error("nothing applied");
+      expect(applied.manifest).toContain('"CHAT_ID": 123456789012345678,');
+      expect(applied.manifest).toContain('"LIMIT": 9007199254740993,');
+      expect(applied.manifest).toContain('"NEGATIVE": -99999999999999999999,');
+      expect(applied.manifest).toContain('"SMALL": 42,');
+      expect(applied.manifest).toContain('"RATIO": 0.25');
+      expect(applied.manifest).toContain('"instances": 1');
     });
 
     it("removes the variables file also when cf apply-manifest fails, and ends with exit 1", async () => {
