@@ -124,6 +124,7 @@ export async function restoreBackup(ctx: OpsContext, options: RestoreOptions): P
   if (manifest === null) throw new OpsError(`backup ${options.backupId} does not exist or is incomplete`, 1, options.backupId);
   if (manifest.env !== ctx.envName) throw new OpsError(`backup ${options.backupId} belongs to environment ${manifest.env}, not ${ctx.envName}`, 1, options.backupId);
   if (manifest.db === null) throw noDatabase(manifest);
+  if (manifest.site.prefix !== ctx.env.app.deliveryPrefix) throw new OpsError(`backup ${manifest.id} holds the delivery prefix ${manifest.site.prefix}, the environment names ${ctx.env.app.deliveryPrefix}; restoring it would write under the old prefix and empty the current one`, 1, "deliveryPrefix");
   const check = await verifyBackup(ctx, manifest.id);
   if (!check.ok) throw new OpsError(`backup ${manifest.id} failed verification: ${check.problems.map((p) => `${p.element}: ${p.message}`).join("; ")}`, 1, check.problems[0]?.element);
   await ctx.journal.record("restore", "started", { backupId: manifest.id });

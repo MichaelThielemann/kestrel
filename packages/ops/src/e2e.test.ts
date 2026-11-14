@@ -125,6 +125,32 @@ describe("backup and restore against an in-memory store", () => {
     }
   });
 
+  it("refuses, before it stops the app, to restore a backup taken under another delivery prefix than the environment names", async () => {
+    const bucket = new MemoryBucket("delivery-prefix");
+    const h = createHarness({ store: memoryStore(bucket) });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const backup = await h.run(["backup", "create", "--freeze", "--json"]);
+      expect(backup.code).toBe(0);
+      h.editEnvironments((file) => {
+        const app = file.environments.prod?.app;
+        if (typeof app === "object" && app !== null) Reflect.set(app, "deliveryPrefix", "public/");
+      });
+      const starts = h.app.starts;
+      const writes = bucket.writes.filter((w) => !w.key.startsWith(LOCATION)).length;
+      const refused = await h.run(["restore", "--backup", String(backup.json.id), "--yes", "--answers", h.answers({ "access-changes": "accept" })]);
+      expect(refused.code).toBe(1);
+      expect(refused.stderr).toContain("www/");
+      expect(refused.stderr).toContain("public/");
+      expect(h.app.starts).toBe(starts);
+      expect((await h.app.status()).state).toBe("started");
+      expect(bucket.writes.filter((w) => !w.key.startsWith(LOCATION)).length).toBe(writes);
+    } finally {
+      await h.dispose();
+    }
+  });
+
   it("names a truncated db.sqlite and a missing object when verification fails, with exit 1", async () => {
     const bucket = new MemoryBucket("verify");
     const h = createHarness({ store: memoryStore(bucket) });

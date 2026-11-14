@@ -146,7 +146,8 @@ counts as missing, a backup copies a key only after a HEAD found no object under
 is listed until two listings agree.
 
 ## Restore
-1. The backup is verified again, then the app is stopped and must report stopped with no instance.
+1. The backup is verified again, then the app is stopped and must report stopped with no instance. A backup
+   taken under another delivery prefix than the environment names is refused before the stop.
 2. The stopped replica is rebuilt and compared with the backup. The report counts, per table, the rows the
    restore drops, reverts and brings back, the audit entries the backup does not hold, and the access changes: users
    created, deleted or deactivated, changed roles and reset second factors. A restore that would bring back
