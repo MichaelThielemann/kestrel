@@ -110,14 +110,28 @@ export function blobstoreOf(store: ObjectStore): Blobstore {
 /**
  * Rebuilds the database of `generation` from its snapshot and exactly the segments that listing shows into `outFile`,
  * which passes `quick_check`. A later listing that lags behind cannot drop a segment; a listing with a gap in its
- * segment numbers is refused.
+ * segment numbers, a listed object that reads as missing and a database that fails `quick_check` are refused with an
+ * {@link OpsError}. A store operation that throws, such as a timeout or an interruption, is thrown unchanged.
  */
 export async function buildDatabase(store: ObjectStore, prefix: string, generation: Generation, outFile: string): Promise<{ generation: string; at: number }> {
   const gap = missingSegments(generation, numbered(generation));
   if (gap.length > 0) throw new OpsError(gapMessage(generation, gap), 1, `${prefix}gen/${generation.name}`);
   const listed = [generation.snapshot, ...generation.segments].filter((info): info is ObjectInfo => info !== null).map((info) => ({ key: info.key, size: info.size }));
-  const blobs: Blobstore = { ...blobstoreOf(store), list: async () => ok(listed) };
+  const thrown: unknown[] = [];
+  const reads: ObjectStore = {
+    ...store,
+    get: async (key) => {
+      try {
+        return await store.get(key);
+      } catch (cause) {
+        thrown.push(cause);
+        throw cause;
+      }
+    },
+  };
+  const blobs: Blobstore = { ...blobstoreOf(reads), list: async () => ok(listed) };
   const result = await restoreFromBlobs(blobs, prefix, { generation: generation.name }, outFile);
+  if (thrown.length > 0) throw thrown[0];
   if (isErr(result)) throw new OpsError(`cannot rebuild generation ${generation.name}: ${result.error.message}`, 1, `${prefix}gen/${generation.name}`);
   return result.value;
 }

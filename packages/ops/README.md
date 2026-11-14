@@ -182,7 +182,9 @@ is listed until two listings agree.
    revoked access, or any restore of a `production` environment, needs the answer `access-changes`.
    When the stopped replica has no generation or its newest one cannot be rebuilt (a listing that does not settle,
    or a segment that stays missing, also against its seal), there is nothing to compare:
-   the restore says so and goes on only after the answer `unreadable-current`.
+   the restore says so and goes on only after the answer `unreadable-current`. A store operation that fails
+   while the replica is read, such as a timeout, or a signal that arrives then, ends the restore before it
+   changed anything and starts the app again.
 3. A `pre-restore` backup of the stopped state is written and verified, so the restore itself can be undone
    with `restore --backup <that id>`. Only `--no-safety-backup` skips it. Over an unreadable replica it holds
    every original under the media prefix and the delivery keys but no database (`db` is null in its
