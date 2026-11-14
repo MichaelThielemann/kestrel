@@ -18,7 +18,7 @@ and `fixture-editor` / `fixture-editor-pw`.
 | `blobs/site/media/<folder>/<filename>[.<size>.<ext>]` | the media copies the export writes for every `/media/<id>/file` and `/media/<id>/variants/<size>.<ext>` reference in a page: both `photo.png` files side by side, a nested folder, a PDF, an SVG, webp variants, one in the original format, and a variant whose original is gone |
 | `blobs/backups/kestrel.db[.<time>]` | what `backup-blobstore` writes: the database and two timestamped versions of it |
 | `blobs/replica/gen/<generation>/…` | one snapshot and three segments spread over two log lineages; restoring them reproduces `kestrel.db` row for row |
-| `manifest.json` | the pinned package versions, the ids of the special cases, the row count of every collection and the list of blobs |
+| `manifest.json` | the pinned package versions, the ids of the special cases, the image sizes and trigger setup the instance booted with (`config`), the row count of every collection and the list of blobs |
 
 Pages, revisions (one of them labelled) and the reference index point at media; there are two users,
 three audit entries, a redirect rule set, settings in two languages and a link index entry.
@@ -44,6 +44,11 @@ counts are stable. `sharp` and `zod` are not pinned by kestrel; their resolved v
 in the manifest.
 
 ## Reading it in a test
+
+Boot the fixture with the configuration recorded in `manifest.json` under `config`: the three image
+sizes (`config.images.sizes`, the same specs `images_variants.spec` holds) replace the default sizes of
+`images-default`, and no HTTP triggers are registered (`config.httpTriggers`). With the default sizes
+every `thumb` and `small` variant counts as outdated and every `wide` variant as an orphaned size.
 
 Open a copy of `kestrel.db`, never the file itself: SQLite creates `-wal` and `-shm` next to a
 database in write-ahead-log mode even for a read-only connection, and a stray file there fails the

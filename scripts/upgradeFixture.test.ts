@@ -32,6 +32,7 @@ interface Manifest {
   duplicatedVariant: { mediaId: string; size: string; rows: number };
   pages: Record<string, string>;
   imageSizes: string[];
+  config: { images: { sizes: Array<{ name: string; width: number; height: number; fit: string; format: string; quality: number }> }; httpTriggers: boolean };
   collections: Record<string, number>;
   blobs: string[];
 }
@@ -81,7 +82,6 @@ describe("the 5.8.1 upgrade fixture: provenance", () => {
     for (const [name, version] of kestrelPackages) expect(version, name).toBe("5.8.1");
   });
 
-  it("ships the database as one self-contained file", () => {
   it("removes its work directory when the run fails", () => {
     const sandbox = mkdtempSync(join(tmpdir(), "kestrel-fixture-cleanup-"));
     scratch.push(sandbox);
@@ -96,6 +96,7 @@ describe("the 5.8.1 upgrade fixture: provenance", () => {
     expect(readdirSync(work).filter((entry) => entry.startsWith("kestrel-upgrade-fixture-"))).toEqual([]);
   }, 60_000);
 
+  it("ships the database as one self-contained file", () => {
     expect(existsSync(join(FIXTURE, "kestrel.db"))).toBe(true);
     expect(existsSync(join(FIXTURE, "kestrel.db-wal"))).toBe(false);
     expect(existsSync(join(FIXTURE, "kestrel.db-shm"))).toBe(false);
@@ -168,6 +169,15 @@ describe("the 5.8.1 upgrade fixture: database", () => {
     expect([...new Set(variants.map((row) => row.size))].sort()).toEqual([...manifest.imageSizes].sort());
     expect(manifest.imageSizes).toHaveLength(3);
     for (const row of variants) expect(existsSync(join(BLOBS, row.key)), row.key).toBe(true);
+  });
+
+  it("records the image sizes and trigger setup the instance booted with", () => {
+    expect(manifest.config.httpTriggers).toBe(false);
+    const specs = new Map(manifest.config.images.sizes.map((size) => [size.name, `${size.width}x${size.height}:${size.fit}:${size.format}:${size.quality}`]));
+    expect([...specs.keys()].sort()).toEqual([...manifest.imageSizes].sort());
+    const stored = rows<{ size: string; spec: string }>("select distinct size, spec from images_variants");
+    expect(stored).toHaveLength(specs.size);
+    for (const row of stored) expect(row.spec, row.size).toBe(specs.get(row.size));
   });
 
   it("has duplicate variant rows for one medium and size", () => {

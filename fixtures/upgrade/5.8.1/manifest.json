@@ -95,6 +95,37 @@
     "small",
     "wide"
   ],
+  "config": {
+    "images": {
+      "sizes": [
+        {
+          "name": "thumb",
+          "width": 32,
+          "height": 32,
+          "fit": "cover",
+          "format": "webp",
+          "quality": 80
+        },
+        {
+          "name": "small",
+          "width": 64,
+          "height": 64,
+          "fit": "inside",
+          "format": "webp",
+          "quality": 80
+        },
+        {
+          "name": "wide",
+          "width": 96,
+          "height": 48,
+          "fit": "cover",
+          "format": "original",
+          "quality": 80
+        }
+      ]
+    },
+    "httpTriggers": false
+  },
   "collections": {
     "audit_entries": 3,
     "authn_sessions": 1,
