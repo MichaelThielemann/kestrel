@@ -362,6 +362,12 @@ wide, both pass it with `crop` `null`.
   gives the path a new `?v=` when it rewrites a public copy of another byte size; a copy put right
   by another write, or at an unchanged size, keeps its `?v=`, so a cache that fetched it meanwhile
   keeps the earlier bytes until the item renders again.
+- After the database is restored from a backup older than the stored variants, an entry lists the
+  `crop` and `?v=` of its restored row, while its path may answer a later render, until the item
+  renders again. `images.syncPublic` renders an entry again whose key holds bytes of another size
+  than its row records, or none; without public copies, a change of the item's framing or of the
+  size does. A `?v=` handed out after the backup can come back if the item rendered more than once
+  since.
 
 `state` tells the `done` entries apart. Anonymous callers do not receive it with the grants of
 `examples/minimal` or the grant `kestrel upgrade` proposes, so a page built from such a read cannot

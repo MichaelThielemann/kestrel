@@ -1413,7 +1413,8 @@ Net changes since 5.8.1.
   `cropForRatio` and `effectiveCrop` return `null` for it, it renders as the centred cut, and
   `framing.ratios[].crop` and `variants[].crop` list it as `null`, while `framing.ratios[].manual`
   still says whether a manual crop is stored. `images.syncPublic` gives a variant path a new `?v=`
-  when it rewrites a public copy of another byte size. `examples/minimal` grants `variants[].crop`
+  when it rewrites a public copy of another byte size, and renders a variant again whose key holds
+  bytes of another size than its row records, as after a database restore. `examples/minimal` grants `variants[].crop`
   to anonymous media reads, and `kestrel upgrade` proposes it in the anonymous media grant when
   `images.attach` runs.
 

@@ -69,7 +69,7 @@ export interface Variant extends Document {
   crop: string | null;
   /** The crop of the bytes the last finished render left at the path, in the form of `crop`; `""` or `null` for the centre or no render yet. */
   renderedCrop: string | null;
-  /** How many renders of the row left their bytes at its path (marked `done`, or a failed attempt whose bytes could not be taken back), counting one more when the row was placed at a path that held bytes before, and raised to at least `2` when `syncPublic` rewrites a public copy of another byte size; `0` or `null` for none. From `2` on, the variant's public URL carries `?v=`. */
+  /** How many renders of the row left their bytes at its path (marked `done`, or a failed attempt whose bytes could not be taken back), counting one more when the row was placed at a path that held bytes before, raised to at least `2` when `syncPublic` rewrites a public copy of another byte size, and raised by one when `syncPublic` finds other bytes at its key than the row records and renders it again; `0` or `null` for none. From `2` on, the variant's public URL carries `?v=`. */
   renders: number | null;
   /** The width of the original after its EXIF orientation, as the row was planned; `0` or `null` when it is not known. */
   originalWidth: number | null;
@@ -190,7 +190,7 @@ export interface Images {
   variantCounts(mediaIds: string[]): Promise<Result<Map<string, VariantCounts>, KestrelError>>;
   read(mediaId: string, file: string): Promise<Result<VariantBlob | null, KestrelError>>;
   exportTo(dir: string): Promise<Result<{ written: number; skipped: number }, KestrelError>>;
-  /** The variant's public URL, `<publicPath>/<id>/variants/<file>`; from the row's second finished render on (`renders` from `2` on, a count a format change keeps, or raises by one when the new path held bytes before, and that `syncPublic` raises when it rewrites a public copy of another byte size), followed by `?v=<token>`, which no other render of that path is given. */
+  /** The variant's public URL, `<publicPath>/<id>/variants/<file>`; from the row's second finished render on (`renders` from `2` on, a count a format change keeps, or raises by one when the new path held bytes before, and that `syncPublic` raises when it rewrites a public copy of another byte size or renders a row again whose key holds other bytes), followed by `?v=<token>`, which no other render of that path is given. */
   publicPath(mediaId: string, variant: Variant): string;
   publicCopyEnabled(): boolean;
   syncPublic(): Promise<Result<PublicSync, KestrelError>>;
@@ -924,6 +924,20 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(renewed)) return renewed;
     if (renewed.value !== null) raiseVariantsChanged([item.id]);
     return ok("written");
+  }
+
+  async function requeueUnrecorded(lease: Lease, rowId: string): Promise<Result<boolean, KestrelError>> {
+    const found = await db.findOne<Variant>(VARIANTS, { id: rowId });
+    if (isErr(found) || found.value === null) return isErr(found) ? found : ok(false);
+    const row = found.value;
+    if (row.state === "planned" || row.bytes === 0) return ok(false);
+    const held = await blobs.get(row.key);
+    if (isErr(held)) return held;
+    if (held.value !== null && held.value.byteLength === row.bytes) return ok(false);
+    const requeued = await updateAsRead(row, { state: "pending", attempts: 0, error: null, renders: (row.renders ?? 0) + 1, updatedAt: now() });
+    if (isErr(requeued)) return requeued;
+    if (requeued.value !== null) raiseVariantsChanged([lease.mediaId]);
+    return ok(requeued.value !== null);
   }
 
   async function writeOwnedCopy(lease: Lease, media: MediaFile, file: string, replacing = false): Promise<Result<CopyOutcome, KestrelError>> {
@@ -2169,6 +2183,11 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const copiedRows = await eachRow<Variant>(VARIANTS, {}, async (row) => {
         const media = ready.get(row.mediaId);
         if (media === undefined || row.state === "planned" || hidden.has(row.mediaId)) return ok(undefined);
+        if (row.bytes > 0 && privateSizes.get(row.key) !== row.bytes && names.includes(row.size)) {
+          const requeued = await withItem(row.mediaId, (lease) => requeueUnrecorded(lease, row.id), async () => ok(false));
+          if (isErr(requeued)) return requeued;
+          if (requeued.value) renderOutstanding = true;
+        }
         return ensureCopy(media, fileOf(row), row.bytes > 0 ? (privateSizes.get(row.key) ?? media.size) : media.size);
       });
       if (isErr(copiedRows)) return copiedRows;

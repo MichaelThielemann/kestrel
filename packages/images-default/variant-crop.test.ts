@@ -15,7 +15,7 @@ import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import { validateSchema } from "@michaelthielemann/kestrel/schema";
 import module from "./module.ts";
-import { DEFAULT_RENDER_TIMEOUT_MS, ITEMS, VARIANTS, createImages, whenIdle, type Config, type Images, type ItemLease, type Variant } from "./impl.ts";
+import { DEFAULT_RENDER_TIMEOUT_MS, FRAMING, ITEMS, VARIANTS, createImages, whenIdle, type Config, type Images, type ItemLease, type Variant } from "./impl.ts";
 import type { PixelCrop } from "./framing.ts";
 import { render, type Renderer } from "./generate.ts";
 import type { Size } from "./sizes.ts";
@@ -581,6 +581,42 @@ describe("images/default variants[].crop in images.attach", () => {
     expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(original);
     expect(w.blobs.blobs.has("media-variants/m1/square.webp")).toBe(false);
     await changed.close();
+  });
+
+  it("renders an entry again with a new ?v= when syncPublic finds other bytes at its key than its restored row records", async () => {
+    const w = await world();
+    const images = await w.open([SQUARE]);
+    expectOk(await images.setFraming("m1", RIGHT_CROP));
+    expectOk(await images.generate("m1"));
+    const backup = await Promise.all([VARIANTS, FRAMING].map(async (collection) => ({ collection, rows: expectOk(await w.db.findMany<{ id: string }>(collection, {}, {})).items.map((row) => ({ ...row })) })));
+    expectOk(await images.setFraming("m1", LEFT_CROP));
+    expectOk(await images.generate("m1"));
+    const recropped = (await attached(images)).get("square")!;
+    expect(recropped).toMatchObject({ state: "done", crop: LEFT });
+    await images.close();
+
+    for (const { collection, rows } of backup) {
+      for (const { id, ...fields } of rows) expectOk(await w.db.updateOne(collection, id, fields));
+    }
+    const restored = await w.open([SQUARE]);
+    expect((await attached(restored)).get("square")).toMatchObject({ state: "done", crop: RIGHT, path: SQUARE_PATH });
+    w.events.emitted.length = 0;
+    expectOk(await restored.syncPublic());
+    await whenIdle(restored);
+    const rendered = (await attached(restored)).get("square")!;
+    expect(rendered).toMatchObject({ state: "done", crop: RIGHT });
+    expect(rendered.path).toMatch(VERSIONED_SQUARE);
+    expect(rendered.path).not.toBe(recropped.path);
+    expect(await leftEdgeIsBlue(restored, "square.webp")).toBe(true);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(await renderedBytes(restored, "m1", "square.webp"));
+    expect(w.events.emitted.some(({ name }) => name === "images.variantsChanged")).toBe(true);
+
+    w.events.emitted.length = 0;
+    expectOk(await restored.syncPublic());
+    await whenIdle(restored);
+    expect((await attached(restored)).get("square")).toEqual(rendered);
+    expect(w.events.emitted).toEqual([]);
+    await restored.close();
   });
 
   it("keeps the path and raises no second images.variantsChanged when syncPublic meets a public copy another instance rewrote while it listed", async () => {

@@ -652,7 +652,9 @@ in pixels, or `null` for the whole image (an `inside` size), the centred cut of 
 to a pixel per edge), or a path without a finished render. Two `done` entries with the same aspect
 ratio and an equal `crop` show the same picture, up to cuts that differ by a few pixels across the
 smaller one since the ratio test compares rounded dimensions, so a `srcset` combines only such entries; anonymous
-callers do not receive `state` by default. The ratio test and the moments when the listing and the
+callers do not receive `state` by default. After a database restore, entries list the `crop` and
+`?v=` of the restored rows until the item renders again, which `images.syncPublic` starts where the
+stored bytes differ in size from their row. The ratio test and the moments when the listing and the
 bytes differ are in [Which variants show the same picture](../packages/images-default/README.md#which-variants-show-the-same-picture).
 `variants[]` never lists a size whose path has no
 object at all yet (still `planned`, internal to `images-default`) — every listed path always answers.
