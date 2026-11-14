@@ -303,6 +303,16 @@ lock file that cannot be read is refused while it was written within the TTL, an
 the file and says so. In both cases the reason names the module setting that allows several
 processes on purpose.
 
+After an unclean stop (a crash, `kill -9`, a power loss, a container restarted in a new PID
+namespace, a restart of the machine) the next start is refused in this way until the old lock's TTL
+(60 s by default) has passed since its last heartbeat, unless the old process is provably gone on
+this machine: the lock was written on this machine and in this PID namespace, and no process runs
+under its PID (on Linux, under its PID with its start time). On Linux the machine is told by its
+boot id, so a lock from before a restart of the machine always waits for the TTL. A supervisor
+should therefore restart the service with a delay; for systemd, `Restart=on-failure` with
+`RestartSec=15s`, so that the retries during the TTL do not reach `StartLimitBurst`. A clean
+`stop()` releases the lock at once, and the next start takes it without waiting.
+
 Module code that throws while boot registers or resolves steps is reported like any other problem.
 A module's `steps()` that throws is `steps-threw`, its `describe()` `describe-threw`, both naming
 the module; a pipeline using a step of that module is listed in `notChecked`. A step factory that

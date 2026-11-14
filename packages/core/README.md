@@ -69,11 +69,17 @@ PID and process start time; on macOS and Windows by the PID alone, so a lock who
 the TTL. "The same machine" means the same Linux boot id, or the same hostname where the system has none. Any other
 lock makes `acquireInstanceLock` throw a `KestrelBootError` with code `instance-locked` at once. For a readable lock
 the reason names the holder's host, PID and start time and the time from which the lock is taken over; an unreadable
-lock file is refused while it was written within the TTL, and the reason names the file and says so. That includes a
-lock from another PID namespace, such as the previous run of a container restarted after its process was killed, and
-a lock written on this machine before it restarted: the boot fails until the TTL after that lock's last heartbeat, so
-a restart policy has to keep retrying for longer than the TTL. Only when the kernel gave a restarted container's new namespace the old
-one's id is its lock judged by PID and start time and taken over at once. A process that exits on its own, through `process.exit()`
+lock file is refused while it was written within the TTL, and the reason names the file and says so. Both reasons name
+the module setting given as `optOut` that lets several processes share the database on purpose.
+After an unclean stop (a crash, `kill -9`, a power loss, a container restarted in a new PID namespace, a restart of
+the machine) the next start is therefore refused until the old lock's TTL (60 s by default) has passed since its last
+heartbeat, unless the old process is provably gone on this machine: the lock was written on this machine and in this
+PID namespace, and its process no longer runs. On Linux a restart of the machine changes the boot id, so its lock always
+waits for the TTL. Only when the kernel gave a restarted container's new namespace the old one's id is its lock judged by
+PID and start time and taken over at once. A supervisor should restart the service with a delay; for systemd,
+`Restart=on-failure` with `RestartSec=15s`, so that the retries during the TTL do not reach `StartLimitBurst`. A clean
+stop releases the lock at once: the last holder's `release()`, which a module calls when the instance stops, deletes the
+lock file, and the next start takes it without waiting. A process that exits on its own, through `process.exit()`
 or an uncaught exception gives up the lock of its main thread on exit, and a worker thread that ends on its own gives
 up its share. A share that a worker thread still holds when it is terminated or when the process ends stays behind,
 as does the lock of a killed process. Several holders in one process share the lock, also across worker threads and
