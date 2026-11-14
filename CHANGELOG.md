@@ -1006,8 +1006,8 @@ Net changes since 5.8.2.
   `replication-sqlite` and S3-compatible storage. A backup takes the database from the replica, copies
   every original the media rows reference and the delivery prefix into write-once objects
   (server-side, guarded by the listed ETag) and is verified from the backup location: hash, full
-  `integrity_check`, row counts, an entry and object for every referenced original, and a hashed
-  sample. A restore stops the app, reports what it discards, including access it would bring back
+  `integrity_check`, row counts, entry counts and delivery keys against the manifest, an entry and
+  object for every referenced original, and a hashed sample. A restore stops the app, reports what it discards, including access it would bring back
   (which needs the explicit answer `access-changes`), takes a `pre-restore` backup, copies originals
   back without deleting any, sets the delivery prefix to the backup's, ends every login session and
   promotes the database as the newest replica generation under a plain time name from the store's

@@ -283,6 +283,56 @@ describe("backup and restore against an in-memory store", () => {
     }
   });
 
+  it.each(["blobs.jsonl", "site.jsonl"])("names a %s cut at a line boundary when verification fails, and a restore of that backup changes nothing", async (file) => {
+    const bucket = new MemoryBucket(`cut-${file}`);
+    const h = createHarness({ store: memoryStore(bucket) });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const id = String((await h.run(["backup", "create", "--freeze", "--yes", "--json"])).json.id);
+      const key = `${LOCATION}backups/${id}/${file}`;
+      const lines = new TextDecoder().decode(bucket.objects.get(key)?.data ?? new Uint8Array()).split("\n").filter((line) => line !== "");
+      expect(lines.length).toBeGreaterThan(1);
+      bucket.tamper(key, new TextEncoder().encode(`${lines[0] ?? ""}\n`));
+      const delivery = (): string[] => [...bucket.objects.keys()].filter((k) => k.startsWith(PREFIXES.delivery)).sort();
+      const before = delivery();
+
+      const verified = await h.run(["backup", "verify", id, "--json"]);
+      expect(verified.code).toBe(1);
+      expect(verified.stderr).toContain(`${file}: holds 1 entry, the manifest counts ${lines.length}`);
+      expect(verified.json).toMatchObject({ ok: false, verification: { ok: false } });
+      expect(Reflect.get(Object(verified.json.verification), "problems")).toContainEqual(expect.objectContaining({ element: file }));
+      const listed = await h.run(["backup", "list", "--json"]);
+      expect(listed.json.backups).toContainEqual(expect.objectContaining({ id, verified: false }));
+
+      const restored = await h.run(["restore", "--backup", id, "--yes", "--answers", h.answers({ "access-changes": "accept" })]);
+      expect(restored.code).toBe(1);
+      expect(restored.stderr).toContain(`backup ${id} failed verification`);
+      expect(restored.stderr).toContain(`${file}: holds 1 entry`);
+      expect(delivery()).toEqual(before);
+    } finally {
+      await h.dispose();
+    }
+  });
+
+  it("names a site.jsonl whose keys differ from the manifest's when verification fails", async () => {
+    const bucket = new MemoryBucket("renamed-site");
+    const h = createHarness({ store: memoryStore(bucket) });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const id = String((await h.run(["backup", "create", "--json"])).json.id);
+      const key = `${LOCATION}backups/${id}/site.jsonl`;
+      const text = new TextDecoder().decode(bucket.objects.get(key)?.data ?? new Uint8Array());
+      bucket.tamper(key, new TextEncoder().encode(text.replace(`${PREFIXES.delivery}about/`, `${PREFIXES.delivery}abaut/`)));
+      const verified = await h.run(["backup", "verify", id]);
+      expect(verified.code).toBe(1);
+      expect(verified.stderr).toContain("site.jsonl: its keys do not hash to the manifest's pathsSha256");
+    } finally {
+      await h.dispose();
+    }
+  });
+
   it("reports a stop without teardown as unsealed with the time of the last segment, and --yes alone does not accept it", async () => {
     const bucket = new MemoryBucket("unsealed");
     const h = createHarness({ store: memoryStore(bucket) });

@@ -302,8 +302,9 @@ function sampledOriginals<T extends { sha256: string | null }>(entries: readonly
 
 /**
  * Verifies a backup from what the backup location holds: the database (when the backup has one) is read back, hashed and fully
- * integrity-checked, its rows are counted against the manifest, every referenced original and every delivery key has
- * its entry and an object of the recorded size, and a sample of originals hashes to the checksum of its row. An
+ * integrity-checked, its rows are counted against the manifest, `blobs.jsonl` and `site.jsonl` hold as many entries as
+ * the manifest counts and the delivery keys hash to its `pathsSha256`, every referenced original and every delivery key
+ * has its entry and an object of the recorded size, and a sample of originals hashes to the checksum of its row. An
  * object the listing does not show yet is looked up by a HEAD before it counts as missing.
  */
 export async function verifyBackup(ctx: OpsContext, id: string): Promise<Verification> {
@@ -356,6 +357,10 @@ export async function verifyBackup(ctx: OpsContext, id: string): Promise<Verific
   }
   const blobs = "entries" in blobList ? blobList.entries : null;
   const site = "entries" in siteList ? siteList.entries : null;
+  const holds = (n: number, count: number): string => `holds ${n} ${n === 1 ? "entry" : "entries"}, the manifest counts ${count}`;
+  if (blobs !== null && blobs.length !== manifest.blobs.count) problems.push({ element: "blobs.jsonl", message: holds(blobs.length, manifest.blobs.count) });
+  if (site !== null && site.length !== manifest.site.count) problems.push({ element: "site.jsonl", message: holds(site.length, manifest.site.count) });
+  else if (site !== null && sha256(site.map((s) => s.key).join("\n")) !== manifest.site.pathsSha256) problems.push({ element: "site.jsonl", message: "its keys do not hash to the manifest's pathsSha256" });
   if (blobs !== null && file !== null) {
     const byKey = new Map(blobs.map((b) => [b.key, b]));
     for (const ref of referencedBlobs(file, ctx.env.app.media)) {

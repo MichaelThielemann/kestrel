@@ -178,7 +178,9 @@ again, and a gap that stays stops the backup with exit 1, naming the missing num
 the packages the app resolves, also when it gets `replication-sqlite` through another package.
 
 Verification works only from what the backup location holds: it downloads `db.sqlite`, compares its sha256
-with the manifest, runs a full `integrity_check`, counts the rows of every table, checks that every original
+with the manifest, runs a full `integrity_check`, counts the rows of every table, checks that `blobs.jsonl` and
+`site.jsonl` hold as many entries as the manifest counts and that the delivery keys hash to its `pathsSha256`
+(a list cut at a line boundary still parses, so only the manifest tells it is short), checks that every original
 a row references has an entry and an object of the recorded size and that every delivery key has one, and
 hashes a sample of originals (25 or 2 %, whichever is more, at most 200) against the checksum of their row.
 Listings may lag behind writes: an object the listing does not show yet is looked up with a HEAD before it
