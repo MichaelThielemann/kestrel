@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { lstat, mkdir, mkdtemp, readdir, readlink, rm, stat, symlink, copyFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { trackTempDir, untrackTempDir } from "./cleanup.ts";
 
@@ -17,8 +17,8 @@ function isExcludedFile(name: string): boolean {
 
 async function gitTrackedFiles(root: string): Promise<string[] | undefined> {
   try {
-    const { stdout } = await run("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: root });
-    return stdout.split("\n").filter((line) => line !== "");
+    const { stdout } = await run("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd: root, maxBuffer: 256 * 1024 * 1024 });
+    return stdout.split("\0").filter((line) => line !== "");
   } catch {
     return undefined;
   }
@@ -41,9 +41,24 @@ async function walk(root: string, dir: string, out: string[]): Promise<void> {
   }
 }
 
+async function isCopyable(root: string, file: string): Promise<boolean> {
+  if (isExcludedFile(basename(file))) return false;
+  try {
+    const info = await lstat(join(root, file));
+    if (info.isSymbolicLink()) return true;
+    return info.isFile() && info.size <= MAX_BYTES;
+  } catch {
+    return false;
+  }
+}
+
 async function projectFiles(root: string): Promise<string[]> {
   const tracked = await gitTrackedFiles(root);
-  if (tracked) return tracked;
+  if (tracked) {
+    const kept: string[] = [];
+    for (const file of tracked) if (await isCopyable(root, file)) kept.push(file);
+    return kept;
+  }
   const out: string[] = [];
   await walk(root, "", out);
   return out;

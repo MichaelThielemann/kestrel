@@ -167,3 +167,63 @@ describe("createScratchCopy, with a git-tracked symlink", () => {
     expect(await readFile(join(dir, "lib", "other.ts"), "utf8")).toBe(originalAbsoluteSource);
   });
 });
+
+describe("createScratchCopy, inside a git repository", () => {
+  async function initRepo(): Promise<void> {
+    await run("git", ["init"], { cwd: dir });
+    await run("git", ["config", "user.email", "t@example.com"], { cwd: dir });
+    await run("git", ["config", "user.name", "t"], { cwd: dir });
+  }
+
+  async function commitAll(): Promise<void> {
+    await run("git", ["add", "-A", "-f"], { cwd: dir });
+    await run("git", ["commit", "-m", "initial"], { cwd: dir });
+  }
+
+  it("leaves tracked secrets, database files and oversized files out of the copy", async () => {
+    await initRepo();
+    await writeFile(join(dir, "kestrel.config.ts"), "export default {};\n");
+    await writeFile(join(dir, ".env.production"), "SECRET_TOKEN=xyz\n");
+    await mkdir(join(dir, "nested"), { recursive: true });
+    await writeFile(join(dir, "nested", ".env"), "SECRET_TOKEN=abc\n");
+    await writeFile(join(dir, "kestrel.db"), "database");
+    await writeFile(join(dir, "kestrel.db-wal"), "wal");
+    await writeFile(join(dir, "big.bin"), Buffer.alloc(20 * 1024 * 1024));
+    await commitAll();
+
+    const scratch = await createScratchCopy(dir);
+    cleanupDirs.push(scratch.dir);
+
+    expect(existsSync(join(scratch.dir, "kestrel.config.ts"))).toBe(true);
+    for (const excluded of [".env.production", "nested/.env", "kestrel.db", "kestrel.db-wal", "big.bin"]) {
+      expect(existsSync(join(scratch.dir, excluded)), excluded).toBe(false);
+    }
+  });
+
+  it("copies a file whose name holds a non-ASCII character", async () => {
+    await initRepo();
+    await writeFile(join(dir, "kestrel.config.ts"), "export default {};\n");
+    await mkdir(join(dir, "pipelines"), { recursive: true });
+    await writeFile(join(dir, "pipelines", "käse-größe.ts"), "export default {};\n");
+    await commitAll();
+
+    const scratch = await createScratchCopy(dir);
+    cleanupDirs.push(scratch.dir);
+
+    expect(await readFile(join(scratch.dir, "pipelines", "käse-größe.ts"), "utf8")).toBe("export default {};\n");
+  });
+
+  it("copies the rest when a tracked file was deleted from the working tree", async () => {
+    await initRepo();
+    await writeFile(join(dir, "kestrel.config.ts"), "export default {};\n");
+    await writeFile(join(dir, "removed.ts"), "export const gone = 1;\n");
+    await commitAll();
+    await rm(join(dir, "removed.ts"));
+
+    const scratch = await createScratchCopy(dir);
+    cleanupDirs.push(scratch.dir);
+
+    expect(existsSync(join(scratch.dir, "kestrel.config.ts"))).toBe(true);
+    expect(existsSync(join(scratch.dir, "removed.ts"))).toBe(false);
+  });
+});
