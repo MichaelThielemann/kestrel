@@ -546,6 +546,30 @@ describe("images/default variants[].crop in images.attach", () => {
     await images.close();
   });
 
+  it("records a render without bytes as a failed attempt and keeps listing the crop of the bytes at the path", async () => {
+    const w = await world();
+    let empty = false;
+    const renderer: Renderer = async (data, size, planned, options) => {
+      const rendered = await render(data, size, planned, options);
+      return empty ? { ...rendered, data: new Uint8Array(0) } : rendered;
+    };
+    const images = await w.open([SQUARE], renderer);
+    expectOk(await images.setFraming("m1", RIGHT_CROP));
+    expectOk(await images.generate("m1"));
+    const before = (await attached(images)).get("square")!;
+    const rendered = await renderedBytes(images, "m1", "square.webp");
+
+    expectOk(await images.setFraming("m1", LEFT_CROP));
+    empty = true;
+    expectOk(await images.generate("m1"));
+    const row = expectOk(await images.variantsOf(["m1"])).get("m1")![0]!;
+    expect([row.state, row.error, row.bytes]).toEqual(["error", "the render produced no bytes", before.bytes]);
+    expect((await attached(images)).get("square")).toMatchObject({ state: "error", crop: RIGHT, path: before.path });
+    expect(await renderedBytes(images, "m1", "square.webp")).toEqual(rendered);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(rendered);
+    await images.close();
+  });
+
   it("answers the original at a size added to the configuration whose first render stayed at its key after its copy and removal failed, while the entry lists crop null", async () => {
     const w = await world();
     const inside = await w.open([THUMB]);

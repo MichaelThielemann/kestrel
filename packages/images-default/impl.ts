@@ -987,6 +987,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (outcome === "timeout") return timedOut();
       if ("cause" in outcome && outcome.cause instanceof Error && outcome.cause.message.startsWith("timeout")) return timedOut();
       if ("cause" in outcome) return err(failure("VALIDATION", errorMessage(outcome.cause), { cause: outcome.cause }));
+      if (outcome.rendered.data.byteLength === 0) return err(failure("VALIDATION", "the render produced no bytes"));
       return ok(outcome.rendered);
     } finally {
       clearTimeout(timer);
