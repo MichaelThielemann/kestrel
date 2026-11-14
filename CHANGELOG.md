@@ -938,14 +938,18 @@ Net changes since 5.8.2.
     `blobstore-filesystem`. Old blobs stay where they are; a second run changes nothing; a run after an
     interruption continues where it stopped. `--plan` only detects and counts. An item whose original is
     not under `--blobs-dir` stops the run before anything is converted, with exit `2`, until
-    `--answers` answers `media-default:id-key-layout:missing-original` with `keep` or `trash`. The module
+    `--answers` answers `media-default:id-key-layout:missing-original` with `keep` or `trash`; when no
+    original is found at all and `--blobs-dir` holds no blob under the media key prefix, it stops
+    whatever the answers say. A database SQLite cannot open for lack of space or write access next to
+    it is named as such, apart from one that fails `quick_check`. The module
     configs come from `kestrel.config.ts`, or through the project's host plugin when that file does not
     load by itself; when neither loads, migrate stops with exit `2` before converting anything, unless
     `--media-prefix` names the prefix. `kestrel upgrade data` warns with `data/media-layout:config` in
     that case. It neither takes nor
     honours the instance lock, so a lock file left next to the copy does not stop it. Exit `0` when
-    every module is in this release's shape, `1` when a migration is still pending, `2` when the run
-    could not start or a migration failed. `docs/upgrading.md` § "Converting the stored media".
+    every module is in this release's shape, `1` when a migration is still pending or the stored data
+    is older or newer than this release reads, `2` when the run could not start, an original is
+    missing without an answer, or a migration failed. `docs/upgrading.md` § "Converting the stored media".
 
 - `replication-sqlite` documents its replica layout as a storage format (README, "Replica layout") and
   adds three files to a generation. Teardown writes `sealed.json` (`{ lineage, lastFrame, segments, at }`)

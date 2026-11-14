@@ -32,8 +32,9 @@ export interface UnresolvedStorage {
 
 /**
  * What {@link projectStorages} found. `configFrom` names where the module configs came from;
- * `configProblem` is set when `kestrel.config.ts` exists but neither it nor the project's host plugin
- * could be loaded, so the storages were built with the defaults. `mediaPrefix` is the key prefix the
+ * `configProblem` is set when the module configs could be loaded neither from `kestrel.config.ts` nor
+ * through the project's host plugin although at least one of the two is there, so the storages were
+ * built with the defaults. `mediaPrefix` is the key prefix the
  * media storage converts to, when the database holds media.
  */
 export interface ProjectStorages {

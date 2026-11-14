@@ -146,9 +146,10 @@ kestrel upgrade migrate --db <copy of the database> --blobs-dir <copy of the blo
 ```
 
 1. Stop the 5.8 instance, so that the database and the blob store no longer change.
-2. Copy both: the database file (`sqlite3 <db> ".backup <copy>"`, or the file of the stopped
-   instance) and the root of the filesystem blob store with everything below it. Keep the originals
-   as they are; they are the backup that 5.8 starts on again if the update is abandoned.
+2. Copy both: the database (`sqlite3 <db> ".backup <copy>"`, or the file of the stopped instance
+   together with its `-wal` and `-shm` files, which hold the last writes until SQLite folds them
+   into the file; after a crash or a killed process, take the `.backup`) and the root of the
+   filesystem blob store with everything below it. Keep the originals as they are; they are the backup that 5.8 starts on again if the update is abandoned.
 3. With the 6.0.0 packages installed, run `migrate --plan` on the copy to see what it would
    convert, then `migrate` without `--plan` to convert it. When the plan names items whose original
    is missing, decide for them with `--answers` (see below).
@@ -178,16 +179,24 @@ module then gets a storage version row, which the start-up check of 6.0.0 reads.
   missing to the trash, or `"keep"` to switch it to its new key anyway.
 - An item whose original is not under `--blobs-dir` stops the run before it converts anything,
   with exit code `2`, the number of such items and a few of them, unless `--answers` answers
-  `media-default:id-key-layout:missing-original`. When none of the originals is there, `--blobs-dir`
-  most likely names another directory than the copy of the blob store's root, such as a directory
-  one level too deep. `--plan` reports the same as a note.
+  `media-default:id-key-layout:missing-original`. When none of the originals is there and
+  `--blobs-dir` holds no blob under the media key prefix, it most likely names another directory
+  than the copy of the blob store's root, such as a directory one level too deep; the run then stops
+  with exit code `2` whatever the answers say. `--plan` reports the same as a note. An item switched
+  with `keep` is not looked at again by a later run: when its original turns up after all, copy it
+  to the item's new key (`media.reconcile` lists that key under `rowsWithoutBlob`).
 - `--media-prefix <prefix>` names the media key prefix (`media-default`'s `prefix`, such as
   `media/`) in place of the one of the config, also when the config does not load.
 - `--json` prints the report (`schema: 1`, one entry per module with its migrations, what they found
   and what they did).
 - Exit codes: `0` every module is in the 6.0.0 shape, `1` a migration is still pending (always
   after `--plan` on 5.x data) or the stored data is older or newer than 6.0.0 reads, `2` the run
-  could not start or a migration failed.
+  could not start, an original is missing without an answer, no original is under `--blobs-dir` at
+  all, or a migration failed.
+- A database that does not pass `PRAGMA quick_check` stops the run with exit code `2` before
+  anything is converted; take a consistent copy. A database SQLite cannot open at all, because its
+  directory has no free space or no write access for the `-wal` and `-shm` files, is reported as
+  such: make room or grant write access next to it, and keep the copy.
 
 A second run finds nothing to do and changes nothing. A run that stops part-way, through an error
 or a killed process, leaves the copy in a state the next run continues from; nothing of what it
@@ -759,8 +768,8 @@ process that holds the lock. A deploy that starts the new process before the old
 fails the same way; stop the old process first. A lock left behind by a killed process is taken over
 60 s after its last heartbeat, at once when the process ran on the same machine in the same PID
 namespace. The finding appears once for each such module entry, and not for an entry whose database
-takes no lock (an in-memory or temporary one: `:memory:`, the empty name, or a `file:` URI whose path
-is `:memory:` or empty or that sets `mode=memory`) or with `allowConcurrentProcesses: true`, the
+takes no lock (an in-memory or temporary database, for which the core's `instanceLockFile` returns
+`undefined`; the core README lists those names and URIs) or with `allowConcurrentProcesses: true`, the
 setting for several processes that share the file on purpose. The 5.x data is not changed by this: the first 6.0.0 start creates the
 sidecar. `kestrel upgrade data` and `kestrel upgrade migrate` neither take nor honour the lock, so a
 sidecar left next to a copy of the database does not stop them.
