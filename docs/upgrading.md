@@ -223,8 +223,9 @@ kept no record of that. `migrate` therefore runs each 5.x SVG through the `sanit
 project, the same step and module config a new upload goes through, set up offline from the module
 entry in `kestrel.config.ts` (or the host plugin) that registers it. The cleaned file becomes
 `<id>/<stem>.svg`, typed `image/svg+xml` and marked as sanitised like an upload; the item keeps its
-id, so every page, setting and document that uses it still does, and its size and sha256 are those of
-the cleaned file. The 5.x original stays under its old key. `migrate --plan` and the report count
+id, so every page, setting and document that uses it still does, its size and sha256 are those of
+the cleaned file, and its `updatedAt` is the time of the run, so `media.export:<dir>` writes the cleaned
+file over a 5.x export of it. The 5.x original stays under its old key. `migrate --plan` and the report count
 these items as `svgSanitized`, and a note names the module entry whose step cleaned them. Publish the
 site again after the update (step 5), so that the public copies and the exported pages use the new
 names.

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -470,6 +470,23 @@ describe("media-default storage: 5.x SVGs with a sanitizer", () => {
     const published = expectOk(await blobs.list("site/")).map((b) => b.key);
     expect(published).toEqual(["site/media/p1/photo.png", "site/media/s1/logo.svg"]);
     expect(new TextDecoder().decode(expectOk(await blobs.get("site/media/s1/logo.svg"))!)).toBe(CLEAN_SVG);
+  });
+
+  it("gives a cleaned SVG the time of the run as updatedAt, so exportTo writes it again over a 5.x export of the same size", async () => {
+    const SAME_SIZE = '<svg xmlns="http://www.w3.org/2000/svg"><rect onload="x" width="1"/></svg>';
+    const { db, blobs } = await oldStore([{ id: "s4", folder: "brand", filename: "mark.svg", contentType: "image/svg+xml", blob: SAME_SIZE }, SVG_ITEMS[2]!], false);
+    const exported = await mkdtemp(join(tmpdir(), "kestrel-media-export-"));
+    tempDirs.push(exported);
+    await mkdir(join(exported, "brand"), { recursive: true });
+    await writeFile(join(exported, "brand", "mark.svg"), SAME_SIZE);
+    await utimes(join(exported, "brand", "mark.svg"), 0.001, 0.001);
+    const sameLength: SvgSanitizer = async (file) => ok(bytes(new TextDecoder().decode(file.data).replace('onload="x"', 'class="x" ')));
+    expectOk(await migrateSanitizing(db, blobs, sameLength));
+    const rows = await rowsOf(db);
+    expect(rows.map((r) => [r.id, r.updatedAt])).toEqual([["p1", 1], ["s4", 5]]);
+    const media = await createMediaDefault(CONFIG, blobs, db, silentLogger);
+    expect(expectOk(await media.exportTo(exported))).toMatchObject({ written: 2, skipped: 0 });
+    expect(await readFile(join(exported, "brand", "mark.svg"), "utf8")).not.toContain("onload");
   });
 
   it("demotes an SVG the sanitizer refuses to a .bin download and names its file and the reason, in the plan and in the outcome", async () => {

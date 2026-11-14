@@ -319,7 +319,7 @@ export function storage(config: StorageConfig = {}, deps: StorageDeps = {}): Mod
           notes.push(demotedNote(row, name, demotionReason(svgs, row)));
         }
         if (cleaned !== null) {
-          Object.assign(patch, { contentType: SVG, svgSanitized: true });
+          Object.assign(patch, { contentType: SVG, svgSanitized: true, updatedAt: ctx.now() });
           svgSanitized += 1;
         }
         if (lost.has(row.id)) {

@@ -922,7 +922,7 @@ Net changes since 5.8.2.
     old blob stays and its key is recorded in `media_legacy_keys`; an item whose original is missing
     is kept and reported, and its old key is recorded too. `storage(config, { sanitizeSvg })` cleans each
     5.x SVG with the given sanitizer and stores it as `<stem>.svg`, `image/svg+xml`, with `svgSanitized`
-    set and the same id (`svgSanitized`). A 5.x SVG the sanitizer refuses, one whose original is
+    set, `updatedAt` set to the time of the run and the same id (`svgSanitized`). A 5.x SVG the sanitizer refuses, one whose original is
     missing, and every 5.x SVG without a sanitizer becomes `<stem>-svg.bin`, served as
     `application/octet-stream`; the run lists each one with the reason (`svgDemoted`), and uploading it
     again through `sanitize.svg` serves it as an image.

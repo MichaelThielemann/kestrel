@@ -459,8 +459,9 @@ for `helpers/shape-migrations` of `kestrel-contracts`, and `migrations`. `deps.s
   a name only that item has in its folder stays, and of items whose names collide one keeps the name
   and the others get the first free `<stem>-<n>.<ext>`. A 5.x SVG has no
   record of passing `sanitize.svg`: with `deps.sanitizeSvg`, its original is cleaned, and the cleaned
-  bytes are stored as `<stem>.svg` with `contentType` `image/svg+xml` and `svgSanitized` set, so it
-  is served as an image (`svgSanitized` counts them). One the sanitizer refuses, one whose original
+  bytes are stored as `<stem>.svg` with `contentType` `image/svg+xml`, `svgSanitized` set and
+  `updatedAt` set to the time of the run, so it is served as an image and `exportTo` writes the
+  cleaned file again (`svgSanitized` counts them). One the sanitizer refuses, one whose original
   is missing, and every 5.x SVG without `deps.sanitizeSvg` becomes `<stem>-svg.bin` and is served as
   `application/octet-stream`; the run lists each one with the reason (`svgDemoted`), and uploading the
   file again through `sanitize.svg` serves it as an image;
