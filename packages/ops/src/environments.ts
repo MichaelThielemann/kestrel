@@ -19,7 +19,10 @@ const storage = z
     requestChecksumCalculation: z.enum(["WHEN_SUPPORTED", "WHEN_REQUIRED"]).optional(),
     credentials: z.object({ accessKeyId: credential, secretAccessKey: credential }).strict().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.endpoint !== undefined && value.region === undefined) ctx.addIssue({ code: "custom", path: ["region"], message: "is required next to an endpoint; an S3-compatible store takes the name its documentation gives, such as us-east-1 or auto" });
+  });
 
 const prefix = z.string().min(1).refine((p) => p.endsWith("/"), "must end with /");
 

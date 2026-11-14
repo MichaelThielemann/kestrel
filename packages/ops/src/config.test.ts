@@ -112,3 +112,35 @@ describe("app credentials", () => {
     }
   });
 });
+
+describe("project and storage configuration", () => {
+  it("reads the project's package.json only for commands that write a manifest, and names it when it is not JSON", async () => {
+    const h = createHarness({ store: memoryStore(new MemoryBucket("broken-manifest")) });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      writeFileSync(join(h.root, "package.json"), "{ dependencies: ");
+      expect((await h.run(["backup", "list"])).code).toBe(0);
+      const backup = await h.run(["backup", "create"]);
+      expect(backup.code).toBe(2);
+      expect(backup.stderr).toContain(`${join(h.root, "package.json")} is not valid JSON`);
+    } finally {
+      await h.dispose();
+    }
+  });
+
+  it("requires a region next to an endpoint and names the field", async () => {
+    const h = createHarness({ store: memoryStore(new MemoryBucket("no-region")) });
+    try {
+      h.editEnvironments((file) => {
+        const storage = file.environments.prod?.storage;
+        if (typeof storage === "object" && storage !== null) Reflect.set(storage, "endpoint", "http://127.0.0.1:9");
+      });
+      const list = await h.run(["backup", "list"]);
+      expect(list.code).toBe(2);
+      expect(list.stderr).toContain("environments.prod.storage.region");
+    } finally {
+      await h.dispose();
+    }
+  });
+});

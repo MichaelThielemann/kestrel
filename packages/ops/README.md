@@ -32,7 +32,9 @@ come as their own packages.
 Every command takes `--env <name>` (optional when the file names one environment), `--json` (one JSON
 document on stdout, with a `schema` field such as `kestrel-ops/restore@1`), `--yes`, `--answers <file>`,
 `--keep` (keep the local working directory) and `--break-lock`, and only the options its line above names.
-Exit codes: 0 done, 1 a check failed or a step was refused, 2 a usage or configuration error. An option the
+Exit codes: 0 done, 1 a check failed or a step was refused, 2 a usage or configuration error, such as an
+invalid `kestrel.environments.json`, or a project `package.json` that is not JSON when `backup create` or
+`restore` records the project's package versions in a manifest. An option the
 command does not take, a malformed backup id, or one of another environment ends the run with exit 2 before
 it resolves credentials, loads the target or writes anything. With `--json`, a failure prints
 `kestrel-ops/error@1` (`message`, `element`, and `backupId` when a backup was written and verified before the
@@ -71,7 +73,10 @@ from.
 
 - `storage` is the app's bucket, reached with the tool's own credentials. `prefix` (default empty) is the
   `prefix` of the app's `blobstore-s3`: every key below, and every key a media row stores, is relative to it.
-  `requestChecksumCalculation: "WHEN_REQUIRED"` leaves out checksum trailers a store may reject.
+  `requestChecksumCalculation: "WHEN_REQUIRED"` leaves out checksum trailers a store may reject. `region` is
+  required next to an `endpoint`; without an endpoint it may come from `AWS_REGION` or the AWS config file.
+  Without `credentials` the AWS SDK's default chain applies: the `AWS_*` variables, `~/.aws/credentials` or
+  the instance's role.
 - `app` names the prefixes the app writes: the replica, the originals, the public output and derived output
   (image variants), which a backup only lists. `media` (default `{ "collection": "media_items", "keyField":
   "key", "checksumField": "checksum" }`) says where the rows keep an original's key and its sha256.

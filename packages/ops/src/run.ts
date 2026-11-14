@@ -175,16 +175,31 @@ function toolVersion(): string {
   return boundaryCast<{ version: string }>(JSON.parse(readFileSync(manifest, "utf8")), "json").version;
 }
 
+function readJsonFile(file: string): unknown {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch (cause) {
+    throw new OpsError(`${file} is not valid JSON: ${messageOf(cause)}`, 2, file);
+  }
+}
+
+function installedVersion(file: string): string | null {
+  try {
+    const version: unknown = Reflect.get(Object(readJsonFile(file)), "version");
+    return typeof version === "string" ? version : null;
+  } catch {
+    return null;
+  }
+}
+
 function projectFacts(root: string): { versions: Record<string, string>; lockfileSha256: string | null } {
   const versions: Record<string, string> = {};
   const manifest = join(root, "package.json");
   if (existsSync(manifest)) {
-    const pkg = boundaryCast<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(JSON.parse(readFileSync(manifest, "utf8")), "json");
+    const pkg = boundaryCast<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(readJsonFile(manifest), "json");
     for (const name of Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })) {
-      const installed = join(root, "node_modules", name, "package.json");
-      if (!existsSync(installed)) continue;
-      const version = boundaryCast<{ version?: unknown }>(JSON.parse(readFileSync(installed, "utf8")), "json").version;
-      if (typeof version === "string") versions[name] = version;
+      const version = installedVersion(join(root, "node_modules", name, "package.json"));
+      if (version !== null) versions[name] = version;
     }
   }
   const lock = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock"].map((f) => join(root, f)).find((f) => existsSync(f));
@@ -314,7 +329,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
       runId,
       journal,
       tool: { name: "@michaelthielemann/kestrel-ops", version: toolVersion() },
-      project: options.project ?? projectFacts(root),
+      project: options.project ?? (cmd.name === "backup-create" || cmd.name === "restore" ? projectFacts(root) : { versions: {}, lockfileSha256: null }),
       poll: options.poll ?? {},
       readyTimeoutMs: options.readyTimeoutMs ?? 300_000,
     };
