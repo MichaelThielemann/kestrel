@@ -103,6 +103,7 @@ function readingRendererModule(state: ReadingRenderer) {
 interface Options {
   mode: Mode;
   lanes?: Record<string, string[]>;
+  relayPipelines?: string[];
   pollMs?: number;
   http?: boolean;
 }
@@ -146,7 +147,7 @@ async function bootExample(options: Options): Promise<Example> {
         },
       };
     }
-    if (queue && m.use === "@michaelthielemann/kestrel-events-direct") return { use: "@michaelthielemann/kestrel-events-queue", config: { pollMs: options.pollMs ?? 10, maxAttempts: 3, backoffSeconds: [1], relayMs: 5000, relayPipelines: ["publishPage", "unpublishPage"], delayMs: { refreshIndexes: 1000, refreshLlms: 3000 }, lanes: options.lanes ?? { pages: ["republishOutput", "refreshLlms"], indexes: ["refreshIndexes"], variants: ["generateImageVariants"] } } };
+    if (queue && m.use === "@michaelthielemann/kestrel-events-direct") return { use: "@michaelthielemann/kestrel-events-queue", config: { pollMs: options.pollMs ?? 10, maxAttempts: 3, backoffSeconds: [1], relayMs: 5000, relayPipelines: options.relayPipelines ?? ["publishPage", "unpublishPage"], delayMs: { refreshIndexes: 1000, refreshLlms: 3000 }, lanes: options.lanes ?? { pages: ["republishOutput", "refreshLlms"], indexes: ["refreshIndexes"], variants: ["generateImageVariants"] } } };
     return m;
   });
   const reading: ReadingRenderer = { calls: [], delayMs: 0, hold: () => ({ reached: Promise.resolve(), release() {} }) };
@@ -492,4 +493,43 @@ describe("examples/minimal dependent pages: lanes keep uploads ahead of re-rende
     const { staleWhenAvailable } = await uploadDuringRerender({});
     expect(staleWhenAvailable).toBe(0);
   }, 40_000);
+});
+
+describe("examples/minimal save response: publishing in its own lane", () => {
+  const lanes = { render: ["publishPage", "unpublishPage"], pages: ["republishOutput", "refreshLlms"], indexes: ["refreshIndexes"], variants: ["generateImageVariants"] };
+
+  async function saveWhileRenderIsHeld(options: Pick<Options, "lanes" | "relayPipelines">) {
+    const example = await bootExample({ mode: "queue", ...options });
+    try {
+      const token = boundaryCast<{ token: string }>(await call(example, "login", { body: { username: "admin", password: "kestrel-demo" } }), "json").token;
+      await call(example, "setSettings", { token, body: { title: "Festival", locale: "de" } });
+      const id = String((await call(example, "createPage", { token, body: { slug: "schnell", title: "Alt", status: "published" } })).id);
+      await settled(example);
+      expect(page(example, "/schnell")).toContain("<h1>Alt</h1>");
+      const gate = example.reading.hold("/schnell");
+      const saved = call(example, "updatePage", { token, params: { id }, body: { title: "Neu", status: "published" } });
+      const outcome = await Promise.race([saved.then((result) => ({ result })), gate.reached.then(() => "render-first" as const)]);
+      const answeredFirst = outcome !== "render-first";
+      gate.release();
+      const response = await saved;
+      await pollUntil(() => (page(example, "/schnell") ?? "").includes("<h1>Neu</h1>"));
+      await settled(example);
+      return { answeredFirst, response };
+    } finally {
+      await example.dispose();
+    }
+  }
+
+  it("answers the save before the page is rendered and writes the output afterwards", async () => {
+    const { answeredFirst, response } = await saveWhileRenderIsHeld({ lanes, relayPipelines: [] });
+    expect(answeredFirst).toBe(true);
+    const events = boundaryCast<{ status: string; pipelines: Array<{ pipeline: string; status: string }> }>(response._events, "json");
+    expect(events.status).toBe("pending");
+    expect(events.pipelines).toContainEqual(expect.objectContaining({ pipeline: "publishPage", status: "queued" }));
+  }, 30_000);
+
+  it("control: with the relay delivering publishPage, the render runs before the response", async () => {
+    const { answeredFirst } = await saveWhileRenderIsHeld({});
+    expect(answeredFirst).toBe(false);
+  }, 30_000);
 });

@@ -61,6 +61,17 @@ Status rows (`readStatus`, `_delivery`) also carry `stale` (marked for a re-rend
 (the re-render failed `dependencies.maxAttempts` times), `staleError` and `dependencies` (how many dependencies the
 last render recorded, `null` when they are unknown).
 
+## Publishing on save
+
+`delivery.publish` renders in whichever process runs the pipeline that contains it. Behind
+`events-direct`, or behind `events-queue` with `publishPage` left in the relay, that is the request
+that saved the document: the response comes back after the render. To answer the save first, give
+the publishing pipeline its own lane in `events-queue` and keep it out of `relayPipelines`; the
+response then carries `_events.status: "pending"` and the lane writes the output afterwards. Visitor
+latency is unchanged, the render still runs in the same process. The wiring, the read-back through
+`delivery.readStatus` and the delivery guarantees are described in the pipelines guide under
+`events.relay`.
+
 ## Index files
 
 `delivery.exportIndexes` writes `<prefix>sitemap.xml`, `<prefix>robots.txt` and `<prefix>llms.txt`;

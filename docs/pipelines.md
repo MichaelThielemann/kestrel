@@ -879,6 +879,36 @@ page). Naming a pipeline unknown to the booted manifest, or one no event trigger
 at `attach()`, once every pipeline is resolved, naming the module, the pipeline(s) and which of the
 two it is.
 
+A save can be answered before its page is rendered. With `events-queue`, put `publishPage` (and
+`unpublishPage`) into a lane of their own and leave them out of `relayPipelines`:
+
+```ts
+{ use: "@michaelthielemann/kestrel-events-queue", config: { relayPipelines: [], lanes: { render: ["publishPage", "unpublishPage"] } } }
+```
+
+`PATCH /pages/:id` then returns once the atomic group has committed and the event row is written;
+the lane's worker renders afterwards, so the response time no longer includes the renderer. The
+response says so: `_events.status` is `"pending"` and the `publishPage` entry has `status: "queued"`.
+The wiring is a choice of `events-queue` alone, `events-direct` always delivers inline. Boot fails
+at `attach()` when a pipeline is named in both a lane and `relayPipelines`.
+
+What this does and does not change:
+
+- Only the response of the saving request is decoupled. Visitors still wait for the same renders,
+  and a render still occupies the process's CPU while the lane runs it, so request latency for
+  visitors is not reduced by this setting.
+- A client that needs its own write to be visible reads it back: `_events` of the save response
+  tells whether delivery is still pending, and `GET /admin/publish-status/pages/:id` shows the
+  locale as published with a `publishedAt` newer than the save once the render has been written.
+- Delivery is at least once. A render that fails is retried with the queue's backoff and ends dead
+  after `maxAttempts`; `delivery.publish` is idempotent, so a repeated run writes the same output.
+- Without a `coalesceKey` on the event, every save writes its own row and runs its own render, so
+  five quick saves of one page render five times, in order of the lane's single worker. Rows are
+  not merged.
+- No order is guaranteed between the pipelines subscribed to one event, nor between lanes. Anything
+  that has to run after the page is written (an export, a notification) belongs in the same
+  pipeline after `delivery.publish`, not in a second subscriber.
+
 A pipeline with a delay above `0` in `events-queue`'s `delayMs` is never relayed, whatever
 `relayPipelines` says: its row is written with `availableAt = createdAt + delayMs`, the relay never
 claims it, and `_events.pipelines` names it with `status: "queued"`. The worker takes it once that
