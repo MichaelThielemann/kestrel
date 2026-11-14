@@ -93,6 +93,7 @@ const RETRY_PAUSE_MS = 20;
 const GUARD_STALE_MS = 5_000;
 const GUARD_WAIT_MS = GUARD_STALE_MS + 1_000;
 const CLOCK_SLACK_MS = 50;
+const CLOCK_SAMPLES = 5;
 const MAX_LINK_HOPS = 40;
 const MAX_TIMER_MS = 2 ** 31 - 1;
 const HOLDERS_KEY = Symbol.for("kestrel.instanceLocks");
@@ -102,7 +103,7 @@ const PID_NAMESPACE = pidNamespace();
 const PROCESS_START = statOf("self")?.start ?? "";
 const PROC_SHOWS_PIDS = PROCESS_START !== "" && statOf(process.pid)?.start === PROCESS_START;
 const BOOT_ID = bootId();
-const CLOCK_START = Math.round(Number(process.hrtime.bigint()) / 1e6 - process.uptime() * 1000);
+const CLOCK_START = clockStart();
 
 const UNLOCKED: InstanceLock = {
   release() {},
@@ -133,6 +134,12 @@ function statOf(pid: number | "self"): { state: string; start: string } | undefi
   } catch {
     return undefined;
   }
+}
+
+function clockStart(): number {
+  let latest = -Infinity;
+  for (let sample = 0; sample < CLOCK_SAMPLES; sample++) latest = Math.max(latest, Number(process.hrtime.bigint()) / 1e6 - process.uptime() * 1000);
+  return Math.round(latest);
 }
 
 function bootId(): string {

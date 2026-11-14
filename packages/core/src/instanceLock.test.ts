@@ -467,6 +467,22 @@ describe("acquireInstanceLock", () => {
     expect(Math.abs(readRecord().clockStart - ownClockStart())).toBeLessThanOrEqual(5);
   });
 
+  it("records this process's start on the monotonic clock even when a pause falls between its two clock readings", async () => {
+    const uptimeOf = process.uptime.bind(process);
+    let paused = false;
+    const spy = vi.spyOn(process, "uptime").mockImplementation(() => {
+      if (paused) return uptimeOf();
+      paused = true;
+      return uptimeOf() + 0.1;
+    });
+    vi.resetModules();
+    const fresh = await import("./instanceLock.ts");
+    spy.mockRestore();
+    expect(paused).toBe(true);
+    held.push(fresh.acquireInstanceLock(file, { module: "store/sqlite" }));
+    expect(Math.abs(readRecord().clockStart - ownClockStart())).toBeLessThanOrEqual(25);
+  });
+
   it("keeps the lock file on the last release in this thread while another thread of this process still holds it", () => {
     const sibling = writeRecord({ ...onThisHost, pid: process.pid, processStart: ownProcessStart() });
     take(file).release();
