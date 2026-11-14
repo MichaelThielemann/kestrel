@@ -920,15 +920,17 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       const location = keyFor(folderPath.value, name);
       const released = await releaseFailed(location);
       if (isErr(released)) return released;
-      let data = file.data;
-      if (config.stripImageMetadata !== false) {
-        const stripped = stripImageMetadata(file.data);
-        if (stripped.kind === "stripped") data = stripped.data;
-        else if (stripped.kind === "malformed") logWarn(logger, `media/default: could not remove the metadata from ${name}, it is stored as uploaded`, { name });
-      }
+      const stripped = stripImageMetadata(file.data);
+      const strippedData = stripped.kind === "stripped" ? stripped.data : file.data;
+      const stripping = config.stripImageMetadata !== false;
+      if (stripping && stripped.kind === "malformed") logWarn(logger, `media/default: could not remove the metadata from ${name}, it is stored as uploaded`, { name });
+      const data = stripping ? strippedData : file.data;
       const checksum = createHash("sha256").update(data).digest("hex");
-      const sentChecksum = data === file.data ? checksum : createHash("sha256").update(file.data).digest("hex");
-      const existing = await existingFor(location, [checksum, sentChecksum]);
+      const comparable = new Set([checksum]);
+      for (const candidate of [file.data, strippedData]) {
+        if (candidate !== data) comparable.add(createHash("sha256").update(candidate).digest("hex"));
+      }
+      const existing = await existingFor(location, [...comparable]);
       if (isErr(existing)) return existing;
       if (existing.value !== null) return ok({ item: existing.value, created: false });
       const parsedProvenance = parseProvenance(provenance);
