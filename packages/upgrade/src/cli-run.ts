@@ -8,6 +8,7 @@ import { askFindings, invalidClosedAnswers, parseAnswersFile, resolveAnswer, sta
 import { boolFlag, parseArgs, stringFlag, type ParsedArgs } from "./args.ts";
 import { unifiedDiff } from "./diff.ts";
 import { runDataStep } from "./data.ts";
+import { renderMigrate, runMigrateStep } from "./migrate.ts";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
@@ -984,6 +985,36 @@ async function runData(args: ParsedArgs, stdout: (line: string) => void, stderr:
   return result.exitCode;
 }
 
+async function runMigrate(args: ParsedArgs, stdout: (line: string) => void, stderr: (line: string) => void, options: InternalRunOptions): Promise<number> {
+  const db = stringFlag(args, "db");
+  const blobsDir = stringFlag(args, "blobs-dir");
+  if (db === undefined || blobsDir === undefined) {
+    stderr("migrate requires --db <sqlite file> and --blobs-dir <dir>, both a copy of the data that no process uses");
+    return 2;
+  }
+  const root = resolve(stringFlag(args, "root") ?? ".");
+  const hosts = hostsOf(root, options.hosts);
+  if (hosts.outdated.length > 0 || hosts.refused.length > 0) {
+    for (const message of hostBlockers(hosts)) stderr(message);
+    stderr("migrate refuses to run while a dependency is not built for this version or its kestrel field is refused");
+    return 2;
+  }
+  const answersFile = stringFlag(args, "answers");
+  const answers = answersFile === undefined ? undefined : Object.fromEntries(parseAnswersFile(readFileSync(resolve(answersFile), "utf8")));
+  const result = await runMigrateStep({ dbFile: resolve(db), blobsDir: resolve(blobsDir), root, plan: boolFlag(args, "plan"), ...(answers === undefined ? {} : { answers }) });
+  if (result.error !== undefined) {
+    stderr(result.error);
+    return result.exitCode;
+  }
+  if (result.report !== undefined) {
+    if (boolFlag(args, "json")) {
+      for (const note of result.report.notes) stderr(`note: ${note}`);
+      stdout(JSON.stringify(result.report, null, 2));
+    } else stdout(renderMigrate(result.report));
+  }
+  return result.exitCode;
+}
+
 export async function runCli(argv: readonly string[], options: InternalRunOptions): Promise<number> {
   const stdout = options.stdout ?? ((line: string) => console.log(line));
   const stderr = options.stderr ?? ((line: string) => console.error(line));
@@ -993,10 +1024,11 @@ export async function runCli(argv: readonly string[], options: InternalRunOption
     if (command === "check") return await runCheck(args, stdout, options);
     if (command === "fix") return await runFix(args, stdout, stderr, options);
     if (command === "data") return await runData(args, stdout, stderr, options);
+    if (command === "migrate") return await runMigrate(args, stdout, stderr, options);
   } catch (err) {
     stderr(err instanceof Error ? err.message : String(err));
     return 2;
   }
-  stderr(`unknown command "${command ?? ""}"; expected check, fix or data`);
+  stderr(`unknown command "${command ?? ""}"; expected check, fix, data or migrate`);
   return 2;
 }
