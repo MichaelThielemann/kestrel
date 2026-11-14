@@ -27,11 +27,31 @@ export function appManifest(file: string, app: string): { text: string; vars: st
   return { text, vars: [...new Set([...JSON.stringify(entry).matchAll(PLACEHOLDER)].map((m) => m[1] ?? ""))].sort() };
 }
 
-/** Writes the manifest and the variables into a directory only this user can read, hands both paths to `use` and removes the directory when `use` settles or the process exits first. */
+const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+
+/**
+ * Writes the manifest and the variables into a directory only this user can read, hands both paths to `use` and
+ * removes the directory when `use` settles, the process exits first or SIGINT, SIGTERM or SIGHUP arrives. A signal
+ * that no other listener of the process handles is raised again once the directory is gone.
+ */
 export async function withManifestFiles<T>(manifest: string, vars: Record<string, string>, use: (manifestFile: string, varsFile: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(join(tmpdir(), "kestrel-cf-vars-"));
-  const removeOnExit = (): void => rmSync(dir, { recursive: true, force: true });
-  process.once("exit", removeOnExit);
+  const removeNow = (): void => rmSync(dir, { recursive: true, force: true });
+  const onSignal = new Map<NodeJS.Signals, () => void>();
+  const unlisten = (): void => {
+    process.off("exit", removeNow);
+    for (const [signal, handler] of onSignal) process.off(signal, handler);
+  };
+  for (const signal of SIGNALS) {
+    const handler = (): void => {
+      removeNow();
+      unlisten();
+      if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
+    };
+    onSignal.set(signal, handler);
+    process.on(signal, handler);
+  }
+  process.once("exit", removeNow);
   try {
     const manifestFile = join(dir, "manifest.yml");
     const varsFile = join(dir, "vars.yml");
@@ -39,7 +59,7 @@ export async function withManifestFiles<T>(manifest: string, vars: Record<string
     await writeFile(varsFile, JSON.stringify(vars), { mode: 0o600 });
     return await use(manifestFile, varsFile);
   } finally {
-    process.off("exit", removeOnExit);
+    unlisten();
     await rm(dir, { recursive: true, force: true });
   }
 }

@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -57,6 +57,29 @@ async function failure(promise: Promise<unknown>): Promise<OpsError> {
     throw error;
   }
   throw new Error("expected the call to fail");
+}
+
+async function signalDuringUse(signal: NodeJS.Signals, host: string): Promise<{ code: number | null; signal: NodeJS.Signals | null; stdout: string; temp: string }> {
+  const temp = join(root, "temp");
+  mkdirSync(temp);
+  const script = join(root, "signal-during-apply.mjs");
+  writeFileSync(script, `${host}import { withManifestFiles } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "manifest.ts")).href)};
+await withManifestFiles("applications: []", { storage_secret: ${JSON.stringify(SECRET)} }, async (manifestFile) => {
+  process.stdout.write(manifestFile);
+  await new Promise((done) => setTimeout(done, 60_000));
+});
+`);
+  const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", "--experimental-transform-types", script], { env: { ...process.env, TMPDIR: temp }, stdio: ["ignore", "pipe", "inherit"] });
+  let stdout = "";
+  const ended = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((done) => child.on("exit", (code, received) => done({ code, signal: received })));
+  await new Promise<void>((done) => {
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+      done();
+    });
+  });
+  child.kill(signal);
+  return { ...(await ended), stdout, temp };
 }
 
 function namesOtherApp(): string[][] {
@@ -395,6 +418,22 @@ await withManifestFiles("applications: []", { storage_secret: ${JSON.stringify(S
       expect(outcome.code).toBe(143);
       expect(outcome.stdout.startsWith(temp)).toBe(true);
       expect(readdirSync(temp)).toEqual([]);
+    });
+
+    for (const signal of ["SIGHUP", "SIGTERM", "SIGINT"] as const) {
+      it(`removes the variables file and ends by ${signal} when ${signal} arrives while cf apply-manifest runs`, async () => {
+        const outcome = await signalDuringUse(signal, "");
+        expect(outcome.signal).toBe(signal);
+        expect(outcome.stdout.startsWith(outcome.temp)).toBe(true);
+        expect(readdirSync(outcome.temp)).toEqual([]);
+      });
+    }
+
+    it("removes the variables file on SIGTERM and leaves the ending to a SIGTERM listener of the host process", async () => {
+      const outcome = await signalDuringUse("SIGTERM", `process.on("SIGTERM", () => setTimeout(() => process.exit(7), 50));\n`);
+      expect(outcome.code).toBe(7);
+      expect(outcome.signal).toBeNull();
+      expect(readdirSync(outcome.temp)).toEqual([]);
     });
 
     it("refuses with exit 1 while the app runs", async () => {
