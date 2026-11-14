@@ -458,10 +458,11 @@ export function refusalOf(run: ModuleRun, mode: StorageMigrationsMode): string |
   const waiting = run.migrations.filter((m) => m.state === "pending" && m.blocked !== "cleanup");
   const offlineOnly = waiting.filter((m) => m.blobWrites || m.unanswered.length > 0);
   const listed = waiting.map(pendingText).join("; ");
-  const offline = `run ${waiting.length === 1 ? "it" : "them"} on a copy of the data with \`${OFFLINE_COMMAND}\`, or let \`${UPDATE_COMMAND}\` run ${waiting.length === 1 ? "it" : "them"}`;
+  const them = waiting.length === 1 ? "it" : "them";
+  const offline = `run ${them} on a copy of the data with \`${OFFLINE_COMMAND}\`, or let \`${UPDATE_COMMAND}\` run ${them}`;
   if (mode === "apply" && offlineOnly.length > 0) return `${run.module}: the stored data needs storage migration ${listed}; a migration that ${offlineOnly.some((m) => m.blobWrites) ? "writes blobs" : "asks a question"} never runs at start-up – ${offline}, then start this release`;
   if (offlineOnly.length > 0) return `${run.module}: the stored data needs storage migration ${listed}; ${offline}, then start this release`;
-  return `${run.module}: the stored data needs storage migration ${listed}; set storageMigrations: "apply" to run it at start-up, or ${offline}`;
+  return `${run.module}: the stored data needs storage migration ${listed}; set storageMigrations: "apply" to run ${them} at start-up, or ${offline}`;
 }
 
 /**

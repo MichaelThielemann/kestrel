@@ -432,7 +432,7 @@ describe("shape-migrations: kinds", () => {
     const db = createFakePersistence();
     const both = (): ModuleStorage => storage("m/z", [rowOnly(order, "m:first", "6.0.0", 1), { ...rowOnly(order, "m:second", "6.1.0", 1), kind: "ask" }]);
     const checked = expectErr(await guardStorage(both(), { db, blobs: memoryBlobs(), mode: "check" }), "STORAGE_REFUSED");
-    expect(checked.message).toMatch(/m:first .*m:second .*set storageMigrations: "apply" to run it at start-up, or run them/);
+    expect(checked.message).toMatch(/m:first .*m:second .*set storageMigrations: "apply" to run them at start-up, or run them/);
     expect(order.filter((entry) => entry.startsWith("apply"))).toEqual([]);
     expect(expectOk(await storageVersionOf(db, "m/z"))).toBeNull();
   });
