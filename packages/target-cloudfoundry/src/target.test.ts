@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { OpsError } from "@michaelthielemann/kestrel-ops";
-import { cloudFoundryTarget, createTarget, type CloudFoundryTarget } from "./index.ts";
+import { cloudFoundryTarget, createTarget, type CloudFoundryOptions, type CloudFoundryTarget } from "./index.ts";
 import { FakeCloudFoundry } from "./fakeCloudFoundry.fixture.ts";
 
 const API = { name: "site-api", guid: "6f0c2a8e-1b7d-4c3e-9a51-0d2e8f4b7a10" };
@@ -43,8 +43,8 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-function target(config: Record<string, unknown> = {}, env: NodeJS.ProcessEnv = {}): Promise<CloudFoundryTarget> {
-  return cloudFoundryTarget({ app: API.name, org: "example-org", space: "dev", ...config }, { root, clock: Date.now }, { env: cf.env({ ...process.env, ...env }), pollMs: 5 });
+function target(config: Record<string, unknown> = {}, env: NodeJS.ProcessEnv = {}, options: CloudFoundryOptions = {}): Promise<CloudFoundryTarget> {
+  return cloudFoundryTarget({ app: API.name, org: "example-org", space: "dev", ...config }, { root, clock: Date.now }, { env: cf.env({ ...process.env, ...env }), pollMs: 5, ...options });
 }
 
 async function failure(promise: Promise<unknown>): Promise<OpsError> {
@@ -125,6 +125,51 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     expect(cf.calls.some((argv) => argv[0] === "stop" || argv[0] === "start")).toBe(false);
     expect(namesOtherApp()).toEqual([]);
     expect(cf.colors.every((color) => color === "false")).toBe(true);
+  });
+
+  it("keeps waiting through failed status reads after the stop until the app reads stopped", async () => {
+    cf.stopLag = 3;
+    cf.hooks.stop = async () => {
+      cf.failNext.set("curl", 2);
+    };
+    const t = await target();
+    await t.stop();
+    expect(await t.status()).toEqual({ state: "stopped", instances: 0 });
+    expect(cf.actions.map((action) => action.action)).toEqual(["stop"]);
+  });
+
+  it("ends with exit 1 naming the stopped app and how to start it when it does not read stopped in time", async () => {
+    cf.stopLag = 1_000_000;
+    const t = await target({}, {}, { stopTimeoutMs: 50 });
+    const lagging = await failure(t.stop());
+    expect(lagging.exitCode).toBe(1);
+    expect(lagging.message).toContain("1 instance");
+    expect(lagging.message).toContain(`cf start ${API.name}`);
+    cf.rejectedActions.add("stop");
+    const refused = await failure(t.stop());
+    expect(refused.exitCode).toBe(1);
+    expect(refused.message).toContain(`stopping ${API.name} failed`);
+    expect(refused.message).toContain(`cf start ${API.name}`);
+    cf.rejectedActions.clear();
+    cf.hooks.stop = async () => {
+      cf.failures.set("curl", 1);
+    };
+    Object.assign(cf.app(API.name), { state: "STARTED", running: 1, ready: 1, downAfter: 0 });
+    const unreadable = await failure(t.stop());
+    expect(unreadable.exitCode).toBe(1);
+    expect(unreadable.message).toContain("could not be read");
+    expect(unreadable.message).toContain(`cf start ${API.name}`);
+  });
+
+  it("reads an app that reports STOPPED with an instance not yet DOWN as stopped with that instance, and refuses to change it", async () => {
+    writeFileSync(join(root, "manifest.yml"), MANIFEST);
+    Object.assign(cf.app(API.name), { state: "STOPPED", running: 1, ready: 1 });
+    const t = await target({ manifest: "manifest.yml", vars: { storage_secret: { env: "APP_STORAGE_SECRET" }, session_secret: { env: "APP_SESSION_SECRET" } } }, { APP_STORAGE_SECRET: SECRET, APP_SESSION_SECRET: OTHER_SECRET });
+    expect(await t.status()).toEqual({ state: "stopped", instances: 1 });
+    expect((await failure(t.setDroplet("0b1e9d4c-2f3a-4e5b-8c6d-7a8b9c0d1e2f"))).exitCode).toBe(1);
+    expect((await failure(t.applyManifest())).exitCode).toBe(1);
+    expect(cf.applied).toEqual([]);
+    expect(cf.actions).toEqual([]);
   });
 
   it("answers false when no instance runs before the timeout", async () => {

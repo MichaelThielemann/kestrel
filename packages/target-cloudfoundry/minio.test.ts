@@ -203,6 +203,23 @@ describe.skipIf(!endpoint)("kestrel backup, restore and status on a Cloud Foundr
     for (const text of outputs) expect(text).not.toContain(secretAccessKey);
   }, 300_000);
 
+  it("finishes a frozen backup through a failed status read after the stop and starts the app again", async () => {
+    await app.start();
+    await app.seed();
+    const stop = cf.hooks.stop;
+    cf.hooks.stop = async (stopped) => {
+      await stop?.(stopped);
+      cf.failNext.set("curl", 1);
+    };
+    const created = await kestrel(["backup", "create", "--freeze", "--json"]);
+    expect(created.stderr).toBe("");
+    expect(created.code).toBe(0);
+    expect(created.json.manifest).toMatchObject({ frozen: true, source: { seal: "sealed" } });
+    expect(cf.actions.map((action) => action.action)).toEqual(["stop", "start"]);
+    expect(api.state).toBe("STARTED");
+    expect(app.running).toBe(true);
+  }, 120_000);
+
   it("refuses with exit 1 an app scaled to two instances before it stops anything", async () => {
     await app.start();
     await app.seed();

@@ -45,8 +45,8 @@ export interface FakeCfAction {
 
 /** Hooks that run inside a start and a stop, before the call returns. */
 export interface FakeCfHooks {
-  start?(app: FakeCfApp): Promise<void>;
-  stop?(app: FakeCfApp): Promise<void>;
+  start?: (app: FakeCfApp) => Promise<void>;
+  stop?: (app: FakeCfApp) => Promise<void>;
 }
 
 interface Answer {

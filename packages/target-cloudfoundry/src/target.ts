@@ -155,12 +155,23 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
 
     async stop() {
       await status();
-      await api(`/v3/apps/${await appGuid()}/actions/stop`, appSchema, "POST");
-      const deadline = deps.clock() + (options.stopTimeoutMs ?? 120_000);
+      try {
+        await api(`/v3/apps/${await appGuid()}/actions/stop`, appSchema, "POST");
+      } catch (error) {
+        throw new OpsError(`stopping ${app} failed: ${messageOf(error)}; cf app ${app} shows whether it stopped, and cf start ${app} in ${config.org}/${config.space} starts it again`, 1, "target");
+      }
+      const timeoutMs = options.stopTimeoutMs ?? 120_000;
+      const deadline = deps.clock() + timeoutMs;
       for (;;) {
-        const now = await status();
-        if (now.state === "stopped" && now.instances === 0) return { stoppedAt: deps.clock() };
-        if (deps.clock() >= deadline) throw new OpsError(`${app} still reports ${now.state} with ${now.instances} instance(s) after cf stop`, 1, "target");
+        let seen: string;
+        try {
+          const now = await status();
+          if (now.state === "stopped" && now.instances === 0) return { stoppedAt: deps.clock() };
+          seen = `reports ${now.state} with ${now.instances} instance(s)`;
+        } catch (error) {
+          seen = `could not be read: ${messageOf(error)}`;
+        }
+        if (deps.clock() >= deadline) throw new OpsError(`${app} was stopped, and ${Math.round(timeoutMs / 1000)} s later its state ${seen}; it stays stopped until it is started again with cf start ${app} in ${config.org}/${config.space}`, 1, "target");
         await sleep(pollMs);
       }
     },
