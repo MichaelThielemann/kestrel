@@ -1,0 +1,49 @@
+{
+  "name": "@michaelthielemann/kestrel-target-cloudfoundry",
+  "version": "5.8.1",
+  "description": "A Cloud Foundry target for kestrel-ops: stops, starts and describes one app through the cf CLI.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json"
+  },
+  "peerDependencies": {
+    "@michaelthielemann/kestrel-ops": "workspace:^"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@michaelthielemann/kestrel": "workspace:*",
+    "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "@michaelthielemann/kestrel-ops": "workspace:*",
+    "@michaelthielemann/kestrel-replication-sqlite": "workspace:*",
+    "vitest": "^4.1.12"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelThielemann/kestrel.git",
+    "directory": "packages/target-cloudfoundry"
+  },
+  "homepage": "https://github.com/MichaelThielemann/kestrel#readme",
+  "bugs": "https://github.com/MichaelThielemann/kestrel/issues"
+}

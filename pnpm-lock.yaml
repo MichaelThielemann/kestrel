@@ -28,10 +28,10 @@ importers:
         version: 8.68.0(eslint@10.9.1)(typescript@5.9.3)
       vite:
         specifier: ^8.3.5
-        version: 8.3.7(@types/node@22.20.1)
+        version: 8.3.7(@types/node@22.20.1)(yaml@2.9.1)
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
       zod:
         specifier: ^4.6.6
         version: 4.6.7
@@ -203,7 +203,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/authn-multi:
     dependencies:
@@ -219,7 +219,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/authn-single:
     dependencies:
@@ -235,7 +235,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/authz-roles:
     dependencies:
@@ -251,7 +251,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/backup-blobstore:
     dependencies:
@@ -267,7 +267,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/blobstore-filesystem:
     dependencies:
@@ -283,7 +283,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/blobstore-s3:
     dependencies:
@@ -302,7 +302,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/cli:
     dependencies:
@@ -342,7 +342,7 @@ importers:
         version: 12.3.0
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
       zod:
         specifier: ^4.6.6
         version: 4.6.7
@@ -364,7 +364,7 @@ importers:
         version: link:../validate-jsonschema
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/contracts:
     devDependencies:
@@ -373,7 +373,7 @@ importers:
         version: link:../core
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/core:
     dependencies:
@@ -410,7 +410,7 @@ importers:
         version: 5.0.6
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/events-direct:
     dependencies:
@@ -429,7 +429,7 @@ importers:
         version: link:../events-inmemory
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/events-inmemory:
     dependencies:
@@ -445,7 +445,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/events-queue:
     dependencies:
@@ -467,7 +467,7 @@ importers:
         version: link:../persistence-sqlite
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/h3:
     devDependencies:
@@ -479,7 +479,7 @@ importers:
         version: 1.15.11
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
       zod:
         specifier: ^4.6.6
         version: 4.6.7
@@ -507,7 +507,7 @@ importers:
         version: link:../persistence-sqlite
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/insights:
     dependencies:
@@ -523,7 +523,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/links-default:
     dependencies:
@@ -542,7 +542,7 @@ importers:
         version: link:../persistence-sqlite
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/media-default:
     dependencies:
@@ -564,7 +564,7 @@ importers:
         version: link:../persistence-sqlite
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/mfa-totp:
     dependencies:
@@ -592,7 +592,7 @@ importers:
         version: link:../ratelimit-memory
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/migrations-default:
     dependencies:
@@ -611,7 +611,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/openapi:
     devDependencies:
@@ -620,7 +620,7 @@ importers:
         version: link:../core
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
       zod:
         specifier: ^4.6.6
         version: 4.6.7
@@ -651,7 +651,7 @@ importers:
         version: link:../delivery-static
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/persistence-sqlite:
     dependencies:
@@ -667,7 +667,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/ratelimit-memory:
     dependencies:
@@ -683,7 +683,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/redirects-default:
     dependencies:
@@ -699,7 +699,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/references-default:
     dependencies:
@@ -715,7 +715,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/renderer-plain:
     dependencies:
@@ -731,7 +731,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/replication-sqlite:
     dependencies:
@@ -747,7 +747,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/revisions-default:
     dependencies:
@@ -766,7 +766,7 @@ importers:
         version: link:../contracts
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/sanitize-svg:
     dependencies:
@@ -788,7 +788,7 @@ importers:
         version: 2.16.1
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/site-default:
     dependencies:
@@ -816,7 +816,32 @@ importers:
         version: link:../persistence-sqlite
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
+
+  packages/target-cloudfoundry:
+    dependencies:
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+    devDependencies:
+      '@michaelthielemann/kestrel':
+        specifier: workspace:*
+        version: link:../core
+      '@michaelthielemann/kestrel-contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@michaelthielemann/kestrel-ops':
+        specifier: workspace:*
+        version: link:../ops
+      '@michaelthielemann/kestrel-replication-sqlite':
+        specifier: workspace:*
+        version: link:../replication-sqlite
+      vitest:
+        specifier: ^4.1.12
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/upgrade:
     dependencies:
@@ -877,7 +902,7 @@ importers:
         version: link:../site-default
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
   packages/validate-jsonschema:
     dependencies:
@@ -905,7 +930,7 @@ importers:
         version: 2.16.1
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1))
+        version: 4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
 
 packages:
 
@@ -2658,6 +2683,11 @@ packages:
   xmlchars@2.2.0:
     resolution: {integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==}
 
+  yaml@2.9.1:
+    resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
@@ -3434,13 +3464,13 @@ snapshots:
       chai: 6.3.0
       tinyrainbow: 3.2.0
 
-  '@vitest/mocker@4.1.12(vite@8.3.7(@types/node@22.20.1))':
+  '@vitest/mocker@4.1.12(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))':
     dependencies:
       '@vitest/spy': 4.1.12
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.3.7(@types/node@22.20.1)
+      vite: 8.3.7(@types/node@22.20.1)(yaml@2.9.1)
 
   '@vitest/pretty-format@4.1.12':
     dependencies:
@@ -4364,7 +4394,7 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
-  vite@8.3.7(@types/node@22.20.1):
+  vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -4374,11 +4404,12 @@ snapshots:
     optionalDependencies:
       '@types/node': 22.20.1
       fsevents: 2.3.3
+      yaml: 2.9.1
 
-  vitest@4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)):
+  vitest@4.1.12(@types/node@22.20.1)(jsdom@30.1.3)(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1)):
     dependencies:
       '@vitest/expect': 4.1.12
-      '@vitest/mocker': 4.1.12(vite@8.3.7(@types/node@22.20.1))
+      '@vitest/mocker': 4.1.12(vite@8.3.7(@types/node@22.20.1)(yaml@2.9.1))
       '@vitest/pretty-format': 4.1.12
       '@vitest/runner': 4.1.12
       '@vitest/snapshot': 4.1.12
@@ -4395,7 +4426,7 @@ snapshots:
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
       tinyrainbow: 3.2.0
-      vite: 8.3.7(@types/node@22.20.1)
+      vite: 8.3.7(@types/node@22.20.1)(yaml@2.9.1)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 22.20.1
@@ -4433,6 +4464,8 @@ snapshots:
   xml-name-validator@5.0.0: {}
 
   xmlchars@2.2.0: {}
+
+  yaml@2.9.1: {}
 
   yocto-queue@0.1.0: {}
 

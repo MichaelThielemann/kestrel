@@ -32,6 +32,7 @@ export const BACKEND_PACKAGE_NAMES: readonly string[] = [
   "@michaelthielemann/kestrel-revisions-default",
   "@michaelthielemann/kestrel-sanitize-svg",
   "@michaelthielemann/kestrel-site-default",
+  "@michaelthielemann/kestrel-target-cloudfoundry",
   "@michaelthielemann/kestrel-upgrade",
   "@michaelthielemann/kestrel-validate-jsonschema",
 ];
