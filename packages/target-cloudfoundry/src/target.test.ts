@@ -382,6 +382,17 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     expect((await (await target()).describe()).revision).toBeNull();
   });
 
+  it("records no droplet for an app without a current droplet, and fails the description when the droplet cannot be read", async () => {
+    const t = await target();
+    cf.app(API.name).droplet = null;
+    expect((await t.describe()).droplet).toBeNull();
+    cf.app(API.name).droplet = "d7c1a3e0-0000-4000-8000-000000000001";
+    cf.failingPaths.add(`/v3/apps/${API.guid}/droplets/current`);
+    const error = await failure(t.describe());
+    expect(error.exitCode).toBe(1);
+    expect(error.message).toContain("droplets/current");
+  });
+
   it("refuses with exit 1 to describe an app scaled to more than one instance or with an active deployment", async () => {
     const app = cf.app(API.name);
     app.instances = 2;

@@ -104,6 +104,8 @@ export class FakeCloudFoundry {
   rejectedActions: Set<string> = new Set();
   /** App actions, `stop` or `start`, that take effect while cf answers them with exit 1. */
   lostAnswers: Set<string> = new Set();
+  /** `cf curl` paths, without their query, that exit with 1. */
+  failingPaths: Set<string> = new Set();
   hooks: FakeCfHooks = {};
   url = "";
   private server: Server | null = null;
@@ -224,6 +226,7 @@ export class FakeCloudFoundry {
     const method = args.includes("-X") ? (args[args.indexOf("-X") + 1] ?? "GET") : "GET";
     const data = args.includes("-d") ? (args[args.indexOf("-d") + 1] ?? "") : "";
     const url = new URL(path, "https://api.example.test");
+    if (this.failingPaths.has(url.pathname)) return fail(`Request error: ${url.pathname}\n`);
     const parts = url.pathname.split("/").filter((p) => p !== "");
     const notFound = json({ errors: [{ code: 10010, title: "CF-ResourceNotFound", detail: "not found" }] });
     if (parts[0] !== "v3") return notFound;

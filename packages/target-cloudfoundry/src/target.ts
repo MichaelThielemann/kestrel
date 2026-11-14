@@ -185,7 +185,10 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     async describe(): Promise<TargetFacts> {
       const guid = await appGuid();
       await requireOneInstance(guid);
-      const droplet = await api(`/v3/apps/${guid}/droplets/current`, dropletSchema).catch(() => null);
+      const droplet = await api(`/v3/apps/${guid}/droplets/current`, dropletSchema).catch((error: unknown) => {
+        if (error instanceof CfApiError && error.titles.includes("CF-ResourceNotFound")) return null;
+        throw error;
+      });
       const revisions = await api(`/v3/apps/${guid}/revisions?order_by=-created_at&per_page=1`, revisionsSchema);
       const latest = revisions.resources[0];
       const variables = await api(`/v3/apps/${guid}/environment_variables`, envSchema);
