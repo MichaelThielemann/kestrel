@@ -253,7 +253,7 @@ export async function createRedirects(config: Config, deps: { content: Content; 
       const compiled = compileRedirects(rulesInput, { reservedPaths: config.reservedPaths });
       const effective = await effectiveAutoRedirects();
       if (isErr(effective)) return effective;
-      const sources = new Set(effective.value.map((auto) => auto.from));
+      const sources = new Set(effective.value.filter((auto) => reservedPathOf(auto.from, config.reservedPaths) === undefined).map((auto) => auto.from));
       compiled.forEach((rule, i) => {
         if (rule.target.startsWith("/") && sources.has(rule.target)) {
           throw new RedirectRuleError(`Row ${i + 1}: "To" points at ${rule.target}, which is itself an automatic redirect – this would create a redirect loop`);

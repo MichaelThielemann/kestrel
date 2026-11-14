@@ -155,6 +155,17 @@ describe("automatic redirects: reserved paths", () => {
     expect(published).toEqual([expect.objectContaining({ from: "/administration" })]);
     expect(infos.filter((message) => message.includes("reserved path"))).toHaveLength(4);
   });
+
+  it("accepts an editor rule that points at a reserved path an automatic redirect leaves", async () => {
+    const r = await createRedirects(config, { content: fakeContent(), blobs: fakeBlobs(), db: createFakePersistence(), logger: quiet });
+    await r.recordMoves([
+      move({ type: "page", id: "d1", locale: "de", from: "/admin", to: "/control", seq: 1 }),
+      move({ type: "page", id: "d2", locale: "de", from: "/old-news", to: "/news", seq: 1 }),
+    ]);
+
+    expect(expectOk(await r.validate([{ from: "/old", to: "/admin" }]))).toBeUndefined();
+    await expect(r.validate([{ from: "/older", to: "/old-news" }])).rejects.toThrow(/redirect loop/);
+  });
 });
 
 describe("automatic redirects: admin removal", () => {
