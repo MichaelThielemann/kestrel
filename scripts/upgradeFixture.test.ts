@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -95,6 +95,16 @@ describe("the 5.8.1 upgrade fixture: provenance", () => {
     expect(run.stderr).toContain("seed-upgrade-fixture:");
     expect(readdirSync(work).filter((entry) => entry.startsWith("kestrel-upgrade-fixture-"))).toEqual([]);
   }, 60_000);
+
+  it("reports an unknown argument when started through a symlinked path", () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "kestrel-fixture-link-"));
+    scratch.push(sandbox);
+    const link = join(sandbox, "scripts");
+    symlinkSync(dirname(GENERATOR), link);
+    const run = spawnSync(process.execPath, [join(link, "seed-upgrade-fixture.mjs"), "--bogus"], { encoding: "utf8" });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("unknown argument --bogus");
+  });
 
   it("ships the database as one self-contained file", () => {
     expect(existsSync(join(FIXTURE, "kestrel.db"))).toBe(true);
