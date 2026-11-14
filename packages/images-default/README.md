@@ -212,9 +212,13 @@ The crop a ratio renders with is, in this order:
   shifted back inside the image, so a focus at an edge or in a corner moves the cut, not out of it;
 - otherwise the centre, exactly as without a framing.
 
-A crop that comes out equal to the centred one counts as the centre: a variant already cut from
-the centre does not render again and its path stays as it is, while one cut elsewhere renders again
-from the centre and gets a new `?v=` like any other change of its cut. A focus larger than the ratio allows cannot fit: the cut is still
+A crop whose left, top, right and bottom edges each lie within one pixel of the centred one counts
+as the centre, whether it comes from the focus or from a manual crop (`ratios[].manual` still says a
+manual crop is stored): it renders as the centred cut and is listed `null`. From a 1920 × 1281
+original, the 3:2 cut of a focus at the top edge, `{ left: 0, top: 0, width: 1920, height: 1280 }`,
+is a pixel off the centred cut, which starts at `top: 1`, so it is the centre. A variant already cut from the centre does not render
+again and its path stays as it is, while one cut elsewhere renders again from the centre and gets a
+new `?v=` like any other change of its cut. A focus larger than the ratio allows cannot fit: the cut is still
 centred on it, and `fits` (below) is `false`. A crop is never enlarged: a size larger than its crop
 renders at the size's ratio and no larger than the crop, so its `width`/`height` in `variants[]`
 shrink and several sizes of one ratio can end up with the same dimensions.
@@ -240,10 +244,10 @@ Until the new render is at the path, the origin and the public copy serve the ol
 original's bytes. Once it is there, `variants[].path` ends in a new `?v=<token>`, and
 `images.variantsChanged` is raised for the item, so pages that show it render again with the new
 URL. The token is a short hash of the variant's row and the number of its finished renders
-(`renders`), which a render raises in the same conditional update that marks the row `done`, or
-that records a failed attempt whose bytes stayed at the path (described under "Focus and crop"),
-and which a write that puts other bytes into a variant's public copy raises right after it, together
-with `images.variantsChanged`. So the query changes only once new bytes are at the path, and it never comes back for that path: a crop
+(`renders`), which a render raises in the same conditional update that marks the row `done` or
+records a failed attempt whose bytes stayed at the path, and which `images.syncPublic` raises when
+it rewrites a public copy of another byte size. So the query changes only once new bytes are at the
+path, and it never comes back for that path: a crop
 set back to an earlier one, or a framing reset to the centre, gets a URL of its own, and a URL
 that a cache filled stays bound to the bytes it got then. The same holds for any later render at
 the path, after a changed size or format, a repair by `images.resume`, or a size registered again
@@ -287,9 +291,7 @@ it has finished its writes (after a failed public copy, once it put the earlier 
 the item, and every size of the item that is `done`, `error` or `failed` renders again, except the
 sizes of an original that cannot be decoded, which stay `failed` with `cannot decode`. Until then
 that path answers the stalled bytes, and a cache that fetched it meanwhile keeps them under the
-current `?v=`; the render after it gives the path a new `?v=` and raises `images.variantsChanged`. If
-that render fails, the size goes to `error` and then `failed` while its path keeps answering the
-stalled bytes, until a later render of it succeeds, for example after `images.retryFailed`.
+current `?v=`; the render after it gives the path a new `?v=` and raises `images.variantsChanged`.
 
 A page published before a re-render goes on asking for its URL (the plain path or an earlier `?v=`)
 until it is published again after `images.variantsChanged`, while the path already answers the new
@@ -304,60 +306,8 @@ original's dimensions after its EXIF orientation, which every rectangle and pixe
 effective `cover` sizes: `{ key, sizes, manual, fits, crop }`, with the names of its sizes, whether a
 manual crop is stored for it, whether the focus lies within its cut (`true` without a focus), and the
 pixel crop it renders with on the oriented original, `{ left, top, width, height }` or `null` for the
-centre. An item without variants gets `focus: null` and an empty framing with `width` and `height`
+centre, up to a pixel per edge. An item without variants gets `focus: null` and an empty framing with `width` and `height`
 `null` and no ratios.
-
-Each entry of `variants[]` carries `crop`: the part of the oriented original that the bytes at its
-`path` show, `{ left, top, width, height }` in the form of `framing.ratios[].crop`, or `null` when
-they show the whole image (an `inside` size) or the centred cut of their ratio. It is the crop of
-the last finished render at the path, not the one planned: while a size renders again after a
-framing change, its entry keeps the old crop together with the old `?v=` until the render that marks
-it `done`, and both change with that render. The path answers the old variant until that render's
-bytes are written, shortly before the row is marked `done`, so for that moment a `pending` entry
-lists the old crop while the path already answers the new bytes. A format change moves the size to a
-path without a finished render, where `crop` is `null` until the first render there. A variant that
-has not finished a render yet reports `null`, and its path answers the original's bytes; the first
-render at a path that never held a render before changes `crop` from `null` to its cut and keeps the
-plain path, without a `?v=`. A row whose rendered crop is missing or does not parse reports `null`
-as well. A render that fails keeps the entry on the crop and `?v=` of the bytes the path still
-answers, also once it is `failed`. When its public copy fails and the earlier bytes cannot be put
-back at the path either, the path answers the new render, so the failed attempt counts as a render:
-the entry moves to that render's crop, and the path gets a new `?v=` from its second render on,
-while a first render at a path that never held a render keeps the plain path. The public copy is
-then written with that render too. If that write fails as well, the public copy keeps the earlier
-bytes until it is written again, and a cache that fetches the entry's URL from the public copy
-meanwhile stores those bytes under it; the write that puts other bytes into a public copy gives the
-path a new `?v=` and raises `images.variantsChanged`. A size whose render stays at its private path
-without being recorded, because the attempt was its first and nothing of it could be taken back,
-keeps `crop` `null`, and its path answers the original's bytes. After a write that stalled past `staleAfterMs` landed late and the render after it failed, an
-`error` or `failed` entry lists the crop and `?v=` of the render recorded before the stalled write
-landed, while its path answers the stalled bytes. For a
-`cover` size whose ratio equals the original's, the centred cut is the whole image, so its variants
-report `null` like the `inside` variants of that ratio, unless a manual crop for its key applies.
-
-Two listed variants in state `done` with the same aspect ratio and an equal `crop` show the same
-picture at different resolutions. `width` and `height` are rounded to whole pixels, so their ratio
-matches only up to that rounding: two variants have the same aspect ratio when their ranges from
-`(width - 0.5) / (height + 0.5)` to `(width + 0.5) / (height - 0.5)` overlap, as for 1000 × 563 and
-320 × 180, both 16:9. A `srcset` should combine only such variants: one that mixes crops shows a
-different picture depending on the viewport and pixel density, and one that leaves out an
-interchangeable variant renders blurry on high-density screens. The ratio test is approximate:
-two variants that pass it can differ by a few pixels across the smaller one, about two pixels per
-side for a wide variant, at any size. From a 2000 × 800 original, an `inside` 799 × 320 of the whole
-image and a `cover` 798 × 321 of its centred cut, 1989 pixels wide, both pass it with `crop` `null`.
-This holds for `done` entries only: a `pending` entry may still answer the previous render with
-dimensions planned for the next one, or already the next render's bytes just before it is marked
-`done`, and an entry whose path has not had a render yet answers the original's bytes. It has one
-exception: after a write that stalled past `staleAfterMs` landed late, as described above for a
-stalled holder, a `done` entry lists the crop and `?v=` of the newer render while its path answers
-the stalled bytes, until the item renders again; that render gives the path a new `?v=` and raises
-`images.variantsChanged`. A reader needs `state` to apply the rule. Anonymous callers do not receive
-it with the grants of `examples/minimal` or the grant `kestrel upgrade` proposes, so a page built
-from such a read cannot tell a `done` entry from the others: from one whose path has no finished
-render yet and answers the original's bytes (after an upload, for a size added to the configuration
-or registered again after a prune, and after a format change until the first render at the new
-path), from a `pending` one whose next render has already written its bytes, and from an `error` or
-`failed` one.
 
 A framing outlives the trash: the item is hidden, not gone, so trash and restore keep it unchanged,
 and a render of a hidden item writes no public copy. `images.remove`, `images.removeMany` and the
@@ -374,6 +324,45 @@ nothing, so an editor that runs in the browser can preview exactly what this mod
 `MAX_CROPS`. This module uses the same functions. They take the oriented dimensions of the original,
 which `framing.width` and `framing.height` carry; `media@1`'s stored `width`/`height` are not
 oriented and give a wrong cut for a rotated photo.
+
+### Which variants show the same picture
+
+Each entry of `variants[]` carries `crop`, the part of the oriented original that the bytes at its
+`path` show: `{ left, top, width, height }` in pixels, in the form of `framing.ratios[].crop`. It is
+`null` when they show the whole image (an `inside` size) or the centred cut of the size's ratio, up
+to a pixel per edge. For a `cover` size whose ratio equals the original's, the centred cut is the
+whole image, so its entries are `null` like the `inside` ones unless a manual crop applies. `crop`
+is taken from the last finished render at the path, not from the planned one: a size that renders
+again after a framing change keeps its old `crop` and its old `?v=` until the render that marks it
+`done` changes both. A path without a finished render lists `null`, and so does a row whose
+rendered crop is missing or does not parse.
+
+Two `done` entries with the same aspect ratio and an equal `crop` show the same picture at
+different resolutions, and a `srcset` should combine only such entries: one that mixes crops shows
+a different picture depending on the viewport and pixel density, and one that leaves out an
+interchangeable entry looks blurry on high-density screens. `width` and `height` are whole pixels,
+so two entries have the same aspect ratio when their ranges from `(width - 0.5) / (height + 0.5)`
+to `(width + 0.5) / (height - 0.5)` overlap, as for 1000 × 563 and 320 × 180, both 16:9.
+
+#### When the listing and the bytes differ
+
+- A `pending` entry around its render: before it, the path still answers the previous render,
+  listed with the dimensions planned for the next one; just before the row is marked `done`, the
+  path already answers the new bytes under the old `crop` and `?v=`.
+- A path without a finished render (after an upload, for a size added to the configuration or
+  registered again after a prune, after a format change) answers the original's bytes and lists
+  `crop` `null`.
+- After a storage fault or an instance that stalled past `staleAfterMs`, an entry, `done` ones
+  included, can list another `crop` or `?v=` than the bytes its path or its public copy answers,
+  until the item renders again or `images.syncPublic` writes its public copies. `images.syncPublic`
+  gives the path a new `?v=` when it rewrites a public copy of another byte size; a copy put right
+  by another write, or at an unchanged size, keeps its `?v=`, so a cache that fetched it meanwhile
+  keeps the earlier bytes until the item renders again.
+
+`state` tells the `done` entries apart. Anonymous callers do not receive it with the grants of
+`examples/minimal` or the grant `kestrel upgrade` proposes, so a page built from such a read cannot
+apply the rule on its own. Published pages are rebuilt on `images.variantsChanged`, which is raised
+whenever an entry's `crop` or `?v=` changes.
 
 ## `images.variantsChanged`
 
@@ -478,8 +467,8 @@ whose check after writing it fails, puts the earlier render back at the private 
 copy; when the path had none, it removes its bytes from the private path and writes the original's
 bytes to the public copy. The origin and the public copy then answer the same bytes under the row's
 `?v=`; the item keeps a request that `images.resume` serves. When the private path cannot get its
-earlier bytes back, it writes the new render to the public copy instead, so both answer the render
-the failed attempt records (see "Focus and crop"). The last failure sets `state: "failed"`
+earlier bytes back, the failed attempt records the render left there and writes it to the public
+copy as well. The last failure sets `state: "failed"`
 instead of `"error"`, and generate/sync/resume skip the variant from then on, so one broken original
 cannot burn the whole budget of the job forever. `images.serve` does not hide such a variant behind
 the original: for a size that has never rendered at its path it keeps answering with the original's

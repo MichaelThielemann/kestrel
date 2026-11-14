@@ -1403,28 +1403,17 @@ Net changes since 5.8.1.
   when `images.attach` runs.
 - `images/default`: every entry of `variants[]` that `images.attach` lists carries `crop`, the part
   of the oriented original that the bytes at its `path` show, as `{ left, top, width, height }` in
-  the form of `framing.ratios[].crop`, or `null` for the whole image (an `inside` size) or the
-  centred cut of the size's ratio. It is the crop of the last finished render at the path: while a
-  size renders again after a framing change it keeps the old crop together with the old `?v=`, and
-  both change once the new render is done; the path answers the new bytes shortly before that. A
-  variant that has not finished a render yet, one whose format changed until its first render at the
-  new path, and a row whose rendered crop is missing or does not parse report `null`; the first
-  render at a path that never held a render before changes `crop` from `null` to its cut and keeps
-  the plain path. A failed attempt whose public copy failed and whose path could not get the earlier
-  bytes back counts as a render: it records the crop and byte size of the render left at the path,
-  gives the path a new `?v=` from its second render on, and writes that render to the public copy;
-  if that write fails too, the public copy keeps the earlier bytes until a later write puts the
-  render there, which gives the path a new `?v=` and raises `images.variantsChanged`. Two listed
-  variants in state `done` with the same aspect ratio (up to the rounding of `width` and `height`,
-  a few pixels across the smaller variant) and an equal `crop` show the same picture, so a `srcset`
-  can combine exactly those, except while a write that stalled past `staleAfterMs` is being rendered
-  again: until that render the path may answer the stalled bytes under the current `?v=`, and the
-  render after it gives a new `?v=` and raises `images.variantsChanged`. That render covers the
-  item's `error` and `failed` sizes as well, except those of an original that cannot be decoded; if
-  it fails, the entry lists the crop and `?v=` recorded before the stalled write landed. Applying
-  this needs `variants[].state`, which anonymous callers do not receive by default.
-  `examples/minimal` grants `variants[].crop` to anonymous media reads, and `kestrel upgrade`
-  proposes it in the anonymous media grant when `images.attach` runs.
+  the form of `framing.ratios[].crop`, or `null` for the whole image (an `inside` size), the centred
+  cut of the size's ratio, or a path without a finished render. It is the crop of the last finished
+  render at the path, not the planned one. Two `done` entries with the same
+  aspect ratio and an equal `crop` show the same picture, so a `srcset` combines only such entries.
+  A cut whose edges each lie within one pixel of the centred cut counts as the centre:
+  `cropForRatio` and `effectiveCrop` return `null` for it, it renders as the centred cut, and
+  `framing.ratios[].crop` and `variants[].crop` list it as `null`, while `framing.ratios[].manual`
+  still says whether a manual crop is stored. `images.syncPublic` gives a variant path a new `?v=`
+  when it rewrites a public copy of another byte size. `examples/minimal` grants `variants[].crop`
+  to anonymous media reads, and `kestrel upgrade` proposes it in the anonymous media grant when
+  `images.attach` runs.
 
 ### Changed
 

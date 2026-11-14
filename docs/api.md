@@ -642,35 +642,17 @@ error, failed } }], job, orphaned: { sizes: [name], variants: n }, registrySeen,
 `GET /media/:id` and `GET /media` additionally return `available` and
 `variants: [{ size, width, height, format, bytes, state, path, crop }]`; `path` is the public path
 `/media/<id>/variants/<size>.<ext>`, followed by `?v=<token>` once a later render replaced bytes the
-path already had, after a format change of a variant that rendered before, or once a write put other
-bytes into the variant's public copy, with a token that path is never given again (the file name never carries the
+path already had, after a format change of a variant that rendered before, or once `images.syncPublic`
+rewrote the variant's public copy at another byte size, with a token that path is never given again (the file name never carries the
 query), and `width`/`height` are the planned dimensions, present in
 every state, not only once the render is `done`. `crop` is the part of the original, after its EXIF
 orientation, that the bytes of the last finished render at `path` show, `{ left, top, width, height }`
-in pixels, or `null` for the whole image (an `inside` size), the centred cut of the size's ratio, or a
-variant with no finished render yet. At a path that already had a finished render it changes only
-with the render that marks the variant `done`, the same render that gives the path its new `?v=`;
-that render writes its bytes shortly before, so for that moment a `pending` entry lists the old `crop`
-while the path already answers the new bytes. A failed attempt whose public copy failed and whose
-path could not get the earlier bytes back leaves the new bytes at the path and counts as a render, so
-it moves `crop` to them while the entry is `error` or `failed`, with a new `?v=` from the path's second
-render on; it writes them to the public copy too, and if that write fails as well, the public copy
-keeps the earlier bytes until a later write puts the new ones there and gives the path a new `?v=`.
-The first render at a path that never
-held a render before changes `crop` from `null` to its cut and keeps the plain path, without a `?v=`,
-since until then the path answered the original's bytes. A format change moves the size to a path with no finished render, where `crop`
-is `null` until the first render there. Two `done` variants with the same aspect ratio (up to the
-rounding of `width` and `height` to whole pixels, which lets two variants of any size match whose
-cuts differ by a few pixels across the smaller one) and an equal `crop` show the same picture, so a
-`srcset` combines only such variants, except while a write that stalled past `staleAfterMs` is being
-rendered again: until that render the path may answer the stalled bytes under the current `?v=`, and
-the render after it gives a new `?v=` and raises `images.variantsChanged`; if that render fails, the
-entry goes to `error` and then `failed` with the `crop` and `?v=` recorded before the stalled write
-landed. Applying this needs `state`, which an anonymous caller does not receive by default, so it
-cannot tell a `done` entry from one whose path still answers the original's bytes (after an upload,
-for a size added to the configuration or registered again, after a format change) or from a
-`pending`, `error` or `failed` one (see
-[Focus and crop](../packages/images-default/README.md#focus-and-crop)). `variants[]` never lists a size whose path has no
+in pixels, or `null` for the whole image (an `inside` size), the centred cut of the size's ratio (up
+to a pixel per edge), or a path without a finished render. Two `done` entries with the same aspect
+ratio and an equal `crop` show the same picture, so a `srcset` combines only such entries; anonymous
+callers do not receive `state` by default. The ratio test and the moments when the listing and the
+bytes differ are in [Which variants show the same picture](../packages/images-default/README.md#which-variants-show-the-same-picture).
+`variants[]` never lists a size whose path has no
 object at all yet (still `planned`, internal to `images-default`) — every listed path always answers.
 `available` is `false` for an eligible image with at least one such size still unplaced, `true`
 otherwise (including for a non-image, an SVG or a GIF, which have no variants at all). A broken
@@ -713,7 +695,7 @@ too, so a page can set `object-position` from its centre. A signed-in caller als
 crops keyed by reduced aspect ratio (`"16:9"`), the original's width and height after its EXIF
 orientation, which the rectangles and pixel cuts refer to (`null` until the item is planned), and per ratio of the `cover` sizes the names of its sizes, whether
 a manual crop is set, whether the focus lies within the cut, and the cut in pixels
-(`{ left, top, width, height }`, `null` for the centre).
+(`{ left, top, width, height }`, `null` for the centre, up to a pixel per edge).
 
 `PUT /media/:id/framing` with `{ focus?, crops? }` replaces both; a field left out is empty, so `{}`
 removes the framing. Only `cover` sizes are cut by it, from the manual crop of their ratio, else
