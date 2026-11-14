@@ -109,6 +109,44 @@ describe("restore --to local", () => {
   });
 });
 
+describe("restore --to local --with-media", () => {
+  it("asks before it writes anything and leaves no partial copy when it stops, so the same command runs again", async () => {
+    const bucket = new MemoryBucket("local-media-refused");
+    const h = createHarness({ store: memoryStore(bucket) });
+    const out = join(h.root, "copy");
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const backup = await h.run(["backup", "create", "--json"]);
+      const args = ["restore", "--to", "local", out, "--backup", String(backup.json.id), "--with-media"];
+      const unanswered = await h.run(args);
+      expect(unanswered.code).toBe(1);
+      expect(unanswered.stderr).toContain('"confirm" needs an answer');
+      expect(existsSync(join(out, "kestrel.db"))).toBe(false);
+
+      const declined = await h.run(args, { prompt: async () => "n" });
+      expect(declined.code).toBe(1);
+      expect(existsSync(join(out, "kestrel.db"))).toBe(false);
+
+      const object = [...bucket.objects.keys()].find((key) => key.startsWith(`${LOCATION}objects/media/m2/`));
+      const saved = object === undefined ? undefined : bucket.objects.get(object);
+      if (object === undefined || saved === undefined) throw new Error("the backup's copy of an original expected");
+      bucket.objects.delete(object);
+      const missing = await h.run([...args, "--yes"]);
+      expect(missing.code).toBe(1);
+      expect(missing.stderr).toContain("is missing");
+      expect(existsSync(join(out, "kestrel.db"))).toBe(false);
+      expect(existsSync(join(out, "blobs", "media", "m1", "harbour.jpg"))).toBe(false);
+      bucket.objects.set(object, saved);
+
+      expect((await h.run([...args, "--yes"])).code).toBe(0);
+      expect(existsSync(join(out, "kestrel.db"))).toBe(true);
+    } finally {
+      await h.dispose();
+    }
+  });
+});
+
 describe("restore --to local into an existing directory", () => {
   it("writes the database and the originals readable by the owner only, whatever the umask and the directory's mode", async () => {
     const h = createHarness({ store: memoryStore(new MemoryBucket("local-modes")) });

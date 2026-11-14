@@ -293,7 +293,7 @@ export interface LocalRestoreOptions {
   keepSessions: boolean;
 }
 
-/** Writes a backup's database (or the newest replica generation) to `<dir>/kestrel.db`, sessions removed unless kept, optionally with the originals under `<dir>/blobs/`. */
+/** Writes a backup's database (or the newest replica generation) to `<dir>/kestrel.db`, sessions removed unless kept, optionally with the originals under `<dir>/blobs/` after the `confirm` answer; a run that fails removes the files it wrote. */
 export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptions): Promise<{ file: string; sessionsDeleted: number; originals: number }> {
   const dir = resolve(options.dir);
   const file = join(dir, "kestrel.db");
@@ -313,26 +313,29 @@ export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptio
     blobs = await entries<BlobEntry>(ctx, ctx.location + keys.blobs(manifest.id));
   }
   const sessionsDeleted = options.keepSessions ? 0 : deleteSessions(source);
-  closeSync(openSync(file, "wx", 0o600));
-  try {
-    vacuumInto(source, file);
-  } catch (cause) {
-    rmSync(file, { force: true });
-    throw cause;
-  }
-  let originals = 0;
   if (options.withMedia) {
     const bytes = blobs.reduce((n, b) => n + b.size, 0);
     await confirm(ctx.answers, "confirm", `download ${blobs.length} original(s), ${(bytes / 1024 / 1024).toFixed(1)} MiB, into ${dir}/blobs`);
-    for (const entry of blobs) {
-      const data = await ctx.backups.get(ctx.location + entry.object);
-      if (data === null) throw new OpsError(`backup object ${entry.object} is missing`, 1, entry.key);
-      const out = join(dir, "blobs", entry.key);
-      if (!resolve(out).startsWith(join(dir, "blobs") + "/")) throw new OpsError(`refusing to write ${entry.key} outside ${dir}/blobs`, 1, entry.key);
-      mkdirSync(dirname(out), { recursive: true, mode: 0o700 });
-      writeFileSync(out, data, { mode: 0o600 });
-      originals += 1;
-    }
   }
-  return { file, sessionsDeleted, originals };
+  const written: string[] = [];
+  try {
+    closeSync(openSync(file, "wx", 0o600));
+    written.push(file);
+    vacuumInto(source, file);
+    if (options.withMedia) {
+      for (const entry of blobs) {
+        const data = await ctx.backups.get(ctx.location + entry.object);
+        if (data === null) throw new OpsError(`backup object ${entry.object} is missing`, 1, entry.key);
+        const out = join(dir, "blobs", entry.key);
+        if (!resolve(out).startsWith(join(dir, "blobs") + "/")) throw new OpsError(`refusing to write ${entry.key} outside ${dir}/blobs`, 1, entry.key);
+        mkdirSync(dirname(out), { recursive: true, mode: 0o700 });
+        writeFileSync(out, data, { mode: 0o600, flag: "wx" });
+        written.push(out);
+      }
+    }
+  } catch (cause) {
+    for (const path of written) rmSync(path, { force: true });
+    throw cause;
+  }
+  return { file, sessionsDeleted, originals: written.length - 1 };
 }
