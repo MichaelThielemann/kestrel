@@ -6,6 +6,41 @@ Net changes since 5.8.2.
 
 ### Breaking
 
+- `persistence-sqlite`, `replication-sqlite`, `backup-blobstore`: **a second process on the same database file
+  fails to boot.** Each of the three modules takes an instance lock on its `file` as the first thing its `setup()`
+  does: before it opens the file, applies a staged restore or rebuilds a missing file from the replica or the
+  backup. Another process that boots on the same file while one runs fails with the new boot error code
+  `instance-locked`, naming the module setting `allowConcurrentProcesses: true` and, for a readable lock, the
+  holder's host, PID and start time and the time from which the lock is taken over (an unreadable lock file is
+  refused while it was written within the TTL); the database, its `-wal` and
+  `-shm`, a staged restore and the restore records next to it stay as they were, and `restoreOnStart` creates no
+  file. The lock is the sidecar `<file>.instance` next to the database, never a row inside it, and it is not part
+  of a snapshot, a replica or a backup; the lock also writes short-lived siblings whose names start with
+  `<file>.instance`, and none of them belongs in a copy of the data directory. The modules of one process that
+  name the same file share the lock, and the lock file goes with the last of them; `replication-sqlite` gives its
+  share up only after its teardown has shipped the last WAL frames and sealed the generation. An in-memory
+  database takes no lock. `kestrel.health()` reports a lost lock (another instance took it over, or its file was
+  gone after the process had not renewed it for longer than its TTL) as `ok: false` with `restartRequired: true`.
+  `checkBoot({ setup: "all" })` takes the lock on the real file while it runs and gives it up before it returns;
+  `kestrel check --run-setup` runs these modules against a scratch database. To run several processes on one file
+  on purpose, set the new option `allowConcurrentProcesses: true` (default `false`) on every module that names
+  the file; one module of the file with it and another without it fails boot with `invalid-module-config`, naming
+  both. After an unclean stop (a crash, `kill -9`, a power loss, a container restarted in a new PID namespace, a
+  restart of the machine) the next start is refused until the old lock's TTL (60 s by default) has passed since
+  its last heartbeat, unless the old process is provably gone on this machine: the lock was written on this
+  machine and in this PID namespace, and its process no longer runs. On Linux that is judged by PID and process
+  start time; on macOS and Windows by the PID alone, so a lock whose PID went to a new process waits for the TTL.
+  "The same machine" means the same Linux boot id, or the same hostname where the system has none; on Linux a
+  restart of the machine changes the boot id, so its lock always waits for the TTL. Only when the kernel gave a
+  restarted container's new namespace the old one's id is its lock judged by PID and start time and taken over at
+  once. A supervisor should restart the service with a delay; for systemd, `Restart=on-failure` with
+  `RestartSec=15s`, so that the retries during the TTL do not reach `StartLimitBurst`. A clean stop releases the
+  lock at once, and the next start takes it without waiting. The lock comes from the new core entry point
+  `@michaelthielemann/kestrel/instanceLock` (`acquireInstanceLock`, `instanceLockFile`), which a module of a
+  project can use for its own database file the same way. A `KestrelBootError` that a module's `setup()` throws
+  and that names that module is reported with its own code, module and reason instead of `setup-failed`, also
+  when another copy of the core created it; `isKestrelBootError` from `@michaelthielemann/kestrel` makes the same
+  check.
 - `site-default`: **a resolve step must carry the route's `liveWhen` filter, and `site.resolveLinks` a filter.** A
   pipeline whose `site.resolve:<type>` on a routed type lacks a field of the route's `liveWhen`, or names a value
   the route excludes, fails boot with `site/default: pipeline "<name>": <step> must carry status=published, …`,
