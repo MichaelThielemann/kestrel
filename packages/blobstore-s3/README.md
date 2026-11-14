@@ -24,11 +24,48 @@ module then logs a warning at every boot.
 `move` copies through `CopyObject`, whose `CopySource` is a path: the segments are percent-encoded,
 the slashes separating them are not.
 
-`pnpm test:s3` runs the `blobstore@1` contract test against a real MinIO instance in Podman
-(starts it, creates the bucket, runs `minio.test.ts`, always stops the container). Only a real
-S3-compatible target exercises the `CopySource` encoding and the `NoSuchKey`/404 detection on
-`CopyObject`, which a fake says nothing about. `@aws-sdk/client-s3` is a dependency of this package
+`pnpm test:s3` runs the `blobstore@1` contract test and the admin client against a real MinIO instance in
+Podman (starts it, creates the bucket, runs every `packages/*/minio.test.ts`, always stops the container).
+Only a real S3-compatible target exercises the `CopySource` encoding, the `NoSuchKey`/404 detection on
+`CopyObject` and the 412 answers of a conditional copy, which a fake says nothing about. `@aws-sdk/client-s3` is a dependency of this package
 alone and not of the workspace root, so the script resolves it from here.
+
+## Admin client (`./admin`)
+`createS3Admin(config)` takes the same `Config` as the module and offers what `blobstore@1` leaves out. Keys
+are relative to `config.prefix`; with an empty prefix the client addresses the whole bucket. Every method
+returns a `Result`: `TRANSIENT` once the SDK's retries are spent, while a denied request or a missing
+bucket throws.
+
+```ts
+import { createS3Admin } from "@michaelthielemann/kestrel-blobstore-s3/admin";
+
+const admin = createS3Admin({ bucket: "assets", prefix: "" });
+const listed = await admin.listDetailed("media/"); // key, size, etag, lastModified (ms)
+const copied = await admin.copy("media/a.png", "backup/a.png", { ifMatch: listed.value?.[0]?.etag });
+```
+
+- `listDetailed(prefix)` lists every object with `key`, `size`, `etag` (without quotes) and `lastModified`
+  in epoch milliseconds, ordered by key. `head(key)` reports the same for one key and `Ok(null)` for a
+  missing one; a `HEAD` reports whole seconds where a listing reports milliseconds.
+- `copy(from, to, { ifMatch? })` copies on the server. It then reads the destination until its size equals
+  the source's, since an overwritten key can still answer with its old size for a moment, and answers
+  `VERIFY_FAILED` with `details.expectedSize` and `details.actualSize` if it never does. With `ifMatch` (the
+  ETag from a listing) it answers `PRECONDITION_FAILED` and writes nothing when the source changed. The
+  store's own `x-amz-copy-source-if-match` does the check where it works; when a store ignores the header or
+  answers 501, the client compares the source's ETag before the copy and again after it. A source above 5 GiB
+  answers `PAYLOAD_TOO_LARGE`, since one copy request does not move more.
+- `serverTime()` returns `{ serverMs, localMs, skewMs }`. It writes a probe object under `.kestrel-clock/`,
+  lists until the object shows, reads its `LastModified` and removes it. Listings can lag behind a write, which
+  is why it lists again, up to `observeAttempts` times.
+- `probeCapabilities()` finds out which write conditions the store enforces: `conditionalCreate`
+  (`If-None-Match: *`), `conditionalOverwrite` (`If-Match`) and `copySourceIfMatch`. Each probe sends a
+  condition that cannot hold, on a scratch key under `.kestrel-probe/` that is removed afterwards. Only a
+  refusal with 412 counts: `supported` is `true` for `outcome: "enforced"` and `false` for `"ignored"` (the
+  store accepted the stale write), `"not-implemented"` (501) and `"error"` (`detail` names it). A capability
+  nobody observed is not assumed.
+
+`createS3Admin(config, client, options)` accepts a client for tests and `S3AdminOptions`: `verifyAttempts`,
+`retryDelayMs`, `observeAttempts`, `sleep` and `now`.
 
 ## Errors
 
