@@ -20,7 +20,7 @@ export const LEGACY_KEYS = "media_legacy_keys";
 
 /** The schema of {@link COLLECTION} this release reads and writes. */
 export const ITEMS_SCHEMA: Schema = {
-  filename: "string", folder: "string", location: { type: "string", unique: true }, contentType: "string", size: "number", key: { type: "string", unique: true }, checksum: "string", status: "string", createdAt: "number", updatedAt: "number",
+  filename: "string", folder: "string", location: { type: "string", unique: true }, contentType: "string", size: "number", key: { type: "string", unique: true }, checksum: "string", sourceChecksum: "string", status: "string", createdAt: "number", updatedAt: "number",
   provenance: "json", width: "number", height: "number", alt: "json", title: "json", description: "json", svgSanitized: "boolean", trashedAt: "number", trashVersion: "number",
 };
 
@@ -56,6 +56,8 @@ export interface MediaItem extends Document {
   size: number;
   key: string;
   checksum: string | null;
+  /** The sha256 of the bytes as sent when they differ from the stored ones because their metadata was removed; `null` otherwise. */
+  sourceChecksum: string | null;
   status: MediaStatus;
   createdAt: number;
   updatedAt: number;
@@ -194,7 +196,7 @@ export interface PublicSync {
   missing: number;
 }
 
-/** `created` is false when the upload was idempotent: same folder, same filename, same checksum (of the bytes as sent or as stored), so `item` is the row that was already there. */
+/** `created` is false when the upload was idempotent: same folder, same filename, same bytes (as sent, or, while `stripImageMetadata` is on, as they would be stored), so `item` is the row that was already there. */
 export interface Upload {
   item: MediaItem;
   created: boolean;
@@ -537,12 +539,12 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     if (isErr(taken)) return taken;
     return taken.value ? err(locationConflict(location)) : ok();
   };
-  const existingFor = async (location: string, checksums: string[]): Promise<Result<MediaItem | null, MediaError>> => {
+  const existingFor = async (location: string, checksums: string[], sent: string): Promise<Result<MediaItem | null, MediaError>> => {
     const row = await db.findOne<Document>(COLLECTION, { location });
     if (isErr(row)) return row;
     if (row.value === null) return ok(null);
     const item = resolveWith(row.value, fallbackLocale);
-    return isReady(item) && item.checksum !== null && checksums.includes(item.checksum) ? ok(item) : err(locationConflict(location));
+    return isReady(item) && ((item.checksum !== null && checksums.includes(item.checksum)) || item.sourceChecksum === sent) ? ok(item) : err(locationConflict(location));
   };
   const releaseFailed = async (location: string): Promise<Result<void, MediaError>> => {
     const row = await db.findOne<MediaItem>(COLLECTION, { location });
@@ -675,7 +677,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     return ok(locale);
   };
   const resolveWith = (row: Record<string, unknown>, key: string): MediaItem => {
-    const item: Record<string, unknown> = { ...row, provenance: row.provenance ?? { origin: "unknown" }, updatedAt: row.updatedAt ?? row.createdAt, width: row.width ?? null, height: row.height ?? null, checksum: row.checksum ?? null, svgSanitized: row.svgSanitized === true, trashedAt: row.trashedAt ?? null, trashVersion: row.trashVersion ?? null };
+    const item: Record<string, unknown> = { ...row, provenance: row.provenance ?? { origin: "unknown" }, updatedAt: row.updatedAt ?? row.createdAt, width: row.width ?? null, height: row.height ?? null, checksum: row.checksum ?? null, sourceChecksum: row.sourceChecksum ?? null, svgSanitized: row.svgSanitized === true, trashedAt: row.trashedAt ?? null, trashVersion: row.trashVersion ?? null };
     for (const field of TEXT_FIELDS) {
       const texts = boundaryCast<Texts | null | undefined>(row[field], "host");
       item[field] = texts?.[key] ?? null;
@@ -926,11 +928,8 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (stripping && stripped.kind === "malformed") logWarn(logger, `media/default: could not remove the metadata from ${name}, it is stored as uploaded`, { name });
       const data = stripping ? strippedData : file.data;
       const checksum = createHash("sha256").update(data).digest("hex");
-      const comparable = new Set([checksum]);
-      for (const candidate of [file.data, strippedData]) {
-        if (candidate !== data) comparable.add(createHash("sha256").update(candidate).digest("hex"));
-      }
-      const existing = await existingFor(location, [...comparable]);
+      const sent = data === file.data ? checksum : createHash("sha256").update(file.data).digest("hex");
+      const existing = await existingFor(location, [checksum, sent], sent);
       if (isErr(existing)) return existing;
       if (existing.value !== null) return ok({ item: existing.value, created: false });
       const parsedProvenance = parseProvenance(provenance);
@@ -943,7 +942,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (isErr(folderReady)) return folderReady;
       const created = await db.createOne<Document>(COLLECTION, {
         id, filename: name, folder: folderPath.value, location, contentType, size: data.byteLength, key,
-        checksum, status: "uploading", createdAt: at, updatedAt: at,
+        checksum, sourceChecksum: sent === checksum ? null : sent, status: "uploading", createdAt: at, updatedAt: at,
         provenance: parsedProvenance.value, width: size?.width ?? null, height: size?.height ?? null, alt: {}, title: {}, description: {}, svgSanitized: sanitized,
       });
       if (isErr(created)) return created.error.code === "CONFLICT" ? err(locationConflict(location)) : created;

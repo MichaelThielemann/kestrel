@@ -113,6 +113,30 @@ describe("media.upload removes image metadata", () => {
     expect(other.ok).toBe(false);
   });
 
+  it("rejects a file that differs only in its metadata when stripping is off and the stored copy was stripped", async () => {
+    const store = fakeBlobstore();
+    const persistence = createFakePersistence();
+    const logger: Logger = { step() {}, info() {}, error() {}, warn() {} };
+    const stripping = await createMediaDefault(CONFIG, store, persistence, logger, () => 7);
+    const sending = await createMediaDefault({ ...CONFIG, stripImageMetadata: false }, store, persistence, logger, () => 7);
+    expectOk(await stripping.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: jpeg() }));
+    const sentWithOtherMetadata = bytes([0xff, 0xd8], segment(0xfe, bytes("Credit-B")), [...jpeg().subarray(2)]);
+    const result = await sending.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: sentWithOtherMetadata });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("CONFLICT");
+    expect(store.blobs.size).toBe(1);
+  });
+
+  it("answers a file that differs only in its metadata as the existing item while stripping is on", async () => {
+    const { media, blobs } = await setup();
+    const first = expectOk(await media.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: jpeg() }));
+    const sentWithOtherMetadata = bytes([0xff, 0xd8], segment(0xfe, bytes("Credit-B")), [...jpeg().subarray(2)]);
+    const again = expectOk(await media.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: sentWithOtherMetadata }));
+    expect(again.created).toBe(false);
+    expect(again.item.id).toBe(first.item.id);
+    expect(blobs.size).toBe(1);
+  });
+
   it("stores the bytes as sent when stripImageMetadata is false", async () => {
     const { media, blobs } = await setup({ ...CONFIG, stripImageMetadata: false });
     const source = jpeg();

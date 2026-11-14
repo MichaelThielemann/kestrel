@@ -195,7 +195,9 @@ Uploading is idempotent: same folder, same filename and the same bytes return th
 already there — no second row, no second blob write, no second variant folder — and `media.upload`
 then ends the pipeline itself (`ctx.done`, 200), so a following `events.emit:media.uploaded` does not
 announce an upload that stored nothing. The same name with *different* bytes stays a `CONFLICT`
-(409). For several files in one request, `ids` lists only what was newly stored; when nothing was,
+(409); for a JPEG, PNG, WebP or GIF, bytes that differ from the stored file only in the metadata
+`stripImageMetadata` removes count as the same file while that option is on (see
+[Image metadata](#image-metadata)). For several files in one request, `ids` lists only what was newly stored; when nothing was,
 the step ends the pipeline the same way.
 
 Why: a plain blobstore has no metadata, folders, locale texts or provenance tracking; this module
@@ -353,13 +355,19 @@ the file (`stripImageMetadata`, default `true`; set it to `false` to store the b
 - WebP: the `EXIF` and `XMP ` chunks and unknown chunks; the colour profile, alpha and animation stay.
 - GIF: comment extensions, XMP and data after the trailer.
 
-The pixel data is copied byte for byte, nothing is decoded or re-encoded, so the image looks the same
-and an upload costs no quality. The pixels are not rotated either, so the EXIF orientation (2 to 8)
+The pixel data is copied byte for byte, nothing is decoded or re-encoded, so the main image looks the
+same and an upload costs no quality. A second picture goes with the metadata: the gain map of an
+Ultra HDR photo and the video of a motion photo are lost, and such a photo is stored as a plain SDR
+image. A consumer that needs them sets `stripImageMetadata` to `false`. Stray bytes between two JPEG
+segments, which decoders skip, are dropped as well. The pixels are not rotated either, so the EXIF orientation (2 to 8)
 stays as the only tag, in a minimal EXIF block, and the image variants and browsers keep applying it.
-The item's `size` and the checksum behind the idempotent re-upload are those of the stored bytes: the
-same file sent again is still answered as the item that is already there, whether that item was stored
-with its metadata (an earlier version, or `stripImageMetadata: false`) or without it, and whichever
-way the option is set now. A JPEG, PNG, WebP or GIF is recognised by its bytes, so it is cleaned also
+The item's `size` and `checksum` are those of the stored bytes, and a stripped item also keeps the
+checksum of the file as sent. The same file sent again is still answered as the item that is already
+there, whether that item was stored with its metadata (an earlier version, or
+`stripImageMetadata: false`) or without it, and whichever way the option is set now. While the option
+is on, a file that differs from the stored one only in its metadata is answered as that item too,
+because it would be stored as the same bytes. With the option off, only the file that was sent is
+recognised: a file with other metadata at the same place is a `CONFLICT`. A JPEG, PNG, WebP or GIF is recognised by its bytes, so it is cleaned also
 when `allowedTypes` lets it through under another declared type. Other types (AVIF, HEIC, TIFF,
 PDF, ...) are stored as sent and keep their metadata, including a GPS position. A JPEG, PNG, WebP or GIF
 that cannot be read to its end is stored as sent as well, and the module logs a warning naming the file.

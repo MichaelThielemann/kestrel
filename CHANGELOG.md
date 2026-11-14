@@ -804,12 +804,16 @@ Net changes since 5.8.2.
   with the GPS position, XMP, IPTC, comments, text chunks, embedded thumbnails and trailing data, so a
   published original no longer reveals where and with what a photo was taken. Pixels, colour
   profiles and animation are copied byte for byte, and the EXIF orientation stays as the only tag.
-  The stored file, its `size` and its checksum are those of the stripped bytes. A JPEG,
-  PNG, WebP or GIF is recognised by its bytes, whatever type the upload declares. New option
+  Second pictures go with the metadata: an Ultra HDR photo loses its gain map and a motion photo its
+  video, and both are stored as plain SDR images. The stored file, its `size` and its checksum are
+  those of the stripped bytes. A JPEG, PNG, WebP or GIF is recognised by its bytes, whatever type the
+  upload declares. New option
   `stripImageMetadata` (default `true`; `false` restores the earlier behaviour of storing uploads as
   sent, so a consumer that relies on the copyright or credit fields of an original sets it). Files
   uploaded earlier keep their metadata, and uploading a file again to the place where it is stored
-  still answers the existing item, with the option on or off. AVIF, HEIC, TIFF and other image types
+  still answers the existing item, with the option on or off. While the option is on, a file that
+  differs only in its metadata is answered as the existing item as well; with it off, a file with
+  other metadata at the same place is a conflict. AVIF, HEIC, TIFF and other image types
   are stored as sent and keep their metadata.
 
 ### Added
