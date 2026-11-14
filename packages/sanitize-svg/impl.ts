@@ -114,7 +114,7 @@ const HREF_ATTRIBUTES = new Set(["href", "xlink:href"]);
 
 const URL_FUNCTION = /url\s*\([ \t\n\r\f]*["']?[ \t\n\r\f]*(.?)/gi;
 
-const FRAGMENT_URL = /url\s*\([ \t\n\r\f]*(["']?)[ \t\n\r\f]*#[^)"' \t\n\r\f]*\1[ \t\n\r\f]*\)/gi;
+const FRAGMENT_URL = /url\s*\([ \t\n\r\f]*(?:(["'])[ \t\n\r\f]*)?#[^)"' \t\n\r\f]*\1[ \t\n\r\f]*\)/gi;
 const IMAGE_FUNCTION = /(?:image-set|cross-fade|element|image|src)\s*\(/i;
 
 function referencesOtherDocument(name: string, value: string): boolean {

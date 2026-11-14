@@ -96,6 +96,15 @@ describe("sanitizeSvg", () => {
       expect(out).toContain("font-family=");
     });
 
+    it("cleans a url() with a long run of whitespace and no closing parenthesis in linear time", () => {
+      for (const value of [`url(${" ".repeat(100_000)}#a`, `url(${"\t\n".repeat(50_000)}#a`, `url(#a${" ".repeat(100_000)}`]) {
+        const started = performance.now();
+        const out = sanitizeSvg(wrap(`fill="${value}"`));
+        expect(performance.now() - started, JSON.stringify(value.slice(0, 6))).toBeLessThan(1500);
+        expect(out).toContain("<rect");
+      }
+    });
+
     it("keeps drawing attributes that carry no url()", () => {
       const out = sanitizeSvg(wrap('fill="red" stroke="#0a0a0a" stroke-width="2" transform="translate(1 2)" d="M0 0L5 5"'));
       for (const kept of ['fill="red"', 'stroke="#0a0a0a"', 'stroke-width="2"', 'transform="translate(1 2)"', 'd="M0 0L5 5"']) expect(out).toContain(kept);
