@@ -24,15 +24,21 @@ come as their own packages.
 | `status` | Target state, newest replica generation and its seal, backups, open runs, held locks, clock skew against the store, and whether the app's own credentials can delete backups. Exit 1 when it finds a problem. |
 | `backup create [--freeze] [--kind manual\|scheduled\|cutover]` | Writes a backup and verifies it. `--freeze` stops the app first and starts it again afterwards; without it the database comes from the replica of the running app. |
 | `backup list` | Every backup of the environment, with its verification state and pins. |
-| `backup verify <id>` | Verifies a backup again from what the backup location holds. Exit 1 names the failing part or key. |
+| `backup verify <id>` | Verifies a backup again from what the backup location holds and records the result next to it. Exit 1 names the failing part or key; an id the location holds nothing under is reported without writing anything. |
 | `backup prune [--dry-run]` | Removes backups beyond the retention of their kind and the objects nothing refers to any more. |
 | `restore --backup <id> [--no-safety-backup]` | Restores a backup over the environment. |
 | `restore --to local <dir> (--backup <id> \| --latest) [--with-media] [--keep-sessions]` | Writes a backup's database, or the newest replica generation, to `<dir>/kestrel.db` without login sessions; `--with-media` adds the originals under `<dir>/blobs/`. Files are written with mode 0600, new directories with 0700. |
 
 Every command takes `--env <name>` (optional when the file names one environment), `--json` (one JSON
 document on stdout, with a `schema` field such as `kestrel-ops/restore@1`), `--yes`, `--answers <file>`,
-`--keep` (keep the local working directory) and `--break-lock`. Exit codes: 0 done, 1 a check failed or a
-step was refused, 2 a usage or configuration error.
+`--keep` (keep the local working directory) and `--break-lock`, and only the options its line above names.
+Exit codes: 0 done, 1 a check failed or a step was refused, 2 a usage or configuration error. An option the
+command does not take, a malformed backup id, or one of another environment ends the run with exit 2 before
+it resolves credentials, loads the target or writes anything. With `--json`, a failure prints
+`kestrel-ops/error@1` (`message`, `element`, and `backupId` when a backup was written and verified before the
+failure, such as a frozen backup whose app does not become ready again), usage errors included; a journal
+entry that cannot be written after the work is done is a warning on stderr and changes neither the document
+nor the exit code.
 
 ## kestrel.environments.json
 One file in the project root describes every environment. It holds no secret values, only where they come

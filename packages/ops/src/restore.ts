@@ -169,7 +169,8 @@ async function readCurrent(ctx: OpsContext, stoppedAt: number): Promise<Current>
   let seal: SealReport;
   try {
     const gens = await stableGenerations(ctx.app, prefix, ctx.poll);
-    const finished = gens.findLastIndex((g) => !isUnfinishedPlacement(g)) + 1;
+    let finished = gens.length;
+    while (finished > 0 && gens.slice(finished - 1, finished).every(isUnfinishedPlacement)) finished -= 1;
     unfinished = gens.slice(finished).map((g) => g.name);
     for (const name of unfinished) ctx.out.warn(`generation ${name} is an unfinished placement of an earlier restore (a snapshot without origin.json); this restore reads the generation before it and places a complete one after it`);
     const newest = gens[finished - 1];

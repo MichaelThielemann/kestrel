@@ -9,6 +9,8 @@ export class OpsError extends Error {
     message: string,
     readonly exitCode: 1 | 2 = 1,
     readonly element?: string,
+    /** A backup the command wrote and verified before it failed, so a caller can still use it. */
+    readonly backupId?: string,
   ) {
     super(message);
   }

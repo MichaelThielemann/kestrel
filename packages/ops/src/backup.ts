@@ -1,7 +1,7 @@
 import { statSync, writeFileSync } from "node:fs";
 import { readFileSync } from "node:fs";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { REPLICATION_PACKAGE, runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
+import { messageOf, REPLICATION_PACKAGE, runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
 import { openRuns, listRuns } from "./journal.ts";
 import { heldLocks } from "./lock.ts";
@@ -114,13 +114,23 @@ export async function createBackup(ctx: OpsContext, options: BackupOptions): Pro
   const pre = await precopy(ctx, [ctx.env.app.mediaPrefix, ctx.env.app.deliveryPrefix]);
   ctx.out.info(`precopied ${pre} object(s) while the app runs`);
   const stop = await stopTarget(ctx);
+  let result: BackupResult;
   try {
     const seal = await readSeal(ctx);
     await acceptSeal(ctx, seal, stop.stoppedAt);
-    return await writeBackup(ctx, options, { kind: "stopped", seal, stoppedAt: stop.stoppedAt });
-  } finally {
-    if (stop.wasRunning) await startTarget(ctx);
+    result = await writeBackup(ctx, options, { kind: "stopped", seal, stoppedAt: stop.stoppedAt });
+  } catch (error) {
+    if (stop.wasRunning) await startTarget(ctx).catch((cause: unknown) => ctx.out.error(`starting the app again failed: ${messageOf(cause)}`));
+    throw error;
   }
+  if (stop.wasRunning) {
+    try {
+      await startTarget(ctx);
+    } catch (cause) {
+      throw new OpsError(`backup ${result.id} is written and verified, but starting the app again failed: ${messageOf(cause)}`, 1, "target", result.id);
+    }
+  }
+  return result;
 }
 
 async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: Exclude<BackupMode, { kind: "freeze" }>): Promise<BackupResult> {
@@ -260,6 +270,7 @@ export async function verifyBackup(ctx: OpsContext, id: string): Promise<Verific
   };
   const manifest = await readManifest(ctx, id);
   if (manifest === null) {
+    if ((await ctx.backups.list(ctx.location + keys.backupDir(id))).length === 0) return { id, at: ctx.clock(), ok: false, checked, problems: [{ element: "manifest.json", message: `backup ${id} does not exist` }] };
     problems.push({ element: "manifest.json", message: `backup ${id} has no manifest` });
     return finish();
   }
