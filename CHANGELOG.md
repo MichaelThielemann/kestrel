@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Net changes since 5.8.1.
+Net changes since 5.8.2.
 
 ### Breaking
 
@@ -1417,6 +1417,10 @@ Net changes since 5.8.1.
   bytes of another size than its row records, as after a database restore. `examples/minimal` grants `variants[].crop`
   to anonymous media reads, and `kestrel upgrade` proposes it in the anonymous media grant when
   `images.attach` runs.
+- `replication-sqlite`: `./wal` exports `walChecksum`, `walHeaderChecksum`, `FrameScanner` and the
+  `WalChecksum` type; `createReplicationSqlite` takes an optional fourth argument,
+  `ReplicationOptions` (`checkIntervalMs`, how often the WAL is compared with `checkpointBytes`
+  between syncs).
 
 ### Changed
 
@@ -1608,29 +1612,8 @@ Net changes since 5.8.1.
   is redacted whole. The JSON Schema leaves out the default of a credential-like key.
 - An `invalid config` boot error reports a secret path by its validation code only and an enum
   mismatch by the expected values only; other messages have credential URLs redacted.
-- `replication-sqlite`: `replication.sync` read the whole WAL file into memory on every run, so time
-  and memory grew with the WAL instead of with the frames written since the last run, and it blocked
-  the event loop for the read. It now reads from where the last run stopped, asynchronously and in
-  1 MiB chunks, and ships segments of about 4 MiB. `./wal` exports `walChecksum`,
-  `walHeaderChecksum`, `FrameScanner` and the `WalChecksum` type; `createReplicationSqlite` takes an
-  optional fourth argument, `ReplicationOptions` (`checkIntervalMs`).
-- `replication-sqlite`: the WAL grew with everything written between two syncs, because the module's
-  read transaction keeps SQLite from resetting it and only a sync checkpointed. The module now checks
-  the WAL every second and, once it holds `checkpointBytes` of frames, ships the new frames and
-  checkpoints without waiting for the next sync. The checkpoint is `wal_checkpoint(PASSIVE)`: the
-  WAL file is reused from its start instead of being truncated.
-- `replication-sqlite`: frames committed while a sync was uploading a segment were checkpointed into
-  the database and truncated from the WAL without ever being shipped, so a restore missed those
-  transactions or failed `quick_check`. A checkpoint now holds the database write lock on a second
-  connection while it reads the remaining frames and checkpoints, and ships those frames right
-  after, so no writer in any thread or process can commit in between.
-- `replication-sqlite`: a frame is only shipped when its salts and checksum continue the WAL's
-  checksum chain, so a frame still being written or left over from an earlier WAL never reaches a
-  segment.
-- `replication-sqlite`: `replication.sync` runs never overlap. A call made before the running one
-  has started reading returns its result; a later call runs once more after it, so the sync at
-  teardown still ships every frame committed before shutdown. `replication.snapshot`,
-  `replication.prepareRestore` and the size-triggered checkpoint wait for each other.
+- `replication-sqlite`: `replication.snapshot`, `replication.prepareRestore` and the size-triggered
+  checkpoint wait for each other, as `replication.sync` runs do.
 - `replication-sqlite`: where the file system reports no birth time, the restore-on-start skip check
   judged an existing database by whether it held any table, so a database whose schema another
   module had just created during this boot, with no rows in it, passed as real data and the restore
@@ -1730,6 +1713,32 @@ Net changes since 5.8.1.
   read once it passes the limit, instead of being buffered whole before the check. The core server
   also answers 413 to an oversized `Content-Length` up front. Both use the new export
   `readRequestBody`.
+
+## 5.8.2 – 2026-09-27
+
+### Fixed
+
+- `replication-sqlite`: the replica could miss transactions. A sync uploaded the new WAL frames and
+  then checkpointed; frames committed while the upload was running were copied into the database
+  file and cut from the WAL without being shipped. Depending on whether later transactions rewrote
+  the same pages, a restore to a point after that sync either failed `quick_check` or succeeded with
+  those transactions missing. The local database was never affected. A checkpoint now holds the
+  database write lock on a second connection while it reads the remaining committed frames and runs
+  `wal_checkpoint(PASSIVE)`, and ships those frames right after, so no writer in any thread or
+  process can commit in between. The first sync after the restart that applies this update starts a
+  new generation. Restore points in generations written by earlier versions may lack transactions;
+  restore from a generation started by this version where possible.
+- `replication-sqlite`: `replication.sync` read the whole WAL file into memory on every run and
+  blocked the event loop for the read. It now reads from where the last run stopped, asynchronously
+  in 1 MiB chunks, ships segments of about 4 MiB, and ships only frames whose salts and checksum
+  continue the WAL's checksum chain.
+- `replication-sqlite`: the WAL grew with everything written between two syncs. The module now
+  checks the WAL every second and ships and checkpoints once it holds `checkpointBytes` of frames.
+  The WAL file is reused from its start instead of being truncated to zero bytes, and the module
+  opens a second connection to the database for the checkpoint lock.
+- `replication-sqlite`: `replication.sync` runs never overlap. A call made before the running one
+  has started reading returns its result; a later call runs once more after it, so the sync at
+  teardown still ships every frame committed before shutdown.
 
 ## 5.8.1 – 2026-09-22
 
