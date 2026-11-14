@@ -1867,8 +1867,9 @@ Net changes since 5.8.2.
   temporary directory, a file name with non-ASCII characters is copied, and a file that git lists but
   the working tree no longer has no longer stops the run.
 - `persistence/sqlite` and `fakePersistence` look fields up by their own name, so a sort or filter on a
-  name `Object.prototype` defines (`constructor`, `toString`) is an unknown field like any other, and
-  an object with such a key is an equality value instead of a condition.
+  name `Object.prototype` defines (`constructor`, `toString`) is an unknown field like any other.
+  `persistence/sqlite` no longer reads a filter value whose only key is such a name as an operator; it is
+  an equality value.
 
 ## 5.8.2 – 2026-09-27
 
