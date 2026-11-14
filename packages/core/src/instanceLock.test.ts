@@ -359,6 +359,19 @@ describe("acquireInstanceLock", () => {
     expect(existsSync(lockFile(file))).toBe(false);
   });
 
+  it("rejects a TTL beyond 365 days", () => {
+    const err = thrownBy(() => take(file, { ttlMs: Number.MAX_SAFE_INTEGER }));
+    expect(err instanceof KestrelBootError ? err.code : err).toBe("invalid-module-config");
+    expect(() => take(file, { ttlMs: 365 * 24 * 3_600_000 })).not.toThrow();
+  });
+
+  it("refuses a fresh lock that records a TTL too long for a date, saying it is never taken over automatically", () => {
+    writeRecord({ host: "web-2", ttlMs: Number.MAX_SAFE_INTEGER });
+    const err = thrownBy(() => take(file));
+    expect(err instanceof KestrelBootError ? err.code : err).toBe("instance-locked");
+    expect(err instanceof KestrelBootError ? err.reason : "").toContain("never taken over automatically");
+  });
+
   it("takes over at once a lock of a dead process on the same host", () => {
     const foreign = writeRecord({ ...onThisHost, pid: deadPid() });
     take(file);

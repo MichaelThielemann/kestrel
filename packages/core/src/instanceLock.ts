@@ -14,8 +14,8 @@ export interface InstanceLockOptions {
   optOut?: string;
   /**
    * Milliseconds after the last heartbeat from which a lock counts as abandoned and may be taken
-   * over. Default 60000. The lock file records it, and a lock is judged by the longer of the TTL
-   * it records and the caller's.
+   * over. Default 60000, at most 365 days. The lock file records it, and a lock is judged by the
+   * longer of the TTL it records and the caller's.
    */
   ttlMs?: number;
   /** Milliseconds between two heartbeats of the holder, at most a third of `ttlMs`. Default 10000, or a third of `ttlMs` when that is shorter. */
@@ -79,6 +79,7 @@ const MEMORY = ":memory:";
 const URI_SCHEME = "file:";
 const DEFAULT_OPT_OUT = "allowConcurrentProcesses: true";
 const DEFAULT_TTL_MS = 60_000;
+const MAX_TTL_MS = 365 * 24 * 3_600_000;
 const DEFAULT_HEARTBEAT_MS = 10_000;
 const ATTEMPTS = 20;
 const RETRY_PAUSE_MS = 20;
@@ -212,7 +213,7 @@ interface Timing {
 
 function timingOf(opts: InstanceLockOptions): Timing {
   const ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
-  if (!(Number.isFinite(ttlMs) && ttlMs > 0)) throw invalidOption(opts, `ttlMs must be a positive number of milliseconds, got ${ttlMs}`);
+  if (!(ttlMs > 0 && ttlMs <= MAX_TTL_MS)) throw invalidOption(opts, `ttlMs must be a positive number of milliseconds up to ${MAX_TTL_MS} (365 days), got ${ttlMs}`);
   const heartbeatMs = opts.heartbeatMs ?? Math.min(DEFAULT_HEARTBEAT_MS, Math.floor(ttlMs / 3));
   if (!(heartbeatMs > 0 && heartbeatMs <= MAX_TIMER_MS)) throw invalidOption(opts, `heartbeatMs must be a positive number of milliseconds up to ${MAX_TIMER_MS}, got ${heartbeatMs}`);
   if (heartbeatMs * 3 > ttlMs) throw invalidOption(opts, `heartbeatMs (${heartbeatMs}) must be at most a third of ttlMs (${ttlMs}), so that a lock outlives two missed heartbeats`);
@@ -600,12 +601,15 @@ function refusal(file: string, lockPath: string, seen: Exclude<Seen, { kind: "ab
     return `${file} is locked by ${lockPath}, which is unreadable and was written within the last ${Math.round(ttlMs / 1000)} s; it is taken over once it is older. ${advice}`;
   }
   const { record } = seen;
-  const expiry = new Date(Date.parse(record.heartbeatAt) + Math.max(ttlMs, record.ttlMs)).toISOString();
+  const expiry = new Date(Date.parse(record.heartbeatAt) + Math.max(ttlMs, record.ttlMs));
+  const takeover = Number.isNaN(expiry.getTime())
+    ? `The lock is never taken over automatically, because it records a TTL of ${record.ttlMs} ms.`
+    : `The lock is taken over automatically from ${expiry.toISOString()} if that process sends no further heartbeat.`;
   const earlierRun =
     sameKernel(record) && record.pidNamespace !== PID_NAMESPACE
       ? ` The lock comes from another PID namespace on this host, such as an earlier run of this container; if no process uses the database any more, delete ${lockPath} to start at once.`
       : "";
-  return `${file} is in use by another process: host "${record.host}", pid ${record.pid}, started ${record.startedAt}, last heartbeat ${record.heartbeatAt} (lock file ${lockPath}). The lock is taken over automatically from ${expiry} if that process sends no further heartbeat.${earlierRun} ${advice}`;
+  return `${file} is in use by another process: host "${record.host}", pid ${record.pid}, started ${record.startedAt}, last heartbeat ${record.heartbeatAt} (lock file ${lockPath}). ${takeover}${earlierRun} ${advice}`;
 }
 
 function runs(pid: number, start: string): boolean {
