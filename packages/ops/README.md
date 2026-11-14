@@ -320,5 +320,11 @@ at once.
 that records every write and can lag listings, ignore `copy-source-if-match` or change a key just before it is
 copied.
 
+The repository's tests run backup and restore against the upgrade fixture of 5.8.1. `pnpm test:published-runtime`
+installs the replication package of that release from the npm registry and boots the fixture with it: it restores
+the replica as the published code does at a start without a database file, a backup reports the seal as
+`unsupported`, and after a restore the published code starts from the promoted generation and names its own
+generation after it. It needs network access and runs in CI as a job of its own.
+
 Not included: other persistence engines than SQLite with `replication-sqlite`, more than one instance,
 backups of secret values.

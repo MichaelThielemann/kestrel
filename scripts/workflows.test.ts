@@ -110,6 +110,12 @@ describe("the ci workflow", () => {
     expect(macos).toMatch(/runs-on: macos-latest/);
     expect(macos).toMatch(/- run: pnpm install --frozen-lockfile\n\s+- run: pnpm vitest run packages\/ops/);
   });
+
+  it("boots the upgrade fixture on the published replication package of its release in a job of its own", () => {
+    const published = job(ci, "ops-published-runtime");
+    expect(published).toMatch(/runs-on: ubuntu-latest/);
+    expect(published).toMatch(/- run: pnpm install --frozen-lockfile\n\s+- run: pnpm test:published-runtime/);
+  });
 });
 
 describe("every workflow", () => {
