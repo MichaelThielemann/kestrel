@@ -1429,9 +1429,13 @@ Net changes since 5.8.2.
   ETag the copy returned (an overwritten destination can look stale for a moment) and answers
   `VERIFY_FAILED` otherwise. With `ifMatch` it answers `PRECONDITION_FAILED` when the source no longer
   has that ETag. A store that enforces `x-amz-copy-source-if-match` writes nothing then; for a store that
-  ignores the header or answers 501 the ETag is also compared before and after the copy, and a
-  destination written from a changed source is removed again. `details.reason` and
-  `details.destinationRemoved` say what happened. A source above 5 GiB answers `PAYLOAD_TOO_LARGE`.
+  ignores the header, answers 501 or 400, or refuses the condition although the source is unchanged, the
+  copy is made without the header, the ETag is compared before and after it, and a destination written
+  from a changed source is removed again (`sourceCheck: "compare"` skips the header). `details.reason`
+  and `details.destinationRemoved` say what happened, and a `TRANSIENT` after the destination was
+  written removes it and reports `destinationWritten` and `destinationRemoved`. Copying an object onto
+  itself throws. A source above 5 GiB answers `PAYLOAD_TOO_LARGE`. `listDetailed` throws when a store
+  reports a truncated page without a continuation token or repeats a token.
   `serverTime()` writes a probe object, lists until it shows and returns its `LastModified` with the
   skew against the local clock, because not every store sends a usable `Date` header.
   `probeCapabilities()` tests on scratch keys whether the store refuses a stale `If-None-Match: *`
