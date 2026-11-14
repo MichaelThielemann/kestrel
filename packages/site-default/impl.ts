@@ -36,6 +36,13 @@ function rulesOf(rules: SiteRules | undefined, type?: string, route?: Route): Ru
   };
 }
 
+const DOCUMENT_FIELDS = new Set(["id", "createdAt", "updatedAt"]);
+
+function ownFields(definition: ContentModel["types"][string] | undefined, filter: Filter): Filter {
+  const fields = definition?.fields ?? {};
+  return Object.fromEntries(Object.entries(filter).filter(([name]) => DOCUMENT_FIELDS.has(name) || name in fields));
+}
+
 export function publicPath(slug: string, locale: string | undefined, defaultLocale: string | undefined, home: string | null, prefixPrimary: boolean): string {
   const prefixed = locale !== undefined && (prefixPrimary || locale !== defaultLocale);
   const segments = [...(prefixed ? [locale] : []), ...(slug === home ? [] : [slug])];
@@ -190,11 +197,14 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
     return pathOfTail(table.format, tail, locale, rules.prefixPrimary);
   }
 
-  function linkedPathRouted(table: SitePaths, t: string, id: string, locale: string, rules: Rules): string | null {
+  async function linkedPathRouted(table: SitePaths, t: string, id: string, locale: string, rules: Rules): Promise<Result<string | null, SiteError>> {
     const row = table.table.row(t, id, locale);
-    if (!row || row.tail === null || !row.valid) return null;
-    if (Object.keys(rules.filter).length > 0 && !row.live) return null;
-    return pathOfTail(table.format, row.tail, locale, rules.prefixPrimary);
+    if (!row || row.tail === null || !row.valid) return ok(null);
+    if (Object.keys(rules.filter).length === 0) return ok(pathOfTail(table.format, row.tail, locale, rules.prefixPrimary));
+    if (!row.live) return ok(null);
+    const passes = await unobserved(() => satisfiesFilter(content, t, id, locale === "" ? undefined : locale, ownFields(content.model().types[t], rules.filter)));
+    if (isErr(passes)) return err(transientOnly(passes.error));
+    return ok(passes.value ? pathOfTail(table.format, row.tail, locale, rules.prefixPrimary) : null);
   }
 
   return {
@@ -240,9 +250,11 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
         let path: string | null = null;
         if (model.types[t]) {
           if (paths?.route(t)) {
-            path = linkedPathRouted(paths, t, id, locale ?? "", rules);
+            const linked = await linkedPathRouted(paths, t, id, locale ?? "", rules);
+            if (isErr(linked)) return linked;
+            path = linked.value;
           } else {
-            const viewResult = await unobserved(() => publishedLocale(content, t, id, locale, rules.filter, { fallback: false, translations: false }));
+            const viewResult = await unobserved(() => publishedLocale(content, t, id, locale, ownFields(model.types[t], rules.filter), { fallback: false, translations: false }));
             if (isErr(viewResult)) return err(transientOnly(viewResult.error));
             const slug = viewResult.value?.[rules.slugField];
             if (typeof slug === "string" && slug !== "") path = publicPath(slug, locale, model.defaultLocale, rules.home, rules.prefixPrimary);

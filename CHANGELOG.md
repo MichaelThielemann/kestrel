@@ -14,8 +14,8 @@ Net changes since 5.8.2.
   every document it rewrites. Add the filter, for example
   `site.resolve:pages?home=home&status=published&fallback=true` for `liveWhen: { status: "published" }`, and
   `site.resolveLinks:pages?home=home&status=published&fallback=true`. A filtered `site.resolveLinks` links a
-  routed target by the route of the target's own type, so a link to a type without the filter's field is
-  resolved when that type's route publishes it. A resolve step behind `authn.requireUser` is a signed-in
+  target only while it passes the filter's fields that its own type declares, and a routed target also only
+  while its own route publishes it; a type without a field of the filter is not restricted by it. A resolve step behind `authn.requireUser` is a signed-in
   preview and stays unfiltered; `authn.identifyUser` does not make a step one. Routed types without a
   `liveWhen` and resolve steps on types that are not routed are not checked.
 - **zod 4.** Every package that lists `zod` requires `^4.6.6` (was `^3.23.8`), which fixes a published

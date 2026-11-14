@@ -65,3 +65,47 @@ describe("site/default: resolveLinks in published mode links by each target's ow
     expect(expectOk(await site.resolveLinks("notes", source, { locale: "de", rules: { filter: { status: "draft" } } }))._links).toEqual({ [draft.id]: { broken: true } });
   });
 });
+
+const STATUS_MODEL: ContentModel = {
+  locales: ["de"],
+  defaultLocale: "de",
+  types: {
+    pages: { kind: "multi", fields: { slug: { type: "slug", required: true }, title: { type: "text", required: true }, status: { type: "enum", options: ["draft", "published"] }, retired: { type: "text" } } },
+    posts: { kind: "multi", fields: { slug: { type: "slug", required: true }, title: { type: "text", required: true }, status: { type: "enum", options: ["draft", "published"] } } },
+    notes: { kind: "multi", fields: { slug: { type: "slug", required: true }, title: { type: "text", required: true } } },
+  },
+};
+
+describe("site/default: a filtered resolveLinks applies the filter to the fields a target type has", () => {
+  it("does not link a draft of a routed type whose route has no liveWhen but whose type has the filter's field", async () => {
+    const { site, content } = await routedSite({ model: STATUS_MODEL, routes: { pages: routeWith({ home: "home", liveWhen: { status: "published" } }), posts: routeWith({}) } });
+    const draft = expectOk(await content.create("posts", { slug: "unreleased", title: "Unreleased", status: "draft" }));
+    const live = expectOk(await content.create("posts", { slug: "released", title: "Released", status: "published" }));
+    const source = { id: "n", createdAt: 0, updatedAt: 0, a: `kestrel:posts:${draft.id}`, b: `kestrel:posts:${live.id}` };
+    const linked = expectOk(await site.resolveLinks("pages", source, { locale: "de", rules: { filter: { status: "published" } } }));
+    expect(linked._links).toEqual({ [draft.id]: { broken: true }, [live.id]: { path: "/released", locale: "de" } });
+    const unfiltered = expectOk(await site.resolveLinks("pages", source, { locale: "de", rules: { filter: {} } }));
+    expect(unfiltered._links).toEqual({ [draft.id]: { path: "/unreleased", locale: "de" }, [live.id]: { path: "/released", locale: "de" } });
+  });
+
+  it("links an unrouted type that has no field of the filter", async () => {
+    const { site, content } = await routedSite({ model: STATUS_MODEL, routes: { pages: routeWith({ home: "home", liveWhen: { status: "published" } }) } });
+    const note = expectOk(await content.create("notes", { slug: "a-note", title: "Note" }));
+    const source = { id: "n", createdAt: 0, updatedAt: 0, ref: `kestrel:notes:${note.id}` };
+    expect(expectOk(await site.resolveLinks("pages", source, { locale: "de", rules: { filter: { status: "published" } } }))._links).toEqual({ [note.id]: { path: "/a-note", locale: "de" } });
+  });
+
+  it("links a routed type that has no field of the filter", async () => {
+    const { site, content } = await routedSite({ model: STATUS_MODEL, routes: { pages: routeWith({ home: "home", liveWhen: { status: "published" } }), notes: routeWith({}) } });
+    const note = expectOk(await content.create("notes", { slug: "a-note", title: "Note" }));
+    const source = { id: "n", createdAt: 0, updatedAt: 0, ref: `kestrel:notes:${note.id}` };
+    expect(expectOk(await site.resolveLinks("pages", source, { locale: "de", rules: { filter: { status: "published" } } }))._links).toEqual({ [note.id]: { path: "/a-note", locale: "de" } });
+  });
+
+  it("still withholds an unrouted draft whose type has the filter's field", async () => {
+    const { site, content } = await routedSite({ model: STATUS_MODEL, routes: { pages: routeWith({ home: "home", liveWhen: { status: "published" } }) } });
+    const draft = expectOk(await content.create("posts", { slug: "unreleased", title: "Unreleased", status: "draft" }));
+    const source = { id: "n", createdAt: 0, updatedAt: 0, ref: `kestrel:posts:${draft.id}` };
+    expect(expectOk(await site.resolveLinks("pages", source, { locale: "de", rules: { filter: { status: "published" } } }))._links).toEqual({ [draft.id]: { broken: true } });
+  });
+});

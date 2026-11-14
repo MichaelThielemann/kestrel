@@ -141,8 +141,8 @@ value the filter names.
 `site.resolveLinks:<t>` links a routed target by the route of the target's own type, so the filter names no
 field of `<t>`. A step with no filter argument links every valid path, drafts included; boot fails for such a step
 when any route has a `liveWhen`, unless it follows `authn.requireUser`. With a filter (`status=published`) a
-routed target is linked only while its own route publishes it, and an unrouted target only when it passes the
-filter itself.
+target is linked only while it passes the filter's fields that its own type declares, and a routed target also
+only while its own route publishes it. A type that declares none of the filter's fields is not restricted by it.
 
 `site.readTree:<t>` lists every document of the mount target type with its parent, label, valid
 paths and per-locale `live` state. `site.attachPaths:<t>?reachable` adds `_paths` to a list or read answer (reachable paths only; without
