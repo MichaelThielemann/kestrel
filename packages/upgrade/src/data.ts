@@ -551,7 +551,28 @@ async function blobstoreFilesystemConfig(root: string): Promise<BlobstoreFilesys
   return isRecord(config) && typeof config.root === "string" ? { root: config.root } : undefined;
 }
 
-async function siteMediaLeftoversFindings(root: string): Promise<Finding[]> {
+const MEDIA_ID_PAGE = 500;
+const LEFTOVER_NAMES_SHOWN = 10;
+
+async function mediaIdsOf(db: Persistence): Promise<Set<string>> {
+  const ids = new Set<string>();
+  try {
+    const ensured = await db.ensureCollection("media_items", {});
+    if (isErr(ensured)) return ids;
+    let cursor: string | null = null;
+    for (;;) {
+      const page: Awaited<ReturnType<typeof db.findMany<Document>>> = await db.findMany<Document>("media_items", cursor === null ? {} : { id: { gt: cursor } }, { sort: { id: "asc" }, limit: MEDIA_ID_PAGE });
+      if (isErr(page)) return ids;
+      for (const item of page.value.items) ids.add(item.id);
+      if (page.value.items.length < MEDIA_ID_PAGE) return ids;
+      cursor = page.value.items[page.value.items.length - 1]!.id;
+    }
+  } catch {
+    return ids;
+  }
+}
+
+async function siteMediaLeftoversFindings(root: string, mediaIds: ReadonlySet<string>): Promise<Finding[]> {
   const blobstore = await blobstoreFilesystemConfig(root);
   if (blobstore === undefined) return [];
   const deliveryConfig = await moduleConfigOf(root, "delivery-static");
@@ -561,8 +582,10 @@ async function siteMediaLeftoversFindings(root: string): Promise<Finding[]> {
   const target = isRecord(media) && typeof media.target === "string" ? media.target : "media/";
   const leftoversDir = resolve(root, blobstore.root, deliveryPrefix, target);
   try {
-    const entries = await readdir(leftoversDir, { withFileTypes: true });
+    const entries = (await readdir(leftoversDir, { withFileTypes: true })).filter((e) => !(e.isDirectory() && mediaIds.has(e.name)));
     if (entries.length === 0) return [];
+    const names = entries.map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).sort();
+    const shown = names.slice(0, LEFTOVER_NAMES_SHOWN).join(", ") + (names.length > LEFTOVER_NAMES_SHOWN ? ` and ${names.length - LEFTOVER_NAMES_SHOWN} more` : "");
     return [
       {
         id: "data/site-media-leftovers",
@@ -570,8 +593,8 @@ async function siteMediaLeftoversFindings(root: string): Promise<Finding[]> {
         severity: "warning",
         tier: "data",
         where: { path: leftoversDir },
-        message: `${entries.length} entr${entries.length === 1 ? "y" : "ies"} found under "${leftoversDir}", the 5.x delivery-static media export directory`,
-        suggestion: 'review these by hand; media.syncPublic never touches this tree. Republish every page that might still link one of them, then delete the directory',
+        message: `${entries.length} entr${entries.length === 1 ? "y" : "ies"} under "${leftoversDir}", the 5.x delivery-static media export directory, that are not the public copy of a media item: ${shown}`,
+        suggestion: "media.syncPublic writes the public copy of each item under <id>/ in this directory and leaves these entries in place. Republish every page that might still link one of them, then delete these entries; keep the <id>/ directories",
         fix: { kind: "manual" },
         docs: upgradingDocs("data-site-media-leftovers"),
       },
@@ -648,6 +671,7 @@ export async function runDataStep(dbFile: string, root: string, plugins: readonl
     let fromPlugin: Finding[];
     let translationSlugs: Finding[];
     let redirectRules: Finding[];
+    let mediaIds: Set<string>;
     try {
       queued = await queueFindings(db);
       if (queued.error !== undefined) return { exitCode: 2, error: queued.error };
@@ -659,10 +683,11 @@ export async function runDataStep(dbFile: string, root: string, plugins: readonl
       translationSlugs = await translationSlugFindings(db, contentModel);
       redirectRules = await redirectReservedPathFindings(db, await moduleConfigOf(root, "redirects-default"));
       fromPlugin = await pluginDataFindings(db, root, plugin, contentModel);
+      mediaIds = await mediaIdsOf(db);
     } finally {
       db.close();
     }
-    const [siteMediaLeftovers, blobstoreTmpSuffix] = await Promise.all([siteMediaLeftoversFindings(root), blobstoreTmpSuffixFindings(root)]);
+    const [siteMediaLeftovers, blobstoreTmpSuffix] = await Promise.all([siteMediaLeftoversFindings(root, mediaIds), blobstoreTmpSuffixFindings(root)]);
     const findings = [...queued.findings, ...underscoreFieldFindings(counts), ...mediaLayout, ...translationSlugs, ...redirectRules, ...siteMediaLeftovers, ...blobstoreTmpSuffix, ...dataModelIssues, ...fromPlugin];
     const report: UpgradeReport = {
       schema: 1,

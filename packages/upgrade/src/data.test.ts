@@ -570,6 +570,49 @@ describe("runDataStep: data/site-media-leftovers and data/blobstore-tmp-suffix",
     expect(finding?.message).toContain("1 entry");
   });
 
+  it("names only the entries that are not the public copy of a stored media item", async () => {
+    const root = await moduleProjectRoot([
+      { use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: "./blobs" } },
+      { use: "@michaelthielemann/kestrel-delivery-static", config: { prefix: "site/", media: { target: "media/" } } },
+    ]);
+    const leftoverDir = join(root, "blobs", "site", "media");
+    await mkdir(join(leftoverDir, "m1"), { recursive: true });
+    await writeFile(join(leftoverDir, "m1", "hero.jpg"), "x");
+    await mkdir(join(leftoverDir, "gallery"), { recursive: true });
+    await writeFile(join(leftoverDir, "gallery", "hero.jpg"), "x");
+    await writeFile(join(leftoverDir, "logo.png"), "x");
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("media_items", { key: "string" });
+    await db.createOne("media_items", { id: "m1", key: "media/m1/hero.jpg" });
+    db.close();
+    const result = await runDataStep(file, root);
+    const finding = result.report?.findings.find((f) => f.rule === "data/site-media-leftovers");
+    expect(finding?.message).toContain("2 entries");
+    expect(finding?.message).toContain("gallery/, logo.png");
+    expect(finding?.message).not.toContain("m1");
+    expect(finding?.suggestion).toContain("delete these entries");
+    expect(finding?.suggestion).not.toContain("never touches");
+    expect(finding?.suggestion).not.toContain("delete the directory");
+  });
+
+  it("does not fire when the export directory holds only the public copies of stored media items", async () => {
+    const root = await moduleProjectRoot([
+      { use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: "./blobs" } },
+      { use: "@michaelthielemann/kestrel-delivery-static", config: { prefix: "site/", media: { target: "media/" } } },
+    ]);
+    const leftoverDir = join(root, "blobs", "site", "media");
+    await mkdir(join(leftoverDir, "m1", "variants"), { recursive: true });
+    await writeFile(join(leftoverDir, "m1", "hero.jpg"), "x");
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("media_items", { key: "string" });
+    await db.createOne("media_items", { id: "m1", key: "media/m1/hero.jpg" });
+    db.close();
+    const result = await runDataStep(file, root);
+    expect(result.report?.findings.filter((f) => f.rule === "data/site-media-leftovers")).toEqual([]);
+  });
+
   it("does not fire when the export directory is empty or missing", async () => {
     const root = await moduleProjectRoot([
       { use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: "./blobs" } },

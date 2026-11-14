@@ -1308,8 +1308,9 @@ Net changes since 5.8.2.
   `data/media-layout` (error) runs the detection of the storage migrations `media-default` and
   `images-default` export under `./storage` and names the pending migration and
   `kestrel upgrade migrate`, for data their `setup()` now refuses (a warning when the installed
-  release has no `./storage` export); `data/site-media-leftovers` (warning, manual) lists files still sitting
-  under the 5.x delivery-static media export directory; `data/blobstore-tmp-suffix` (info) lists stored
+  release has no `./storage` export); `data/site-media-leftovers` (warning, manual) names the entries still sitting
+  under the 5.x delivery-static media export directory other than the `<id>/` directories of stored
+  items, where `media.syncPublic` writes its public copies; `data/blobstore-tmp-suffix` (info) lists stored
   filesystem-blobstore keys already ending in the suffix 6.0.0 reserves for its own atomic writes. An
   edit can also create a brand-new file (a `create` edit, refused if the path already exists, or if a
   second edit races to create the same one) — how `pipelines/media-serve` and `pipelines/media-repair`

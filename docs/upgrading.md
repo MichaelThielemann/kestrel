@@ -209,8 +209,9 @@ The conversion leaves these in place on purpose:
 - Some of the 5.x static export copies under the delivery prefix (`site/media/<folder>/<filename>`
   and `….<size>.<ext>`). `media.syncPublic` removes those exactly one folder deep, because they sit
   where its own copies `<id>/<name>` go; a copy directly under the media path or in a deeper folder
-  stays. [`data/site-media-leftovers`](#data-site-media-leftovers) reports the directory while it
-  holds anything; delete what is left by hand once every page that might link it is published again.
+  stays. [`data/site-media-leftovers`](#data-site-media-leftovers) names the entries of that
+  directory that are not an `<id>/` directory of a stored item; delete those by hand once every page
+  that might link them is published again, and keep the `<id>/` directories.
 
 ### Not included
 
@@ -314,7 +315,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`data/translation-slug`](#data-translation-slug) | data | manual (error) | a stored translation of a routed type that is published without a slug of its own, or below a page without a slug in its locale |
 | [`data/media-layout`](#data-media-layout) | data | none (error / warning) | media or variant rows in the 5.x storage shape, found by the storage migrations `media-default` and `images-default` export; `kestrel upgrade migrate` converts them |
 | [`data/redirect-reserved-paths`](#data-redirect-reserved-paths) | data | manual (warning) | a stored `redirects-default` rule or automatic redirect whose source can match a reserved path (`/admin`, `/api`, `/media` unless `reservedPaths` says otherwise) |
-| [`data/site-media-leftovers`](#data-site-media-leftovers) | data | manual (warning) | a leftover 5.x static export copy `media.syncPublic` never touches |
+| [`data/site-media-leftovers`](#data-site-media-leftovers) | data | manual (warning) | a leftover 5.x static export copy next to the public copies `media.syncPublic` writes |
 | [`data/blobstore-tmp-suffix`](#data-blobstore-tmp-suffix) | data | none (info) | a stored filesystem-blobstore key already ending in `.kestrel-tmp` |
 | [`steps/ctx-done-terminal-output`](#steps-ctx-done-terminal-output) | source | none (info) | a local module calling `ctx.done()` |
 | [`tests/run-pipeline-validates`](#tests-run-pipeline-validates) | source | none (info) | a file importing `testing/runPipeline` |
@@ -721,12 +722,12 @@ change `reservedPaths` if the path is not one your application serves itself. A 
 left out for every path, not only for the reserved ones.
 
 #### data-site-media-leftovers
-A file under the filesystem blobstore's own root (resolved from its `root` config, relative to the
-project root) that looks like a 5.x static export copy — `<folder>/<filename>` or
-`….<size>.<ext>` directly under the delivery prefix and the old `media.target` — that
-`media.syncPublic` never reaches, since it only ever considers depth-1 copies under the *new*
-public-copy tree. Manual: lists what it found and says to delete it once every page that might
-still link it has been republished.
+An entry of the 5.x delivery-static media export directory (the delivery prefix and the old
+`media.target` under the filesystem blobstore's `root`, resolved relative to the project root) that
+is not an `<id>/` directory of an item in `media_items`. With `publicCopy`, `media.syncPublic`
+writes its copies into the same directory, one `<id>/` directory per item, so those are never
+reported. Manual: names the remaining entries (up to ten, with the count of the rest) and says to
+delete them, and only them, once every page that might still link one has been republished.
 
 #### data-blobstore-tmp-suffix
 A stored filesystem-blobstore key already ending in `.kestrel-tmp`: 6.0.0 reserves that suffix for

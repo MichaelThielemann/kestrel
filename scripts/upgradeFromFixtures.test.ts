@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { copyFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -201,6 +201,29 @@ describe("upgrading the data of 5.8.1 to this release", () => {
       await kestrel.stop();
     }
   }, 60_000);
+
+  it("names as site media leftovers only the 5.x export copies media.syncPublic left next to its own copies", async () => {
+    const project = join(work, "project");
+    mkdirSync(project);
+    copyFileSync(join(PROJECT, "package.json"), join(project, "package.json"));
+    symlinkSync(join(PROJECT, "node_modules"), join(project, "node_modules"), "dir");
+    const modules = [
+      { use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: blobs } },
+      { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: db } },
+      { use: "@michaelthielemann/kestrel-delivery-static", config: { types: { pages: {} }, prefix: "site/" } },
+    ];
+    writeFileSync(join(project, "kestrel.config.ts"), `export default ${JSON.stringify({ modules, triggers: [] })};\n`);
+    const ids = new Set(Object.values(manifest.media).map((m) => m.id));
+    expect(readdirSync(join(blobs, "site", "media")).filter((name) => ids.has(name)).length).toBeGreaterThan(0);
+    const run = await cli(["data", "--root", project, "--db", db, "--json"]);
+    expect(run.code, run.errors).toBe(0);
+    const report = boundaryCast<UpgradeReport>(JSON.parse(run.out), "json");
+    const leftovers = report.findings.filter((f) => f.rule === "data/site-media-leftovers");
+    expect(leftovers).toHaveLength(1);
+    expect(leftovers[0]?.message).toContain("4 entries");
+    expect(leftovers[0]?.message).toContain("gallery/, logo.png, logo.png.small.webp, mark.svg");
+    for (const id of ids) expect(leftovers[0]?.message).not.toContain(id);
+  });
 
   it("never changes the fixture the copy was taken from, so the backup before the conversion stays in the 5.8.1 format", () => {
     expect(files(FIXTURE)).toEqual(fixtureBefore);
