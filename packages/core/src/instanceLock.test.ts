@@ -163,6 +163,28 @@ describe("acquireInstanceLock", () => {
     lock.release();
   });
 
+  it("takes no lock and creates no file for an empty file name, which opens a temporary database", () => {
+    const lock = take("");
+    expect(existsSync(`${process.cwd()}.instance`)).toBe(false);
+    expect(lock.health()).toEqual({ ok: true });
+  });
+
+  it("takes no lock and creates no file for an in-memory or temporary database named by a file: URI", () => {
+    for (const uri of ["file::memory:", "file::memory:?cache=shared", "file:memdb1?mode=memory&cache=shared", "file:"]) {
+      expect(take(uri).health()).toEqual({ ok: true });
+    }
+    expect(existsSync(join(process.cwd(), "file::memory:.instance"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "file:memdb1?mode=memory&cache=shared.instance"))).toBe(false);
+  });
+
+  it("locks the database file a file: URI names", () => {
+    take(`file:${file}?mode=rwc`);
+    expect(existsSync(instanceLockFile(file))).toBe(true);
+    expect(() => take(`file://${file}`)).not.toThrow();
+    expect(instanceLockFile(`file:${file}?mode=ro`)).toBe(instanceLockFile(file));
+    expect(instanceLockFile(`file:${join(dir, "my%20app.db")}`)).toBe(`${join(dir, "my app.db")}.instance`);
+  });
+
   it("is shared by several holders in one process, and the file disappears only with the last release", () => {
     const first = take(file);
     const second = take(join(dir, ".", "app.db"));

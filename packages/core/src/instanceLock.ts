@@ -60,6 +60,7 @@ interface Holder {
 }
 
 const MEMORY = ":memory:";
+const URI_SCHEME = "file:";
 const DEFAULT_OPT_OUT = "allowConcurrentProcesses: true";
 const DEFAULT_TTL_MS = 60_000;
 const DEFAULT_HEARTBEAT_MS = 10_000;
@@ -117,19 +118,22 @@ function bootId(): string {
 /**
  * The lock file for a database file: the file's real path with `.instance` appended, resolved
  * through symlinks, including ones whose target does not exist yet, so that every spelling of
- * one database names the same lock before and after the database file is created. The lock also
+ * one database names the same lock before and after the database file is created. A SQLite
+ * `file:` URI names the lock of the file in its path. The lock also
  * writes short-lived siblings whose names start with this path; a process that ends abruptly
  * can leave one behind, and the next process to take the lock removes those older than the TTL.
  * None of them belongs in a replica, snapshot or backup of the database.
  */
 export function instanceLockFile(file: string): string {
-  return `${canonicalPath(file)}.instance`;
+  return `${canonicalPath(databasePath(file) ?? file)}.instance`;
 }
 
 /**
  * Takes the lock that keeps a second process off the same database file. The lock is a sidecar
  * file next to the database (see {@link instanceLockFile}), never a row inside it, so it cannot
- * travel with a replica, snapshot or restore. `:memory:` takes no lock.
+ * travel with a replica, snapshot or restore. An in-memory or temporary database takes no lock:
+ * `:memory:`, the empty name, and a `file:` URI with the path `:memory:`, an empty path or
+ * `mode=memory`.
  *
  * A lock is taken over when its heartbeat is older than `ttlMs`. A lock written on this machine
  * (the same Linux boot id, or the same hostname where the system has none) in this PID namespace
@@ -149,8 +153,9 @@ export function instanceLockFile(file: string): string {
  * on a timer that does not keep the process alive.
  */
 export function acquireInstanceLock(file: string, opts: InstanceLockOptions): InstanceLock {
-  if (file === MEMORY) return UNLOCKED;
-  const lockPath = instanceLockFile(file);
+  const path = databasePath(file);
+  if (path === undefined) return UNLOCKED;
+  const lockPath = `${canonicalPath(path)}.instance`;
   const holder = holders.get(lockPath) ?? take(file, lockPath, opts);
   holder.refs++;
   let released = false;
@@ -163,6 +168,30 @@ export function acquireInstanceLock(file: string, opts: InstanceLockOptions): In
     },
     health: () => holder.health,
   };
+}
+
+function databasePath(file: string): string | undefined {
+  if (file === "" || file === MEMORY) return undefined;
+  if (!file.startsWith(URI_SCHEME)) return file;
+  const rest = file.slice(URI_SCHEME.length);
+  const end = rest.search(/[?#]/);
+  const query = end === -1 ? "" : rest.slice(end + 1).split("#")[0];
+  let path = end === -1 ? rest : rest.slice(0, end);
+  if (path.startsWith("//")) {
+    const slash = path.indexOf("/", 2);
+    path = slash === -1 ? "" : path.slice(slash);
+  }
+  path = decoded(path);
+  if (path === "" || path === MEMORY || new URLSearchParams(query).get("mode") === "memory") return undefined;
+  return path;
+}
+
+function decoded(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
 }
 
 function canonicalPath(file: string, hops = 0): string {
