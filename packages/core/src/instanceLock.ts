@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, parse, sep } from "node:path";
 import type { ModuleHealth } from "./defineModule.ts";
 import { boundaryCast } from "./cast.ts";
 import { KestrelBootError } from "./errors.ts";
@@ -137,7 +137,8 @@ function bootId(): string {
 
 /**
  * The lock file for a database file: the file's real path with `.instance` appended, resolved
- * through symlinks, including ones whose target does not exist yet, so that every spelling of
+ * through symlinks, including ones whose target does not exist yet, and with each `..` applied
+ * to the directory a symlink leads to, as the system opens the file, so that every spelling of
  * one database names the same lock before and after the database file is created. A SQLite
  * `file:` URI names the lock of the file in its path. The lock also
  * writes short-lived siblings whose names start with this path; a process that ends abruptly
@@ -241,18 +242,37 @@ function decoded(text: string): string {
   }
 }
 
-function canonicalPath(file: string, hops = 0): string {
-  const absolute = resolve(file);
+function canonicalPath(file: string): string {
+  const absolute = isAbsolute(file) ? file : `${process.cwd()}${sep}${file}`;
   try {
-    return realpathSync(absolute);
+    return realpathSync.native(absolute);
   } catch {
-    const parent = dirname(absolute);
-    if (parent === absolute) return absolute;
-    const path = join(canonicalPath(parent, hops), basename(absolute));
-    const target = linkTarget(path);
-    if (target === undefined || hops >= MAX_LINK_HOPS) return path;
-    return canonicalPath(resolve(dirname(path), target), hops + 1);
+    return physicalPath(absolute);
   }
+}
+
+function physicalPath(absolute: string): string {
+  let current = parse(absolute).root;
+  const pending = absolute.slice(current.length).split(sep).reverse();
+  let hops = 0;
+  for (let part = pending.pop(); part !== undefined; part = pending.pop()) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      current = dirname(current);
+      continue;
+    }
+    const path = join(current, part);
+    const target = hops < MAX_LINK_HOPS ? linkTarget(path) : undefined;
+    if (target === undefined) {
+      current = path;
+      continue;
+    }
+    hops++;
+    const root = isAbsolute(target) ? parse(target).root : "";
+    if (root !== "") current = root;
+    pending.push(...target.slice(root.length).split(sep).reverse());
+  }
+  return current;
 }
 
 function linkTarget(path: string): string | undefined {

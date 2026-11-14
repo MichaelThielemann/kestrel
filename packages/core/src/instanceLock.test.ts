@@ -148,6 +148,33 @@ describe("instanceLockFile", () => {
     expect(instanceLockFile(join(dir, "vol", "app.db"))).toBe(before);
   });
 
+  it("resolves .. after a symlinked directory from the link's target, as SQLite opens the file", () => {
+    mkdirSync(join(dir, "app", "releases", "7"), { recursive: true });
+    mkdirSync(join(dir, "app", "releases", "shared"));
+    symlinkSync(join("releases", "7"), join(dir, "app", "current"));
+    const spelled = `${dir}/app/current/../shared/db.sqlite`;
+    expect(instanceLockFile(spelled)).toBe(`${join(dir, "app", "releases", "shared", "db.sqlite")}.instance`);
+    writeFileSync(join(dir, "app", "releases", "shared", "db.sqlite"), "");
+    expect(instanceLockFile(spelled)).toBe(`${join(dir, "app", "releases", "shared", "db.sqlite")}.instance`);
+  });
+
+  it("resolves .. after a symlinked directory in a relative name from the link's target", () => {
+    mkdirSync(join(dir, "app", "releases", "7"), { recursive: true });
+    symlinkSync(join("releases", "7"), join(dir, "app", "current"));
+    vi.spyOn(process, "cwd").mockReturnValue(join(dir, "app"));
+    expect(instanceLockFile("current/../shared/db.sqlite")).toBe(`${join(dir, "app", "releases", "shared", "db.sqlite")}.instance`);
+  });
+
+  it("takes one lock for every spelling of a database behind a symlinked directory", () => {
+    mkdirSync(join(dir, "app", "releases", "7"), { recursive: true });
+    mkdirSync(join(dir, "app", "releases", "shared"));
+    symlinkSync(join("releases", "7"), join(dir, "app", "current"));
+    take(`${dir}/app/current/../shared/db.sqlite`);
+    take(join(dir, "app", "releases", "shared", "db.sqlite"));
+    expect(existsSync(join(dir, "app", "shared"))).toBe(false);
+    expect(existsSync(`${join(dir, "app", "releases", "shared", "db.sqlite")}.instance`)).toBe(true);
+  });
+
   it("follows a symlinked directory whose target does not exist yet", () => {
     symlinkSync("missing", join(dir, "link"));
     expect(instanceLockFile(join(dir, "link", "app.db"))).toBe(`${join(dir, "missing", "app.db")}.instance`);
