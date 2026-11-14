@@ -185,7 +185,9 @@ answer per label.
 `authz.fields:<resource>?shape=<shape>`, last in a pipeline, cuts the answer to them: a caller
 without an identity, or with one that holds no configured role, keeps the anonymous grant and never
 everything; any other signed-in caller keeps everything when one of its roles has no grant for the
-resource, otherwise the union of its roles' grants and the anonymous one. At `attach()` boot fails
+resource, otherwise the union of its roles' grants and the anonymous one. For `?shape=list` the step also answers
+`400 VALIDATION` when the request's `sort` names a field the caller's grant does not name whole,
+leaving `id`, `createdAt` and `updatedAt` always sortable. At `attach()` boot fails
 when a pipeline an anonymous caller reaches over HTTP does not end with the step or its resource has
 no anonymous grant, when the declared output does not fit the shape parameter or `?shape=item` cuts
 a list whose granted paths only its elements declare, when a grant names a

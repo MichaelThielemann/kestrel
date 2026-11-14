@@ -61,6 +61,12 @@ wins over a sub-path of the same member, and a map or a free-form value is grant
 that is not an object (`null`, a string) is kept as it is. The step declares `narrows` with one
 answer per audience (`anonymous`, `role:<name>`), so `kestrel openapi` documents each.
 
+With `?shape=list` the step also checks the request's `sort` (`field` or `-field`; a repeated
+parameter is checked value by value). A caller whose answer is cut may sort only by a member its grant
+names whole, or by `id`, `createdAt` and `updatedAt`; any other name answers 400 `VALIDATION`, so the
+order of a list never shows what the grant withholds. A caller whose roles have no grant for the
+resource sorts by anything.
+
 At `attach()` boot fails, one line per problem, when a step runs after `authz.fields`; when the
 declared output does not fit the shape parameter (`item` fits any object, `list` an object whose
 `items` is an array of objects, `array` an array of objects, `file` a pipeline with a `binary`
