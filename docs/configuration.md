@@ -80,7 +80,13 @@ and its seal. A module whose `setup()` fails gives its share up before boot repo
 To run several processes on one file on purpose, for example with `events-queue`, set
 `allowConcurrentProcesses: true` on every module that names the file. The setting has to match:
 one module of the file with it and another without it fails the boot with
-`invalid-module-config`, naming both modules.
+`invalid-module-config`, naming both modules. The mismatch is found when the second of those
+modules is set up. `replication-sqlite` and `backup-blobstore` are set up before
+`persistence-sqlite`, so when one of them has the setting and `persistence-sqlite` does not, it
+has already run without a lock by the time the boot fails: it may have applied a staged restore or
+rebuilt a missing file, and `replication-sqlite` ships and seals a generation when it is torn down
+after the failed boot. This happens beside a process that holds the lock as well, so set the
+option alike before the first start.
 
 `kestrel.health()` reports a lost lock as `ok: false` with `restartRequired: true` for each module
 that shares it: another instance took the lock over, or its file was gone after the process had

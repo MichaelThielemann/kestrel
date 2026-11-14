@@ -215,7 +215,11 @@ process share the lock. Teardown gives it up only after the last WAL frames are 
 generation is sealed, and a `setup()` that fails gives it up before boot reports the failure.
 `health()` answers `ok: false` with `restartRequired: true` once another instance took the lock
 over. `allowConcurrentProcesses: true` skips the lock; it has to be set alike on every module that
-names the file, otherwise boot fails with `invalid-module-config`. The lock covers one file on one
+names the file, otherwise boot fails with `invalid-module-config`. This module is set up before
+`persistence/sqlite`, so with the option here and not there the mismatch shows only after this
+module has run without a lock, also beside a process that holds one: it may have applied a
+prepared restore or rebuilt a missing file, and its teardown after the failed boot ships and seals
+a generation. The lock covers one file on one
 file system: a process elsewhere that replicates to the same prefix is noticed as described next.
 
 **Another writer.** Only one process may replicate a database to a prefix. Every sync lists the

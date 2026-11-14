@@ -27,7 +27,10 @@ Net changes since 5.8.2.
   `kestrel check --run-setup` runs these modules against a scratch database. To run several processes on one file
   on purpose, set the new option `allowConcurrentProcesses: true` (default `false`) on every module that names
   the file; one module of the file with it and another without it fails boot with `invalid-module-config`, naming
-  both. After an unclean stop (a crash, `kill -9`, a power loss, a container restarted in a new PID namespace, a
+  both. The mismatch is found when the second of them is set up: `replication-sqlite` or `backup-blobstore` with
+  the option, set up before `persistence-sqlite` without it, has by then run without a lock, also beside a process
+  that holds one, and may have applied a staged restore or rebuilt a missing file, and `replication-sqlite` ships
+  and seals a generation when the failed boot tears it down. After an unclean stop (a crash, `kill -9`, a power loss, a container restarted in a new PID namespace, a
   restart of the machine) the next start is refused until the old lock's TTL (60 s by default) has passed since
   its last heartbeat, unless the old process is provably gone on this machine: the lock was written on this
   machine and in this PID namespace, and its process no longer runs. On Linux that is judged by PID and process

@@ -59,7 +59,9 @@ same process share it, and teardown gives this module's share up; a `setup()` th
 before boot reports the failure. `health()` answers `{ ok: true }` while the lock holds and `ok: false`
 with `restartRequired: true` once another instance took it over. `allowConcurrentProcesses: true`
 skips the lock; it has to be set alike on every module that names the file, otherwise boot fails
-with `invalid-module-config`.
+with `invalid-module-config`. This module is set up before `persistence/sqlite`, so with the option
+here and not there the mismatch shows only after this module has run without a lock, also beside a
+process that holds one, and it may have applied a pending restore or restored a missing file.
 
 Every step returns a `Result`. A blobstore `Err` (`Err(TRANSIENT)`, 503, `retryable`) passes
 through unchanged; `backup.restore` with an unknown or missing backup key is `Err(NOT_FOUND)`
