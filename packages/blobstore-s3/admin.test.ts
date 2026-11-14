@@ -188,6 +188,143 @@ describe("blobstore/s3 admin: head", () => {
   });
 });
 
+const fastOptions = { sleep: async (): Promise<void> => {}, retryDelayMs: 0 };
+
+describe("blobstore/s3 admin: copy", () => {
+  it("copies server-side under the prefix, encodes the source and reports the verified destination", async () => {
+    const s3 = fakeS3();
+    s3.put("site/media/a b+c.png", 12);
+    const admin = createS3Admin({ bucket: "b", prefix: "site/" }, s3.client, fastOptions);
+    const copied = expectOk(await admin.copy("media/a b+c.png", "objects/a b+c.png"));
+    expect(copied.size).toBe(12);
+    expect(s3.objects.get("site/objects/a b+c.png")?.data.byteLength).toBe(12);
+    expect(s3.objects.has("site/media/a b+c.png")).toBe(true);
+    const command = s3.sent.find((sent): sent is CopyObjectCommand => sent instanceof CopyObjectCommand);
+    expect(command?.input.CopySource).toBe("b/site/media/a%20b%2Bc.png");
+    expect(command?.input.MetadataDirective).toBe("COPY");
+  });
+
+  it("answers NOT_FOUND for a missing source without writing anything", async () => {
+    const s3 = fakeS3();
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    expectErr(await admin.copy("missing", "dst"), "NOT_FOUND");
+    expect(s3.objects.size).toBe(0);
+  });
+
+  it("fails when the destination does not carry the source's size, naming both sizes", async () => {
+    const s3 = fakeS3({ truncateCopyTo: 4 });
+    s3.put("src", 10);
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    const error = expectErr(await admin.copy("src", "dst"), "VERIFY_FAILED");
+    expect(error.details).toMatchObject({ expectedSize: 10, actualSize: 4 });
+  });
+
+  it("waits out a stale read of a destination it just overwrote", async () => {
+    const s3 = fakeS3({ staleHeadsAfterOverwrite: 2 });
+    s3.put("dst", 3);
+    s3.put("src", 9);
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    expect(expectOk(await admin.copy("src", "dst")).size).toBe(9);
+  });
+
+  it("gives up on a destination that stays stale beyond the verification attempts", async () => {
+    const s3 = fakeS3({ staleHeadsAfterOverwrite: 50 });
+    s3.put("dst", 3);
+    s3.put("src", 9);
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, { ...fastOptions, verifyAttempts: 3 });
+    expectErr(await admin.copy("src", "dst"), "VERIFY_FAILED");
+  });
+
+  it("passes the expected source ETag as copy-source-if-match, quoted or not", async () => {
+    const s3 = fakeS3();
+    s3.put("src", 5);
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    expectOk(await admin.copy("src", "dst", { ifMatch: normalizeEtag(s3.etagOf("src")) }));
+    const command = s3.sent.find((sent): sent is CopyObjectCommand => sent instanceof CopyObjectCommand);
+    expect(command?.input.CopySourceIfMatch).toBe(s3.etagOf("src"));
+  });
+
+  it("answers PRECONDITION_FAILED when the server rejects a stale ETag with 412", async () => {
+    const s3 = fakeS3();
+    s3.put("src", 5);
+    const stale = normalizeEtag(s3.etagOf("src"));
+    const original = s3.client.send.bind(s3.client);
+    let headsServedFresh = 0;
+    s3.client.send = async (command) => {
+      if (command instanceof HeadObjectCommand && headsServedFresh === 0) {
+        headsServedFresh += 1;
+        return { ContentLength: 5, ETag: `"${stale}"`, LastModified: new Date() };
+      }
+      return original(command);
+    };
+    s3.put("src", 6);
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    expectErr(await admin.copy("src", "dst", { ifMatch: stale }), "PRECONDITION_FAILED");
+    expect(s3.objects.has("dst")).toBe(false);
+  });
+
+  it("still refuses a stale ETag on a store that ignores conditional headers", async () => {
+    const s3 = fakeS3({ ignoreConditions: true });
+    s3.put("src", 5);
+    const stale = normalizeEtag(s3.etagOf("src"));
+    s3.put("src", 6);
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    expectErr(await admin.copy("src", "dst", { ifMatch: stale }), "PRECONDITION_FAILED");
+    expect(s3.objects.has("dst")).toBe(false);
+  });
+
+  it("detects a source rewritten during the copy on a store that ignores conditional headers", async () => {
+    const s3 = fakeS3({ ignoreConditions: true });
+    s3.put("src", 5);
+    const expected = normalizeEtag(s3.etagOf("src"));
+    const original = s3.client.send.bind(s3.client);
+    s3.client.send = async (command) => {
+      const result = await original(command);
+      if (command instanceof CopyObjectCommand) s3.put("src", 7);
+      return result;
+    };
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    expectErr(await admin.copy("src", "dst", { ifMatch: expected }), "PRECONDITION_FAILED");
+  });
+
+  it("falls back to its own checks when the store answers 501 to the conditional header", async () => {
+    const s3 = fakeS3({ notImplementedConditions: true });
+    s3.put("src", 5);
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    expect(expectOk(await admin.copy("src", "dst", { ifMatch: normalizeEtag(s3.etagOf("src")) })).size).toBe(5);
+    const copies = s3.sent.filter((sent): sent is CopyObjectCommand => sent instanceof CopyObjectCommand);
+    expect(copies.map((copy) => copy.input.CopySourceIfMatch !== undefined)).toEqual([true, false]);
+  });
+
+  it("refuses a source above the single-request copy limit before sending a copy", async () => {
+    const s3 = fakeS3();
+    const original = s3.client.send.bind(s3.client);
+    s3.client.send = async (command) => {
+      if (command instanceof HeadObjectCommand) return { ContentLength: 5 * 1024 ** 3 + 1, ETag: '"x"', LastModified: new Date() };
+      return original(command);
+    };
+    const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+    expectErr(await admin.copy("big", "dst"), "PAYLOAD_TOO_LARGE");
+    expect(s3.sent.some((sent) => sent instanceof CopyObjectCommand)).toBe(false);
+  });
+
+  it("answers TRANSIENT when the copy fails after the SDK's retries and lets a denied copy throw", async () => {
+    const s3 = fakeS3();
+    s3.put("src", 1);
+    const original = s3.client.send.bind(s3.client);
+    s3.client.send = async (command) => {
+      if (command instanceof CopyObjectCommand) throw httpError("ServiceUnavailable", 503);
+      return original(command);
+    };
+    expectErr(await createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions).copy("src", "dst"), "TRANSIENT");
+    s3.client.send = async (command) => {
+      if (command instanceof CopyObjectCommand) throw httpError("AccessDenied", 403);
+      return original(command);
+    };
+    await expect(createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions).copy("src", "dst")).rejects.toThrow(/AccessDenied/);
+  });
+});
+
 describe("blobstore/s3 admin: lifecycle", () => {
   it("close() destroys a real S3Client and is a no-op for a stub", () => {
     const destroy = vi.spyOn(S3Client.prototype, "destroy");
