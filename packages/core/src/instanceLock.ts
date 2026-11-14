@@ -170,28 +170,39 @@ export function instanceLockFile(file: string): string | undefined {
  * lock file records. A lock written on this machine (the same Linux boot id, or the same hostname
  * where the system has none) in this PID namespace is also taken over at once when its process no
  * longer runs: no process has its PID, or, where `/proc` shows it, the process under that PID is a
- * zombie or has another start time than the one the lock records. A lock from another machine or
- * another PID namespace, such as another container with the same hostname, is judged by its
- * heartbeat alone. Any lock that is not taken over makes the call throw a `KestrelBootError` with
- * code `instance-locked` at once; the reason names that process's host, PID and start time, the
- * time from which the lock is taken over and the `optOut` setting. While another process is in
- * the middle of taking over or releasing the lock, the call waits for it for up to 6 s and then
- * throws `instance-locked` naming that process; a process on this machine and in this PID
- * namespace that died in that moment is noticed at once, one elsewhere after 5 s. A container restarted after
- * its process was killed usually runs in a new PID namespace and fails to boot until the TTL
- * after the previous run's last heartbeat; only when the kernel gave the new namespace the id of
- * the old one is the lock judged by PID and start time and taken over at once. A process that
- * ends through the end of its event loop, `process.exit()` or an uncaught exception gives up its
- * shares on exit as `release()` does. Invalid `ttlMs` or `heartbeatMs` throw a `KestrelBootError`
- * with code `invalid-module-config`. `module` should be the calling module's name so that boot
- * reports these codes.
+ * zombie or has another start time than the one the lock records. Without `/proc`, as on macOS and
+ * Windows, only the PID is checked, so a lock whose PID went to a new process waits for the TTL. A
+ * lock from another machine or another PID namespace, such as another container with the same
+ * hostname, is judged by its heartbeat alone; so is a lock left from before a restart of this machine,
+ * because the boot id changes. Any lock that is not taken over makes the call throw a
+ * `KestrelBootError` with code `instance-locked` at once; the reason names that process's host,
+ * PID and start time, the time from which the lock is taken over and the `optOut` setting. While
+ * another process is in the middle of taking over or releasing the lock, the call waits for it for
+ * up to 6 s and then throws `instance-locked` naming that process; a process on this machine and
+ * in this PID namespace that died in that moment is noticed at once, a thread of this process or a
+ * process elsewhere after 5 s. Two processes that clear such an abandoned takeover at the same
+ * moment can, in a window of two system calls, both take the lock; the one overwritten reports
+ * `restartRequired` at its next heartbeat. A container restarted after its process was killed
+ * usually runs in a new PID namespace and fails to boot until the TTL after the previous run's
+ * last heartbeat, and a service restarted after its machine restarted waits the same way, so a
+ * restart policy has to retry for longer than the TTL; only when the kernel gave the new namespace
+ * the id of the old one is the lock judged by PID and start time and taken over at once.
+ *
+ * A process that ends through the end of its event loop, `process.exit()` or an uncaught
+ * exception gives up the shares of its main thread on exit as `release()` does, and a worker
+ * thread that ends on its own gives up its shares. A share that a worker thread still holds when
+ * it is terminated or when the process ends stays in the lock file like the lock of a killed
+ * process. Invalid `ttlMs` or `heartbeatMs` throw a `KestrelBootError` with code
+ * `invalid-module-config`. `module` should be the calling module's name so that boot reports
+ * these codes.
  *
  * Several holders in one process share one lock, also across copies of this module and across
- * worker threads; the last of them to call `release()` deletes the lock file. Once another
- * instance took the lock over, the next call does not join the lost share but takes the lock
- * anew or throws like a first call. A thread that
- * ends without releasing stops counting once its share is older than `ttlMs`. The heartbeat runs
- * on a timer that does not keep the process alive.
+ * worker threads, whatever the age of the lock's heartbeat; without `/proc` this process is told
+ * by its start on the monotonic clock. The last of them to call `release()` deletes the lock file.
+ * Once another instance took the lock over, the next call does not join the lost share but takes
+ * the lock anew or throws like a first call. A thread that ends without releasing stops counting
+ * once its share is older than `ttlMs`. The heartbeat runs on a timer that does not keep the
+ * process alive.
  */
 export function acquireInstanceLock(file: string, opts: InstanceLockOptions): InstanceLock {
   const timing = timingOf(opts);
