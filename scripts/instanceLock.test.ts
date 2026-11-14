@@ -20,7 +20,7 @@ import blobstoreFilesystem from "../packages/blobstore-filesystem/module.ts";
 import persistenceSqlite from "../packages/persistence-sqlite/module.ts";
 import replicationSqlite from "../packages/replication-sqlite/module.ts";
 import { sandboxBootInput } from "../packages/upgrade/src/sandbox.ts";
-import { copyProject, MINIMAL, runCli } from "../packages/cli/test/harness.ts";
+import { copyProject, freePort, MINIMAL, runCli, startAndStop } from "../packages/cli/test/harness.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE = join(ROOT, "fixtures", "upgrade", "5.8.1");
@@ -320,7 +320,45 @@ describe("boot checks and the instance lock", () => {
     expect(check.errors).toEqual([]);
     expect(readdirSync(dir)).toEqual(["kestrel.db.instance"]);
     expect(readFileSync(lockFileOf(file), "utf8")).toBe(held);
-    expect(existsSync(lockFileOf(join(scratch, "sandbox", "kestrel.db")))).toBe(false);
+    expect(tree(scratch).filter((path) => path.endsWith(".instance"))).toEqual([]);
+  });
+
+  it("checks storage modules on two database files with different allowConcurrentProcesses in the sandbox without a configuration error", async () => {
+    const dir = freshDir();
+    const scratch = freshDir();
+    const recording = recordingBlobstore(lockFileOf(join(dir, "kestrel.db")));
+    const input = storageInput(recording.module, {}, { file: join(dir, "other.db"), allowConcurrentProcesses: true }, { file: join(dir, "kestrel.db") }, dir);
+
+    const direct = await checkBoot(input, { setup: "all" });
+    const box = sandboxBootInput(input, { dir: scratch, consent: ["./blobs"] });
+    const sandboxed = await checkBoot(box.input, { setup: box.setup });
+
+    expect(direct.errors).toEqual([]);
+    expect(sandboxed.errors).toEqual([]);
+  });
+
+  it("checks, describes and starts a project whose storage modules name two database files with different allowConcurrentProcesses", async () => {
+    const project = copyProject(MINIMAL, "lock-two-files");
+    dirs.push(project);
+    const config = join(project, "kestrel.config.ts");
+    const replication = '{ use: "@michaelthielemann/kestrel-replication-sqlite", config: { file: "./data/kestrel.db" } }';
+    const source = readFileSync(config, "utf8");
+    expect(source).toContain(replication);
+    expect(source).toContain("port: 4000");
+    writeFileSync(config, source.replace(replication, '{ use: "@michaelthielemann/kestrel-replication-sqlite", config: { file: "./data/other.db", allowConcurrentProcesses: true } }').replace("port: 4000", `port: ${await freePort()}`));
+
+    const check = await runCli(["check", "--json", "--root", project]);
+    const openapi = await runCli(["openapi", "--root", project, "--out", join(project, "generated.json")]);
+    const start = await startAndStop(["start"], { cwd: project });
+
+    expect(check.stdout).not.toContain("invalid-module-config");
+    expect(check.code).toBe(0);
+    expect(openapi.stdout + openapi.stderr).not.toContain("boot failed");
+    expect(openapi.code).toBe(0);
+    expect(existsSync(join(project, "generated.json"))).toBe(true);
+    expect(start.started).toBe(true);
+    expect(start.code).toBe(0);
+    expect(readdirSync(join(project, "data")).filter((name) => name.endsWith(".instance"))).toEqual([]);
   });
 
   it("checks a project with kestrel check --run-setup while another process holds its database, without touching that database", async () => {

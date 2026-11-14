@@ -28,11 +28,54 @@ function input(): BootInput {
   };
 }
 
+function storageInput(files: { persistence: string; replication: string; backup: string }): BootInput {
+  return {
+    config: {
+      modules: [
+        { use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: "./data/blobs" } },
+        { use: "@michaelthielemann/kestrel-replication-sqlite", config: { file: files.replication, allowConcurrentProcesses: true } },
+        { use: "@michaelthielemann/kestrel-backup-blobstore", config: { file: files.backup } },
+        { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: files.persistence } },
+      ],
+      triggers: [],
+    },
+    modules: [],
+    pipelines: [],
+  };
+}
+
+function fileOf(input: BootInput, name: string): string {
+  const config = input.config.modules.find((m) => m.use.endsWith(name))?.config;
+  const file: unknown = typeof config === "object" && config !== null ? Reflect.get(config, "file") : undefined;
+  if (typeof file !== "string") throw new Error(`${name} has no file`);
+  return file;
+}
+
 describe("sandboxBootInput", () => {
   it("rewrites persistence-sqlite's file into the scratch directory", () => {
     const result = sandboxBootInput(input(), { dir: "/tmp/scratch-1" });
     const sqlite = result.input.config.modules.find((m) => m.use.includes("persistence-sqlite"));
-    expect(sqlite?.config).toMatchObject({ file: "/tmp/scratch-1/sandbox/kestrel.db", acquireTimeoutMs: 15000, busyTimeoutMs: 5000 });
+    expect(sqlite?.config).toMatchObject({ acquireTimeoutMs: 15000, busyTimeoutMs: 5000 });
+    expect(fileOf(result.input, "persistence-sqlite")).toMatch(/^\/tmp\/scratch-1\/sandbox\/[^/]+\/kestrel\.db$/);
+  });
+
+  it("gives storage modules that name different database files different scratch files", () => {
+    const result = sandboxBootInput(storageInput({ persistence: "./data/kestrel.db", replication: "./data/other.db", backup: "./data/third.db" }), { dir: "/tmp/scratch-1" });
+    const files = ["persistence-sqlite", "replication-sqlite", "backup-blobstore"].map((name) => fileOf(result.input, name));
+    expect(new Set(files).size).toBe(3);
+    for (const file of files) expect(file.startsWith("/tmp/scratch-1/sandbox/")).toBe(true);
+  });
+
+  it("gives storage modules that name the same database file, however written, one scratch file", () => {
+    const result = sandboxBootInput(storageInput({ persistence: "./data/kestrel.db", replication: "data/kestrel.db", backup: "./data/../data/kestrel.db" }), { dir: "/tmp/scratch-1" });
+    const files = ["persistence-sqlite", "replication-sqlite", "backup-blobstore"].map((name) => fileOf(result.input, name));
+    expect(new Set(files).size).toBe(1);
+  });
+
+  it("keeps an in-memory persistence database in memory", () => {
+    const result = sandboxBootInput(storageInput({ persistence: ":memory:", replication: "./data/other.db", backup: "./data/other.db" }), { dir: "/tmp/scratch-1" });
+    expect(fileOf(result.input, "persistence-sqlite")).toBe(":memory:");
+    expect(fileOf(result.input, "replication-sqlite").startsWith("/tmp/scratch-1/sandbox/")).toBe(true);
   });
 
   it("rewrites blobstore-filesystem's root into the scratch directory", () => {

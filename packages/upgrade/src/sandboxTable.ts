@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { basename, join, resolve } from "node:path";
 import { isRecord } from "./guards.ts";
 
 type SandboxRewrite = (config: unknown, scratch: string) => unknown;
@@ -9,10 +10,19 @@ function asRecord(config: unknown): Record<string, unknown> {
   return isRecord(config) ? { ...config } : {};
 }
 
+function scratchDatabase(config: unknown, scratch: string): string {
+  const file: unknown = isRecord(config) ? config.file : undefined;
+  if (typeof file !== "string") return join(scratch, "sandbox", "kestrel.db");
+  if (file === "" || file === ":memory:") return file;
+  const key = file.startsWith("file:") ? file : resolve(file);
+  const name = basename(key.replace(/^file:/, "").split(/[?#]/)[0] ?? "") || "kestrel.db";
+  return join(scratch, "sandbox", `db-${createHash("sha256").update(key).digest("hex").slice(0, 16)}`, name);
+}
+
 export const BUILT_IN_SANDBOX_ENTRIES: Readonly<Record<string, SandboxRewrite>> = {
-  [`${OFFICIAL_PREFIX}persistence-sqlite`]: (config, scratch) => ({ ...asRecord(config), file: join(scratch, "sandbox", "kestrel.db") }),
-  [`${OFFICIAL_PREFIX}replication-sqlite`]: (config, scratch) => ({ ...asRecord(config), file: join(scratch, "sandbox", "kestrel.db"), restoreOnStart: false }),
-  [`${OFFICIAL_PREFIX}backup-blobstore`]: (config, scratch) => ({ ...asRecord(config), file: join(scratch, "sandbox", "kestrel.db"), restoreOnStart: false }),
+  [`${OFFICIAL_PREFIX}persistence-sqlite`]: (config, scratch) => ({ ...asRecord(config), file: scratchDatabase(config, scratch) }),
+  [`${OFFICIAL_PREFIX}replication-sqlite`]: (config, scratch) => ({ ...asRecord(config), file: scratchDatabase(config, scratch), restoreOnStart: false }),
+  [`${OFFICIAL_PREFIX}backup-blobstore`]: (config, scratch) => ({ ...asRecord(config), file: scratchDatabase(config, scratch), restoreOnStart: false }),
   [`${OFFICIAL_PREFIX}blobstore-filesystem`]: (config, scratch) => ({ ...asRecord(config), root: join(scratch, "sandbox", "blobs") }),
   [`${OFFICIAL_PREFIX}migrations-default`]: (config) => ({ ...asRecord(config), mode: "off" }),
   [`${OFFICIAL_PREFIX}validate-jsonschema`]: (config) => ({ ...asRecord(config), watch: false }),
