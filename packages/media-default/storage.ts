@@ -1,5 +1,5 @@
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
-import { answerOf, blobSha256, type Detection, type MigrationContext, type MigrationNote, type MigrationQuestion, type ModuleStorage, type ShapeMigration, storageMigrationFailed, type ShapeMigrationError } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
+import { answerOf, blobSha256, sha256Of, type Detection, type MigrationContext, type MigrationNote, type MigrationQuestion, type ModuleStorage, type ShapeMigration, storageMigrationFailed, type ShapeMigrationError } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { COLLECTION, ITEMS_SCHEMA, LEGACY_KEYS, LEGACY_KEYS_SCHEMA, canonicalIdOf, keyFor, nameFor, suffixedName, urlNameOf } from "./impl.ts";
 
@@ -23,6 +23,15 @@ export const MISSING_ORIGINAL: MigrationQuestion = {
 /** The part of the module config the storage migrations read. */
 export interface StorageConfig {
   prefix?: string;
+}
+
+/** Cleans the bytes of a stored SVG the way `sanitize.svg` cleans an upload; `Err` holds the reason it refuses the file. */
+export type SvgSanitizer = (file: { filename: string; contentType: string; data: Uint8Array }) => Promise<Result<Uint8Array, string>>;
+
+/** What the storage migrations use besides the module config. */
+export interface StorageDeps {
+  /** Without it, every 5.x SVG becomes a `.bin` download, since 5.x kept no record of whether it passed `sanitize.svg`. */
+  sanitizeSvg?: SvgSanitizer;
 }
 
 interface Row extends Document {
@@ -68,8 +77,19 @@ function isDemotedSvg(row: Row): boolean {
   return nameFor(row.filename ?? urlNameOf(row.key), row.contentType, true) !== nameOf(row);
 }
 
-function demotedNote(row: Row, name: string): MigrationNote {
-  return { item: row.id, reason: `${row.key} is an SVG without a sanitize.svg record: it is kept as ${name} and served as application/octet-stream; upload it again through sanitize.svg to serve it as an image` };
+type SvgOutcome = { sanitized: Uint8Array | null } | { refused: string };
+
+const SVG = "image/svg+xml";
+
+function demotedNote(row: Row, name: string, why: string): MigrationNote {
+  return { item: row.id, reason: `${row.key} is an SVG ${why}: it is kept as ${name} and served as application/octet-stream; upload it again through sanitize.svg to serve it as an image` };
+}
+
+function demotionReason(outcomes: ReadonlyMap<string, SvgOutcome> | null, row: Row): string {
+  if (outcomes === null) return "without a sanitize.svg record";
+  const outcome = outcomes.get(row.id);
+  if (outcome !== undefined && "refused" in outcome) return `that sanitize.svg refuses (${outcome.refused})`;
+  return "whose original is missing, so sanitize.svg cannot clean it";
 }
 
 async function allRows<T extends Document>(db: Persistence, collection: string): Promise<Result<T[], ShapeMigrationError>> {
@@ -131,8 +151,9 @@ async function anyOf(exists: (key: string) => Promise<Result<boolean, ShapeMigra
 }
 
 /** The storage of media/default: one migration, `media-default:id-key-layout`. */
-export function storage(config: StorageConfig = {}): ModuleStorage {
+export function storage(config: StorageConfig = {}, deps: StorageDeps = {}): ModuleStorage {
   const prefix = config.prefix ?? "media/";
+  const { sanitizeSvg } = deps;
 
   const loaded = async (ctx: MigrationContext): Promise<Result<{ rows: Row[]; work: ReturnType<typeof assign> }, ShapeMigrationError>> => {
     const prepared = await ctx.db.ensureCollection(COLLECTION, ITEMS_SCHEMA);
@@ -164,13 +185,38 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
     return ok(lost);
   };
 
-  const decided = async (ctx: MigrationContext, rows: Row[], exists: (key: string) => Promise<Result<boolean, ShapeMigrationError>>): Promise<Result<{ lost: Set<string>; work: ReturnType<typeof assign> }, ShapeMigrationError>> => {
+  const svgOutcomes = async (ctx: MigrationContext, rows: readonly Row[]): Promise<Result<Map<string, SvgOutcome> | null, ShapeMigrationError>> => {
+    if (sanitizeSvg === undefined) return ok(null);
+    const outcomes = new Map<string, SvgOutcome>();
+    for (const row of rows) {
+      if (canonicalIdOf(row.key, prefix) === row.id || !isDemotedSvg(row)) continue;
+      const read = await ctx.blobs.get(row.key);
+      if (isErr(read)) return read;
+      if (read.value === null) {
+        const earlier = await ctx.blobs.list(`${prefix}${row.id}/`);
+        if (isErr(earlier)) return earlier;
+        if (earlier.value.some((b) => !b.key.slice(prefix.length + row.id.length + 1).includes("/") && b.key.endsWith(".svg"))) outcomes.set(row.id, { sanitized: null });
+        continue;
+      }
+      const cleaned = await sanitizeSvg({ filename: row.filename ?? urlNameOf(row.key), contentType: row.contentType, data: read.value });
+      outcomes.set(row.id, isErr(cleaned) ? { refused: cleaned.error } : { sanitized: cleaned.value });
+    }
+    return ok(outcomes);
+  };
+
+  const decided = async (ctx: MigrationContext, rows: Row[], exists: (key: string) => Promise<Result<boolean, ShapeMigrationError>>): Promise<Result<{ lost: Set<string>; work: ReturnType<typeof assign>; svgs: Map<string, SvgOutcome> | null }, ShapeMigrationError>> => {
     const answer = answerOf(ctx, MISSING_ORIGINAL);
     if (isErr(answer)) return answer;
-    const lost = answer.value === "trash" ? await lostOriginals(rows, exists) : ok(new Set<string>());
+    const svgs = await svgOutcomes(ctx, rows);
+    if (isErr(svgs)) return svgs;
+    const marked = rows.map((row): Row => {
+      const outcome = svgs.value?.get(row.id);
+      return outcome !== undefined && "sanitized" in outcome ? { ...row, svgSanitized: true, contentType: SVG } : row;
+    });
+    const lost = answer.value === "trash" ? await lostOriginals(marked, exists) : ok(new Set<string>());
     if (isErr(lost)) return lost;
-    const effective = rows.map((row): Row => (lost.value.has(row.id) ? { ...row, status: "trashed", location: null } : row));
-    return ok({ lost: lost.value, work: assign(effective, prefix) });
+    const effective = marked.map((row): Row => (lost.value.has(row.id) ? { ...row, status: "trashed", location: null } : row));
+    return ok({ lost: lost.value, work: assign(effective, prefix), svgs: svgs.value });
   };
 
   const detected = (work: ReturnType<typeof assign>): Detection => ({
@@ -219,12 +265,13 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
       if (isErr(exists)) return exists;
       const decision = await decided(ctx, state.value.rows, exists.value);
       if (isErr(decision)) return decision;
-      const { work } = decision.value;
+      const { work, svgs } = decision.value;
       const notes: MigrationNote[] = [...work.conflicts];
       let copies = 0;
       let renamed = 0;
       let missing = 0;
       let svgDemoted = 0;
+      let svgSanitized = 0;
       for (const { row, name, key } of work.pending) {
         if (key === row.key) continue;
         const source = await exists.value(row.key);
@@ -239,10 +286,10 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
         if (name !== nameOf(row)) renamed += 1;
         if (isDemotedSvg(row)) {
           svgDemoted += 1;
-          notes.push(demotedNote(row, name));
-        }
+          notes.push(demotedNote(row, name, demotionReason(svgs, row)));
+        } else if (svgs?.has(row.id) === true) svgSanitized += 1;
       }
-      return ok({ counts: { items: work.pending.length, copies, renamed, missingOriginals: missing, trashed: decision.value.lost.size, svgDemoted, conflicts: work.conflicts.length }, notes });
+      return ok({ counts: { items: work.pending.length, copies, renamed, missingOriginals: missing, trashed: decision.value.lost.size, svgSanitized, svgDemoted, conflicts: work.conflicts.length }, notes });
     },
 
     async apply(ctx) {
@@ -252,7 +299,7 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
       if (isErr(exists)) return exists;
       const decision = await decided(ctx, state.value.rows, exists.value);
       if (isErr(decision)) return decision;
-      const { lost, work } = decision.value;
+      const { lost, work, svgs } = decision.value;
       if (work.conflicts.length > 0) {
         return err(storageMigrationFailed(`${ID_KEY_LAYOUT}: ${work.conflicts.length} item(s) in the new key layout share a location: ${work.conflicts.map((c) => c.item).slice(0, SAMPLE).join(", ")}`, { conflicts: work.conflicts }));
       }
@@ -262,11 +309,18 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
       let copied = 0;
       let trashed = 0;
       let svgDemoted = 0;
+      let svgSanitized = 0;
       for (const { row, name, key, location } of work.pending) {
         const patch: Record<string, unknown> = { key, filename: name, location };
+        const svg = svgs?.get(row.id);
+        const cleaned = svg !== undefined && "sanitized" in svg ? svg : null;
         if (key !== row.key && isDemotedSvg(row)) {
           svgDemoted += 1;
-          notes.push(demotedNote(row, name));
+          notes.push(demotedNote(row, name, demotionReason(svgs, row)));
+        }
+        if (cleaned !== null) {
+          Object.assign(patch, { contentType: SVG, svgSanitized: true });
+          svgSanitized += 1;
         }
         if (lost.has(row.id)) {
           notes.push({ item: row.id, reason: `original ${row.key} is missing` });
@@ -282,7 +336,7 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
           } else if (source.value === null && target.value !== null) {
             const targetSha = await blobSha256(ctx, key, target.value);
             if (isErr(targetSha)) return targetSha;
-            if (target.value.size !== row.size || (row.checksum !== null && targetSha.value !== row.checksum)) {
+            if (cleaned === null && (target.value.size !== row.size || (row.checksum !== null && targetSha.value !== row.checksum))) {
               notes.push({ item: row.id, reason: `the bytes at ${key} differ from the item's recorded size or checksum, and its original ${row.key} is gone; the item records those of ${key}` });
             }
             Object.assign(patch, { size: target.value.size, checksum: targetSha.value });
@@ -292,18 +346,21 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
             if (source.value.size !== row.size || (row.checksum !== null && sourceSha.value !== row.checksum)) {
               notes.push({ item: row.id, reason: `the bytes at ${row.key} differ from the item's recorded size or checksum; the item records those of the copy` });
             }
-            Object.assign(patch, { size: source.value.size, checksum: sourceSha.value });
+            const bytes = cleaned?.sanitized ?? null;
+            const want = bytes === null ? { size: source.value.size, sha: sourceSha.value } : { size: bytes.byteLength, sha: sha256Of(bytes) };
+            Object.assign(patch, { size: want.size, checksum: want.sha });
             const targetSha = target.value === null ? ok(null) : await blobSha256(ctx, key, target.value);
             if (isErr(targetSha)) return targetSha;
-            if (target.value === null || target.value.size !== source.value.size || targetSha.value !== sourceSha.value) {
-              const done = await ctx.blobOps.copy(row.key, key, { contentType: row.contentType });
+            if (target.value === null || target.value.size !== want.size || targetSha.value !== want.sha) {
+              const done = bytes === null ? await ctx.blobOps.copy(row.key, key, { contentType: row.contentType }) : await ctx.blobs.put(key, bytes, { contentType: SVG });
               if (isErr(done)) return done;
               const written = await ctx.blobOps.head(key);
               if (isErr(written)) return written;
               const writtenSha = await blobSha256(ctx, key, written.value);
               if (isErr(writtenSha)) return writtenSha;
-              if (written.value === null || written.value.size !== source.value.size || writtenSha.value !== sourceSha.value) {
-                return err(storageMigrationFailed(`${ID_KEY_LAYOUT}: the copy of ${row.key} at ${key} does not match the original`, { item: row.id, from: row.key, to: key }));
+              if (written.value === null || written.value.size !== want.size || writtenSha.value !== want.sha) {
+                const what = bytes === null ? "the copy" : "the sanitized copy";
+                return err(storageMigrationFailed(`${ID_KEY_LAYOUT}: ${what} of ${row.key} at ${key} does not match the ${bytes === null ? "original" : "sanitized bytes"}`, { item: row.id, from: row.key, to: key }));
               }
               copied += 1;
             }
@@ -312,7 +369,7 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
         const switched = await ctx.db.updateOne(COLLECTION, row.id, patch);
         if (isErr(switched)) return switched;
       }
-      return ok({ counts: { items: work.pending.length, copied, missingOriginals: notes.filter((n) => n.reason.endsWith("is missing")).length, trashed, svgDemoted, legacyKeys: recorded.value }, notes });
+      return ok({ counts: { items: work.pending.length, copied, missingOriginals: notes.filter((n) => n.reason.endsWith("is missing")).length, trashed, svgSanitized, svgDemoted, legacyKeys: recorded.value }, notes });
     },
   };
 
