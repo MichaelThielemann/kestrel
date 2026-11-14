@@ -37,7 +37,8 @@ masks it with `0xff` to get the primary code: 5 `SQLITE_BUSY`, 6 `SQLITE_LOCKED`
 
 **Statement cache.** Each connection keeps up to 256 prepared statements, keyed by their SQL text, and
 drops the least recently used one beyond that. A statement's text depends on the collection, the filter's
-fields and operators, the length of an `in` list and the sort, never on the values: `LIMIT` and `OFFSET`
+fields and operators (an `eq` or `ne` against `null` and an empty `in` list each have their own form), the
+length of an `in` list, the sort and the fields an update patches, in their order. `LIMIT` and `OFFSET`
 are bound parameters, so pages of any size share one statement. `ensureCollection` and `close()` empty
 the cache.
 
