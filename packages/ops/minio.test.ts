@@ -20,7 +20,7 @@ describe.skipIf(!endpoint)("kestrel-ops against MinIO", () => {
 
   backupRestoreRoundTrip(async () => fresh());
 
-  it("refuses a server-side copy whose source no longer has the listed ETag, and reports unquoted ETags", async () => {
+  it("refuses a server-side copy and a conditional read whose source no longer has the listed ETag, reports unquoted ETags and keeps the Content-Type", async () => {
     const store = fresh();
     try {
       await store.put("a.txt", new TextEncoder().encode("first"));
@@ -32,6 +32,10 @@ describe.skipIf(!endpoint)("kestrel-ops against MinIO", () => {
       expect(await store.head("b.txt")).toBeNull();
       await store.copy("a.txt", "b.txt", { ifMatch: (await store.head("a.txt"))?.etag ?? "" });
       expect(new TextDecoder().decode((await store.get("b.txt")) ?? new Uint8Array())).toBe("second");
+      await expect(store.read("a.txt", { ifMatch: listed?.etag ?? "" })).rejects.toBeInstanceOf(PreconditionFailed);
+      await store.put("c.html", new TextEncoder().encode("<p>c</p>"), { contentType: "text/html" });
+      expect((await store.head("c.html"))?.contentType).toBe("text/html");
+      expect(await store.read("c.html", { ifMatch: (await store.head("c.html"))?.etag ?? "" })).toMatchObject({ contentType: "text/html" });
     } finally {
       store.close();
     }

@@ -6,6 +6,14 @@ export interface ObjectInfo {
   size: number;
   etag: string;
   lastModified: number;
+  /** The stored Content-Type; only a HEAD reports it. */
+  contentType?: string;
+}
+
+/** An object's bytes with the Content-Type it was stored with. */
+export interface ObjectData {
+  data: Uint8Array;
+  contentType?: string;
 }
 
 /** Options of {@link ObjectStore.copy}. */
@@ -27,6 +35,8 @@ export interface ObjectStore {
   list(prefix: string): Promise<ObjectInfo[]>;
   head(key: string): Promise<ObjectInfo | null>;
   get(key: string): Promise<Uint8Array | null>;
+  /** Reads bytes and Content-Type; with `ifMatch`, throws {@link PreconditionFailed} unless the object still has that ETag. */
+  read(key: string, options?: { ifMatch?: string }): Promise<ObjectData | null>;
   put(key: string, data: Uint8Array, options?: { contentType?: string }): Promise<void>;
   copy(sourceKey: string, key: string, options?: CopyOptions): Promise<void>;
   /** A missing key is not an error. */
@@ -45,20 +55,20 @@ export class ObjectMissing extends Error {
   override readonly name = "ObjectMissing";
 }
 
-/** Copies `sourceKey` of `from` to `key` of `to`, server-side when both are the same store, otherwise by reading and writing the bytes. */
-export async function transfer(from: ObjectStore, sourceKey: string, to: ObjectStore, key: string, ifMatch?: string): Promise<void> {
+/**
+ * Copies `sourceKey` of `from` to `key` of `to`, server-side when both are the same store, otherwise by reading the
+ * bytes (conditional on `ifMatch`) and writing them with the source's Content-Type. Resolves to the bytes when it
+ * read them, null after a server-side copy.
+ */
+export async function transfer(from: ObjectStore, sourceKey: string, to: ObjectStore, key: string, ifMatch?: string): Promise<Uint8Array | null> {
   if (from.id === to.id) {
     await to.copy(sourceKey, key, ifMatch === undefined ? { from } : { from, ifMatch });
-    return;
+    return null;
   }
-  if (ifMatch !== undefined) {
-    const head = await from.head(sourceKey);
-    if (head === null) throw new ObjectMissing(`${sourceKey} does not exist`);
-    if (head.etag !== ifMatch) throw new PreconditionFailed(`${sourceKey} changed since it was listed`);
-  }
-  const data = await from.get(sourceKey);
-  if (data === null) throw new ObjectMissing(`${sourceKey} does not exist`);
-  await to.put(key, data);
+  const object = await from.read(sourceKey, ifMatch === undefined ? {} : { ifMatch });
+  if (object === null) throw new ObjectMissing(`${sourceKey} does not exist`);
+  await to.put(key, object.data, object.contentType === undefined ? {} : { contentType: object.contentType });
+  return object.data;
 }
 
 /** Lists `prefix` and returns the entries keyed by their key. */

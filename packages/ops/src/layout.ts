@@ -61,13 +61,14 @@ export const keys = {
   probe: (runId: string) => `probes/${runId}-${hex(4)}`,
 };
 
-/** One authoritative original as `blobs.jsonl` records it. `object` is the backup copy's key in the backup location. */
+/** One authoritative original as `blobs.jsonl` records it. `object` is the backup copy's key in the backup location, `objectEtag` the ETag the store gave that copy. */
 export interface BlobEntry {
   key: string;
   size: number;
   etag: string;
   sha256: string | null;
   object: string;
+  objectEtag: string;
 }
 
 /** One key of the public output as `site.jsonl` records it. */
@@ -76,6 +77,7 @@ export interface SiteEntry {
   size: number;
   etag: string;
   object: string;
+  objectEtag: string;
 }
 
 /** One key of a derived prefix as `derived.jsonl` records it; derived output is listed, not copied. */

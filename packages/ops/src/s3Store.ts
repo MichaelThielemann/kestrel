@@ -63,8 +63,8 @@ export function s3Store(config: S3StoreConfig): S3Store {
     },
     async head(key) {
       try {
-        const out = boundaryCast<{ ContentLength?: number; ETag?: string; LastModified?: Date }>(await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: full(key) })), "host");
-        return { key, size: out.ContentLength ?? 0, etag: unquote(out.ETag), lastModified: out.LastModified?.getTime() ?? 0 };
+        const out = boundaryCast<{ ContentLength?: number; ETag?: string; LastModified?: Date; ContentType?: string }>(await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: full(key) })), "host");
+        return { key, size: out.ContentLength ?? 0, etag: unquote(out.ETag), lastModified: out.LastModified?.getTime() ?? 0, ...(out.ContentType === undefined ? {} : { contentType: out.ContentType }) };
       } catch (cause) {
         if (statusOf(cause) === 404 || nameOf(cause) === "NotFound" || nameOf(cause) === "NoSuchKey") return null;
         throw cause;
@@ -75,6 +75,20 @@ export function s3Store(config: S3StoreConfig): S3Store {
         const out = boundaryCast<{ Body?: { transformToByteArray(): Promise<Uint8Array> } }>(await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: full(key) })), "host");
         return out.Body ? await out.Body.transformToByteArray() : null;
       } catch (cause) {
+        if (statusOf(cause) === 404 || nameOf(cause) === "NoSuchKey") return null;
+        throw cause;
+      }
+    },
+    async read(key, readOptions = {}) {
+      try {
+        const out = boundaryCast<{ Body?: { transformToByteArray(): Promise<Uint8Array> }; ContentType?: string }>(
+          await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: full(key), ...(readOptions.ifMatch === undefined ? {} : { IfMatch: `"${readOptions.ifMatch}"` }) })),
+          "host",
+        );
+        if (!out.Body) return null;
+        return { data: await out.Body.transformToByteArray(), ...(out.ContentType === undefined ? {} : { contentType: out.ContentType }) };
+      } catch (cause) {
+        if (statusOf(cause) === 412 || nameOf(cause) === "PreconditionFailed") throw new PreconditionFailed(`${key} changed since it was listed`, { cause });
         if (statusOf(cause) === 404 || nameOf(cause) === "NoSuchKey") return null;
         throw cause;
       }

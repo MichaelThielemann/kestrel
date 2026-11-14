@@ -94,8 +94,8 @@ export `createTarget(config, { root, clock })`.
 ```
 <location>backups/<id>/manifest.json
 <location>backups/<id>/db.sqlite          VACUUM INTO, integrity-checked
-<location>backups/<id>/blobs.jsonl        per original: key, size, etag, sha256 of its row, object
-<location>backups/<id>/site.jsonl         per key of the delivery prefix: key, size, etag, object
+<location>backups/<id>/blobs.jsonl        per original: key, size, etag, sha256 of its row, object, objectEtag
+<location>backups/<id>/site.jsonl         per key of the delivery prefix: key, size, etag, object, objectEtag
 <location>backups/<id>/derived.jsonl      per key of a derived prefix: key, size, etag (not copied)
 <location>backups/<id>/verify/<time>.json each verification result
 <location>backups/<id>/pins/<run>.json    a run that keeps the backup from prune
@@ -113,7 +113,12 @@ The database comes from the replica, rebuilt from the newest generation, so it i
 not a file copied from a disk. The originals are the keys the media rows reference, copied server-side into
 `objects/` with `x-amz-copy-source-if-match` set to the listed ETag; when the original changed in between,
 the copy is refused, the key is listed again and the new version is copied. A store that ignores the header is
-caught by a HEAD on the copy. A referenced original missing in the store is recorded in `missingAtBackup`.
+caught by a HEAD on the copy: a copy whose ETag differs while the source still has the listed one is kept (a
+multipart or KMS-encrypted source has no MD5 ETag), any other mismatch removes the copy and copies the new
+version. `objectEtag` in `blobs.jsonl` and `site.jsonl` records the ETag the copy got. When `backups.storage`
+names another store, the bytes are read with `If-Match` and written with the source's Content-Type, and an
+original that does not hash to the checksum of its row stops the backup. A referenced original missing in the
+store is recorded in `missingAtBackup`.
 With `--freeze` the originals and the delivery prefix are copied once while the app runs and only the
 difference after the stop.
 

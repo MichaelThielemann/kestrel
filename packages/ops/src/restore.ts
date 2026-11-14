@@ -8,7 +8,7 @@ import { confirm } from "./questions.ts";
 import { acknowledgement, buildDatabase, promote, stableGenerations, type Acknowledgement, type Promoted } from "./replica.ts";
 import { serverClock } from "./serverTime.ts";
 import { deleteSessions, hasAccessChanges, integrityCheck, lossReport, sha256, vacuumInto, type LossReport } from "./sqlite.ts";
-import { listMap, stableList, transfer } from "./store.ts";
+import { listMap, stableList, transfer, type ObjectInfo } from "./store.ts";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 
 /** Options of {@link restoreBackup}. */
@@ -47,10 +47,12 @@ async function downloadDb(ctx: OpsContext, manifest: Manifest, file: string): Pr
   writeFileSync(file, data);
 }
 
-async function waitForEtag(ctx: OpsContext, key: string, etag: string): Promise<boolean> {
+const isVersionOf = (info: ObjectInfo | null | undefined, entry: BlobEntry | SiteEntry): boolean => info !== null && info !== undefined && info.size === entry.size && (info.etag === entry.etag || info.etag === entry.objectEtag);
+
+async function waitForVersion(ctx: OpsContext, entry: SiteEntry): Promise<boolean> {
   const sleep = ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
   for (let i = 0; i < (ctx.poll.attempts ?? 30); i++) {
-    if ((await ctx.app.head(key))?.etag === etag) return true;
+    if (isVersionOf(await ctx.app.head(entry.key), entry)) return true;
     await sleep(ctx.poll.delayMs ?? 1000);
   }
   return false;
@@ -61,7 +63,7 @@ async function restoreOriginals(ctx: OpsContext, blobs: readonly BlobEntry[], dr
   const restored: string[] = [];
   for (const entry of blobs) {
     const current = live.get(entry.key) ?? (await ctx.app.head(entry.key));
-    if (current !== null && current.etag === entry.etag && current.size === entry.size) continue;
+    if (isVersionOf(current, entry)) continue;
     restored.push(entry.key);
     if (!dryRun) await transfer(ctx.backups, ctx.location + entry.object, ctx.app, entry.key);
   }
@@ -73,12 +75,14 @@ async function restoreDelivery(ctx: OpsContext, site: readonly SiteEntry[], dryR
   const wanted = new Map(site.map((s) => [s.key, s]));
   const written: string[] = [];
   for (const entry of site) {
-    const current = live.get(entry.key);
-    if (current && current.etag === entry.etag && current.size === entry.size) continue;
+    if (isVersionOf(live.get(entry.key), entry)) continue;
     written.push(entry.key);
     if (!dryRun) await transfer(ctx.backups, ctx.location + entry.object, ctx.app, entry.key);
   }
-  if (!dryRun) for (const key of written) if (!(await waitForEtag(ctx, key, wanted.get(key)?.etag ?? ""))) ctx.out.warn(`${key} does not read back with the restored version yet`);
+  if (!dryRun) for (const key of written) {
+    const entry = wanted.get(key);
+    if (entry && !(await waitForVersion(ctx, entry))) ctx.out.warn(`${key} does not read back with the restored version yet`);
+  }
   const removed = [...live.keys()].filter((key) => !wanted.has(key));
   if (!dryRun) for (const key of removed) await ctx.app.delete(key);
   return { written, removed };

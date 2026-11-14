@@ -4,6 +4,7 @@ import { ObjectMissing, PreconditionFailed, type CopyOptions, type ObjectInfo, t
 interface StoredObject {
   data: Uint8Array;
   etag: string;
+  contentType: string | undefined;
   lastModified: number;
   visibleAfterLists: number;
 }
@@ -25,6 +26,8 @@ export interface MemoryBucketOptions {
   clock?: () => number;
   /** Called before a server-side copy reads its source, with the source key. */
   beforeCopy?: (sourceKey: string) => void;
+  /** The ETag a write gets; defaults to the MD5 of the bytes, as a single-part upload without KMS encryption has. */
+  etag?: (data: Uint8Array, key: string, op: "put" | "copy") => string;
 }
 
 /** An in-memory bucket shared by any number of {@link memoryStore} views, with a record of every write. */
@@ -41,9 +44,10 @@ export class MemoryBucket {
     return (this.options.clock ?? Date.now)();
   }
 
-  write(key: string, data: Uint8Array, op: "put" | "copy"): void {
+  write(key: string, data: Uint8Array, op: "put" | "copy", contentType?: string): void {
     this.writes.push({ op, key, existed: this.objects.has(key) });
-    this.objects.set(key, { data: new Uint8Array(data), etag: createHash("md5").update(data).digest("hex"), lastModified: this.now(), visibleAfterLists: this.options.listLag ?? 0 });
+    const etag = this.options.etag?.(data, key, op) ?? createHash("md5").update(data).digest("hex");
+    this.objects.set(key, { data: new Uint8Array(data), etag, contentType, lastModified: this.now(), visibleAfterLists: this.options.listLag ?? 0 });
   }
 
   remove(key: string): void {
@@ -53,7 +57,7 @@ export class MemoryBucket {
 
   /** Replaces the bytes of `key` without recording a write, as another writer outside the tool would. */
   tamper(key: string, data: Uint8Array): void {
-    this.objects.set(key, { data: new Uint8Array(data), etag: createHash("md5").update(data).digest("hex"), lastModified: this.now(), visibleAfterLists: 0 });
+    this.objects.set(key, { data: new Uint8Array(data), etag: createHash("md5").update(data).digest("hex"), contentType: this.objects.get(key)?.contentType, lastModified: this.now(), visibleAfterLists: 0 });
   }
 }
 
@@ -77,14 +81,20 @@ export function memoryStore(bucket: MemoryBucket, prefix = ""): ObjectStore {
     },
     async head(key) {
       const object = bucket.objects.get(prefix + key);
-      return object ? info(key, object) : null;
+      return object ? { ...info(key, object), ...(object.contentType === undefined ? {} : { contentType: object.contentType }) } : null;
+    },
+    async read(key, options = {}) {
+      const object = bucket.objects.get(prefix + key);
+      if (!object) return null;
+      if (options.ifMatch !== undefined && object.etag !== options.ifMatch) throw new PreconditionFailed(`${key} changed since it was listed`);
+      return { data: new Uint8Array(object.data), ...(object.contentType === undefined ? {} : { contentType: object.contentType }) };
     },
     async get(key) {
       const object = bucket.objects.get(prefix + key);
       return object ? new Uint8Array(object.data) : null;
     },
-    async put(key, data) {
-      bucket.write(prefix + key, data, "put");
+    async put(key, data, options = {}) {
+      bucket.write(prefix + key, data, "put", options.contentType);
     },
     async copy(sourceKey, key, options: CopyOptions = {}) {
       const source = (options.from ?? store).locate(sourceKey);
@@ -93,7 +103,7 @@ export function memoryStore(bucket: MemoryBucket, prefix = ""): ObjectStore {
       const object = bucket.objects.get(source.key);
       if (!object) throw new ObjectMissing(`${sourceKey} does not exist`);
       if (options.ifMatch !== undefined && !bucket.options.ignoreCopyIfMatch && object.etag !== options.ifMatch) throw new PreconditionFailed(`${sourceKey} changed since it was listed`);
-      bucket.write(prefix + key, object.data, "copy");
+      bucket.write(prefix + key, object.data, "copy", object.contentType);
     },
     async delete(key) {
       bucket.remove(prefix + key);

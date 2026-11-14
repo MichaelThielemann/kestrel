@@ -53,26 +53,35 @@ export async function readSeal(ctx: OpsContext): Promise<SealReport> {
   return sealOf(ctx.app, ctx.env.app.replicaPrefix, newest, runtimeVersion(await ctx.target.describe()));
 }
 
-async function copyIntoObjects(ctx: OpsContext, info: ObjectInfo, existing: Map<string, ObjectInfo>): Promise<{ entry: { key: string; size: number; etag: string; object: string }; copied: boolean } | null> {
+type CopiedEntry = { key: string; size: number; etag: string; object: string; objectEtag: string };
+
+async function copyIntoObjects(ctx: OpsContext, info: ObjectInfo, existing: Map<string, ObjectInfo>, checksum: string | null = null): Promise<{ entry: CopiedEntry; copied: boolean } | null> {
   let current: ObjectInfo | null = info;
   for (let attempt = 0; attempt < COPY_ATTEMPTS && current !== null; attempt++) {
-    const object = ctx.location + keys.object(current.key, current.etag);
+    const source: ObjectInfo = current;
+    const objectKey = keys.object(source.key, source.etag);
+    const object = ctx.location + objectKey;
+    const entry = (objectEtag: string): CopiedEntry => ({ key: source.key, size: source.size, etag: source.etag, object: objectKey, objectEtag });
     const known = existing.get(object) ?? (await ctx.backups.head(object));
-    if (known && known.size === current.size) return { entry: { key: current.key, size: current.size, etag: current.etag, object: keys.object(current.key, current.etag) }, copied: false };
+    if (known && known.size === source.size) return { entry: entry(known.etag), copied: false };
+    let streamed: Uint8Array | null;
     try {
-      await transfer(ctx.app, current.key, ctx.backups, object, current.etag);
+      streamed = await transfer(ctx.app, source.key, ctx.backups, object, source.etag);
     } catch (cause) {
       if (cause instanceof ObjectMissing) return null;
       if (!(cause instanceof PreconditionFailed)) throw cause;
-      current = await ctx.app.head(current.key);
+      current = await ctx.app.head(source.key);
       continue;
     }
     const written = await ctx.backups.head(object);
-    if (written !== null && written.size === current.size && written.etag === current.etag) {
+    const now = written !== null && written.size === source.size && streamed === null && written.etag !== source.etag ? await ctx.app.head(source.key) : source;
+    if (written !== null && written.size === source.size && now !== null && now.etag === source.etag) {
+      if (streamed !== null && checksum !== null && sha256(streamed) !== checksum) throw new OpsError(`the copy of ${source.key} does not hash to the checksum of its media row`, 1, source.key);
       existing.set(object, written);
-      return { entry: { key: current.key, size: current.size, etag: current.etag, object: keys.object(current.key, current.etag) }, copied: true };
+      return { entry: entry(written.etag), copied: true };
     }
-    current = await ctx.app.head(current.key);
+    await ctx.backups.delete(object);
+    current = now === source ? await ctx.app.head(source.key) : now;
   }
   if (current === null) return null;
   throw new OpsError(`${info.key} kept changing while it was copied`, 1, info.key);
@@ -135,7 +144,7 @@ async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: { kind
   const missing: string[] = [];
   for (const ref of referencedBlobs(dbFile, app.media)) {
     const info = live.get(ref.key) ?? (await ctx.app.head(ref.key));
-    const copied = info === null ? null : await copyIntoObjects(ctx, info, existing);
+    const copied = info === null ? null : await copyIntoObjects(ctx, info, existing, ref.sha256);
     if (copied === null) missing.push(ref.key);
     else blobs.push({ ...copied.entry, sha256: ref.sha256 });
   }

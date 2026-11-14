@@ -162,9 +162,9 @@ export class FakeApp implements Target {
     for (const page of pages) {
       const key = `${prefixes.delivery}${page.id}/index.html`;
       wanted.add(key);
-      await store.put(key, encode(`<h1>${page.title}</h1><p>${page.body}</p>`));
+      await store.put(key, encode(`<h1>${page.title}</h1><p>${page.body}</p>`), { contentType: "text/html; charset=utf-8" });
     }
-    await store.put(`${prefixes.delivery}sitemap.xml`, encode(pages.map((p) => `/${p.id}/`).join("\n")));
+    await store.put(`${prefixes.delivery}sitemap.xml`, encode(pages.map((p) => `/${p.id}/`).join("\n")), { contentType: "application/xml" });
     wanted.add(`${prefixes.delivery}sitemap.xml`);
     for (const info of await store.list(prefixes.delivery)) if (!wanted.has(info.key)) await store.delete(info.key);
     for (const page of pages) await store.put(`${prefixes.derived}${page.id}/thumb.webp`, encode(`thumb ${page.id} ${page.title}`));
