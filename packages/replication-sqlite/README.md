@@ -137,8 +137,10 @@ whose name sorts last, by byte order, among those with a `snapshot.db`, and appl
 segments with `seq` from `0` to `segments - 1`, so a reader can check that a listing shows all of them
 before it relies on it; `at` is when the seal was written, in epoch milliseconds. Before `setup()`
 rebuilds a missing file, it lists the replica again, up to ten times half a second apart, while the
-newest generation's seal names more segments than the listing shows, and refuses to start when the
-listing still lacks some: a restore without them would lose the frames they hold. The error names the
+listing of the newest generation lacks one of the sequence numbers its seal names, and refuses to start
+when it still lacks some: a restore without them would lose the frames they hold. It checks sequence
+numbers, not the number of keys, since an upload that failed after the store kept the object is retried
+under a key with the same `seq` and a later `time`. The error names the
 generation; moving its `sealed.json` aside restores from the listed segments alone. A process killed before
 teardown, or whose teardown could not ship its frames, leaves its generation without a seal, and the
 replica may lack the frames committed since that process's last sync. A process that never synced takes

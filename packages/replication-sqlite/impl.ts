@@ -253,10 +253,13 @@ async function readSealedSegments(blobs: Blobstore, prefix: string, generation: 
   }
 }
 
+const segmentSeq = (key: string): number => Number(/\/wal\/\d+-(\d+)-[0-9TZ]+\.wal$/.exec(key)?.[1] ?? Number.NaN);
+
 /**
- * Lists the replica, and lists it again while the newest generation with a snapshot has a listed `sealed.json`
- * naming more WAL segments than the listing shows, up to `attempts` listings. `missing` is how many of those
- * segments the last listing still lacks: 0 when it shows them all or when the generation has no listed seal.
+ * Lists the replica, and lists it again while the listing of the newest generation with a snapshot lacks a WAL
+ * segment its listed `sealed.json` names, up to `attempts` listings. `missing` is how many of the sequence numbers
+ * `0` to `segments - 1` the last listing still lacks: 0 when it shows them all or when the generation has no
+ * listed seal.
  */
 export async function listSealedReplica(blobs: Blobstore, prefix: string, options: SealedListingOptions = {}): Promise<Result<{ listing: ReplicaListing; generation: string | null; segments: number | null; missing: number }, BlobstoreError>> {
   const attempts = Math.max(1, options.attempts ?? 10);
@@ -277,8 +280,9 @@ export async function listSealedReplica(blobs: Blobstore, prefix: string, option
       }
       segments = seals.get(generation) ?? null;
     }
-    const shown = listing.points.filter((p) => p.generation === generation && p.kind === "wal").length;
-    const missing = segments === null ? 0 : Math.max(0, segments - shown);
+    const shown = new Set(listing.points.filter((p) => p.generation === generation && p.kind === "wal").map((p) => segmentSeq(p.key)));
+    let missing = 0;
+    for (let seq = 0; segments !== null && seq < segments; seq++) if (!shown.has(seq)) missing += 1;
     if (missing === 0 || attempt >= attempts) return ok({ listing, generation, segments, missing });
     await sleep(delayMs);
   }

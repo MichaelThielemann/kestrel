@@ -618,6 +618,14 @@ describe("replication/sqlite listing against the seal", () => {
     expect(listed).toMatchObject({ generation, segments: 3, missing: 1 });
   });
 
+  it("counts a sequence number the listing lacks as missing although a segment uploaded twice under another time fills the count", async () => {
+    const { blobs, generation } = sealedReplica();
+    blobs.blobs.delete(`replica/gen/${generation}/wal/000001-000002-20260101T000001Z.wal`);
+    blobs.blobs.set(`replica/gen/${generation}/wal/000001-000001-20260101T000003Z.wal`, { data: new Uint8Array([1]), contentType: "application/octet-stream" });
+    const listed = expectOk(await listSealedReplica(blobs, "replica/", { attempts: 2, delayMs: 1, sleep: async () => {} }));
+    expect(listed).toMatchObject({ generation, segments: 3, missing: 1 });
+  });
+
   it("lists once when the newest generation has no seal", async () => {
     const { blobs, generation } = sealedReplica();
     blobs.blobs.delete(`replica/gen/${generation}/sealed.json`);
