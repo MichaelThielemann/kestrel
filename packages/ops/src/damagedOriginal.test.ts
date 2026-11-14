@@ -23,7 +23,8 @@ async function restoreOverDamage(h: Harness, appBucket: MemoryBucket, backupBuck
   expect(safety).toMatch(/-pre-restore-/);
   const manifestData = backupBucket.objects.get(LOCATION + keys.manifest(safety))?.data;
   const manifest = boundaryCast<Manifest>(parseJson(manifestData ?? new Uint8Array()), "json");
-  expect(manifest.blobs.mismatchAtBackup).toEqual([{ key: harbour, sha256: expect.stringMatching(/^[0-9a-f]{64}$/) }]);
+  expect(manifest.blobs.mismatchAtBackup?.map((m) => m.key)).toEqual([harbour]);
+  expect(manifest.blobs.mismatchAtBackup?.[0]?.sha256).toMatch(/^[0-9a-f]{64}$/);
   const verified = await h.run(["backup", "verify", safety, "--json"], extra);
   expect(verified.code).toBe(0);
 }
