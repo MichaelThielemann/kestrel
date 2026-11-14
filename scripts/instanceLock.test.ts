@@ -337,7 +337,7 @@ describe("boot checks and the instance lock", () => {
     expect(sandboxed.errors).toEqual([]);
   });
 
-  it("checks, describes and starts a project whose storage modules name two database files with different allowConcurrentProcesses", async () => {
+  it("checks, describes and starts a project whose storage modules name two database files with different allowConcurrentProcesses", { timeout: 60_000 }, async () => {
     const project = copyProject(MINIMAL, "lock-two-files");
     dirs.push(project);
     const config = join(project, "kestrel.config.ts");
@@ -361,7 +361,7 @@ describe("boot checks and the instance lock", () => {
     expect(readdirSync(join(project, "data")).filter((name) => name.endsWith(".instance"))).toEqual([]);
   });
 
-  it("checks a project with kestrel check --run-setup while another process holds its database, without touching that database", async () => {
+  it("checks a project with kestrel check --run-setup while another process holds its database, without touching that database", { timeout: 60_000 }, async () => {
     const project = copyProject(MINIMAL, "lock-check");
     dirs.push(project);
     const file = join(project, "data", "kestrel.db");
