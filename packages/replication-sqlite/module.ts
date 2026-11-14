@@ -41,39 +41,47 @@ function unlistedSegmentsError(file: string, prefix: string, generation: string,
   return `replication/sqlite: refusing to restore ${file} from generation ${generation}: its sealed.json names ${segments} WAL segments, but repeated listings of ${prefix}gen/${generation}/wal/ show only ${segments - missing}. The blobstore lists new keys late, or segments were removed. Start again once the listing shows them all; to restore from the listed segments alone, move ${prefix}gen/${generation}/sealed.json aside.`;
 }
 
-async function restoreMissingFile(config: Config, blobs: Blobstore, logger: Logger, bootStartedAt: number): Promise<void> {
+interface StartListing {
+  keys: string[];
+  at: number;
+}
+
+async function restoreMissingFile(config: Config, blobs: Blobstore, logger: Logger, bootStartedAt: number): Promise<StartListing> {
+  const at = Date.now();
   const listed = await listSealedReplica(blobs, config.prefix);
   if (isErr(listed)) throw new Error(listed.error.message, { cause: listed.error });
   const { listing, generation: newest, segments, missing } = listed.value;
+  const startListing = { keys: listing.points.map((p) => p.key), at };
   const unplaced = unplacedNewerGenerations(listing);
   if (unplaced.newest !== null && unplaced.generations.length > 0) throw new Error(unplacedGenerationsError(config.file, config.prefix, unplaced.newest, unplaced.generations));
   if (newest !== null && segments !== null && missing > 0) throw new Error(unlistedSegmentsError(config.file, config.prefix, newest, segments, missing));
   const restored = await restoreFromBlobs(blobs, config.prefix, {}, config.file, listing.points);
   if (isErr(restored)) {
-    if (restored.error.message.includes("no snapshot")) return;
+    if (restored.error.message.includes("no snapshot")) return startListing;
     throw new Error(restored.error.message, { cause: restored.error });
   }
   const { generation } = restored.value;
   const markers = listing.markers.get(generation);
   if (markers === undefined || !markers.has("origin")) {
     markRestoredThisBoot(config.file, bootStartedAt);
-    return;
+    return startListing;
   }
   if (markers.has("applied")) {
     markRestoredThisBoot(config.file, bootStartedAt);
     logger.info("replication/sqlite: restored from a generation placed with origin.json that an earlier start already reported", { file: config.file, generation });
-    return;
+    return startListing;
   }
   markRestoredThisBoot(config.file, bootStartedAt, true);
   const nonce = await readOriginNonce(blobs, config.prefix, generation);
   if (isErr(nonce)) {
     logWarn(logger, "replication/sqlite: restored from a generation placed with origin.json but could not read that file, so no applied.json acknowledges the restore", { file: config.file, generation, error: nonce.error.message });
-    return;
+    return startListing;
   }
   const applied: Applied = { generation, nonce: nonce.value, restoredAt: bootStartedAt };
   const written = await blobs.put(markerKey(config.prefix, generation, "applied"), new TextEncoder().encode(JSON.stringify(applied)), { contentType: "application/json" });
   if (isErr(written)) logWarn(logger, "replication/sqlite: could not write applied.json; the next start that restores this generation reports the restore again", { file: config.file, generation, error: written.error.message });
   else logger.info("replication/sqlite: restored from a generation placed with origin.json and reported the restore", { file: config.file, generation, nonce: nonce.value });
+  return startListing;
 }
 
 export default defineModule({
@@ -87,11 +95,12 @@ export default defineModule({
     const blobs = deps.get(BLOBSTORE);
     const bootStartedAt = deps.bootStartedAt ?? Date.now();
     const restoredFromMarker = applyPendingRestore(config.file, () => markRestoredThisBoot(config.file, bootStartedAt, true));
+    let listedBefore: StartListing | undefined;
     if (config.restoreOnStart) {
-      if (!existsSync(config.file)) await restoreMissingFile(config, blobs, deps.logger, bootStartedAt);
+      if (!existsSync(config.file)) listedBefore = await restoreMissingFile(config, blobs, deps.logger, bootStartedAt);
       else if (!restoredFromMarker) await checkSkippedRestore(config, blobs, deps.logger, bootStartedAt);
     }
-    return { ...createReplicationSqlite(config, blobs, Date.now, { logger: deps.logger }), logger: deps.logger, reportedRestoreAt: () => reportedRestoreAt(config.file) };
+    return { ...createReplicationSqlite(config, blobs, Date.now, { logger: deps.logger, ...(listedBefore === undefined ? {} : { listedBefore }) }), logger: deps.logger, reportedRestoreAt: () => reportedRestoreAt(config.file) };
   },
 
   health: (r) => r.health(),

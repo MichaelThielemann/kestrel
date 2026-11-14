@@ -27,6 +27,13 @@ export interface ReplicationOptions {
   checkIntervalMs?: number;
   /** Receives the warning when another process is found writing to the same replica. Default: nothing is logged. */
   logger?: Logger;
+  /**
+   * A listing of the replica made before the instance was created, such as the one a start restored from: its
+   * keys, and when it was made in epoch milliseconds. A key a later listing shows that this one does not counts
+   * as written by another process, a WAL segment only when stamped after `at`. Default: the keys of the
+   * instance's first listing, except the WAL segments stamped after the instance was created.
+   */
+  listedBefore?: { keys: Iterable<string>; at: number };
 }
 
 export interface Point {
@@ -356,7 +363,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   const startedAt = now();
   const own = new Set<string>();
   let newestListed = 0;
-  let firstListing: Set<string> | null = null;
+  let known: Set<string> | null = options.listedBefore ? new Set(options.listedBefore.keys) : null;
+  const since = options.listedBefore?.at ?? startedAt;
   let otherWriter: { key: string; seenAt: number } | null = null;
   let sealedAs: (Seal & { generation: string }) | null = null;
 
@@ -412,13 +420,10 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
 
   const observe = (listing: ReplicaListing): void => {
     for (const listed of new Set([...listing.points.map((p) => p.generation), ...listing.markers.keys()])) newestListed = Math.max(newestListed, generationTime(listed));
-    if (firstListing === null) {
-      firstListing = new Set(listing.points.map((p) => p.key));
-      return;
-    }
+    known ??= new Set(listing.points.filter((p) => p.kind === "snapshot" || p.at <= since).map((p) => p.key));
     if (otherWriter !== null) return;
-    const known = firstListing;
-    const found = listing.points.find((p) => !own.has(p.generation) && !known.has(p.key) && listing.markers.get(p.generation)?.has("origin") !== true && (p.kind === "snapshot" || p.at > startedAt));
+    const baseline = known;
+    const found = listing.points.find((p) => !own.has(p.generation) && !baseline.has(p.key) && listing.markers.get(p.generation)?.has("origin") !== true && (p.kind === "snapshot" || p.at > since));
     if (!found) return;
     otherWriter = { key: found.key, seenAt: now() };
     logWarn(logger, "replication/sqlite: another process writes to this replica; only one process may replicate a database to a prefix", { key: found.key, generation: found.generation });

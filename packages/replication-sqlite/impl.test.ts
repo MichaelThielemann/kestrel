@@ -578,6 +578,48 @@ describe("replication/sqlite generation order, seal and other writers", () => {
     expect(firstLog.warnings).toHaveLength(1);
   });
 
+  it("notes a segment another process shipped after this one started and before its first sync", async () => {
+    const blobs = fakeBlobs();
+    const clock = manualClock();
+    const first = setup({}, { blobs, clock });
+    first.insert(1);
+    expectOk(await first.repl.sync());
+    clock.advance(5_000);
+    const log = warningLogger();
+    const second = setup({}, { blobs, clock, logger: log.logger });
+    clock.advance(5_000);
+    first.insert(1);
+    expect(expectOk(await first.repl.seal())?.segments).toBe(1);
+    second.insert(1);
+    expectOk(await second.repl.sync());
+    expect(second.repl.health()).toEqual({ ok: true, note: expect.stringContaining("another process writes to this replica") as unknown });
+    expect(log.warnings).toEqual([{ message: expect.stringContaining("another process writes to this replica") as unknown, data: expect.objectContaining({ key: expect.stringContaining("/wal/") as unknown }) as unknown }]);
+  });
+
+  it("notes a snapshot that turns up after a listing made before the instance was created, and nothing that listing showed", async () => {
+    const blobs = fakeBlobs();
+    const clock = manualClock();
+    const earlier = stampOf(clock.now() - 60_000);
+    place(blobs, earlier, image(1), false);
+    const listedAt = clock.now();
+    const keys = [...blobs.blobs.keys()];
+    clock.advance(5_000);
+    const other = `${stampOf(clock.now())}-${orderKey(clock.now())}${orderKey(clock.now())}${"0".repeat(20)}`;
+    place(blobs, other, image(1), false);
+    const log = warningLogger();
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    const app = new DatabaseSync(file);
+    app.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT); INSERT INTO t (v) VALUES ('x')");
+    const repl = createReplicationSqlite({ file, prefix: "replica/", checkpointBytes: 4 * 1024 * 1024, checkpointSeconds: 300, snapshotSeconds: 24 * 3600, retentionSeconds: 48 * 3600, restoreOnStart: true }, blobs, clock.now, { logger: log.logger, listedBefore: { keys, at: listedAt } });
+    open.push(repl);
+    expectOk(await repl.sync());
+    expect(repl.health()).toEqual({ ok: true, note: expect.stringContaining(`${other}/snapshot.db`) as unknown });
+    expect(log.warnings).toHaveLength(1);
+    app.close();
+  });
+
   it("counts neither a generation placed with origin.json while it runs, nor one listed when it first looked, nor a segment stamped before it started", async () => {
     const blobs = fakeBlobs();
     const clock = manualClock();

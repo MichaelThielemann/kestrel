@@ -408,6 +408,33 @@ describe("replication/sqlite start with a generation of unknown origin", () => {
   });
 });
 
+describe("replication/sqlite another writer after the start", () => {
+  it("notes a segment that another process ships into the restored generation after the start listed the replica, before the first sync", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    const previous = sixGeneration("20260101T000000Z", Date.UTC(2026, 0, 1));
+    place(blobs, previous, 1, null);
+    const { instance } = await startOn(file, blobs);
+    open.push(instance);
+    const late = new Date(Date.now() + 2000).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+    blobs.blobs.set(`replica/gen/${previous}/wal/000001-000000-${late}.wal`, { data: new Uint8Array([1]), contentType: "application/octet-stream" });
+    expect((await instance.sync()).ok).toBe(true);
+    expect(instance.health()).toEqual({ ok: true, note: expect.stringContaining(`${previous}/wal/`) as unknown });
+  });
+
+  it("notes a generation that another process starts after the start listed the replica, before the first sync", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, sixGeneration("20260101T000000Z", Date.UTC(2026, 0, 1)), 1, null);
+    const { instance } = await startOn(file, blobs);
+    open.push(instance);
+    const other = sixGeneration("20260101T000001Z", Date.UTC(2026, 0, 1, 0, 0, 1));
+    place(blobs, other, 1, null);
+    expect((await instance.sync()).ok).toBe(true);
+    expect(instance.health()).toEqual({ ok: true, note: expect.stringContaining(`${other}/snapshot.db`) as unknown });
+  });
+});
+
 describe("replication/sqlite restore of a sealed generation", () => {
   it("restores every row a process committed before its teardown sealed the generation", async () => {
     const dir = freshDir();

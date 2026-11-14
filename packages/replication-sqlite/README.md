@@ -170,10 +170,12 @@ generation before them. A replica written only by 5.x releases holds neither kin
 restores its newest generation as before.
 
 **Another writer.** Only one process may replicate a database to a prefix. Every sync lists the
-replica; when a listing shows a key that this process did not write, in a generation without
-`origin.json`, that was not there at its first listing (a snapshot, or a WAL segment shipped after this
-process started), the module logs a warning and `health()` answers `{ ok: true, note }` naming the key
-until the process restarts. Health stays ok on purpose: a failing readiness probe gets the process
+replica and compares it with a first listing: the one `setup()` made to rebuild a missing file, or else
+the process's first sync. When a listing shows a key that this process did not write, in a generation
+without `origin.json`, and that is a snapshot the first listing did not show or a WAL segment shipped
+after it, the module logs a warning and `health()` answers `{ ok: true, note }` naming the key
+until the process restarts. A WAL segment counts by the time in its key, so the last frames an older
+process ships into the generation this one restored from are noticed even before the first sync. Health stays ok on purpose: a failing readiness probe gets the process
 restarted, and the restart would restore from the other process's generation. Stop the other process,
 then run `replication.snapshot` in this one, so that the next restore starts from its data. This is
 detection, not a lock: it relies on clocks within seconds of each other and on listings that show new
