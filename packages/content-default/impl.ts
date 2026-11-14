@@ -73,7 +73,7 @@ export async function createContentDefault(model: ContentModel, db: Persistence,
   const defaultLocale = model.defaultLocale;
 
   const typeOf = (name: string): TypeDefinition => {
-    const type = model.types[name];
+    const type = Object.hasOwn(model.types, name) ? model.types[name] : undefined;
     if (!type) throw new Error(`content/default: unknown type "${name}"`);
     return type;
   };
@@ -103,7 +103,7 @@ export async function createContentDefault(model: ContentModel, db: Persistence,
     const out: Record<string, unknown> = {};
     for (const field of Object.keys(data)) {
       if (RESERVED.has(field)) errors.push({ field, message: "is set by the system" });
-      else if (!(field in type.fields)) errors.push({ field, message: "unknown field" });
+      else if (!Object.hasOwn(type.fields, field)) errors.push({ field, message: "unknown field" });
     }
     for (const [field, raw] of Object.entries(type.fields)) {
       const def = definition(raw);
@@ -166,7 +166,7 @@ export async function createContentDefault(model: ContentModel, db: Persistence,
         out[field] = value;
         continue;
       }
-      const raw = type.fields[field];
+      const raw = Object.hasOwn(type.fields, field) ? type.fields[field] : undefined;
       if (!raw) throw new Error(`content/default: unknown field "${field}" in filter for "${typeName}"`);
       out[column(field, definition(raw), locale)] = value;
     }
@@ -191,7 +191,7 @@ export async function createContentDefault(model: ContentModel, db: Persistence,
     const column = error.details?.field;
     if (error.code !== "CONFLICT" || typeof column !== "string") return err(error);
     const field = column.split("__")[0] ?? column;
-    if (!(field in typeOf(typeName).fields)) return err(error);
+    if (!Object.hasOwn(typeOf(typeName).fields, field)) return err(error);
     return fieldFailure(typeName, [{ field, message: `must be unique, ${JSON.stringify(fields[field])} exists` }]);
   };
 
@@ -239,7 +239,7 @@ export async function createContentDefault(model: ContentModel, db: Persistence,
       if (find.sort) {
         const fields = typeOf(typeName).fields;
         for (const field of Object.keys(find.sort)) {
-          if (!RESERVED.has(field) && !fields[field]) return err(failure("VALIDATION", `content/default: unknown sort field "${field}" for "${typeName}"`));
+          if (!RESERVED.has(field) && !Object.hasOwn(fields, field)) return err(failure("VALIDATION", `content/default: unknown sort field "${field}" for "${typeName}"`));
         }
         query.sort = Object.fromEntries(boundaryCast<Array<[string, "asc" | "desc"]>>(Object.entries(toFilter(typeName, find.sort, locale.value)), "host"));
       }

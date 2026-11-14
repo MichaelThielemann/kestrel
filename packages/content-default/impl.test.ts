@@ -43,6 +43,16 @@ describe("content/default", () => {
     expect(expectOk(await content.list("notes", {}, { sort: { updatedAt: "desc" } }))).toMatchObject({ total: 0 });
   });
 
+  it("treats names of Object.prototype members as unknown fields in sorts and in written data", async () => {
+    const content = await createContentDefault({ types: { notes: { kind: "multi", fields: { text: "text" } } } }, createFakePersistence());
+    for (const name of ["constructor", "toString", "hasOwnProperty", "valueOf", "__proto__"]) {
+      const sort = expectErr(await content.list("notes", {}, { sort: { [name]: "asc" } }), "VALIDATION");
+      expect(sort.message, name).toMatch(/unknown sort field/);
+      const written = expectErr(await content.create("notes", Object.fromEntries([["text", "x"], [name, "y"]])), "VALIDATION");
+      expect(written.details, name).toMatchObject({ fields: [{ field: name, message: "unknown field" }] });
+    }
+  });
+
   it("uses the injected clock for timestamps", async () => {
     const content = await createContentDefault({ types: { notes: { kind: "multi", fields: { text: "text" } } } }, createFakePersistence(), () => 42);
     expect(expectOk(await content.create("notes", { text: "x" }))).toMatchObject({ createdAt: 42, updatedAt: 42 });
@@ -119,6 +129,13 @@ describe("content/default", () => {
       const content = { ...(await createContentDefault(model, createFakePersistence())), maxLimit };
       return module.steps!(content).list("notes");
     };
+
+    it("answers VALIDATION to a sort by a member of Object.prototype", async () => {
+      const list = await listStep();
+      for (const sort of ["constructor", "-constructor", "toString", "__proto__"]) {
+        expect(expectErr(await list(ctx({}, { sort })), "VALIDATION").status, sort).toBe(400);
+      }
+    });
 
     it("rejects a non-integer limit, an oversized limit, a negative offset and an unknown sort field with VALIDATION", async () => {
       const list = await listStep(50);
