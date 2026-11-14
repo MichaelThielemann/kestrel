@@ -130,3 +130,26 @@ describe("a restore that fails after it changed the store", () => {
     }
   });
 });
+
+describe("a step that fails right after the app stopped", () => {
+  it("starts the app again after a frozen backup and after a restore whose stop entry cannot be written", async () => {
+    const { h, failNext, restoreArgs } = await seededWithChange("stop-entry");
+    try {
+      failNext((key) => key.endsWith("-stop-done.json"));
+      const frozen = await h.run(["backup", "create", "--freeze"]);
+      expect(frozen.code).toBe(1);
+      expect(frozen.stderr).toContain("-stop-done.json");
+      expect(frozen.stderr).toContain("the app was stopped; starting it again");
+      expect((await h.app.status()).state).toBe("started");
+
+      failNext((key) => key.endsWith("-stop-done.json"));
+      const restored = await h.run(restoreArgs());
+      expect(restored.code).toBe(1);
+      expect(restored.stderr).toContain("the app was stopped; starting it again");
+      expect((await h.app.status()).state).toBe("started");
+      expect(h.app.rows("pages")).toContainEqual({ id: "home", title: "Home", body: "changed after the backup" });
+    } finally {
+      await h.dispose();
+    }
+  });
+});

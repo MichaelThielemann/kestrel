@@ -42,14 +42,22 @@ export function runtimeVersion(facts: TargetFacts): string | null {
   return facts.packages[REPLICATION_PACKAGE] ?? null;
 }
 
-/** Stops the target unless it is stopped and checks that it reports stopped with no running instance. */
+/** Stops the target unless it is stopped and checks that it reports stopped with no running instance; when that check or its journal entry fails, it starts a target it stopped again. */
 export async function stopTarget(ctx: OpsContext): Promise<{ stoppedAt: number; wasRunning: boolean }> {
   const before = await ctx.target.status();
   const wasRunning = before.state !== "stopped" || before.instances > 0;
   const stoppedAt = wasRunning ? (await ctx.target.stop()).stoppedAt : ctx.clock();
-  const after = await ctx.target.status();
-  if (after.state !== "stopped" || after.instances > 0) throw new OpsError(`the target reports ${after.state} with ${after.instances} instance(s) after the stop`, 1, "target");
-  await ctx.journal.record("stop", "done", { stoppedAt, wasRunning });
+  try {
+    const after = await ctx.target.status();
+    if (after.state !== "stopped" || after.instances > 0) throw new OpsError(`the target reports ${after.state} with ${after.instances} instance(s) after the stop`, 1, "target");
+    await ctx.journal.record("stop", "done", { stoppedAt, wasRunning });
+  } catch (error) {
+    if (wasRunning) {
+      ctx.out.error("the app was stopped; starting it again");
+      await startTarget(ctx).catch((cause: unknown) => ctx.out.error(`starting the app again failed: ${messageOf(cause)}`));
+    }
+    throw error;
+  }
   return { stoppedAt, wasRunning };
 }
 
