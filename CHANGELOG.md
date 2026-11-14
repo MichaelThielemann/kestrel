@@ -800,6 +800,17 @@ Net changes since 5.8.2.
   declares the three overloads the contract lists and implements them in one function, as
   `persistence/sqlite` does. A test double can use `vi.spyOn(persistence, "findMany")` instead. Callers
   are unaffected.
+- `media-default` removes metadata from JPEG, PNG, WebP and GIF files before it stores them: EXIF
+  with the GPS position, XMP, IPTC, comments, text chunks, embedded thumbnails and trailing data, so a
+  published original no longer reveals where and with what a photo was taken. Pixels, colour
+  profiles and animation are copied byte for byte, and the EXIF orientation stays as the only tag.
+  The stored file, its `size` and its checksum are those of the stripped bytes. A JPEG,
+  PNG, WebP or GIF is recognised by its bytes, whatever type the upload declares. New option
+  `stripImageMetadata` (default `true`; `false` restores the earlier behaviour of storing uploads as
+  sent, so a consumer that relies on the copyright or credit fields of an original sets it). Files
+  uploaded earlier keep their metadata, and uploading a file again to the place where it is stored
+  still answers the existing item, with the option on or off. AVIF, HEIC, TIFF and other image types
+  are stored as sent and keep their metadata.
 
 ### Added
 
@@ -1751,14 +1762,6 @@ Net changes since 5.8.2.
   out) instead of preparing every call's SQL again, and binds `LIMIT` and `OFFSET` as parameters so
   pages of different sizes share one statement. A `findMany` whose page holds every match no longer
   runs a second `COUNT(*)`.
-- `media-default` removes metadata from JPEG, PNG, WebP and GIF files before it stores them: EXIF
-  with the GPS position, XMP, IPTC, comments, text chunks, embedded thumbnails and trailing data, so a
-  published original no longer reveals where and with what a photo was taken. Pixels, colour
-  profiles and animation are copied byte for byte, and the EXIF orientation stays as the only tag.
-  The stored file, its `size` and its checksum are those of the stripped bytes. New option
-  `stripImageMetadata` (default `true`); `false` stores uploads as sent. Files uploaded earlier keep
-  their metadata, and uploading such a file again to the same place still answers the existing item.
-  AVIF, HEIC, TIFF and other image types are stored as sent and keep their metadata.
 
 ### Fixed
 

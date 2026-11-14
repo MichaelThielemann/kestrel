@@ -357,10 +357,12 @@ The pixel data is copied byte for byte, nothing is decoded or re-encoded, so the
 and an upload costs no quality. The pixels are not rotated either, so the EXIF orientation (2 to 8)
 stays as the only tag, in a minimal EXIF block, and the image variants and browsers keep applying it.
 The item's `size` and the checksum behind the idempotent re-upload are those of the stored bytes: the
-same file sent again is still answered as the item that is already there, also when that item was stored
-with its metadata (an earlier version, or `stripImageMetadata: false`). Other types (AVIF, HEIC, TIFF,
-PDF, ...) are stored as sent and keep their metadata, including a GPS position. A JPEG, PNG, WebP or GIF that cannot be read to its end is stored
-as sent as well, and the module logs a warning naming the file.
+same file sent again is still answered as the item that is already there, whether that item was stored
+with its metadata (an earlier version, or `stripImageMetadata: false`) or without it, and whichever
+way the option is set now. A JPEG, PNG, WebP or GIF is recognised by its bytes, so it is cleaned also
+when `allowedTypes` lets it through under another declared type. Other types (AVIF, HEIC, TIFF,
+PDF, ...) are stored as sent and keep their metadata, including a GPS position. A JPEG, PNG, WebP or GIF
+that cannot be read to its end is stored as sent as well, and the module logs a warning naming the file.
 
 ## Anonymous reads
 
