@@ -56,7 +56,7 @@ export default definePipeline({ name: "login", steps: ["authn.login", "events.em
 TS
 cat > pipelines/createPage.ts <<TS
 import { definePipeline } from "$SCOPE/definePipeline";
-export default definePipeline({ name: "createPage", steps: ["authn.requireUser", "authz.require:pages.write", "content.create:pages"] });
+export default definePipeline({ name: "createPage", steps: ["authn.requireUser", "authz.requireRole", "authz.require:pages.write", "content.create:pages"] });
 TS
 cat > pipelines/listPages.ts <<TS
 import { definePipeline } from "$SCOPE/definePipeline";
