@@ -737,6 +737,19 @@ describe("info rules", () => {
     expect(await singleProcessRule.check(contextFor(p))).toEqual([]);
   });
 
+  it("runtime/single-process stays quiet for every SQLite URI that names an in-memory or temporary database", async () => {
+    const uris = ["file::memory:", "file:?cache=shared", "file:%3Amemory%3A", "file:", "file:?mode=ro", "file:./data/kestrel.db?mode=memory", ""];
+    for (const file of uris) {
+      const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file } }] });
+      expect(await singleProcessRule.check(contextFor(p)), file).toEqual([]);
+    }
+  });
+
+  it("runtime/single-process still names a database file given as a SQLite URI", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "file:./data/kestrel.db?cache=shared" } }] });
+    expect(await singleProcessRule.check(contextFor(p))).toHaveLength(1);
+  });
+
   const publishing = {
     triggers: [{ event: "page.updated", pipeline: "publishPage" }],
     pipelines: [{ name: "publishPage", steps: ["delivery.publish:pages", "delivery.exportLlms"] }],

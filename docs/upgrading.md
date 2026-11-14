@@ -744,9 +744,10 @@ on the same file fails boot with `instance-locked`, naming the host, PID and sta
 process that holds the lock. A deploy that starts the new process before the old one has stopped
 fails the same way; stop the old process first. A lock left behind by a killed process is taken over
 60 s after its last heartbeat, at once when the process ran on the same machine in the same PID
-namespace. The finding appears once for each such module entry, and not for an entry with an
-in-memory database or with `allowConcurrentProcesses: true`, the setting for several processes that
-share the file on purpose. The 5.x data is not changed by this: the first 6.0.0 start creates the
+namespace. The finding appears once for each such module entry, and not for an entry whose database
+takes no lock (an in-memory or temporary one: `:memory:`, the empty name, or a `file:` URI whose path
+is `:memory:` or empty or that sets `mode=memory`) or with `allowConcurrentProcesses: true`, the
+setting for several processes that share the file on purpose. The 5.x data is not changed by this: the first 6.0.0 start creates the
 sidecar. `kestrel upgrade data` and `kestrel upgrade migrate` neither take nor honour the lock, so a
 sidecar left next to a copy of the database does not stop them.
 

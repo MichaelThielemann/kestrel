@@ -1007,7 +1007,8 @@ Net changes since 5.8.2.
   `--json` or `--mermaid`. `manifest` prints `describe()` of the checked project.
 - `kestrel upgrade`'s new info rule `runtime/single-process` names every `persistence-sqlite`,
   `replication-sqlite` and `backup-blobstore` entry that takes the instance lock on its database file,
-  once per entry, and stays quiet for an in-memory database or `allowConcurrentProcesses: true`.
+  once per entry, and stays quiet for a database that takes no lock (in-memory or temporary, in any
+  spelling the lock itself accepts) or `allowConcurrentProcesses: true`.
   `types/breaking-signatures` names `MediaItem.sourceChecksum`.
 - `@michaelthielemann/kestrel-upgrade` gains the subpaths `./hosts` (`scanHosts`,
   `loadHostPlugins`, `selectHostPlugin`), `./project` (`loadBackendProject`, which takes the

@@ -1,5 +1,6 @@
 import { effectiveModuleConfig } from "@michaelthielemann/kestrel";
 import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
+import { instanceLockFile } from "@michaelthielemann/kestrel/instanceLock";
 import { isRecord } from "./guards.ts";
 import type { Rule, SourceRule } from "./plugin.ts";
 import type { Finding } from "./report.ts";
@@ -169,7 +170,7 @@ export const restoreFreshnessRule: Rule = {
 const LOCKING_MODULES = ["persistence-sqlite", "replication-sqlite", "backup-blobstore"];
 
 function takesNoLock(file: unknown): boolean {
-  return file === ":memory:" || file === "" || (typeof file === "string" && file.startsWith("file:") && /(^file::memory:|[?&]mode=memory(&|$))/.test(file));
+  return typeof file === "string" && instanceLockFile(file) === undefined;
 }
 
 /** `runtime/single-process`: persistence-sqlite, replication-sqlite and backup-blobstore take an instance lock on their database file at setup, so a second process on the same file fails boot with `instance-locked`. */
