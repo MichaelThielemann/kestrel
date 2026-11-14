@@ -1612,8 +1612,6 @@ Net changes since 5.8.2.
   is redacted whole. The JSON Schema leaves out the default of a credential-like key.
 - An `invalid config` boot error reports a secret path by its validation code only and an enum
   mismatch by the expected values only; other messages have credential URLs redacted.
-- `replication-sqlite`: `replication.snapshot`, `replication.prepareRestore` and the size-triggered
-  checkpoint wait for each other, as `replication.sync` runs do.
 - `replication-sqlite`: where the file system reports no birth time, the restore-on-start skip check
   judged an existing database by whether it held any table, so a database whose schema another
   module had just created during this boot, with no rows in it, passed as real data and the restore
