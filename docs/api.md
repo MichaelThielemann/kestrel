@@ -557,11 +557,16 @@ private blob prefix.
 `media_items`'s internal uniqueness column (folder + display filename) means a name belongs to
 exactly one item per folder: two uploads of the same name into the same folder at the same time end
 as one item and one 409, never as two items sharing one name. Uploading is idempotent: same folder,
-same filename and the same bytes (checksum) return the item that is already there, with 200 and its
+same filename and the same file return the item that is already there, with 200 and its
 original `id` and `createdAt` — no second item, no second blob, no second set of variants, and no
 `media.uploaded` event (`media.upload` ends the pipeline itself, so the `events.emit:media.uploaded`
-step after it does not run, see [pipelines.md](pipelines.md#event-data)). The same name with
-*different* bytes stays a 409. Deleting an item removes its own copy and blob; nothing else shares
+step after it does not run, see [pipelines.md](pipelines.md#event-data)). Which files count as the same
+depends on `stripImageMetadata` (default on). While it is on, a JPEG, PNG, WebP or GIF that differs from
+the stored file only in the metadata that is removed on upload is answered as the existing item, because
+it would be stored as the same bytes; this holds for an item that was stored without its metadata. With
+the option off, the checksum of the file as sent decides, and a file with other bytes is a 409, whatever
+its type. The same name with a file that differs in more than that stays a 409 as well; the
+details are in [Image metadata](../packages/media-default/README.md#image-metadata). Deleting an item removes its own copy and blob; nothing else shares
 its id-based key.
 
 Upload happens in phases: first the row with `status: "uploading"`, then the private blob, then (if
