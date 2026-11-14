@@ -132,10 +132,12 @@ describe("source", () => {
     expect(hits).toEqual([]);
   });
 
-  it("spawns no external binary besides the configured app command and credential commands", () => {
+  it("spawns no external binary besides the configured app command, ps for a local app's start time and credential commands", () => {
     const spawning = readdirSync(SRC)
       .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && !f.endsWith(".fixture.ts"))
       .filter((f) => readFileSync(join(SRC, f), "utf8").includes('from "node:child_process"'));
     expect(spawning.sort()).toEqual(["credentials.ts", "target.ts"]);
+    const target = readFileSync(join(SRC, "target.ts"), "utf8");
+    expect([...target.matchAll(/\b(spawn|execFileSync|execFile|exec|execSync|spawnSync|fork)\(([^,]+),/g)].map((m) => `${m[1] ?? ""}(${m[2] ?? ""})`)).toEqual(['execFileSync("ps")', "spawn(file)"]);
   });
 });
