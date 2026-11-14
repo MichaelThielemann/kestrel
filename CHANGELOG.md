@@ -447,11 +447,12 @@ Net changes since 5.8.2.
   - Anonymous callers read media by id only: `media.list` without `ids`, and `media.listFolders`,
     answer 401 to a caller without an identity. Set `anonymousList: "all"` to allow listing the
     library anonymously.
-  - Media stored by 5.x are not converted. The start-up key migration is removed, and setup fails when
-    a stored item's key is not `<prefix><id>/<name>`, naming the first such item. Start 6.0.0 with an
-    empty media store, and with empty `images_variants` and `images_retired` collections: rows written
-    before 6.0.0 have no `slot`, which this version needs to find them, so `images-default`'s setup
-    fails while either collection holds such a row, naming the collection and the count.
+  - The start-up key migration of `media-default` is removed. Setup refuses media stored by 5.x
+    (keys `<prefix><folder>/<filename>`) and `images_variants` and `images_retired` rows without a
+    `slot`, naming the storage migration and the command that runs it. `media-default:id-key-layout`
+    converts the media offline (`kestrel upgrade migrate --db <file> --blobs-dir <dir>`, or
+    `kestrel update`); `images-default:variant-slots` fills in the slots, also at start-up with
+    `storageMigrations: "apply"` (see Added).
   - New step `media.serve` answers a file at its public URL (`params.id`, `params.name`), cacheable
     for a year as `immutable`; any other name is 404. `media.download` answers with the same type as
     `media.serve` (see above), so an unlisted type is a download there too.
