@@ -812,8 +812,11 @@ Net changes since 5.8.2.
   sent, so a consumer that relies on the copyright or credit fields of an original sets it). Files
   uploaded earlier keep their metadata, and uploading a file again to the place where it is stored
   still answers the existing item, with the option on or off. While the option is on, a file that
-  differs only in its metadata is answered as the existing item as well; with it off, a file with
-  other metadata at the same place is a conflict. AVIF, HEIC, TIFF and other image types
+  differs only in its metadata is answered as the existing item as well, provided the stored file
+  has no metadata; a file with other metadata at the same place is a conflict when the stored item
+  keeps its metadata or the option is off. `MediaItem` (`/impl`) gains `sourceChecksum` (the
+  sha256 of the bytes sent when they differ from the stored ones, otherwise `null`), which a
+  hand-built implementation or test double must set. AVIF, HEIC, TIFF and other image types
   are stored as sent and keep their metadata.
 
 ### Added

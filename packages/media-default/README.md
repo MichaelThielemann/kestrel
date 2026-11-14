@@ -2,7 +2,7 @@
 Uploads: one `POST /media` takes as many files as the HTTP trigger's `http.multipart.maxFiles`
 allows (default 20; the h3 adapter's `multipart` option), a bulk upload sends several requests. Bytes go to `blobstore@1` under `<prefix><id>/<name>` — one blob key per item, fixed at
 upload and never touched again by a rename or a move. Metadata (`filename`, `folder`, `location`,
-`contentType`, `size`, `key`, `checksum`, `status`, `createdAt`, `provenance`) goes into the
+`contentType`, `size`, `key`, `checksum`, `sourceChecksum`, `status`, `createdAt`, `provenance`) goes into the
 persistence collection `media_items`; only a public projection of it ever leaves the API (see
 below). `folder` is a path-like label (`2026/press`), tracked in `media_folders`, with folder-tree
 operations (create/rename/remove) that touch metadata only — a folder rename never moves a blob.
@@ -195,8 +195,8 @@ Uploading is idempotent: same folder, same filename and the same bytes return th
 already there — no second row, no second blob write, no second variant folder — and `media.upload`
 then ends the pipeline itself (`ctx.done`, 200), so a following `events.emit:media.uploaded` does not
 announce an upload that stored nothing. The same name with *different* bytes stays a `CONFLICT`
-(409); for a JPEG, PNG, WebP or GIF, bytes that differ from the stored file only in the metadata
-`stripImageMetadata` removes count as the same file while that option is on (see
+(409); for a JPEG, PNG, WebP or GIF, bytes that differ only in the metadata `stripImageMetadata`
+removes count as the same file while that option is on and the stored file has no metadata (see
 [Image metadata](#image-metadata)). For several files in one request, `ids` lists only what was newly stored; when nothing was,
 the step ends the pipeline the same way.
 
@@ -362,12 +362,14 @@ image. A consumer that needs them sets `stripImageMetadata` to `false`. Stray by
 segments, which decoders skip, are dropped as well. The pixels are not rotated either, so the EXIF orientation (2 to 8)
 stays as the only tag, in a minimal EXIF block, and the image variants and browsers keep applying it.
 The item's `size` and `checksum` are those of the stored bytes, and a stripped item also keeps the
-checksum of the file as sent. The same file sent again is still answered as the item that is already
+checksum of the file as sent in `sourceChecksum` (`null` when the stored bytes are the bytes sent). The same file sent again is still answered as the item that is already
 there, whether that item was stored with its metadata (an earlier version, or
 `stripImageMetadata: false`) or without it, and whichever way the option is set now. While the option
 is on, a file that differs from the stored one only in its metadata is answered as that item too,
-because it would be stored as the same bytes. With the option off, only the file that was sent is
-recognised: a file with other metadata at the same place is a `CONFLICT`. A JPEG, PNG, WebP or GIF is recognised by its bytes, so it is cleaned also
+because it would be stored as the same bytes. That holds for an item stored without its metadata;
+an item that keeps its metadata (stored with the option off, or by an earlier version) answers only
+the file that was sent, and a file with other metadata at the same place is a `CONFLICT`. With the
+option off, only the file that was sent is recognised either way. A JPEG, PNG, WebP or GIF is recognised by its bytes, so it is cleaned also
 when `allowedTypes` lets it through under another declared type. Other types (AVIF, HEIC, TIFF,
 PDF, ...) are stored as sent and keep their metadata, including a GPS position. A JPEG, PNG, WebP or GIF
 that cannot be read to its end is stored as sent as well, and the module logs a warning naming the file.
