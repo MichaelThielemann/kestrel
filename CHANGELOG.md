@@ -6,6 +6,14 @@ Net changes since 5.8.2.
 
 ### Breaking
 
+- `site-default`: **a resolve step on a routed type must carry the route's `liveWhen` filter.** A pipeline
+  whose `site.resolve:<type>` or `site.resolveLinks:<type>` step lacks a field of the route's `liveWhen`, or
+  names another value for it, fails boot with `site/default: pipeline "<name>": <step> must carry
+  status=published, …`, because the step would serve drafts and other unpublished documents at their path.
+  Add the filter to the step, for example `site.resolve:pages?home=home&status=published&fallback=true` for
+  `liveWhen: { status: "published" }`. A resolve step behind `authn.requireUser` is a signed-in preview and
+  stays unfiltered; `authn.identifyUser` does not make a step one. Routed types without a `liveWhen` and
+  types that are not routed are not checked.
 - **zod 4.** Every package that lists `zod` requires `^4.6.6` (was `^3.23.8`), which fixes a published
   advisory in array parsing that no zod 3 release fixes. A module's `configSchema` is read through
   zod 4's own definitions for its JSON Schema, variables, defaults and secrets, so a project's own

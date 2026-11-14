@@ -126,6 +126,14 @@ it could not finish, `site.resumePaths` (on a cron, every minute) finishes, so t
 one interval after a failure. Boot fails when a pipeline writes a routed type without this wiring, or
 reads it with a `home` or `slugField` the route does not have.
 
+**Resolve steps carry the route's filter.** `site.resolve:<t>` and `site.resolveLinks:<t>` on a routed type
+with a `liveWhen` must name every field of it as an argument, with the same value when `liveWhen` holds a
+plain value: `liveWhen: { status: "published" }` needs `site.resolve:pages?home=home&status=published`.
+Without it the step would resolve a path to documents the route does not publish, and boot fails naming the
+pipeline and the argument. A `liveWhen` condition such as `{ in: [...] }` cannot be written as an argument, so
+the step names the field with the value it serves. A step that follows `authn.requireUser` in its pipeline is
+a signed-in preview and may stay unfiltered; `authn.identifyUser` does not exempt it.
+
 `site.readTree:<t>` lists every document of the mount target type with its parent, label, valid
 paths and per-locale `live` state. `site.attachPaths:<t>?reachable` adds `_paths` to a list or read answer (reachable paths only; without
 `?reachable` every valid path, drafts included). `site.previewPath:<t>` answers, for a payload
