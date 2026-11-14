@@ -1,6 +1,5 @@
 FROM nginx:1.30-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a
 
-# The digest pins the 1.30 stable series; change the tag and the digest together.
 # nginx-module-njs: ships ngx_http_js_module.so, requires njs >= 0.8.1 for js_periodic.
 # gettext: provides envsubst, used at start to bake REDIRECTS_INTERVAL_MS into nginx.conf
 # (js_periodic's interval is read once at config load, not from process.env at runtime).

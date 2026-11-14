@@ -52,6 +52,8 @@ NGINX reverse proxy in front of a static bucket periodically fetches `redirects.
 - `REDIRECTS_URL` should be `https://` as well; `ngx.fetch` verifies the certificate against the
   same CA bundle (`js_fetch_trusted_certificate`).
 - The artifact should be served with `Cache-Control: public, max-age=0, must-revalidate`.
+- The `Dockerfile` pins the base image by digest to the nginx 1.30 stable series; when you change the tag,
+  change the digest with it.
 
 ## Smoke test
 
