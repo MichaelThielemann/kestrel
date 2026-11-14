@@ -7,6 +7,7 @@ import type { Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contr
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { ModuleHealth } from "@michaelthielemann/kestrel/defineModule";
 import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
+import { logWarn, silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import { applySegment, FRAME_HEADER_SIZE, FrameScanner, frameSize, parseWalHeader, WAL_HEADER_SIZE, walHeaderChecksum, type WalChecksum, type WalHeader } from "./wal.ts";
 
@@ -24,6 +25,8 @@ export interface Config {
 export interface ReplicationOptions {
   /** How often the WAL size is compared with `checkpointBytes` between syncs, in milliseconds. Default 1000. */
   checkIntervalMs?: number;
+  /** Receives the warning when another process is found writing to the same replica. Default: nothing is logged. */
+  logger?: Logger;
 }
 
 export interface Point {
@@ -44,8 +47,58 @@ export interface Status {
   pendingRestore: string | null;
 }
 
+/** A file next to a generation's snapshot under `<prefix>gen/<generation>/`: `origin.json`, `applied.json` or `sealed.json`. */
+export type GenerationMarker = "origin" | "applied" | "sealed";
+
+/** What one listing of `<prefix>gen/` shows: the restore points and, per generation, the marker files next to them. */
+export interface ReplicaListing {
+  points: Point[];
+  markers: Map<string, Set<GenerationMarker>>;
+}
+
+/** The content of `sealed.json`, written once by {@link Replication.seal} after the last frames of the generation are shipped. */
+export interface Seal {
+  /** The WAL lineage the replica's last frames belong to, the first number of a segment key. */
+  lineage: number;
+  /** How many frames of that lineage's WAL the replica holds, counted from the start of the WAL. */
+  lastFrame: number;
+  /** How many WAL segments the generation holds; their sequence numbers, the second number of a segment key, run from 0 to `segments - 1`. */
+  segments: number;
+  /** When the seal was written, in epoch milliseconds. */
+  at: number;
+}
+
+/** The content of `origin.json`, written by whoever places a generation into the replica on purpose, such as a restore or an upgrade done while the process is stopped. Only `nonce` is read here. */
+export interface Origin {
+  /** Why the generation was placed. */
+  kind: "restore" | "upgrade";
+  /** What the placed database was made from, such as the id of a backup. */
+  source: string;
+  /** When the placement was requested, as ISO 8601. */
+  requestedAt: string;
+  /** A value unique to this placement, repeated in `applied.json`. */
+  nonce: string;
+}
+
+/** The content of `applied.json`, written by the start that restored the database from a generation with `origin.json` and reported that restore. */
+export interface Applied {
+  /** The generation restored from. */
+  generation: string;
+  /** The `nonce` of its `origin.json`, or null when that file holds none. */
+  nonce: string | null;
+  /** The start of the boot that reported the restore, the value `replication.checkRestored` answers. */
+  restoredAt: number;
+}
+
 export interface Replication {
   sync(): Promise<Result<{ generation: string; shippedBytes: number; frames: number; checkpointed: boolean; pruned: number }, BlobstoreError>>;
+  /**
+   * Ships every committed frame the replica lacks, then writes `sealed.json` into the current generation, once; a
+   * later call answers the same seal. Takes no checkpoint, no periodic snapshot and prunes nothing. Without a
+   * generation yet, it takes the first snapshot when the WAL holds committed frames and answers `null` without
+   * writing anything when it holds none.
+   */
+  seal(): Promise<Result<(Seal & { generation: string }) | null, BlobstoreError>>;
   snapshot(): Promise<Result<{ generation: string; bytes: number }, BlobstoreError>>;
   points(): Promise<Result<Point[], BlobstoreError>>;
   prepareRestore(target: { generation?: string; at?: number }): Promise<Result<{ generation: string; at: number; file: string; restartRequired: true }, KestrelError<"NOT_FOUND" | "TRANSIENT">>>;
@@ -58,6 +111,42 @@ export interface Replication {
 const pad = (n: number, w: number): string => String(n).padStart(w, "0");
 const stamp = (ms: number): string => new Date(ms).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 const unstamp = (s: string): number => Date.parse(s.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/, "$1-$2-$3T$4:$5:$6Z"));
+const orderKey = (ms: number): string => ms.toString(16).padStart(12, "0");
+const TIME_ONLY = /^\d{8}T\d{6}Z$/;
+const generationTime = (generation: string): number => {
+  const order = /^[0-9a-f]{12}/.exec(generation.slice(17))?.[0];
+  const time = unstamp(generation.slice(0, 16));
+  return order === undefined ? time : Math.max(time, Number.parseInt(order, 16));
+};
+
+/** The key of a marker file of `generation`. */
+export function markerKey(prefix: string, generation: string, marker: GenerationMarker): string {
+  return `${prefix}gen/${generation}/${marker}.json`;
+}
+
+/**
+ * The generations a start must not restore from: named by their time alone, without `origin.json`, and sorting
+ * after `newest`, the newest generation that is named with an order key or carries `origin.json`. Both are empty
+ * when the replica holds no generation of either kind, as a replica written only by 5.x releases does.
+ */
+export function unplacedNewerGenerations(listing: ReplicaListing): { newest: string | null; generations: string[] } {
+  const generations = [...new Set(listing.points.filter((p) => p.kind === "snapshot").map((p) => p.generation))].sort();
+  const newest = generations.filter((g) => !TIME_ONLY.test(g) || listing.markers.get(g)?.has("origin") === true).at(-1) ?? null;
+  return { newest, generations: newest === null ? [] : generations.filter((g) => g > newest) };
+}
+
+/** Reads the `nonce` of a generation's `origin.json`: null when the file holds none or is not JSON, `NOT_FOUND` when the file is missing. */
+export async function readOriginNonce(blobs: Blobstore, prefix: string, generation: string): Promise<Result<string | null, BlobstoreError | KestrelError<"NOT_FOUND">>> {
+  const blob = await blobs.get(markerKey(prefix, generation, "origin"));
+  if (isErr(blob)) return blob;
+  if (blob.value === null) return err(failure("NOT_FOUND", `replication/sqlite: ${markerKey(prefix, generation, "origin")} is missing`));
+  try {
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(blob.value));
+    return ok(typeof parsed === "object" && parsed !== null && "nonce" in parsed && typeof parsed.nonce === "string" ? parsed.nonce : null);
+  } catch {
+    return ok(null);
+  }
+}
 
 export function restoreMarker(file: string): string {
   return `${file}.restore`;
@@ -73,20 +162,26 @@ export function applyPendingRestore(file: string, beforeSwap: () => void = () =>
   return true;
 }
 
-export async function restoreFromBlobs(blobs: Blobstore, prefix: string, target: { generation?: string; at?: number }, outFile: string): Promise<Result<{ generation: string; at: number }, KestrelError<"NOT_FOUND" | "TRANSIENT">>> {
-  const points = await listPoints(blobs, prefix);
-  if (isErr(points)) return points;
+/** Rebuilds the database at `target` into `outFile`: the newest generation with a snapshot at or before `target.at` unless `target.generation` names one. `listed` takes the points of a listing already made instead of listing again. */
+export async function restoreFromBlobs(blobs: Blobstore, prefix: string, target: { generation?: string; at?: number }, outFile: string, listed?: readonly Point[]): Promise<Result<{ generation: string; at: number }, KestrelError<"NOT_FOUND" | "TRANSIENT">>> {
+  let points: readonly Point[];
+  if (listed) points = listed;
+  else {
+    const fetched = await listPoints(blobs, prefix);
+    if (isErr(fetched)) return fetched;
+    points = fetched.value;
+  }
   const until = target.at ?? Number.POSITIVE_INFINITY;
-  const generation = target.generation ?? [...new Set(points.value.filter((p) => p.kind === "snapshot" && p.at <= until).map((p) => p.generation))].sort().at(-1);
+  const generation = target.generation ?? [...new Set(points.filter((p) => p.kind === "snapshot" && p.at <= until).map((p) => p.generation))].sort().at(-1);
   if (!generation) return err(failure("NOT_FOUND", "replication/sqlite: no snapshot before the requested point"));
-  const snapshot = points.value.find((p) => p.generation === generation && p.kind === "snapshot");
+  const snapshot = points.find((p) => p.generation === generation && p.kind === "snapshot");
   if (!snapshot) return err(failure("NOT_FOUND", `replication/sqlite: generation ${generation} has no snapshot`));
   const blob = await blobs.get(snapshot.key);
   if (isErr(blob)) return blob;
   if (blob.value === null) return err(failure("NOT_FOUND", `replication/sqlite: snapshot ${snapshot.key} is missing`));
   let image = blob.value;
   let at = snapshot.at;
-  for (const p of points.value.filter((x) => x.generation === generation && x.kind === "wal" && x.at <= until)) {
+  for (const p of points.filter((x) => x.generation === generation && x.kind === "wal" && x.at <= until)) {
     const segment = await blobs.get(p.key);
     if (isErr(segment)) return segment;
     if (segment.value === null) return err(failure("NOT_FOUND", `replication/sqlite: segment ${p.key} is missing`));
@@ -115,18 +210,31 @@ function checkImage(file: string): string {
   }
 }
 
-async function listPoints(blobs: Blobstore, prefix: string): Promise<Result<Point[], BlobstoreError>> {
+const isMarker = (name: string | undefined): name is GenerationMarker => name === "origin" || name === "applied" || name === "sealed";
+
+/** Lists `<prefix>gen/` once: every snapshot and WAL segment as a {@link Point}, and the marker files of each generation. */
+export async function listReplica(blobs: Blobstore, prefix: string): Promise<Result<ReplicaListing, BlobstoreError>> {
   const list = await blobs.list(`${prefix}gen/`);
   if (isErr(list)) return list;
-  const out: Point[] = [];
+  const points: Point[] = [];
+  const markers = new Map<string, Set<GenerationMarker>>();
   for (const info of list.value) {
-    const m = /gen\/(\d{8}T\d{6}Z(?:-[0-9a-f]+)?)\/(snapshot\.db|wal\/(\d+)-(\d+)-([0-9TZ]+)\.wal)$/.exec(info.key);
+    const m = /gen\/(\d{8}T\d{6}Z(?:-[0-9a-f]+)?)\/(snapshot\.db|wal\/(\d+)-(\d+)-([0-9TZ]+)\.wal|(origin|applied|sealed)\.json)$/.exec(info.key);
     if (!m) continue;
     const generation = m[1] ?? "";
-    if (m[2] === "snapshot.db") out.push({ generation, at: unstamp(generation.slice(0, 16)), kind: "snapshot", key: info.key });
-    else out.push({ generation, at: unstamp(m[5] ?? ""), kind: "wal", key: info.key });
+    const marker = m[6];
+    if (isMarker(marker)) markers.set(generation, (markers.get(generation) ?? new Set<GenerationMarker>()).add(marker));
+    else if (m[2] === "snapshot.db") points.push({ generation, at: unstamp(generation.slice(0, 16)), kind: "snapshot", key: info.key });
+    else points.push({ generation, at: unstamp(m[5] ?? ""), kind: "wal", key: info.key });
   }
-  return ok(out.sort((a, b) => a.generation.localeCompare(b.generation) || (a.kind === "snapshot" ? -1 : b.kind === "snapshot" ? 1 : a.key.localeCompare(b.key))));
+  points.sort((a, b) => a.generation.localeCompare(b.generation) || (a.kind === "snapshot" ? -1 : b.kind === "snapshot" ? 1 : a.key.localeCompare(b.key)));
+  return ok({ points, markers });
+}
+
+async function listPoints(blobs: Blobstore, prefix: string): Promise<Result<Point[], BlobstoreError>> {
+  const listing = await listReplica(blobs, prefix);
+  if (isErr(listing)) return listing;
+  return ok(listing.value.points);
 }
 
 const READ_CHUNK_BYTES = 1024 * 1024;
@@ -179,6 +287,13 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   let restorePrepared = false;
   let closed = false;
   let pending: Array<{ key: string; data: Uint8Array }> = [];
+  const logger = options.logger ?? silentLogger;
+  const startedAt = now();
+  const own = new Set<string>();
+  let newestListed = 0;
+  let firstListing: Set<string> | null = null;
+  let otherWriter: { key: string; seenAt: number } | null = null;
+  let sealedAs: (Seal & { generation: string }) | null = null;
 
   const walBytes = (): number => (existsSync(walFile) ? statSync(walFile).size : 0);
   const walContentBytes = (): number => {
@@ -230,14 +345,35 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     return ok();
   };
 
+  const observe = (listing: ReplicaListing): void => {
+    for (const listed of new Set([...listing.points.map((p) => p.generation), ...listing.markers.keys()])) newestListed = Math.max(newestListed, generationTime(listed));
+    if (firstListing === null) {
+      firstListing = new Set(listing.points.map((p) => p.key));
+      return;
+    }
+    if (otherWriter !== null) return;
+    const known = firstListing;
+    const found = listing.points.find((p) => !own.has(p.generation) && !known.has(p.key) && listing.markers.get(p.generation)?.has("origin") !== true && (p.kind === "snapshot" || p.at > startedAt));
+    if (!found) return;
+    otherWriter = { key: found.key, seenAt: now() };
+    logWarn(logger, "replication/sqlite: another process writes to this replica; only one process may replicate a database to a prefix", { key: found.key, generation: found.generation });
+  };
+
   let snapshotOrder = 0;
-  const takeSnapshot = async (): Promise<Result<{ generation: string; bytes: number }, BlobstoreError>> => {
+  const takeSnapshot = async (listed?: ReplicaListing): Promise<Result<{ generation: string; bytes: number }, BlobstoreError>> => {
+    if (listed) observe(listed);
+    else {
+      const listing = await listReplica(blobs, config.prefix);
+      if (isErr(listing)) return listing;
+      observe(listing.value);
+    }
     const at = now();
     let data: Uint8Array = new Uint8Array(readFileSync(file));
     const wal = readCommittedSync(fromStart);
     if (wal && wal.frames > 0) data = applySegment(data, wal.segment);
-    snapshotOrder = Math.max(at, snapshotOrder + 1);
-    const gen = `${stamp(at)}-${snapshotOrder.toString(16).padStart(12, "0")}${randomBytes(16).toString("hex")}`;
+    snapshotOrder = Math.max(at, newestListed + 1, snapshotOrder + 1);
+    const gen = `${stamp(snapshotOrder)}-${orderKey(snapshotOrder)}${randomBytes(16).toString("hex")}`;
+    own.add(gen);
     const put = await blobs.put(`${config.prefix}gen/${gen}/snapshot.db`, data, { contentType: "application/vnd.sqlite3" });
     if (isErr(put)) return put;
     generation = gen;
@@ -352,16 +488,17 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     await checkpoint();
   };
   const timer = setInterval(() => {
-    if (closed || queued > 0 || generation === null) return;
+    if (closed || sealedAs !== null || queued > 0 || generation === null) return;
     if (walContentBytes() < config.checkpointBytes) return;
     exclusive(maintain).catch(() => undefined);
   }, options.checkIntervalMs ?? 1000);
   timer.unref();
 
   const prune = async (): Promise<Result<number, BlobstoreError>> => {
-    const list = await listPoints(blobs, config.prefix);
+    const list = await listReplica(blobs, config.prefix);
     if (isErr(list)) return list;
-    const points = list.value;
+    observe(list.value);
+    const points = list.value.points;
     const generations = [...new Set(points.map((p) => p.generation))].sort();
     const cutoff = now() - config.retentionSeconds * 1000;
     let removed = 0;
@@ -381,13 +518,10 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   const runSync = async (run: { started: boolean }): Promise<Result<{ generation: string; shippedBytes: number; frames: number; checkpointed: boolean; pruned: number }, BlobstoreError>> => {
     run.started = true;
     if (generation === null) {
-      const existingList = await listPoints(blobs, config.prefix);
-      if (isErr(existingList)) return existingList;
-      const existing = existingList.value.filter((p) => p.kind === "snapshot");
-      if (existing.length === 0 || lastSnapshotAt === null) {
-        const snap = await takeSnapshot();
-        if (isErr(snap)) return snap;
-      }
+      const listing = await listReplica(blobs, config.prefix);
+      if (isErr(listing)) return listing;
+      const snap = await takeSnapshot(listing.value);
+      if (isErr(snap)) return snap;
     }
     const t = now();
     const shipped = await shipNewFrames();
@@ -442,6 +576,25 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
         if (isErr(shipped)) return shipped;
         return takeSnapshot();
       }),
+    seal: () =>
+      exclusive(async (): Promise<Result<(Seal & { generation: string }) | null, BlobstoreError>> => {
+        if (sealedAs !== null) return ok(sealedAs);
+        if (generation === null) {
+          const wal = readCommittedSync(fromStart);
+          if (!wal || wal.frames === 0) return ok(null);
+          const snap = await takeSnapshot();
+          if (isErr(snap)) return snap;
+        }
+        const shipped = await shipNewFrames();
+        if (isErr(shipped)) return shipped;
+        const current = generation;
+        if (current === null) throw new Error("replication/sqlite: seal ended without a generation");
+        const seal: Seal = { lineage, lastFrame: cursor?.frame ?? 0, segments: seq, at: now() };
+        const put = await blobs.put(markerKey(config.prefix, current, "sealed"), new TextEncoder().encode(JSON.stringify(seal)), { contentType: "application/json" });
+        if (isErr(put)) return put;
+        sealedAs = { generation: current, ...seal };
+        return ok(sealedAs);
+      }),
     points: () => listPoints(blobs, config.prefix),
     prepareRestore: (target) =>
       exclusive(async () => {
@@ -457,8 +610,10 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       return { generation, lineage, shippedFrames: cursor?.frame ?? 0, lastSyncAt, lastSnapshotAt, lastCheckpointAt, walBytes: walBytes(), pendingRestore: existsSync(restoreMarker(file)) ? restoreMarker(file) : null };
     },
     health(): ModuleHealth {
-      if (!restorePrepared) return { ok: true };
-      return { ok: true, note: "replication/sqlite: a restore is prepared; restart the process to apply it" };
+      const notes: string[] = [];
+      if (restorePrepared) notes.push("replication/sqlite: a restore is prepared; restart the process to apply it");
+      if (otherWriter !== null) notes.push(`replication/sqlite: another process writes to this replica (${otherWriter.key}, seen ${new Date(otherWriter.seenAt).toISOString()}); stop it, then run replication.snapshot here so the next restore starts from this process's data`);
+      return notes.length === 0 ? { ok: true } : { ok: true, note: notes.join("; ") };
     },
     close() {
       closed = true;
