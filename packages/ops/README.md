@@ -29,9 +29,9 @@ target; other targets come as their own packages.
 | `restore --to local <dir> (--backup <id> \| --latest) [--with-media] [--keep-sessions]` | Writes a backup's database, or the newest replica generation, to `<dir>/kestrel.db` without login sessions; `--with-media` adds the originals under `<dir>/blobs/`. |
 
 Every command takes `--env <name>` (optional when the file names one environment), `--json` (one JSON
-document on stdout, with a `schema` field such as `kestrel-ops/restore@1`), `--yes`, `--answers <file>`
-`--keep` (keep the local working directory) and `--break-lock`. Exit codes: 0 done, 1 a check failed or a step was refused,
-2 a usage or configuration error.
+document on stdout, with a `schema` field such as `kestrel-ops/restore@1`), `--yes`, `--answers <file>`,
+`--keep` (keep the local working directory) and `--break-lock`. Exit codes: 0 done, 1 a check failed or a
+step was refused, 2 a usage or configuration error.
 
 ## kestrel.environments.json
 One file in the project root describes every environment. It holds no secret values, only where they come
