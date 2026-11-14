@@ -50,6 +50,38 @@ export function routesConfig(input: { routes: Record<string, Partial<Route>> } &
   };
 }
 
+export function isScalar(value: unknown): value is string | number | boolean {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function condition(expected: unknown): [string, unknown] | undefined {
+  if (typeof expected !== "object" || expected === null || Array.isArray(expected)) return undefined;
+  const entries = Object.entries(expected);
+  return entries.length === 1 ? entries[0] : undefined;
+}
+
+/** Whether one scalar argument can state a `liveWhen` condition: a scalar, `eq` or `ne` of a scalar, or `in` of scalars. */
+export function isStatable(expected: unknown): boolean {
+  if (isScalar(expected)) return true;
+  const [operator, operand] = condition(expected) ?? [];
+  return ((operator === "eq" || operator === "ne") && isScalar(operand)) || (operator === "in" && Array.isArray(operand) && operand.every(isScalar));
+}
+
+/** Whether the scalar `actual` an argument names satisfies a statable `liveWhen` condition. */
+export function stated(expected: unknown, actual: string): boolean {
+  if (isScalar(expected)) return String(expected) === actual;
+  const [operator, operand] = condition(expected) ?? [];
+  if (operator === "eq" && isScalar(operand)) return String(operand) === actual;
+  if (operator === "ne" && isScalar(operand)) return String(operand) !== actual;
+  if (operator === "in" && Array.isArray(operand)) return operand.some((value) => String(value) === actual);
+  return false;
+}
+
+/** `filter` without the fields whose `liveWhen` condition no argument can state; the route's own `liveWhen` decides those. */
+export function withoutUnstatable(route: Route, filter: Filter): Filter {
+  return Object.fromEntries(Object.entries(filter).filter(([name]) => !(name in route.liveWhen) || isStatable(route.liveWhen[name])));
+}
+
 /** Type → id of the mount target page it lives under, or `null` for the top level. */
 export type Mounts = Record<string, string | null>;
 

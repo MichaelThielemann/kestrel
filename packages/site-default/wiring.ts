@@ -1,7 +1,7 @@
 import type { ContentModel } from "@michaelthielemann/kestrel-contracts/content";
 import type { Introspection } from "@michaelthielemann/kestrel/defineModule";
 import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
-import type { RoutesConfig } from "./routes.ts";
+import { isScalar, isStatable, stated, type RoutesConfig } from "./routes.ts";
 
 const WRITE = /^content\.(create|update|remove|removeTranslation):([^?]+)/;
 const RESOLVE = /^site\.resolve:([^?]+)(?:\?(.*))?$/;
@@ -48,23 +48,8 @@ export function checkRoutedModel(config: RoutesConfig, model: ContentModel, logg
   if (problems.length > 0) throw new Error(`site/default: ${problems.join("; ")}`);
 }
 
-function isScalar(value: unknown): value is string | number | boolean {
-  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
-}
-
-function condition(expected: unknown): [string, unknown] | undefined {
-  if (typeof expected !== "object" || expected === null || Array.isArray(expected)) return undefined;
-  const entries = Object.entries(expected);
-  return entries.length === 1 ? entries[0] : undefined;
-}
-
 function agrees(expected: unknown, actual: string): boolean {
-  if (isScalar(expected)) return String(expected) === actual;
-  const [operator, operand] = condition(expected) ?? [];
-  if (operator === "eq" && isScalar(operand)) return String(operand) === actual;
-  if (operator === "ne" && isScalar(operand)) return String(operand) !== actual;
-  if (operator === "in" && Array.isArray(operand) && operand.every(isScalar)) return operand.some((value) => String(value) === actual);
-  return true;
+  return !isStatable(expected) || stated(expected, actual);
 }
 
 function requirement(field: string, expected: unknown): string {

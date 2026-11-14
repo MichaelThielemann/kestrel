@@ -130,9 +130,9 @@ reads it with a `home` or `slugField` the route does not have.
 field of it as an argument, with the value the route publishes: `liveWhen: { status: "published" }` needs
 `site.resolve:pages?home=home&status=published`. A `liveWhen` of `{ eq: v }`, `{ ne: v }` or `{ in: [...] }` is
 checked against the value the argument names; an argument holds one value, so a step on `{ in: [...] }` serves
-the one value it names. Any other condition, and `null`, cannot be written as an argument, and only the field
-must be named. Without the filter the step would resolve a path to documents the route does not publish, and
-boot fails naming the pipeline and the argument. A resolve step that follows `authn.requireUser` in its pipeline
+the one value it names. Any other condition, and `null`, cannot be written as an argument: only the field must be named, and
+the route's own `liveWhen` decides which documents the step serves for it. Without the filter the step would
+resolve a path to documents the route does not publish, and boot fails naming the pipeline and the argument. A resolve step that follows `authn.requireUser` in its pipeline
 is a signed-in preview and may stay unfiltered; `authn.identifyUser` does not exempt it.
 
 A filtered step also serves a routed document only while the route's own `liveWhen` holds for it, whatever

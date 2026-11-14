@@ -11,7 +11,7 @@ import type { SitePaths } from "./paths.ts";
 
 export { createSitePaths, type SitePaths, type SitePathsDeps } from "./paths.ts";
 export { routesConfig, type Mounts, type Move, type Route, type RoutesConfig } from "./routes.ts";
-import { splitTail, tailOf, type Route } from "./routes.ts";
+import { splitTail, tailOf, withoutUnstatable, type Route } from "./routes.ts";
 import { pathOfTail, prefixSource } from "./table.ts";
 
 interface Rules {
@@ -142,22 +142,24 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
     return ok(effective === undefined ? doc : { ...doc, _locale: effective });
   }
 
-  async function resolveRouted(table: SitePaths, type: string, path: string, rules: Rules): Promise<Result<ContentDocument | null, SiteError>> {
+  async function resolveRouted(table: SitePaths, type: string, path: string, rules: Rules, route: Route): Promise<Result<ContentDocument | null, SiteError>> {
     const model = content.model();
     const split = splitTail(path, model.locales ?? [], model.defaultLocale ?? "", rules.prefixPrimary);
     if (!split) return ok(null);
     const readLocale = split.explicit ? split.locale : undefined;
     const effective = split.locale === "" ? undefined : split.locale;
     const claim = table.table.claim(split.locale, split.tail);
+    const filter = withoutUnstatable(route, rules.filter);
+    const gated = Object.keys(rules.filter).length > 0;
     const answered = await unobserved(async (): Promise<Result<{ candidate: string | null; doc: ContentDocument | null }, SiteError>> => {
-      let holder = claim.strong?.valid === true && (claim.strong.live || Object.keys(rules.filter).length === 0) ? claim.strong : undefined;
+      let holder = claim.strong?.valid === true && (claim.strong.live || !gated) ? claim.strong : undefined;
       if (holder) {
-        const passes = await satisfiesFilter(content, holder.type, holder.docId, readLocale, rules.filter);
+        const passes = await satisfiesFilter(content, holder.type, holder.docId, readLocale, filter);
         if (isErr(passes)) return err(transientOnly(passes.error));
         if (!passes.value) holder = undefined;
       }
       if (!holder || holder.type !== type) return ok({ candidate: null, doc: null });
-      const viewResult = await publishedLocale(content, type, holder.docId, readLocale, rules.filter, { fallback: rules.fallback });
+      const viewResult = await publishedLocale(content, type, holder.docId, readLocale, filter, { fallback: rules.fallback });
       if (isErr(viewResult)) return err(transientOnly(viewResult.error));
       return ok({ candidate: holder.docId, doc: viewResult.value });
     });
@@ -165,7 +167,7 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
     const { candidate, doc } = answered.value;
     const segments = split.tail.split("/");
     const slug = split.tail === "" ? (rules.home ?? "") : (segments[segments.length - 1] ?? "");
-    if (candidate === null) noteRead({ kind: "query", type, filter: { ...rules.filter, [rules.slugField]: slug }, ...(effective === undefined ? {} : { locale: effective }) });
+    if (candidate === null) noteRead({ kind: "query", type, filter: { ...filter, [rules.slugField]: slug }, ...(effective === undefined ? {} : { locale: effective }) });
     else noteRead({ kind: "document", type, id: candidate, ...(effective === undefined ? {} : { locale: effective }) });
     if (!doc) return ok(null);
     return ok(withPaths(effective === undefined ? doc : { ...doc, _locale: effective }, table, type));
@@ -197,12 +199,12 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
     return pathOfTail(table.format, tail, locale, rules.prefixPrimary);
   }
 
-  async function linkedPathRouted(table: SitePaths, t: string, id: string, locale: string, rules: Rules): Promise<Result<string | null, SiteError>> {
+  async function linkedPathRouted(table: SitePaths, route: Route, t: string, id: string, locale: string, rules: Rules): Promise<Result<string | null, SiteError>> {
     const row = table.table.row(t, id, locale);
     if (!row || row.tail === null || !row.valid) return ok(null);
     if (Object.keys(rules.filter).length === 0) return ok(pathOfTail(table.format, row.tail, locale, rules.prefixPrimary));
     if (!row.live) return ok(null);
-    const passes = await unobserved(() => satisfiesFilter(content, t, id, locale === "" ? undefined : locale, ownFields(content.model().types[t], rules.filter)));
+    const passes = await unobserved(() => satisfiesFilter(content, t, id, locale === "" ? undefined : locale, ownFields(content.model().types[t], withoutUnstatable(route, rules.filter))));
     if (isErr(passes)) return err(transientOnly(passes.error));
     return ok(passes.value ? pathOfTail(table.format, row.tail, locale, rules.prefixPrimary) : null);
   }
@@ -215,7 +217,7 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
       typeOf(type);
       const route = paths?.route(type);
       const rules = rulesOf(options.rules, type, route);
-      return paths && route ? resolveRouted(paths, type, path, rules) : resolveUnrouted(type, path, rules);
+      return paths && route ? resolveRouted(paths, type, path, rules, route) : resolveUnrouted(type, path, rules);
     },
 
     pathOf(type, document, options = {}) {
@@ -249,8 +251,9 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
         const id = ref.slice(at + 1);
         let path: string | null = null;
         if (model.types[t]) {
-          if (paths?.route(t)) {
-            const linked = await linkedPathRouted(paths, t, id, locale ?? "", rules);
+          const route = paths?.route(t);
+          if (paths && route) {
+            const linked = await linkedPathRouted(paths, route, t, id, locale ?? "", rules);
             if (isErr(linked)) return linked;
             path = linked.value;
           } else {

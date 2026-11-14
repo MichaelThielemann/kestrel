@@ -148,6 +148,15 @@ describe("site/default routed: resolve status filter", () => {
     await kestrel.stop();
   });
 
+  it("accepts any value for a field whose liveWhen condition no argument can state, and still requires the field", async () => {
+    const routes = { pages: { home: "home", liveWhen: { status: { ne: null } } } };
+    await expect(bootWith([definePipeline({ name: "resolvePage", steps: ["site.resolve:pages?home=home"] })], routes)).rejects.toThrow(/must carry status matching \{"ne":null\}/);
+    for (const named of ["status=", "status=null", "status=published"]) {
+      const kestrel = await bootWith([definePipeline({ name: "resolvePage", steps: [`site.resolve:pages?home=home&${named}`, `site.resolveLinks:pages?${named}`] })], routes);
+      await kestrel.stop();
+    }
+  });
+
   it("checks the value a step names against an eq, ne or in condition of the liveWhen", async () => {
     const wiring = (liveWhen: Record<string, unknown>, status: string) => bootWith([definePipeline({ name: "resolvePage", steps: [`site.resolve:pages?home=home&status=${status}`] })], { pages: { home: "home", liveWhen } });
     await expect(wiring({ status: { ne: "draft" } }, "draft")).rejects.toThrow(/must carry status matching \{"ne":"draft"\}/);
