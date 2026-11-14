@@ -859,9 +859,42 @@ Net changes since 5.8.2.
   sha256 of the bytes sent when they differ from the stored ones, otherwise `null`), which a
   hand-built implementation or test double must set. AVIF, HEIC, TIFF and other image types
   are stored as sent and keep their metadata.
+- `authz-roles`: **a caller kept to a field grant sorts a list only by a field it receives.** For a
+  pipeline ending with `authz.fields:<resource>?shape=list`, a request whose `sort` names a field the
+  caller's grant does not name whole (a member the grant names only in part, a hidden field, a name that is
+  no member such as `constructor`) answers `400 VALIDATION` instead of ordering by it, because the order of a
+  list shows what the grant withholds. `id`, `createdAt` and `updatedAt` stay sortable for every caller,
+  also where the answer leaves the two timestamps out, so `?sort=-updatedAt` keeps working on public lists.
+  A caller whose roles have no field grant for the resource sorts by anything.
+- `authz-roles`: **`anonymous` takes only read permissions.** An entry that is not `<name>.read`
+  (`"*"`, `"pages.*"`, `"pages.write"`, `"media.list"`) fails boot with
+  `anonymous may hold only read permissions such as "pages.read"` and the path of the entry. Grant a
+  wildcard or a write to a role instead.
+- **A query parameter that names a member of a step's body schema answers `400 VALIDATION`.** The payload
+  merges the query with the body, but a step's `input` schema only checked the body, so `?roles=admin` with
+  an empty body gave `authn.createUser` a value its schema never saw, and `POST /admin/migrations/apply?dry=true`
+  applied the migrations for real because `dry` is a body flag. The runner now refuses such a parameter before the
+  step runs (`details.problems` names it) unless the step lists the same name in `describe().query`;
+  `content.create`, `content.set`, `content.update` and `content.validate` do for `locale`, which stays valid in the
+  query. A parameter the body schema does not describe is still ignored. A custom step whose `input` and query use
+  the same name declares it in `query`; `migrations.apply` reads `dry` from `ctx.body`.
+- `sanitize-svg`: **an attribute holding a `url()` that does not point to a `#fragment` of the same file
+  is removed** (`fill="url(http://…)"`, `filter`, `mask`, `clip-path`, `marker-*`, a `url()` with quotes or
+  spaces, a `data:` or protocol-relative target), together with any attribute whose value uses a CSS escape.
+  `fill="url(#gradient)"` and every attribute without a `url()` are unchanged. `style` and `<style>` stay removed.
+- `validate-jsonschema`: **the HTML sanitizer gives every link whose `target` is not `_self` (in any
+  case) `rel="noopener noreferrer"` and removes `opener`** (`target="_BLANK" rel="opener"` and
+  `target="win1"` were left open), keeps other `rel` tokens such as `nofollow`, and drops an `href` or `src`
+  starting with `//` or a backslash pair. `data:` stays allowed only in `img[src]`; a scheme is read as a browser
+  reads it, so `java<tab>script:` is refused.
 
 ### Added
 
+- `contracts`: `helpers/html-allowlist` holds the one allowlist for HTML shown to visitors: the lists
+  `HTML_ALLOWED_TAGS`, `HTML_ALLOWED_ATTRIBUTES`, `HTML_ALLOWED_SCHEMES`, `HTML_IMG_SCHEMES`, the pattern
+  `HTML_ID_PATTERN`, `isAllowedHtmlUrl(tag, attribute, value)` and `normalizeHtmlAttributes(tag, attributes)`,
+  which applies the link and id rules above to one element. The file has no imports, so server-rendered pages and
+  browsers can apply the same rules as `validate-jsonschema`, which builds its `HTML_ALLOWLIST` from it.
 - **5.x media are converted, not discarded.** New helper `helpers/shape-migrations` in
   `kestrel-contracts` runs a module's storage-shape migrations in dependency order and by the release
   that introduced them, verifies each and then records the module's storage version in the
@@ -1829,6 +1862,11 @@ Net changes since 5.8.2.
 
 ### Fixed
 
+- `content/default` looks up type names, fields in a filter, a sort and written data by their own name, so
+  `?sort=constructor` and `toString` answer `400` (unknown sort field) and a written field named like an
+  `Object.prototype` member is reported as an unknown field instead of passing the check.
+- The `sanitize-svg`, `media-default` and `images-default` READMEs recommend serving SVG with
+  `Content-Security-Policy: default-src 'none'; sandbox`, which is what the Node origin sends.
 - `images/default`: `images.prune` raises `images.variantsChanged` for every item it took a size
   from, also when a later write of the run fails, and `images.syncPublic` deletes the private render
   a retired path still holds after such a failure while it writes the original over its public copy.
