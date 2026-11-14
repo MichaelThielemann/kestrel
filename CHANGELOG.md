@@ -659,34 +659,19 @@ Net changes since 5.8.2.
 - `blobstore-s3` refuses a plain `http://` `endpoint` outside loopback (`localhost`, `127.0.0.0/8`,
   `[::1]`) with a config error at boot. The new option `allowInsecureEndpoint: true` accepts it for a
   trusted network and logs a warning at every boot.
-- `replication-sqlite` names a new generation by its time, an order key and 32 random hex digits
-  (`<prefix>gen/<time>-<order><random>/…`); generations of the same second sort in the order they were
-  taken, so a snapshot key cannot be guessed from the time it was taken;
-  generations named by the time alone are still listed, restored and pruned. The READMEs of
+- `replication-sqlite` names a new generation by its time, an order key, the time its snapshot was
+  taken and 20 random hex digits (`<prefix>gen/<time>-<order><taken><random>/…`); generations of the
+  same second sort in the order they were taken, so a snapshot key cannot be guessed from the time it
+  was taken; generations named by the time alone are still listed, restored and pruned. The READMEs of
   `media-default` and `blobstore-s3` list every key family on the blobstore and which of them may be
   public (`site/*` only), with an example bucket policy.
-- `replication-sqlite` documents its replica layout as a storage format (README, "Replica layout") and
-  adds three files to a generation. Teardown writes `sealed.json` (`{ lineage, lastFrame, segments, at }`)
-  once the frames committed since the last sync are shipped, so a generation without one shows a stop
-  that may have lost frames. A start that rebuilds the missing database lists the replica again, for up
-  to five seconds, while the newest generation's seal names more WAL segments than the listing shows,
-  and refuses to start when some are still missing. A tool that places a database into the replica writes `origin.json` next to
-  its snapshot; a start that rebuilds the missing database from such a generation reports the restore
-  through `replication.checkRestored`, so `delivery.checkBuild` renders every output again, and writes
-  `applied.json` naming the generation and the `nonce` of `origin.json`. A later start that finds
-  `applied.json` does not report the restore again. `Replication` (`./impl`) gains `seal()`, and
-  `./impl` exports `listReplica()`, `listSealedReplica()`, `markerKey()`, `readOriginNonce()`,
-  `unplacedNewerGenerations()` and the types `Seal`, `Origin`, `Applied`, `ReplicaListing` and
-  `SealedListingOptions`.
 - `replication-sqlite` refuses to rebuild a missing database at start when a generation named by its
   time alone and without `origin.json`, as 5.x releases name every generation, sorts after the newest
   generation that this version wrote or that carries `origin.json`. Restoring it would start from data
   this version never wrote; the error names the generations and how to go on. A replica written only by
   5.x releases restores its newest generation as before.
-- `replication-sqlite` notices another process writing to the same replica: a key it did not write
-  that turns up in a later listing, in a generation without `origin.json`, logs a warning and makes
-  `health()` answer `{ ok: true, note }` until the process restarts. Health stays ok, so that a
-  readiness probe does not restart the process into the other process's data.
+- `replication-sqlite`: the `Replication` interface of `./impl` gains `seal()` and `restoreHandled()`;
+  an implementation of it outside this package has to add both.
 - `examples/nginx-njs` proxies to the origin over `https://` with certificate verification and passes
   `Host`, `X-Forwarded-For` and `X-Forwarded-Proto`; `ORIGIN_UPSTREAM` defaults to `origin` (port 443).
 - Forwarding headers count only from a trusted proxy. The new `http.trustedProxies` (also an option
@@ -771,6 +756,30 @@ Net changes since 5.8.2.
 
 ### Added
 
+- `replication-sqlite` documents its replica layout as a storage format (README, "Replica layout") and
+  adds three files to a generation. Teardown writes `sealed.json` (`{ lineage, lastFrame, segments, at }`)
+  once the frames committed since the last sync are shipped; only the newest generation of a process that
+  stopped through teardown carries one, so a newest generation of the stopped process without one shows a
+  stop that may have lost frames. A start that rebuilds the missing database lists the replica again, for
+  up to five seconds, while the newest generation's listing lacks a WAL segment its seal names, or a newer
+  generation shows `origin.json` without a snapshot, and refuses to start when it still does. A tool that
+  places a database into the replica writes the snapshot and then `origin.json`; a start that rebuilds
+  the missing database from such a generation reports the restore through `replication.checkRestored`,
+  so `delivery.checkBuild` renders every output again. Once a pipeline run through that step ended
+  without failure, the first successful sync after it writes `applied.json` naming the generation and the
+  `nonce` of `origin.json`; until then every generation the process starts carries a copy of
+  `origin.json`, so a start that stops earlier leaves the restore reported to the next one. A start that
+  restores a generation with `applied.json` does not report the restore again. Whether a generation
+  carries either file is read from the blobstore, not from a listing. `./impl` exports `listReplica()`,
+  `listSealedReplica()`, `markerKey()`, `readOrigin()`, `readOriginNonce()`,
+  `unplacedNewerGenerations()` and the types `Seal`, `Origin`, `Applied`, `PlacedRestore`,
+  `ReplicaListing` and `SealedListingOptions`; `ReplicationOptions` gains `listedBefore`,
+  `placedRestore` and `onAcknowledged`.
+- `replication-sqlite` notices another process writing to the same replica: a snapshot or WAL segment it
+  did not write, outside a generation placed with `origin.json`, that the listing the start restored
+  from (or else the first sync's listing) did not show, logs a warning and makes `health()` answer
+  `{ ok: true, note }` until the process restarts. Health stays ok, so that a readiness probe does not
+  restart the process into the other process's data.
 - `kestrel-h3`'s `createKestrelHandler` takes a `logger` and writes one `http` line per request
   with the fields of the core server's line (`runId`, `requestId`, `method`, `path`, `pipeline`,
   `status`, `ms`, `ip`). A request refused before its pipeline (unknown route, dot segment, body too
@@ -1562,7 +1571,8 @@ Net changes since 5.8.2.
   nothing at teardown.
 - `replication-sqlite` names a new generation after the newest one the replica lists, one millisecond
   later where its own clock is behind, so a generation placed by a process whose clock runs ahead never
-  sorts after this process's data.
+  sorts after this process's data. The snapshot's restore point keeps the time it was taken, so a restore
+  to a point in time still finds it.
 - A `reassignTo` value in `authn.verifyUser`'s request body or event hand-over no longer requires a
   `name` alongside `id`, and also accepts a bare user id string.
 - `authn-single` and `authn-multi` share one behavioural test suite for the five steps both

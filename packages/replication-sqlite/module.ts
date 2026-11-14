@@ -211,7 +211,7 @@ export default defineModule({
 
   describe: () => ({
     checkRestored: {
-      summary: "When the latest restore of the file was a prepared restore or a restore of a missing file from a periodic backup, by this module or another one (adds `_databaseRestoredAt`, the start of the boot that wrote it or null, to the result)",
+      summary: "When the latest restore of the file was a prepared restore, a restore of a missing file from a periodic backup or a rebuild of a missing file from a generation placed with origin.json, by this module or another one (adds `_databaseRestoredAt`, the start of the boot that wrote it or null, to the result)",
       reads: [],
       writes: ["result._databaseRestoredAt"],
       extendsOutput: { type: "object", properties: { _databaseRestoredAt: { type: ["number", "null"] } }, required: ["_databaseRestoredAt"] },

@@ -151,7 +151,12 @@ generation; moving its `sealed.json` aside restores from the listed segments alo
 teardown, or whose teardown could not ship its frames, leaves its generation without a seal, and the
 replica may lack the frames committed since that process's last sync. A process that never synced takes
 its first snapshot at teardown when it committed anything, and writes nothing when it did not: the
-generation it was restored from already holds its database.
+generation it was restored from already holds its database. A seal therefore speaks only for the
+process that wrote its generation. A process leaves no trace in the replica until it starts a generation
+of its own, at its first sync, at `replication.snapshot` or at teardown: one killed before then leaves
+the newest generation as it found it, with or without a seal, and that seal says nothing about how the
+later process stopped or which frames it lost. To judge a stop by the seal of the newest generation, a
+reader also has to know that the process that stopped wrote that generation.
 
 **Placed generations.** A tool that places a database into the replica while the process is stopped
 writes the snapshot into a new generation and then `origin.json`, last, which marks the placement as
@@ -217,7 +222,7 @@ keys, and nothing keeps a second process from writing.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `replication.checkRestored` | When the latest restore of the file was a prepared restore or a restore of a missing file from a periodic backup, by this module or another one (adds `_databaseRestoredAt`, the start of the boot that wrote it or null, to the result) | – | `result._databaseRestoredAt` | – | { _databaseRestoredAt: number \| null, … } | – | – | no |
+| `replication.checkRestored` | When the latest restore of the file was a prepared restore, a restore of a missing file from a periodic backup or a rebuild of a missing file from a generation placed with origin.json, by this module or another one (adds `_databaseRestoredAt`, the start of the boot that wrote it or null, to the result) | – | `result._databaseRestoredAt` | – | { _databaseRestoredAt: number \| null, … } | – | – | no |
 | `replication.sync` | Ship new WAL frames, checkpoint, snapshot and prune when due | – | `result` | – | { generation: string, shippedBytes: number, frames: number, checkpointed: boolean, pruned: number, … } | – | – | no |
 | `replication.snapshot` | Start a new generation with a full snapshot | – | `result` | – | { generation: string, bytes: number, … } | – | – | no |
 | `replication.listPoints` | Restore points (snapshots and WAL segments) | – | `result` | – | object[] | – | – | no |
