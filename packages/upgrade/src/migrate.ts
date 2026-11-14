@@ -8,6 +8,7 @@ import type { Persistence } from "@michaelthielemann/kestrel-contracts/persisten
 import { runShapeMigrations, type ModuleRun } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import { isRecord } from "./guards.ts";
 import { importInstalled } from "./installed.ts";
+import type { UpgradePlugin } from "./plugin.ts";
 import { projectStorages } from "./storages.ts";
 import { toolVersion } from "./versions.ts";
 
@@ -39,6 +40,10 @@ export interface MigrateStepOptions {
   answers?: Readonly<Record<string, string>>;
   now?: () => number;
   wrap?: (stores: { db: Persistence; blobs: Blobstore }) => { db: Persistence; blobs: Blobstore };
+  /** The host plugins the module configs are loaded through when `kestrel.config.ts` does not load by itself. */
+  plugins?: readonly UpgradePlugin[];
+  /** The media key prefix to convert to, in place of the one of `media-default`'s config. */
+  mediaPrefix?: string;
 }
 
 interface ClosablePersistence extends Persistence {
@@ -135,11 +140,15 @@ export async function runMigrateStep(options: MigrateStepOptions): Promise<Migra
   if (persistence === undefined) return { exitCode: 2, error: "the project's own @michaelthielemann/kestrel-persistence-sqlite could not be resolved; install the project's dependencies first" };
   const filesystem = await blobstoreOf(root);
   if (filesystem === undefined) return { exitCode: 2, error: "the project's own @michaelthielemann/kestrel-blobstore-filesystem could not be resolved; install the project's dependencies first" };
-  const { storages, unresolved } = await projectStorages(root, dbFile);
+  const { storages, unresolved, configFrom, configProblem, mediaPrefix } = await projectStorages(root, dbFile, { ...(options.plugins === undefined ? {} : { plugins: options.plugins }), ...(options.mediaPrefix === undefined ? {} : { mediaPrefix: options.mediaPrefix }) });
   if (unresolved.length > 0) {
     return { exitCode: 2, error: unresolved.map((u) => `the database holds ${u.collections.join(", ")}, but ${u.package}/storage could not be loaded from the project; install the project's 6.x dependencies first`).join("; ") };
   }
+  if (configProblem !== undefined && options.mediaPrefix === undefined && storages.length > 0) {
+    return { exitCode: 2, error: `${configProblem}; migrate needs the module config for the media key prefix, so make kestrel.config.ts load (with the environment it reads) or name the prefix with --media-prefix <prefix>; nothing was converted` };
+  }
   const notes: string[] = [];
+  if (mediaPrefix !== undefined) notes.push(`media/default converts to the key prefix "${mediaPrefix}" from ${configFrom}`);
   if (existsSync(`${dbFile}.instance`)) notes.push(`${dbFile}.instance exists: migrate neither takes nor honours the instance lock, so make sure no process uses this copy`);
   const opened = persistence.createPersistenceSqlite({ file: dbFile }, { logger: silentLogger });
   try {

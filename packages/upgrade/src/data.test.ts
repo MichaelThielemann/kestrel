@@ -10,7 +10,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createPersistenceSqlite } from "@michaelthielemann/kestrel-persistence-sqlite/impl";
 import { runDataStep, storageFindings } from "./data.ts";
 import { runUpgradeCli } from "./plugin.ts";
-import type { UpgradePlugin } from "./plugin.ts";
+import type { LoadedProject, UpgradePlugin } from "./plugin.ts";
 import type { Finding, UpgradeReport } from "./report.ts";
 
 const createdCopyDirs: string[] = [];
@@ -505,6 +505,32 @@ describe("runDataStep: data/media-layout", () => {
     slotted.close();
     const clean = await runDataStep(file, root);
     expect(clean.report?.findings.filter((f) => f.rule === "data/media-layout")).toEqual([]);
+  });
+
+  it("warns that the storage shape was checked with the defaults when kestrel.config.ts does not load, and takes the config from the host plugin otherwise", async () => {
+    const root = await moduleProjectRoot([{ use: "@michaelthielemann/kestrel-media-default", config: { prefix: "files/" } }]);
+    await writeFile(join(root, "kestrel.config.ts"), `throw new Error("a setting the config reads is not set");\n`);
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("media_items", { key: "string", folder: "string", filename: "string", location: "string", contentType: "string", size: "number", status: "string" });
+    await db.createOne("media_items", { id: "m1", key: "files/m1/hero.jpg", folder: "", filename: "hero.jpg", location: "hero.jpg", contentType: "image/jpeg", size: 3, status: "ready" });
+    db.close();
+    const host = (prefix: string): UpgradePlugin => ({
+      kind: "test-host",
+      detect: () => true,
+      dataModel: () => Promise.resolve(undefined),
+      load: () => Promise.resolve({ project: boundaryCast<LoadedProject>({ kind: "test-host", configFile: "kestrel.config.ts", moduleFiles: new Map(), pipelineFiles: [], input: { config: { modules: [{ use: "@michaelthielemann/kestrel-media-default", config: { prefix } }], triggers: [] }, modules: [], pipelines: [] } }, "host"), issues: [] }),
+    });
+    const unloaded = await runDataStep(file, root, [{ ...host("files/"), load: () => Promise.resolve({ issues: [{ message: "the host could not read its config either" }] }) }]);
+    const warning = unloaded.report?.findings.find((f) => f.id === "data/media-layout:config");
+    expect(warning).toMatchObject({ severity: "warning" });
+    expect(warning?.message).toContain("a setting the config reads is not set");
+    expect(warning?.message).toContain("the host could not read its config either");
+
+    const fromPlugin = await runDataStep(file, root, [host("files/")]);
+    expect(fromPlugin.report?.findings.filter((f) => f.rule === "data/media-layout")).toEqual([]);
+    const otherPrefix = await runDataStep(file, root, [host("media/")]);
+    expect(otherPrefix.report?.findings.find((f) => f.rule === "data/media-layout")).toMatchObject({ id: "data/media-layout:media/default", severity: "error" });
   });
 
   it("warns instead of guessing when the installed module has no storage export", async () => {

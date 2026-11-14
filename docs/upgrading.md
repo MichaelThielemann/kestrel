@@ -162,8 +162,11 @@ whose collections the database holds, taken from the `./storage` export of the m
 project has installed (found from the project or from one of its direct dependencies), through the
 project's own `persistence-sqlite` and `blobstore-filesystem`, in order: `media-default:id-key-layout`,
 then `images-default:variant-slots`. The media prefix comes from `media-default`'s entry in
-`kestrel.config.ts`; without a `kestrel.config.ts` (a project a host package loads) it is
-`media/`. Each original is copied to its new key, checked against the item's size and sha256 (a
+`kestrel.config.ts`. When that file does not load by itself (it reads environment variables that
+are not set, or an import only a host package resolves), the module configs come through the
+project's host plugin; when that does not load them either, `migrate` stops with exit code `2`,
+naming the error, before it converts anything. Without a `kestrel.config.ts` and without a host
+plugin the prefix is `media/`. The report names the prefix and where it came from. Each original is copied to its new key, checked against the item's size and sha256 (a
 difference is reported, and the item records those of the copy), and only then is the item
 switched to it. The duplicate variant rows of a slot are reduced to the newest finished one. Each
 module then gets a storage version row, which the start-up check of 6.0.0 reads.
@@ -178,6 +181,8 @@ module then gets a storage version row, which the start-up check of 6.0.0 reads.
   `media-default:id-key-layout:missing-original`. When none of the originals is there, `--blobs-dir`
   most likely names another directory than the copy of the blob store's root, such as a directory
   one level too deep. `--plan` reports the same as a note.
+- `--media-prefix <prefix>` names the media key prefix (`media-default`'s `prefix`, such as
+  `media/`) in place of the one of the config, also when the config does not load.
 - `--json` prints the report (`schema: 1`, one entry per module with its migrations, what they found
   and what they did).
 - Exit codes: `0` every module is in the 6.0.0 shape, `1` a migration is still pending (always
@@ -700,7 +705,9 @@ their ids, and the command that converts them: setup refuses such data in 6.0.0.
 [`kestrel upgrade migrate`](#7-converting-the-stored-media) on a copy of the data. A stored storage
 version that 6.0.0 does not read is an error too. When the installed module has no `./storage`
 export (its 5.x release is still installed), the finding is a warning: install the 6.0.0 packages
-and run `data` again.
+and run `data` again. The module configs, such as the media key prefix, come from
+`kestrel.config.ts`, or through the project's host plugin when that file does not load by itself;
+when neither loads, `data/media-layout:config` warns that the check ran with the defaults.
 
 #### data-redirect-reserved-paths
 A rule stored by the redirect editor whose `from` equals, lies below or, through a wildcard (`/**`,

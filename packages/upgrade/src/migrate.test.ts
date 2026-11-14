@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import dns from "node:dns";
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
@@ -16,6 +16,7 @@ import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { runCli } from "./cli-run.ts";
 import { runMigrateStep, type MigrateReport } from "./migrate.ts";
+import type { LoadedProject, UpgradePlugin } from "./plugin.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..", "..");
@@ -88,10 +89,10 @@ function state(copy: Copy): { media: unknown; variants: unknown; legacy: unknown
   };
 }
 
-async function cli(argv: string[]): Promise<{ code: number; out: string; errors: string }> {
+async function cli(argv: string[], plugins: readonly UpgradePlugin[] = []): Promise<{ code: number; out: string; errors: string }> {
   const out: string[] = [];
   const errors: string[] = [];
-  const code = await runCli(argv, { stdout: (l) => out.push(l), stderr: (l) => errors.push(l) });
+  const code = await runCli(argv, { stdout: (l) => out.push(l), stderr: (l) => errors.push(l), plugins });
   return { code, out: out.join("\n"), errors: errors.join("\n") };
 }
 
@@ -139,6 +140,88 @@ describe("kestrel upgrade migrate: arguments and refusals", () => {
   });
 });
 
+const FILES_PREFIX_MODULES = `[
+  { use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: "./data/blobs" } },
+  { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "./data/kestrel.db" } },
+  { use: "@michaelthielemann/kestrel-media-default", config: { prefix: "files/" } },
+  { use: "@michaelthielemann/kestrel-images-default", config: {} },
+]`;
+
+function projectWith(config: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "kestrel-upgrade-migrate-project-"));
+  copies.push(dir);
+  copyFileSync(join(PROJECT, "package.json"), join(dir, "package.json"));
+  symlinkSync(join(PROJECT, "node_modules"), join(dir, "node_modules"), "dir");
+  writeFileSync(join(dir, "kestrel.config.ts"), config);
+  return dir;
+}
+
+function failingConfigProject(): string {
+  return projectWith(`import { defineConfig } from "@michaelthielemann/kestrel/defineConfig";
+if (process.env.KESTREL_MIGRATE_TEST_SETTING !== "on") throw new Error("KESTREL_MIGRATE_TEST_SETTING is not set");
+export default defineConfig({ modules: ${FILES_PREFIX_MODULES} });
+`);
+}
+
+function filesPrefixPlugin(): UpgradePlugin {
+  const project = { kind: "test-host", configFile: "kestrel.config.ts", moduleFiles: new Map(), pipelineFiles: [], input: { config: { modules: [{ use: "@michaelthielemann/kestrel-media-default", config: { prefix: "files/" } }], triggers: [] }, modules: [], pipelines: [] } };
+  return { kind: "test-host", detect: () => true, load: () => Promise.resolve({ project: boundaryCast<LoadedProject>(project, "host"), issues: [] }) };
+}
+
+function keysOf(copy: Copy): string[] {
+  return rows(copy.db, "SELECT id, key FROM media_items ORDER BY id").map((r) => String(r.key).replace(String(r.id), "<id>"));
+}
+
+describe("kestrel upgrade migrate: the module config it converts with", () => {
+  it("stops when kestrel.config.ts exists but does not load, names the error and converts nothing", async () => {
+    const copy = fixtureCopy();
+    const pristine = fixtureCopy();
+    const before = files(copy.blobs);
+    const run = await cli(["migrate", "--root", failingConfigProject(), "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(run.code).toBe(2);
+    expect(run.errors).toContain("KESTREL_MIGRATE_TEST_SETTING is not set");
+    expect(run.errors).toContain("--media-prefix");
+    expect(files(copy.blobs)).toEqual(before);
+    expect(rows(copy.db, "SELECT id, key FROM media_items ORDER BY id")).toEqual(rows(pristine.db, "SELECT id, key FROM media_items ORDER BY id"));
+  });
+
+  it("takes the media prefix from kestrel.config.ts and names it in a note", async () => {
+    const copy = fixtureCopy();
+    const root = projectWith(`import { defineConfig } from "@michaelthielemann/kestrel/defineConfig";
+export default defineConfig({ modules: ${FILES_PREFIX_MODULES} });
+`);
+    const run = await cli(["migrate", "--root", root, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(run.code, run.errors).toBe(0);
+    expect(run.out).toContain('note: media/default converts to the key prefix "files/" from kestrel.config.ts');
+    expect(keysOf(copy).every((key) => key.startsWith("files/<id>/"))).toBe(true);
+  });
+
+  it("takes the module config from the host plugin when kestrel.config.ts does not load by itself", async () => {
+    const copy = fixtureCopy();
+    const run = await cli(["migrate", "--root", failingConfigProject(), "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)], [filesPrefixPlugin()]);
+    expect(run.code, run.errors).toBe(0);
+    expect(run.out).toContain('note: media/default converts to the key prefix "files/" from the "test-host" plugin');
+    expect(keysOf(copy).every((key) => key.startsWith("files/<id>/"))).toBe(true);
+  });
+
+  it("refuses a --media-prefix that media-default would not accept", async () => {
+    const copy = fixtureCopy();
+    for (const prefix of ["media", "/media/", ""]) {
+      const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--media-prefix", prefix]);
+      expect(run.code, prefix).toBe(2);
+      expect(run.errors, prefix).toContain('--media-prefix must be one or more "<segment>/" parts');
+    }
+  });
+
+  it("converts with the prefix --media-prefix names, whether or not the config loads", async () => {
+    const copy = fixtureCopy();
+    const run = await cli(["migrate", "--root", failingConfigProject(), "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy), "--media-prefix", "files/"]);
+    expect(run.code, run.errors).toBe(0);
+    expect(run.out).toContain('note: media/default converts to the key prefix "files/" from --media-prefix');
+    expect(keysOf(copy).every((key) => key.startsWith("files/<id>/"))).toBe(true);
+  });
+});
+
 describe("kestrel upgrade migrate on the 5.8.1 data", () => {
   it("plans without converting a row or writing a blob", async () => {
     const copy = fixtureCopy();
@@ -165,7 +248,8 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
     const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
     expect(run.errors).toBe("");
     expect(run.code).toBe(0);
-    expect(run.out).toContain("note: ");
+    expect(run.out).toContain(`note: ${sidecar} exists`);
+    expect(run.out).toContain('note: media/default converts to the key prefix "media/" from kestrel.config.ts');
     expect(run.out).toContain("media/default: migrated");
     expect(run.out).toContain("images/default: migrated");
     expect(readFileSync(sidecar, "utf8")).toBe(lock);

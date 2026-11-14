@@ -518,14 +518,19 @@ function storageFinding(id: string, severity: Finding["severity"], module: strin
  * `data/media-layout`: runs the `detect` of every storage migration of the modules whose collections
  * `file` holds, taken from each module's own `./storage` export as the project at `root` has it
  * installed, against `db` (a verified copy of `file`); nothing is applied and no version row is
- * written. A module with data in an older shape, or with a stored version this release does not
- * read, is an error naming the migration and the command that runs it.
+ * written. The module configs come from `kestrel.config.ts`, or through the host plugin among
+ * `plugins` when that file does not load by itself; when neither loads, a warning says the check ran
+ * with the defaults. A module with data in an older shape, or with a stored version this release does
+ * not read, is an error naming the migration and the command that runs it.
  */
-export async function storageFindings(root: string, file: string, db: Persistence): Promise<Finding[]> {
-  const { storages, unresolved } = await projectStorages(root, file);
+export async function storageFindings(root: string, file: string, db: Persistence, plugins: readonly UpgradePlugin[] = []): Promise<Finding[]> {
+  const { storages, unresolved, configProblem } = await projectStorages(root, file, { plugins });
   const findings: Finding[] = unresolved.map((u) =>
     storageFinding(u.package, "warning", u.package, `the database holds ${u.collections.join(", ")}, but the installed ${u.package} has no ./storage export, so the storage shape of its data was not checked`, "install the 6.0.0 packages, then run data again"),
   );
+  if (configProblem !== undefined && storages.length > 0) {
+    findings.push(storageFinding("config", "warning", "", `${configProblem}; the storage shape was checked with the modules' default config, such as the media key prefix "media/"`, "make kestrel.config.ts load (with the environment it reads), then run data again"));
+  }
   if (storages.length === 0) return findings;
   const run = await runShapeMigrations({ storages, db, blobs: NO_BLOBS, apply: false, plan: false, blobWrites: false });
   if (isErr(run)) return [...findings, storageFinding("detect-failed", "warning", "", `the storage migrations could not detect the old shape: ${run.error.message}`, "run kestrel upgrade migrate --plan on a copy of the data to see what it would convert")];
@@ -650,7 +655,7 @@ export async function runDataStep(dbFile: string, root: string, plugins: readonl
       const { model: contentModel, issues } = await activeDataModel(root, plugin);
       dataModelIssues = [...loadIssuesAsFindings(detectIssues), ...issues];
       counts = contentModel === undefined ? {} : await underscoreFieldCounts(copy, db, contentModel);
-      mediaLayout = await storageFindings(root, copy, db);
+      mediaLayout = await storageFindings(root, copy, db, plugins);
       translationSlugs = await translationSlugFindings(db, contentModel);
       redirectRules = await redirectReservedPathFindings(db, await moduleConfigOf(root, "redirects-default"));
       fromPlugin = await pluginDataFindings(db, root, plugin, contentModel);

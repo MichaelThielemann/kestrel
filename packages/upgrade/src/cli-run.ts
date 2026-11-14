@@ -1001,7 +1001,12 @@ async function runMigrate(args: ParsedArgs, stdout: (line: string) => void, stde
   }
   const answersFile = stringFlag(args, "answers");
   const answers = answersFile === undefined ? undefined : Object.fromEntries(parseAnswersFile(readFileSync(resolve(answersFile), "utf8")));
-  const result = await runMigrateStep({ dbFile: resolve(db), blobsDir: resolve(blobsDir), root, plan: boolFlag(args, "plan"), ...(answers === undefined ? {} : { answers }) });
+  const mediaPrefix = stringFlag(args, "media-prefix");
+  if (mediaPrefix !== undefined && !/^([A-Za-z0-9._-]+\/)+$/.test(mediaPrefix)) {
+    stderr(`--media-prefix must be one or more "<segment>/" parts, as media-default's prefix, e.g. "media/"; got "${mediaPrefix}"`);
+    return 2;
+  }
+  const result = await runMigrateStep({ dbFile: resolve(db), blobsDir: resolve(blobsDir), root, plan: boolFlag(args, "plan"), plugins: options.plugins ?? [], ...(answers === undefined ? {} : { answers }), ...(mediaPrefix === undefined ? {} : { mediaPrefix }) });
   if (result.error !== undefined) {
     stderr(result.error);
     return result.exitCode;

@@ -930,7 +930,7 @@ Net changes since 5.8.2.
     never runs at start-up.
   - `media.reconcile` and `media.reconcileDelete` gain `legacyKeys`: the recorded 5.x blobs, reported
     apart from `blobsWithoutRow` and never deleted.
-  - `kestrel upgrade migrate --db <file> --blobs-dir <dir> [--root <dir>] [--plan] [--answers <file>] [--json]`
+  - `kestrel upgrade migrate --db <file> --blobs-dir <dir> [--root <dir>] [--plan] [--answers <file>] [--media-prefix <prefix>] [--json]`
     converts a copy of the database and of the filesystem blob store in place, offline and without
     network access: it runs the storage migrations of every module whose collections the database
     holds, from the `./storage` export of the module package the project has installed (found from the
@@ -938,7 +938,11 @@ Net changes since 5.8.2.
     `blobstore-filesystem`. Old blobs stay where they are; a second run changes nothing; a run after an
     interruption continues where it stopped. `--plan` only detects and counts. An item whose original is
     not under `--blobs-dir` stops the run before anything is converted, with exit `2`, until
-    `--answers` answers `media-default:id-key-layout:missing-original` with `keep` or `trash`. It neither takes nor
+    `--answers` answers `media-default:id-key-layout:missing-original` with `keep` or `trash`. The module
+    configs come from `kestrel.config.ts`, or through the project's host plugin when that file does not
+    load by itself; when neither loads, migrate stops with exit `2` before converting anything, unless
+    `--media-prefix` names the prefix. `kestrel upgrade data` warns with `data/media-layout:config` in
+    that case. It neither takes nor
     honours the instance lock, so a lock file left next to the copy does not stop it. Exit `0` when
     every module is in this release's shape, `1` when a migration is still pending, `2` when the run
     could not start or a migration failed. `docs/upgrading.md` § "Converting the stored media".
