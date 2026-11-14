@@ -1428,10 +1428,12 @@ Net changes since 5.8.2.
   `MetadataDirective: "COPY"`, then reads the destination until it reports the source's size and the
   ETag the copy returned (an overwritten destination can look stale for a moment) and answers
   `VERIFY_FAILED` otherwise. With `ifMatch` it answers `PRECONDITION_FAILED` when the source no longer
-  has that ETag. A store that enforces `x-amz-copy-source-if-match` writes nothing then; for a store that
-  ignores the header, answers 501 or 400, or refuses the condition although the source is unchanged, the
-  copy is made without the header, the ETag is compared before and after it, and a destination written
-  from a changed source is removed again (`sourceCheck: "compare"` skips the header). `details.reason`
+  has that ETag. A store that enforces `x-amz-copy-source-if-match` writes nothing then, and its 412 is final;
+  for a store that ignores the header or answers 501 or 400, the copy is made without the header, the
+  ETag is compared before and after it, and a destination written from a changed source is removed
+  again (`sourceCheck: "compare"` skips the header and suits a store that refuses every conditional
+  request). Where the expected, the source's and the copy's ETag are plain content hashes, the ETag the
+  copy reports is compared too, which catches an overwrite that reads of the source did not show yet. `details.reason`
   and `details.destinationRemoved` say what happened, and a `TRANSIENT` after the destination was
   written removes it and reports `destinationWritten` and `destinationRemoved`. Copying an object onto
   itself throws. A source above 5 GiB answers `PAYLOAD_TOO_LARGE`. `listDetailed` throws when a store

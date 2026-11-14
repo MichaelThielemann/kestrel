@@ -1,4 +1,5 @@
 import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
@@ -27,6 +28,8 @@ interface FakeBehaviour {
   truncateCopyTo?: number;
   pageSize?: number;
   clockOffsetMs?: number;
+  md5Etags?: boolean;
+  serverSideEncryption?: "aws:kms";
 }
 
 function httpError(name: string, status: number): Error {
@@ -38,13 +41,19 @@ function fakeS3(behaviour: FakeBehaviour = {}) {
   const sent: unknown[] = [];
   let listCalls = 0;
   let sequence = 0;
-  const etagOf = (): string => `"etag-${++sequence}"`;
+  const etagOf = (data: Uint8Array): string => {
+    sequence += 1;
+    if (behaviour.md5Etags === true) return `"${createHash("md5").update(data).digest("hex")}"`;
+    if (behaviour.serverSideEncryption !== undefined) return `"${sequence.toString(16).padStart(32, "0")}"`;
+    return `"etag-${sequence}"`;
+  };
+  const encryption = behaviour.serverSideEncryption === undefined ? {} : { ServerSideEncryption: behaviour.serverSideEncryption };
 
   function store(key: string, data: Uint8Array): void {
     const existing = objects.get(key);
     const object: StoredObject = {
       data,
-      etag: etagOf(),
+      etag: etagOf(data),
       lastModified: new Date(Date.now() + (behaviour.clockOffsetMs ?? 0)),
       visibleFromListing: listCalls + (behaviour.listingLag ?? 0) + 1,
     };
@@ -95,9 +104,9 @@ function fakeS3(behaviour: FakeBehaviour = {}) {
         if (object === undefined) throw httpError("NotFound", 404);
         if (object.previous !== undefined && object.previous.remainingStaleHeads > 0) {
           object.previous.remainingStaleHeads -= 1;
-          return { ContentLength: object.previous.size, ETag: object.previous.etag, LastModified: new Date(Math.floor(object.lastModified.getTime() / 1000) * 1000) };
+          return { ...encryption, ContentLength: object.previous.size, ETag: object.previous.etag, LastModified: new Date(Math.floor(object.lastModified.getTime() / 1000) * 1000) };
         }
-        return { ContentLength: object.data.byteLength, ETag: object.etag, LastModified: new Date(Math.floor(object.lastModified.getTime() / 1000) * 1000) };
+        return { ...encryption, ContentLength: object.data.byteLength, ETag: object.etag, LastModified: new Date(Math.floor(object.lastModified.getTime() / 1000) * 1000) };
       }
       if (command instanceof ListObjectsV2Command) {
         listCalls += 1;
@@ -125,7 +134,7 @@ function fakeS3(behaviour: FakeBehaviour = {}) {
         if (conditional([CopySourceIfMatch]) && CopySourceIfMatch !== undefined && CopySourceIfMatch !== object.etag) throw httpError("PreconditionFailed", 412);
         const data = behaviour.truncateCopyTo === undefined ? object.data : object.data.slice(0, behaviour.truncateCopyTo);
         store(command.input.Key ?? "", data);
-        return { CopyObjectResult: { ETag: objects.get(command.input.Key ?? "")?.etag } };
+        return { ...encryption, CopyObjectResult: { ETag: objects.get(command.input.Key ?? "")?.etag } };
       }
       throw new Error("unexpected command");
     },
@@ -433,10 +442,7 @@ describe("blobstore/s3 admin: copy", () => {
       };
     };
     const copiesOf = (s3: ReturnType<typeof fakeS3>): CopyObjectCommand[] => s3.sent.filter((sent): sent is CopyObjectCommand => sent instanceof CopyObjectCommand);
-    const stores = [
-      ["refuses every conditional request", { refuseAllConditions: true }],
-      ["answers 400 to the conditional header", { rejectConditionHeaders: true }],
-    ] as const;
+    const stores = [["answers 400 to the conditional header", { rejectConditionHeaders: true }]] as const;
 
     it.each(stores)("copies an unchanged source on a store that %s", async (_label, behaviour) => {
       const s3 = fakeS3(behaviour);
@@ -445,6 +451,30 @@ describe("blobstore/s3 admin: copy", () => {
       expect(expectOk(await admin.copy("src", "dst", { ifMatch: normalizeEtag(s3.etagOf("src")) })).size).toBe(4);
       expect(s3.objects.has("dst")).toBe(true);
       expect(copiesOf(s3).map((copy) => copy.input.CopySourceIfMatch !== undefined)).toEqual([true, false]);
+    });
+
+    it("treats a 412 as final on a store that refuses every conditional request, and copies in compare mode", async () => {
+      const s3 = fakeS3({ refuseAllConditions: true });
+      s3.put("src", "AAAA");
+      const expected = normalizeEtag(s3.etagOf("src"));
+      const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+      const error = expectErr(await admin.copy("src", "dst", { ifMatch: expected }), "PRECONDITION_FAILED");
+      expect(error.details).toEqual({ expectedEtag: expected, foundEtag: expected, reason: "store-refused", destinationWritten: false });
+      expect(copiesOf(s3).length).toBe(1);
+      expect(s3.objects.has("dst")).toBe(false);
+      expect(expectOk(await admin.copy("src", "dst", { ifMatch: expected, sourceCheck: "compare" })).size).toBe(4);
+    });
+
+    it("keeps the store's 412 when the source is read stale after being overwritten", async () => {
+      const s3 = fakeS3({ staleHeadsAfterOverwrite: 3 });
+      s3.put("src", "AAAA");
+      const listed = normalizeEtag(s3.etagOf("src"));
+      s3.put("src", "BBBB");
+      const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+      const error = expectErr(await admin.copy("src", "dst", { ifMatch: listed }), "PRECONDITION_FAILED");
+      expect(error.details).toMatchObject({ expectedEtag: listed, reason: "store-refused", destinationWritten: false });
+      expect(copiesOf(s3).length).toBe(1);
+      expect(s3.objects.has("dst")).toBe(false);
     });
 
     it("reports the found ETag when a store that refuses every conditional request meets a changed source", async () => {
@@ -544,6 +574,79 @@ describe("blobstore/s3 admin: copy", () => {
       const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
       await expect(admin.copy("src", "dst", { ifMatch: normalizeEtag(s3.etagOf("src")) })).rejects.toThrow(/AccessDenied/);
       expect(attempts).toBe(1);
+    });
+  });
+
+  describe("when the source is read stale after being overwritten", () => {
+    const staleSource = async (behaviour: FakeBehaviour) => {
+      const s3 = fakeS3({ staleHeadsAfterOverwrite: 5, md5Etags: true, ...behaviour });
+      s3.put("src", "AAAA");
+      const listed = normalizeEtag(s3.etagOf("src"));
+      s3.put("src", "BBBB");
+      return { s3, listed, admin: createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions) };
+    };
+
+    it.each([
+      ["compares the source", { ignoreConditions: true }, "compare"],
+      ["ignores the conditional header", { ignoreConditions: true }, "header"],
+    ] as const)("removes the destination when the store %s, by the ETag the copy reports", async (_label, behaviour, sourceCheck) => {
+      const { s3, listed, admin } = await staleSource(behaviour);
+      const error = expectErr(await admin.copy("src", "dst", { ifMatch: listed, sourceCheck }), "PRECONDITION_FAILED");
+      expect(error.details).toEqual({ expectedEtag: listed, foundEtag: normalizeEtag(s3.etagOf("src")), reason: "source-changed", destinationWritten: true, destinationRemoved: true });
+      expect(s3.objects.has("dst")).toBe(false);
+    });
+
+    it("does not compare the copy's ETag without ifMatch", async () => {
+      const { s3, admin } = await staleSource({ ignoreConditions: true });
+      expect(expectOk(await admin.copy("src", "dst")).size).toBe(4);
+      expect(s3.objects.has("dst")).toBe(true);
+    });
+
+    it("does not refuse a copy whose ETag matches", async () => {
+      const s3 = fakeS3({ md5Etags: true });
+      s3.put("src", "AAAA");
+      const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+      const copied = expectOk(await admin.copy("src", "dst", { ifMatch: normalizeEtag(s3.etagOf("src")), sourceCheck: "compare" }));
+      expect(copied.etag).toBe(normalizeEtag(s3.etagOf("src")));
+    });
+
+    it("leaves the ETag alone when the source ETag is not a plain content hash", async () => {
+      const s3 = fakeS3();
+      s3.put("src", "AAAA");
+      const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+      expectOk(await admin.copy("src", "dst", { ifMatch: normalizeEtag(s3.etagOf("src")), sourceCheck: "compare" }));
+      expect(s3.etagOf("dst")).not.toBe(s3.etagOf("src"));
+    });
+
+    it("leaves the ETag alone when the copy reports server-side encryption", async () => {
+      const s3 = fakeS3({ serverSideEncryption: "aws:kms" });
+      s3.put("src", "AAAA");
+      const original = s3.client.send.bind(s3.client);
+      s3.client.send = async (command) => {
+        const result = await original(command);
+        if (command instanceof HeadObjectCommand && command.input.Key === "src") return { ...boundaryCast<object>(result, "host"), ServerSideEncryption: undefined };
+        return result;
+      };
+      const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+      expectOk(await admin.copy("src", "dst", { ifMatch: normalizeEtag(s3.etagOf("src")), sourceCheck: "compare" }));
+    });
+
+    it("leaves the ETag alone when the source is server-side encrypted and the copy is not", async () => {
+      const s3 = fakeS3({ serverSideEncryption: "aws:kms" });
+      s3.put("src", "AAAA");
+      const original = s3.client.send.bind(s3.client);
+      s3.client.send = async (command) => {
+        const result = await original(command);
+        if (command instanceof CopyObjectCommand) {
+          const hash = `"${createHash("md5").update("AAAA").digest("hex")}"`;
+          const written = s3.objects.get("dst");
+          if (written !== undefined) written.etag = hash;
+          return { CopyObjectResult: { ETag: hash } };
+        }
+        return result;
+      };
+      const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
+      expectOk(await admin.copy("src", "dst", { ifMatch: normalizeEtag(s3.etagOf("src")), sourceCheck: "compare" }));
     });
   });
 
@@ -824,6 +927,35 @@ describe("blobstore/s3 admin: cleanup of scratch objects", () => {
     denyDeletes(s3, httpError("AccessDenied", 403));
     const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, { ...fastOptions, observeAttempts: 2 });
     expectErr(await admin.serverTime(), "TRANSIENT");
+  });
+});
+
+describe("blobstore/s3 admin: probe objects of a write that failed", () => {
+  const landThenFail = (s3: ReturnType<typeof fakeS3>): void => {
+    const original = s3.client.send.bind(s3.client);
+    let failed = false;
+    s3.client.send = async (command) => {
+      const result = await original(command);
+      if (command instanceof PutObjectCommand && !failed) {
+        failed = true;
+        throw httpError("ServiceUnavailable", 503);
+      }
+      return result;
+    };
+  };
+
+  it("removes the clock probe object when its write is reported as failed after it arrived", async () => {
+    const s3 = fakeS3();
+    landThenFail(s3);
+    expectErr(await createS3Admin({ bucket: "b", prefix: "media/" }, s3.client, fastOptions).serverTime(), "TRANSIENT");
+    expect(s3.objects.size).toBe(0);
+  });
+
+  it("removes the capability probe object when its write is reported as failed after it arrived", async () => {
+    const s3 = fakeS3();
+    landThenFail(s3);
+    expectErr(await createS3Admin({ bucket: "b", prefix: "media/" }, s3.client, fastOptions).probeCapabilities(), "TRANSIENT");
+    expect(s3.objects.size).toBe(0);
   });
 });
 

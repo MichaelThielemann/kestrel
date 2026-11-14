@@ -59,12 +59,16 @@ if (first !== undefined) {
   old metadata for a moment, and answers `VERIFY_FAILED` with the expected and actual size and ETag if it never
   does. With `ifMatch` (the ETag from a listing) it answers `PRECONDITION_FAILED` when the source changed.
   By default the store's own `x-amz-copy-source-if-match` does the check where it works and writes nothing
-  then (`details.reason: "store-refused"`, with the ETag found in `details.foundEtag`). When a store answers
-  501 or 400 to the header, or refuses the condition although the source still has the expected ETag, the
-  client copies without the header, compares the source's ETag after the copy and removes a destination
-  written from a changed source (`details.reason: "source-changed"` or `"source-missing"`,
+  then (`details.reason: "store-refused"`, with the ETag a later read found in `details.foundEtag`); the
+  store's 412 is final even when that read still shows the expected ETag. When a store answers 501 or 400 to
+  the header, the client copies without it, compares the source's ETag after the copy and removes a
+  destination written from a changed source (`details.reason: "source-changed"` or `"source-missing"`,
   `details.destinationRemoved`). `sourceCheck: "compare"` skips the header and always compares; use it when
-  `probeCapabilities` did not report `copySourceIfMatch` as supported. A destination that fails verification
+  `probeCapabilities` did not report `copySourceIfMatch` as supported, which includes a store that refuses
+  every conditional request (`always-refused`). Where the expected ETag, the source's and the copy's are plain
+  content hashes (32 hex digits, no server-side encryption other than SSE-S3), the ETag the copy reports is
+  compared with the expected one too, so a source overwritten while reads of it still look stale is caught;
+  other ETags are only compared by reading the source. A destination that fails verification
   is removed too, and an object that already existed under `to` is overwritten and removed with it, so copy to
   keys that are free. Copying an object onto itself throws. A source that changes and returns to identical
   content during the copy cannot be detected. A source above 5 GiB answers `PAYLOAD_TOO_LARGE`, since one copy
@@ -83,9 +87,10 @@ if (first !== undefined) {
   and the matching one accepted. It is `false` for `"always-refused"` (the matching condition got a 412 too),
   `"ignored"` (the store accepted the stale write), `"not-implemented"` (501) and `"error"` (`detail` names
   it). A capability nobody observed is not assumed.
-- `serverTime()` and `probeCapabilities()` remove their scratch objects and need the `DeleteObject`
-  permission for that; a denied delete throws, while a transient failure to delete, and a 404 for a scratch
-  key that was never written, are ignored.
+- `serverTime()` and `probeCapabilities()` remove their scratch objects, also after a write that failed, and
+  need the `DeleteObject` permission for that. A denied delete throws when the probe itself succeeded; when
+  the probe failed, its own error is returned and the scratch object may stay. A transient failure to delete,
+  and a 404 for a scratch key that was never written, are ignored.
 
 `createS3Admin(config, client, options)` accepts a client for tests and `S3AdminOptions`: `verifyAttempts`,
 `retryDelayMs`, `observeAttempts`, `sleep` and `now`.

@@ -40,15 +40,22 @@ export type S3CopyError = KestrelError<"NOT_FOUND" | "TRANSIENT" | "PAYLOAD_TOO_
 export interface CopyOptions {
   /**
    * The ETag the caller listed for the source. The copy is refused when the source no longer has it. A store that
-   * enforces `x-amz-copy-source-if-match` writes nothing then. For a store that ignores the header, answers 501
-   * or 400, or refuses the condition although the source is unchanged, the copy is made without the header, the
-   * source is read again afterwards and a destination written from a changed source is removed.
+   * enforces `x-amz-copy-source-if-match` writes nothing then, and its 412 is final even when a read of the source
+   * still shows the listed ETag. For a store that ignores the header, or answers 501 or 400, the copy is made
+   * without it, the source is read again afterwards and a destination written from a changed source is removed.
+   * A store that refuses every conditional request needs `sourceCheck: "compare"`.
+   *
+   * Reading the source can lag behind an overwrite. When the listed ETag, the source's and the copy's are plain
+   * content hashes (32 hex digits, no server-side encryption other than SSE-S3), the ETag the copy reports is
+   * compared with this one as well, which catches an overwrite that the reads of the source did not show yet. Other
+   * ETags are only compared by reading the source.
    */
   ifMatch?: string;
   /**
    * How `ifMatch` is checked. `"header"` (default) lets the store check it and falls back to comparing when the
-   * store cannot. `"compare"` never sends the header and only compares the source's ETag before and after the
-   * copy; pass it when `probeCapabilities` did not report `copySourceIfMatch` as supported.
+   * store ignores the header or answers 501 or 400. `"compare"` never sends the header and only compares the
+   * source's ETag before and after the copy; pass it when `probeCapabilities` did not report `copySourceIfMatch`
+   * as supported, including `always-refused`.
    */
   sourceCheck?: "header" | "compare";
 }
@@ -122,7 +129,8 @@ export interface S3Admin {
    * source's size and the ETag the copy returned, read again while an overwritten destination still looks stale.
    * With `ifMatch` the copy is refused when the source changed, both by the store (`x-amz-copy-source-if-match`)
    * and, for stores that ignore, reject or always refuse that header (see `CopyOptions.sourceCheck`), by comparing
-   * the source's ETag before and after the copy. A destination written from a source that changed, or that fails
+   * the source's ETag before and after the copy, and by the ETag the copy reports where that is a content hash.
+   * A destination written from a source that changed, or that fails
    * verification, is removed again; an object that existed under `to` before is overwritten and removed too, so
    * copy to keys that are free. A source that changed and returned to its earlier content during the copy cannot
    * be told apart. Sources above 5 GiB are refused. Copying an object onto itself throws.
@@ -131,12 +139,14 @@ export interface S3Admin {
   /**
    * Reads the store's clock: writes a probe object, lists until it appears and returns its `LastModified`, which
    * listings report with at least whole-second precision (some stores report milliseconds), so `skewMs` is accurate
-   * to about a second. The probe object is removed again; a denied delete throws.
+   * to about a second. The probe object is removed again, also after a write that failed; a denied delete throws
+   * unless the probe failed anyway, in which case the original error is returned.
    */
   serverTime(): Promise<Result<ServerClock, S3AdminError>>;
   /**
    * Tests which write conditions the store enforces, on scratch keys under the configured prefix that are removed
-   * afterwards; a denied delete throws. A store that ignores a condition accepts the stale write, and a store that
+   * afterwards, also after a write that failed; a denied delete throws unless the probe failed anyway, in which case
+   * the original error is returned. A store that ignores a condition accepts the stale write, and a store that
    * refuses every conditional request also refuses the matching one, so a probe reports a capability as supported
    * only after it saw the stale condition refused and the matching one accepted.
    */
@@ -190,6 +200,12 @@ type PreconditionReason = "store-refused" | "source-changed" | "source-missing";
 
 function preconditionFailed(key: string, details: { expectedEtag: string; foundEtag: string | null; reason: PreconditionReason; destinationWritten: boolean; destinationRemoved?: boolean }): S3CopyError {
   return customFailure("PRECONDITION_FAILED", 412, `blobstore/s3 admin: ${JSON.stringify(key)} no longer has the expected ETag`, { details });
+}
+
+const PLAIN_MD5_ETAG = /^[0-9a-f]{32}$/i;
+
+function hasCustomEtag(response: { ServerSideEncryption?: string; SSECustomerAlgorithm?: string }): boolean {
+  return response.SSECustomerAlgorithm !== undefined || (response.ServerSideEncryption !== undefined && response.ServerSideEncryption !== "AES256");
 }
 
 function errorName(cause: unknown): string {
@@ -324,28 +340,36 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
     }));
   }
 
-  async function head(key: string): Promise<Result<ObjectInfo | null, S3AdminError>> {
+  async function readHead(key: string): Promise<Result<{ info: ObjectInfo | null; customEtag: boolean }, S3AdminError>> {
     const target = fullKey(key);
     try {
-      const out = boundaryCast<{ ContentLength?: number; ETag?: string; LastModified?: Date }>(await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: target })), "host");
-      return ok({ key, size: out.ContentLength ?? 0, etag: normalizeEtag(out.ETag ?? ""), lastModified: out.LastModified?.getTime() ?? null });
+      const out = boundaryCast<{ ContentLength?: number; ETag?: string; LastModified?: Date; ServerSideEncryption?: string; SSECustomerAlgorithm?: string }>(await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: target })), "host");
+      return ok({
+        info: { key, size: out.ContentLength ?? 0, etag: normalizeEtag(out.ETag ?? ""), lastModified: out.LastModified?.getTime() ?? null },
+        customEtag: hasCustomEtag(out),
+      });
     } catch (cause) {
       if (isNotFound(cause)) {
         await verifyBucket();
-        return ok(null);
+        return ok({ info: null, customEtag: false });
       }
       if (isTransient(cause)) return err(describeFailure(`head ${JSON.stringify(key)}`, cause));
       throw cause;
     }
   }
 
+  async function head(key: string): Promise<Result<ObjectInfo | null, S3AdminError>> {
+    const read = await readHead(key);
+    return read.ok ? ok(read.value.info) : read;
+  }
+
   async function serverTime(): Promise<Result<ServerClock, S3AdminError>> {
     const key = `${CLOCK_PREFIX}${randomUUID()}`;
-    const before = now();
-    const written = await guarded("clock probe write", () => write(key, new Uint8Array(0)));
-    if (!written.ok) return written;
-    const localMs = Math.round((before + now()) / 2);
     return withScratch([key], async () => {
+      const before = now();
+      const written = await guarded("clock probe write", () => write(key, new Uint8Array(0)));
+      if (!written.ok) return written;
+      const localMs = Math.round((before + now()) / 2);
       for (let attempt = 0; attempt < observeAttempts; attempt += 1) {
         if (attempt > 0) await sleep(retryDelayMs);
         const listed = await listDetailed(key);
@@ -363,8 +387,6 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
     const copied = `${scratch}copy`;
     const fresh = `${scratch}fresh`;
     const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
-    const created = await guarded("capability probe write", () => write(original, bytes("one")));
-    if (!created.ok) return created;
     const currentEtag = async (): Promise<string> => {
       const out = boundaryCast<{ ETag?: string }>(await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: fullKey(original) })), "host");
       return `"${normalizeEtag(out.ETag ?? "")}"`;
@@ -372,6 +394,8 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
     const copyFromOriginal = (condition: string): Promise<unknown> =>
       client.send(new CopyObjectCommand({ Bucket: config.bucket, Key: fullKey(copied), CopySource: `${config.bucket}/${fullKey(original).split("/").map(encodeURIComponent).join("/")}`, CopySourceIfMatch: condition }));
     return withScratch([original, copied, fresh], async () => {
+      const created = await guarded("capability probe write", () => write(original, bytes("one")));
+      if (!created.ok) return created;
       const conditionalCreate = await classify(
         () => write(original, bytes("two"), { ifNoneMatch: "*" }),
         () => write(fresh, bytes("one"), { ifNoneMatch: "*" }),
@@ -409,10 +433,10 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
 
     async copy(from, to, copyOptions = {}) {
       if (fullKey(from) === fullKey(to)) throw new Error(`blobstore/s3 admin: cannot copy ${JSON.stringify(from)} onto itself`);
-      const source = await head(from);
+      const source = await readHead(from);
       if (!source.ok) return source;
-      if (source.value === null) return err(failure("NOT_FOUND", `blobstore/s3 admin: ${JSON.stringify(from)} not found`));
-      const expected = source.value;
+      if (source.value.info === null) return err(failure("NOT_FOUND", `blobstore/s3 admin: ${JSON.stringify(from)} not found`));
+      const expected = source.value.info;
       if (expected.size > MAX_SINGLE_COPY_BYTES) {
         return err(failure("PAYLOAD_TOO_LARGE", `blobstore/s3 admin: ${JSON.stringify(from)} is ${expected.size} bytes, above the ${MAX_SINGLE_COPY_BYTES} bytes one copy request moves`));
       }
@@ -442,7 +466,6 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
         }
         const current = await head(from);
         if (!current.ok) return { refusal: current.error };
-        if (current.value !== null && current.value.etag === ifMatch) return { response: await send(false) };
         return { refusal: refused(current.value === null ? "source-missing" : "store-refused", current.value?.etag ?? null, false) };
       };
       let response: unknown;
@@ -456,10 +479,15 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
         if (isTransient(cause)) return err(describeFailure(`copy ${JSON.stringify(from)} to ${JSON.stringify(to)}`, cause));
         throw cause;
       }
-      const copiedEtag = boundaryCast<{ CopyObjectResult?: { ETag?: string } }>(response, "host").CopyObjectResult?.ETag;
-      const expectedEtag = copiedEtag === undefined ? null : normalizeEtag(copiedEtag);
+      const copied = boundaryCast<{ CopyObjectResult?: { ETag?: string }; ServerSideEncryption?: string; SSECustomerAlgorithm?: string }>(response, "host");
+      const expectedEtag = copied.CopyObjectResult?.ETag === undefined ? null : normalizeEtag(copied.CopyObjectResult.ETag);
 
       if (ifMatch !== undefined) {
+        const comparable = !source.value.customEtag && !hasCustomEtag(copied) && PLAIN_MD5_ETAG.test(ifMatch) && expectedEtag !== null && PLAIN_MD5_ETAG.test(expectedEtag);
+        if (comparable && expectedEtag.toLowerCase() !== ifMatch.toLowerCase()) {
+          const removed = await tryRemove(to);
+          return err(refused("source-changed", expectedEtag, true, removed));
+        }
         const after = await head(from);
         if (!after.ok) return err(await transientAfterWrite(after.error, to));
         if (after.value === null || after.value.etag !== ifMatch) {
