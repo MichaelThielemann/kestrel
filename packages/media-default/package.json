@@ -9,7 +9,8 @@
   },
   "exports": {
     ".": "./module.ts",
-    "./impl": "./impl.ts"
+    "./impl": "./impl.ts",
+    "./storage": "./storage.ts"
   },
   "publishConfig": {
     "exports": {
@@ -20,6 +21,10 @@
       "./impl": {
         "types": "./dist/impl.d.ts",
         "default": "./dist/impl.js"
+      },
+      "./storage": {
+        "types": "./dist/storage.d.ts",
+        "default": "./dist/storage.js"
       }
     }
   },

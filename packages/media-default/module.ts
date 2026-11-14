@@ -7,6 +7,8 @@ import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { binaryResult, first, stepFactory, type Context, type StepResult } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
+import { guardStorage } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
+import { storage } from "./storage.ts";
 import { createMediaDefault, MEDIA_KINDS, publishedFileOf, SORTABLE, type ListOptions, type Media, type MediaItem, type MediaKind, type SortField, type TrashListOptions } from "./impl.ts";
 
 export const configSchema = z
@@ -30,6 +32,7 @@ export const configSchema = z
     defaultLimit: z.number().int().min(1).optional(),
     listPermission: z.string().min(1).default("media.list").describe("The permission a signed-in caller needs to list the library or its folders when an authz module is loaded"),
     trashRetentionDays: z.number().int().min(1).default(30).describe("How many days a trashed item is kept before media.selectExpiredTrash selects it for media.purge"),
+    storageMigrations: z.enum(["check", "apply"]).default("check").describe('What setup does with stored data in an older storage shape: "check" refuses to start and names the migration, "apply" runs the migrations that write no blobs. A migration that writes blobs, such as media-default:id-key-layout, never runs at start-up'),
   })
   .strict()
   .refine((config) => config.defaultLimit === undefined || config.defaultLimit <= config.maxLimit, { message: "defaultLimit must not exceed maxLimit", path: ["defaultLimit"] });
@@ -155,7 +158,7 @@ const MEDIA_ITEM_SCHEMA = {
   required: ["id", "path", "filename", "folder", "contentType", "size", "createdAt", "updatedAt", "provenance", "width", "height", "alt", "title", "description"],
   additionalProperties: false,
 };
-const RECONCILE_SCHEMA = { type: "object", properties: { blobsWithoutRow: { type: "array", items: { type: "string" } }, rowsWithoutBlob: { type: "array", items: { type: "string" } } }, required: ["blobsWithoutRow", "rowsWithoutBlob"] };
+const RECONCILE_SCHEMA = { type: "object", properties: { blobsWithoutRow: { type: "array", items: { type: "string" } }, rowsWithoutBlob: { type: "array", items: { type: "string" } }, legacyKeys: { type: "array", items: { type: "string" }, description: "blobs in the 5.x key layout that media-default:id-key-layout recorded; never deleted" } }, required: ["blobsWithoutRow", "rowsWithoutBlob", "legacyKeys"] };
 const PUBLIC_SYNC_SCHEMA = { type: "object", properties: { written: { type: "number" }, removed: { type: "number" }, missing: { type: "number" } }, required: ["written", "removed", "missing"] };
 const UPLOAD_RESULT_SCHEMA = {
   oneOf: [
@@ -202,6 +205,8 @@ export default defineModule({
 
   async setup(config, deps): Promise<Instance> {
     if (config.defaultLocale !== undefined && !config.locales.includes(config.defaultLocale)) throw new Error("media/default: defaultLocale must be one of locales");
+    const guarded = await guardStorage(storage(config), { db: deps.get(PERSISTENCE), blobs: deps.get(BLOBSTORE), mode: config.storageMigrations });
+    if (isErr(guarded)) throw new Error(guarded.error.message);
     const media = await createMediaDefault(config, deps.get(BLOBSTORE), deps.get(PERSISTENCE), deps.logger);
     const authz = deps.find(AUTHZ);
     if (authz === undefined) return media;
@@ -450,7 +455,7 @@ export default defineModule({
     listFolders: { summary: "Folders (persistent and implied) with item counts; anonymous callers are refused", reads: ["identity?"], writes: ["result"], output: { type: "array", items: { type: "object", properties: { folder: { type: "string" }, count: { type: "number" } }, required: ["folder", "count"] } }, errors: { 401: "no identity (unless anonymousList is \"all\")", 403: "with an authz module, no listPermission" } },
     update: { summary: "Rename, move, set provenance or texts (alt/title/description per locale); the file's key and path never change", reads: ["params.id"], writes: ["result"], input: { type: "object", properties: { filename: { type: "string" }, folder: { type: "string" }, provenance: PROVENANCE, locale: { type: "string" }, alt: { type: ["string", "null"] }, title: { type: ["string", "null"] }, description: { type: ["string", "null"] } }, additionalProperties: false }, query: { locale: { type: "string" } }, output: MEDIA_ITEM_SCHEMA, errors: { 400: "invalid name, folder or text (texts are plain text, max 2000 chars)", 404: "not found", 409: "the folder already has a file with that name, `details.field: \"location\"`" } },
     remove: { summary: "Delete file and metadata: end the item's readiness, then remove copy, blob and row, then a final sweep", reads: ["params.id"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }, errors: { 400: "missing id" } },
-    reconcile: { summary: "Compare the blobs under the media prefix with the media_items rows; with `delete` also removes blobs that no row points at (rows are never deleted)", reads: [], writes: ["result"], input: { type: "object", properties: { delete: { type: "boolean" } }, additionalProperties: false }, output: RECONCILE_SCHEMA },
+    reconcile: { summary: "Compare the blobs under the media prefix with the media_items rows; with `delete` also removes blobs that no row points at (rows are never deleted, nor the 5.x-layout blobs listed in legacyKeys)", reads: [], writes: ["result"], input: { type: "object", properties: { delete: { type: "boolean" } }, additionalProperties: false }, output: RECONCILE_SCHEMA },
     reconcileDelete: { summary: "Like media.reconcile, but always deletes the orphan blobs – the deletion is in the pipeline, not in the request", reads: [], writes: ["result"], output: RECONCILE_SCHEMA },
     syncPublic: {
       summary: "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed, trashed or deleted items and foreign files, re-reading an item before its copy goes (adds _publicMedia: { written, removed, missing } to the result)",

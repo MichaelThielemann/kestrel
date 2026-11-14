@@ -261,7 +261,7 @@ describe("images/default and media-default storing under the same prefix", () =>
     expect(blobs.blobs.has(`media/${item.id}/thumb.webp`)).toBe(true);
     expectOk(await blobs.put("media/no-such-item/orphan.png", new Uint8Array([1]), { contentType: "image/png" }));
 
-    expect(expectOk(await media.reconcile({ delete: true }))).toEqual({ blobsWithoutRow: ["media/no-such-item/orphan.png"], rowsWithoutBlob: [] });
+    expect(expectOk(await media.reconcile({ delete: true }))).toEqual({ blobsWithoutRow: ["media/no-such-item/orphan.png"], rowsWithoutBlob: [], legacyKeys: [] });
     expect(blobs.blobs.has(`media/${item.id}/thumb.webp`)).toBe(true);
     expect(blobs.blobs.has(item.key)).toBe(true);
     expect(blobs.blobs.has("media/no-such-item/orphan.png")).toBe(false);

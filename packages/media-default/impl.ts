@@ -5,7 +5,7 @@ import type { Introspection, PipelineManifest, PipelineStepManifest } from "@mic
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { LoadedMediaFile, MediaFile, MediaFiles, MediaFilesError, MediaFilter } from "@michaelthielemann/kestrel-contracts/media";
 import { canonicalMediaType, mediaTypeAllowed, mediaTypeEssence, mediaTypeMatches, NEUTRAL_EXTENSION, NEUTRAL_TYPE, publicFormOf, verifiedMediaType } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
-import type { Document, Filter, FindOptions, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Document, Filter, FindOptions, Persistence, Schema } from "@michaelthielemann/kestrel-contracts/persistence";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
@@ -14,6 +14,17 @@ import { imageSize } from "./imageSize.ts";
 
 export const COLLECTION = "media_items";
 export const FOLDERS = "media_folders";
+/** The 5.x blob keys `media-default:id-key-layout` found under the prefix; `media.reconcile` never deletes them. */
+export const LEGACY_KEYS = "media_legacy_keys";
+
+/** The schema of {@link COLLECTION} this release reads and writes. */
+export const ITEMS_SCHEMA: Schema = {
+  filename: "string", folder: "string", location: { type: "string", unique: true }, contentType: "string", size: "number", key: { type: "string", unique: true }, checksum: "string", status: "string", createdAt: "number", updatedAt: "number",
+  provenance: "json", width: "number", height: "number", alt: "json", title: "json", description: "json", svgSanitized: "boolean", trashedAt: "number", trashVersion: "number",
+};
+
+/** The schema of {@link LEGACY_KEYS}: the old key, the item it belonged to (`null` for a blob no row named) and when it was recorded. */
+export const LEGACY_KEYS_SCHEMA: Schema = { key: { type: "string", unique: true }, mediaId: "string", recordedAt: "number" };
 
 export type MediaCode = "VALIDATION" | "NOT_FOUND" | "CONFLICT" | "UNSUPPORTED" | "PAYLOAD_TOO_LARGE" | "TRANSIENT";
 export type MediaError = KestrelError<MediaCode>;
@@ -170,6 +181,8 @@ export function matchesMediaKind(contentType: string, kind: MediaKind): boolean 
 export interface Reconciliation {
   blobsWithoutRow: string[];
   rowsWithoutBlob: string[];
+  /** Blobs under the prefix in the 5.x key layout that `media-default:id-key-layout` recorded; reported, never deleted. */
+  legacyKeys: string[];
 }
 
 export interface PublicSync {
@@ -414,7 +427,8 @@ function capName(name: string): string {
   return Buffer.from(stem).subarray(0, budget).toString("latin1") + ext;
 }
 
-function suffixedName(filename: string, attempt: number): string {
+/** `<stem>-<attempt>.<ext>`, kept within the name length limit. */
+export function suffixedName(filename: string, attempt: number): string {
   const ext = extname(filename);
   const stem = ext === "" ? filename : filename.slice(0, -ext.length);
   const tail = `-${attempt}${ext}`;
@@ -463,7 +477,8 @@ export function urlNameOf(key: string): string {
   return slash === -1 ? key : key.slice(slash + 1);
 }
 
-function canonicalIdOf(key: string, prefix: string): string | null {
+/** The `<id>` of a key of the form `<prefix><id>/<name>`, or `null` for a key of another form. */
+export function canonicalIdOf(key: string, prefix: string): string | null {
   if (!key.startsWith(prefix)) return null;
   const rest = key.slice(prefix.length);
   const slash = rest.indexOf("/");
@@ -489,13 +504,12 @@ function copyKeyOf(config: Pick<Config, "publicPath" | "publicCopy">, id: string
 }
 
 export async function createMediaDefault(config: Config, blobs: Blobstore, db: Persistence, logger: Logger, now: () => number = Date.now): Promise<Media> {
-  const items = await db.ensureCollection(COLLECTION, {
-    filename: "string", folder: "string", location: { type: "string", unique: true }, contentType: "string", size: "number", key: { type: "string", unique: true }, checksum: "string", status: "string", createdAt: "number", updatedAt: "number",
-    provenance: "json", width: "number", height: "number", alt: "json", title: "json", description: "json", svgSanitized: "boolean", trashedAt: "number", trashVersion: "number",
-  });
+  const items = await db.ensureCollection(COLLECTION, ITEMS_SCHEMA);
   if (isErr(items)) throw new Error(`media/default: cannot prepare collection "${COLLECTION}": ${items.error.message}`);
   const folders = await db.ensureCollection(FOLDERS, { path: "string", createdAt: "number" });
   if (isErr(folders)) throw new Error(`media/default: cannot prepare collection "${FOLDERS}": ${folders.error.message}`);
+  const legacy = await db.ensureCollection(LEGACY_KEYS, LEGACY_KEYS_SCHEMA);
+  if (isErr(legacy)) throw new Error(`media/default: cannot prepare collection "${LEGACY_KEYS}": ${legacy.error.message}`);
   const backfilled = await db.updateMany(COLLECTION, { status: { eq: null } }, { status: "ready" });
   if (isErr(backfilled)) throw new Error(`media/default: cannot backfill the status of "${COLLECTION}": ${backfilled.error.message}`);
 
@@ -555,12 +569,12 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     const created = await db.createOne(FOLDERS, { path, createdAt: now() });
     return isErr(created) ? created : ok();
   };
-  const eachItem = async (filter: Record<string, unknown>, fn: (item: MediaItem) => Promise<Result<void, MediaError>>): Promise<Result<number, MediaError>> => {
+  const eachRow = async <T extends Document>(collection: string, filter: Record<string, unknown>, fn: (item: T) => Promise<Result<void, MediaError>>): Promise<Result<number, MediaError>> => {
     let n = 0;
     let last: string | null = null;
     for (;;) {
       const pageFilter: Record<string, unknown> = last === null ? filter : { ...filter, id: { gt: last } };
-      const page = await db.findMany<MediaItem>(COLLECTION, pageFilter, { sort: { id: "asc" }, limit: 500 });
+      const page = await db.findMany<T>(collection, pageFilter, { sort: { id: "asc" }, limit: 500 });
       if (isErr(page)) return page;
       for (const item of page.value.items) {
         const applied = await fn(item);
@@ -572,6 +586,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     }
     return ok(n);
   };
+  const eachItem = (filter: Record<string, unknown>, fn: (item: MediaItem) => Promise<Result<void, MediaError>>): Promise<Result<number, MediaError>> => eachRow<MediaItem>(COLLECTION, filter, fn);
   const eachInSubtree = async <T extends Document>(collection: string, field: string, path: string, fn: (item: T) => Promise<Result<void, MediaError>>): Promise<Result<number, MediaError>> => {
     const prefix = `${path}/`;
     let n = 0;
@@ -759,7 +774,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
   });
   if (isErr(layoutChecked)) throw new Error(`media/default: could not check the stored key layout: ${layoutChecked.error.message}`);
   if (layoutViolations > 0) {
-    throw new Error(`media/default: ${layoutViolations} stored item(s) use a blob key other than "${config.prefix}<id>/<name>" (first: ${firstViolation!.id} at "${firstViolation!.key}") – this version reads no other layout; start with an empty media store`);
+    throw new Error(`media/default: ${layoutViolations} stored item(s) use a blob key other than "${config.prefix}<id>/<name>" (first: ${firstViolation!.id} at "${firstViolation!.key}") – this version reads no other layout; convert them with the storage migration media-default:id-key-layout: run \`kestrel upgrade migrate --db <file> --blobs-dir <dir>\` on a copy of the data, or let \`kestrel update\` run it`);
   }
   const interrupted: string[] = [];
   const causeText = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
@@ -1404,10 +1419,21 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     async reconcile(options = {}) {
       const storedIds = new Set<string>();
       const rowsWithoutBlob: string[] = [];
+      const recorded = new Set<string>();
+      const legacyWalked = await eachRow<Document>(LEGACY_KEYS, {}, async (row) => {
+        if (typeof row.key === "string") recorded.add(row.key);
+        return ok();
+      });
+      if (isErr(legacyWalked)) return legacyWalked;
       const listed = await blobs.list(config.prefix);
       if (isErr(listed)) return listed;
       const present = new Map<string, string>();
+      const legacyKeys: string[] = [];
       for (const info of listed.value) {
+        if (recorded.has(info.key)) {
+          legacyKeys.push(info.key);
+          continue;
+        }
         const id = canonicalIdOf(info.key, config.prefix);
         if (id !== null) present.set(info.key, id);
       }
@@ -1427,7 +1453,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (blobsWithoutRow.length > 0 || rowsWithoutBlob.length > 0) {
         logger.info("media/default: blobstore and media_items disagree", { blobsWithoutRow: blobsWithoutRow.length, rowsWithoutBlob: rowsWithoutBlob.length, deleted: options.delete === true ? blobsWithoutRow.length : 0 });
       }
-      return ok({ blobsWithoutRow, rowsWithoutBlob: rowsWithoutBlob.sort() });
+      return ok({ blobsWithoutRow, rowsWithoutBlob: rowsWithoutBlob.sort(), legacyKeys: legacyKeys.sort() });
     },
     async syncPublic() {
       if (config.publicCopy === undefined) return ok({ written: 0, removed: 0, missing: 0 });

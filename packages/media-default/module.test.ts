@@ -339,7 +339,7 @@ describe("media/default reconcile and syncPublic steps", () => {
     expectOk(await blobs.put("media/stray-id/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
 
     const reported = expectOk(await steps.reconcile(fakeCtx()));
-    expect(reported.result).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [] });
+    expect(reported.result).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [], legacyKeys: [] });
     expect(expectOk(await blobs.get("media/stray-id/stray.png"))).not.toBeNull();
 
     expectOk(await steps.reconcile(fakeCtx([], { delete: true })));
@@ -351,7 +351,7 @@ describe("media/default reconcile and syncPublic steps", () => {
     expectOk(await blobs.put("media/stray-id/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
 
     const ctx = expectOk(await steps.reconcileDelete(fakeCtx()));
-    expect(ctx.result).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [] });
+    expect(ctx.result).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [], legacyKeys: [] });
     expect(expectOk(await blobs.get("media/stray-id/stray.png"))).toBeNull();
   });
 
@@ -536,7 +536,7 @@ describe("media/default steps via runPipeline", () => {
     const { media, blobs } = await makeInstance();
     expectOk(await blobs.put("media/stray-id/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
     const reported = await runPipeline(pipeline("media.reconcile"), {}, { modules: [{ module, instance: media }] });
-    expect(reported.result).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [] });
+    expect(reported.result).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [], legacyKeys: [] });
     const deleted = await runPipeline(pipeline("media.reconcile"), { body: { delete: true } }, { modules: [{ module, instance: media }] });
     expect(deleted.status).toBe(200);
     expect(expectOk(await blobs.get("media/stray-id/stray.png"))).toBeNull();

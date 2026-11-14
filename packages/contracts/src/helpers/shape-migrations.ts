@@ -178,7 +178,8 @@ export type StorageMigrationsMode = "check" | "apply";
 
 const PAGE = 200;
 
-function failed(message: string, details: Record<string, unknown> = {}): ShapeMigrationError {
+/** A `STORAGE_MIGRATION_FAILED` error for a migration's `apply` or `verify`. */
+export function storageMigrationFailed(message: string, details: Record<string, unknown> = {}): ShapeMigrationError {
   return customFailure("STORAGE_MIGRATION_FAILED", 500, message, { details });
 }
 
@@ -290,7 +291,7 @@ export async function readStorageVersions(db: Persistence): Promise<Result<Map<s
     const page: Result<{ items: Document[] }, PersistenceError> = await db.findMany<Document>(STORAGE_VERSIONS, cursor === null ? {} : { id: { gt: cursor } }, { sort: { id: "asc" }, limit: PAGE });
     if (isErr(page)) return page;
     for (const row of page.value.items) {
-      if (!isStorageVersion(row)) return err(failed(`collection "${STORAGE_VERSIONS}" holds a row (${row.id}) that is not a storage version row; another component uses this collection name`, { collection: STORAGE_VERSIONS, id: row.id }));
+      if (!isStorageVersion(row)) return err(storageMigrationFailed(`collection "${STORAGE_VERSIONS}" holds a row (${row.id}) that is not a storage version row; another component uses this collection name`, { collection: STORAGE_VERSIONS, id: row.id }));
       rows.set(row.module, row);
     }
     if (page.value.items.length < PAGE) return ok(rows);
@@ -366,7 +367,7 @@ export async function runShapeMigrations(options: RunOptions): Promise<Result<Ru
       const verified = migration.verify === undefined ? await migration.detect(ctx) : await migration.verify(ctx);
       if (isErr(verified)) return verified;
       if (verified.value.pending > 0) {
-        return err(failed(`${storage.module}: ${migration.id} left ${verified.value.pending} item(s) in the old form (e.g. ${verified.value.sample.slice(0, 3).join(", ")}); run it again, or restore the copy it ran on`, { module: storage.module, migration: migration.id, pending: verified.value.pending, sample: verified.value.sample }));
+        return err(storageMigrationFailed(`${storage.module}: ${migration.id} left ${verified.value.pending} item(s) in the old form (e.g. ${verified.value.sample.slice(0, 3).join(", ")}); run it again, or restore the copy it ran on`, { module: storage.module, migration: migration.id, pending: verified.value.pending, sample: verified.value.sample }));
       }
       entry.state = "applied";
       applied.push(migration.id);

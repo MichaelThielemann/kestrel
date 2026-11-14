@@ -1064,10 +1064,10 @@ describe("media/default", () => {
       expectOk(await blobs.put("media/stray-id/stray.png", png.data, { contentType: "image/png" }));
       expectOk(await blobs.put("media-variants/x/thumb.webp", png.data, { contentType: "image/webp" }));
 
-      expect(expectOk(await media.reconcile())).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [lost.key] });
+      expect(expectOk(await media.reconcile())).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [lost.key], legacyKeys: [] });
       expect(blobs.blobs.has("media/stray-id/stray.png")).toBe(true);
 
-      expect(expectOk(await media.reconcile({ delete: true }))).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [lost.key] });
+      expect(expectOk(await media.reconcile({ delete: true }))).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [lost.key], legacyKeys: [] });
       expect(blobs.blobs.has("media/stray-id/stray.png")).toBe(false);
       expect(blobs.blobs.has("media-variants/x/thumb.webp")).toBe(true);
       expect(blobs.blobs.has(kept.key)).toBe(true);
@@ -1082,7 +1082,7 @@ describe("media/default", () => {
       expectOk(await blobs.put("media/orphan-id/orphan.png", png.data, { contentType: "image/png" }));
 
       expectOk(await blobs.put(`media/${kept.id}/thumb.webp`, png.data, { contentType: "image/webp" }));
-      expect(expectOk(await media.reconcile({ delete: true }))).toEqual({ blobsWithoutRow: ["media/orphan-id/orphan.png"], rowsWithoutBlob: [] });
+      expect(expectOk(await media.reconcile({ delete: true }))).toEqual({ blobsWithoutRow: ["media/orphan-id/orphan.png"], rowsWithoutBlob: [], legacyKeys: [] });
       for (const key of nested) expect(blobs.blobs.has(key), key).toBe(true);
       expect(blobs.blobs.has(`media/${kept.id}/thumb.webp`)).toBe(true);
       expect(blobs.blobs.has(kept.key)).toBe(true);
