@@ -4,7 +4,7 @@ import { AUTHZ } from "@michaelthielemann/kestrel-contracts/authz";
 import { stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { cutAnswer, FIELD_PATH, parseFieldsArgument, RESOURCE } from "./fields.ts";
+import { cutAnswer, FIELD_PATH, parseFieldsArgument, RESOURCE, unsortableField } from "./fields.ts";
 import { createAuthzRoles, DEFAULT_ROLELESS_PIPELINES, type AuthzRoles } from "./impl.ts";
 
 const fieldGrants = z.record(
@@ -91,6 +91,10 @@ export default defineModule({
         const tree = authz.fieldsFor(ctx.identity, resource);
         if (tree === "all") return ok(ctx);
         if (tree === undefined) return ctx.fail("FORBIDDEN", `no field grant on ${resource} for a caller without an identity or a configured role`);
+        if (shape === "list") {
+          const field = unsortableField(ctx.payload.sort, tree);
+          if (field !== undefined) return ctx.fail("VALIDATION", `authz.fields:${resource}: cannot sort by "${field}"`);
+        }
         if (ctx.result === undefined) return ok(ctx);
         return ok({ ...ctx, result: cutAnswer(ctx.result, shape, tree) });
       };
@@ -138,9 +142,17 @@ export default defineModule({
       const resource = target?.resource ?? arg;
       const summary = `Keep only the ${resource} fields the caller may see: anonymousFields.${resource} without an identity or a configured role; otherwise everything when one of its roles has no field grant for ${resource}, else the union of its roles' grants and the anonymous one`;
       const errors = { 403: `no field grant on ${resource} for a caller without an identity or a configured role` };
-      return target === undefined
-        ? { summary, reads: ["identity?", "result?"], writes: ["result?"], errors }
-        : { summary, reads: ["identity?", "result?"], writes: ["result?"], errors, narrows: { shape: target.shape, answers: authz.answersOf(target.resource) } };
+      if (target === undefined) return { summary, reads: ["identity?", "result?"], writes: ["result?"], errors };
+      const narrows = { shape: target.shape, answers: authz.answersOf(target.resource) };
+      if (target.shape !== "list") return { summary, reads: ["identity?", "result?"], writes: ["result?"], errors, narrows };
+      return {
+        summary: `${summary}; a caller kept to a grant may sort only by a field it names whole or by id, createdAt and updatedAt`,
+        reads: ["identity?", "result?", "payload.sort?"],
+        writes: ["result?"],
+        query: { sort: { type: "string", description: "field name, prefix - for descending" } },
+        errors,
+        narrows,
+      };
     },
     validateRoles: (path: string) => ({
       summary: `Validate the role names at payload.${path} against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept`,

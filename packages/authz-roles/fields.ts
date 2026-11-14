@@ -94,6 +94,24 @@ export function cutAnswer(answer: unknown, shape: AnswerShape, tree: FieldTree):
   return cutValue(answer, tree);
 }
 
+const SORTABLE_SYSTEM_FIELDS: ReadonlySet<string> = new Set(["id", "createdAt", "updatedAt"]);
+
+/**
+ * The first requested sort field a caller whose grant is `tree` may not order by, or `undefined`. `sort` is a
+ * field name, `-` prefixed for descending, or a list of those; a field is sortable when the grant names it whole
+ * or it is one of the system fields `id`, `createdAt` and `updatedAt`. A grant that names a member only in part
+ * does not make it sortable, because the order of the answer would show what the grant withholds.
+ */
+export function unsortableField(sort: unknown, tree: FieldTree): string | undefined {
+  const requested = Array.isArray(sort) ? sort : [sort];
+  for (const entry of requested) {
+    if (typeof entry !== "string" || entry === "") continue;
+    const field = entry.startsWith("-") ? entry.slice(1) : entry;
+    if (!SORTABLE_SYSTEM_FIELDS.has(field) && tree.get(field) !== true) return field;
+  }
+  return undefined;
+}
+
 function branchesOf(schema: JsonSchema): JsonSchema[] {
   const union = Array.isArray(schema.anyOf) ? schema.anyOf : Array.isArray(schema.oneOf) ? schema.oneOf : undefined;
   if (union === undefined) return [schema];

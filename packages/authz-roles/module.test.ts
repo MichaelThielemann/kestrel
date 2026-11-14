@@ -436,6 +436,63 @@ describe("authz/roles: authz.fields cuts the answer to the caller's field grant"
     await kestrel.stop();
   });
 
+  describe("sorting a list", () => {
+    const sortGrants = { ...grants, anonymousFields: { records: ["id", "note", "nested.open"] } };
+    const sorted = (sort: unknown, role?: string) => ({ ...as(role), payload: { sort } });
+
+    it("answers 400 to a restricted caller who sorts by a field its grant does not name, ascending or descending", async () => {
+      const kestrel = await bootRecords(sortGrants);
+      for (const sort of ["secret", "-secret"]) {
+        const res = await kestrel.run("listRecords", sorted(sort));
+        expect(res, sort).toMatchObject({ status: 400, code: "VALIDATION" });
+        expect(JSON.stringify(res)).not.toContain("s3cret");
+      }
+      await kestrel.stop();
+    });
+
+    it("answers 400 for a member the grant names only in part, and for a name that is no member of the answer", async () => {
+      const kestrel = await bootRecords(sortGrants);
+      for (const sort of ["nested", "nested.open", "constructor", "toString", "__proto__"]) {
+        expect(await kestrel.run("listRecords", sorted(sort)), sort).toMatchObject({ status: 400, code: "VALIDATION" });
+      }
+      await kestrel.stop();
+    });
+
+    it("checks every value of a repeated sort parameter", async () => {
+      const kestrel = await bootRecords(sortGrants);
+      expect(await kestrel.run("listRecords", sorted(["note", "secret"]))).toMatchObject({ status: 400 });
+      expect(await kestrel.run("listRecords", sorted(["note", "-id"]))).toMatchObject({ status: 200 });
+      await kestrel.stop();
+    });
+
+    it("lets a restricted caller sort by a granted field and by the system fields", async () => {
+      const kestrel = await bootRecords(sortGrants);
+      for (const sort of ["note", "-note", "id", "createdAt", "-createdAt", "updatedAt", "", undefined]) {
+        expect(await kestrel.run("listRecords", sorted(sort)), String(sort)).toMatchObject({ status: 200 });
+      }
+      await kestrel.stop();
+    });
+
+    it("checks the union of the grants of a role that has one", async () => {
+      const kestrel = await bootRecords(sortGrants);
+      expect(await kestrel.run("listRecords", sorted("secret", "reviewer"))).toMatchObject({ status: 400 });
+      expect(await kestrel.run("listRecords", sorted("secret", "archivist"))).toMatchObject({ status: 200 });
+      await kestrel.stop();
+    });
+
+    it("lets a role without a field grant sort by anything", async () => {
+      const kestrel = await bootRecords(sortGrants);
+      expect(await kestrel.run("listRecords", sorted("-secret", "editor"))).toMatchObject({ status: 200 });
+      await kestrel.stop();
+    });
+
+    it("does not look at a sort parameter when the answer is one item", async () => {
+      const kestrel = await bootRecords(sortGrants);
+      expect(await kestrel.run("getRecord", sorted("secret"))).toMatchObject({ status: 200 });
+      await kestrel.stop();
+    });
+  });
+
   it("answers 403 FORBIDDEN to an anonymous caller of a resource without an anonymous grant", async () => {
     const instance = await module.setup(configSchema.parse({ roles: {}, anonymous: ["records.read"] }), deps);
     const pipeline = definePipeline({ name: "getRecord", steps: ["records.get", "authz.fields:records?shape=item"] });
