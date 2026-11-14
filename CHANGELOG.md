@@ -808,7 +808,9 @@ Net changes since 5.8.2.
   that introduced them, verifies each and then records the module's storage version in the
   collection `kestrel_storage_versions`. A run that stops halfway is finished by running it again; a
   second run writes nothing; data newer than the release, or older than a module converts, is
-  refused (`update through <major>.x first`). Blobs are copied through an injected `BlobOps`
+  refused (`update through <major>.x first`). A cleanup migration runs only in a run that selects
+  the kind `cleanup`, also after the version was recorded; an `ask` migration waits for an answer to
+  each of its questions. Blobs are copied through an injected `BlobOps`
   (`copy`, `head`); `blobOpsOf` builds one from any `blobstore@1`.
   - `media-default` and `images-default` export `./storage` (`storage(config)`, `migrations`).
     `media-default:id-key-layout` copies each original a 5.x release stored under

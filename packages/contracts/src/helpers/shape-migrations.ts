@@ -23,7 +23,10 @@ export const UPDATE_COMMAND = "kestrel update";
  */
 export type ShapeMigrationError = KestrelError<"STORAGE_REFUSED" | "STORAGE_MIGRATION_FAILED" | "CONFLICT" | "NOT_FOUND" | "TRANSIENT">;
 
-/** `auto` runs without a question, `ask` needs an answer for each of its questions, `cleanup` removes an old form after the update was accepted. */
+/**
+ * `auto` runs without a question (a question it declares falls back to its default), `ask` needs an answer for each
+ * of its questions, `cleanup` removes an old form after the update was accepted and runs only in a run that selects it.
+ */
 export type MigrationKind = "auto" | "ask" | "cleanup";
 
 /** A stored blob's size and, when the store knows it without reading the bytes, its sha256 as lower-case hex. */
@@ -139,11 +142,13 @@ export interface MigrationRun {
   state: MigrationState;
   detected: Detection;
   /**
-   * Why a `pending` migration was not applied. `plan-only`: the run had `apply: false`. `earlier-pending`: an earlier
-   * migration of the same module is still pending, and migrations apply in order. `dependency-pending`: a module this
-   * one depends on is not finished. `blob-writes`: the migration writes blobs and the run had `blobWrites: false`.
+   * Why a `pending` migration was not applied. `cleanup`: a cleanup migration in a run that did not select `cleanup`;
+   * it does not hold back the version row. `not-selected`: another kind the run did not select. `plan-only`: the run had
+   * `apply: false`. `earlier-pending`: an earlier migration of the same module is still pending, and migrations apply in
+   * order. `dependency-pending`: a module this one depends on is not finished. `blob-writes`: the migration writes blobs
+   * and the run had `blobWrites: false`. `needs-answer`: an `ask` migration with a question the run has no answer for.
    */
-  blocked?: "plan-only" | "blob-writes" | "earlier-pending" | "dependency-pending";
+  blocked?: "cleanup" | "not-selected" | "plan-only" | "blob-writes" | "earlier-pending" | "dependency-pending" | "needs-answer";
   /** What `plan` counted; absent when nothing was found or the run had `plan: false`. */
   plan?: MigrationPlan;
   /** What `apply` did; present only when the migration was applied. */
@@ -151,9 +156,10 @@ export interface MigrationRun {
 }
 
 /**
- * `current`: the version row already matched. `recorded`: nothing was pending and the row was written.
- * `unrecorded`: nothing was pending, and the run only planned, so the row is unchanged.
- * `migrated`: migrations were applied and the row was written. `pending`: migrations wait, the row is unchanged.
+ * `current`: the version row already matched and no migration of a selected kind was missing from it. `recorded`: nothing
+ * was pending and the row was written. `unrecorded`: nothing was pending, and the run only planned, so the row is unchanged.
+ * `migrated`: migrations were applied and the row was written. `pending`: migrations wait, the row is unchanged. A
+ * cleanup migration left pending (`blocked: "cleanup"`) counts as nothing pending.
  * `too-old` / `too-new`: the stored version is outside what this release reads, nothing ran.
  */
 export type ModuleState = "current" | "recorded" | "unrecorded" | "migrated" | "pending" | "too-old" | "too-new";
@@ -190,6 +196,8 @@ export interface RunOptions {
   /** `false` skips each pending migration's `plan`, so the report carries no `plan`; the start-up guard sets it. Default `true`. */
   plan?: boolean;
   blobWrites: boolean;
+  /** The kinds of migration this run applies. Default `["auto", "ask"]`: a cleanup runs only in a run that names it. */
+  kinds?: readonly MigrationKind[];
   answers?: Readonly<Record<string, string>>;
   now?: () => number;
 }
@@ -198,6 +206,7 @@ export interface RunOptions {
 export type StorageMigrationsMode = "check" | "apply";
 
 const PAGE = 200;
+const DEFAULT_KINDS: readonly MigrationKind[] = ["auto", "ask"];
 const VERSION = /^(\d+)\.(\d+)\.(\d+)/;
 
 /** A `STORAGE_MIGRATION_FAILED` error for a migration's `apply` or `verify`. */
@@ -291,9 +300,14 @@ export function orderStorages(storages: readonly ModuleStorage[]): ModuleStorage
   return ordered;
 }
 
-/** A module's migrations ordered by `introducedIn`, then by id. */
+/** A module's migrations ordered by `introducedIn`, then by id, the cleanup migrations after all others. */
 export function orderMigrations(migrations: readonly ShapeMigration[]): ShapeMigration[] {
-  return [...migrations].sort((a, b) => compareVersions(a.introducedIn, b.introducedIn) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const last = (m: ShapeMigration): number => (m.kind === "cleanup" ? 1 : 0);
+  return [...migrations].sort((a, b) => last(a) - last(b) || compareVersions(a.introducedIn, b.introducedIn) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+function unanswered(migration: ShapeMigration, answers: Readonly<Record<string, string>>): boolean {
+  return migration.kind === "ask" && (migration.questions ?? []).some((q) => answers[q.id] === undefined);
 }
 
 function isStorageVersion(row: Document): row is StorageVersion {
@@ -335,11 +349,14 @@ function contextOf(options: RunOptions): MigrationContext {
 
 /**
  * Brings each module's stored data to the shape of this release. Modules run in dependency order, a module's
- * migrations by `introducedIn`. A module's version row is read first: equal to `version` means nothing runs; newer
- * than `version`, or older than `convertsFrom`, leaves the module untouched (`too-new` / `too-old`). Otherwise every
- * migration introduced after the stored version (all of them when there is no row) is detected and, when it found
- * something, planned unless `plan` is `false`, and when allowed applied and verified. The version row is written only after every pending migration of the module has
- * been verified, and with `apply: false` only when `recordWhenCurrent` is set and nothing was pending. A failing `apply` or `verify` ends the run with `Err`; rerunning continues where it stopped.
+ * migrations by `introducedIn`, cleanups last. A module's version row is read first: newer than `version`, or older than
+ * `convertsFrom`, leaves the module untouched (`too-new` / `too-old`). A migration the row lists has run. Of the others,
+ * every cleanup and every migration introduced after the stored version (all of them when there is no row) is detected
+ * and, when it found something, planned unless `plan` is `false`, and when allowed applied and verified; a row equal
+ * to `version` that lacks no migration of a selected kind means nothing runs. The version row is written only after
+ * every pending migration of the module but an unselected cleanup has been verified, and with `apply: false` only when
+ * `recordWhenCurrent` is set and nothing was pending; it lists the migrations applied and those that found nothing in a
+ * run that selected their kind. A failing `apply` or `verify` ends the run with `Err`; rerunning continues where it stopped.
  */
 export async function runShapeMigrations(options: RunOptions): Promise<Result<RunReport, ShapeMigrationError>> {
   const ctx = contextOf(options);
@@ -347,12 +364,15 @@ export async function runShapeMigrations(options: RunOptions): Promise<Result<Ru
   if (isErr(versions)) return versions;
   const modules: ModuleRun[] = [];
   const unfinished = new Set<string>();
+  const kinds = new Set(options.kinds ?? DEFAULT_KINDS);
   for (const storage of orderStorages(options.storages)) {
     const row = versions.value.get(storage.module);
     const stored = row?.version ?? null;
     const run: ModuleRun = { module: storage.module, stored, version: storage.version, state: "current", migrations: [] };
     modules.push(run);
-    if (stored !== null && compareVersions(stored, storage.version) === 0) continue;
+    const listed = new Set(row?.migrations ?? []);
+    const candidates = orderMigrations(storage.migrations).filter((m) => !listed.has(m.id) && (stored === null || m.kind === "cleanup" || compareVersions(m.introducedIn, stored) > 0));
+    if (stored !== null && compareVersions(stored, storage.version) === 0 && !candidates.some((m) => kinds.has(m.kind))) continue;
     if (stored !== null && compareVersions(stored, storage.version) > 0) {
       run.state = "too-new";
       unfinished.add(storage.module);
@@ -365,16 +385,26 @@ export async function runShapeMigrations(options: RunOptions): Promise<Result<Ru
     }
     const dependencyPending = (storage.dependsOn ?? []).some((name) => unfinished.has(name));
     const applied: string[] = [];
+    const settled: string[] = [];
     let waiting = false;
-    for (const migration of orderMigrations(storage.migrations)) {
-      if (stored !== null && compareVersions(migration.introducedIn, stored) <= 0) continue;
+    for (const migration of candidates) {
       const detected = await migration.detect(ctx);
       if (isErr(detected)) return detected;
       const entry: MigrationRun = { id: migration.id, introducedIn: migration.introducedIn, kind: migration.kind, blobWrites: migration.blobWrites, state: "not-needed", detected: detected.value };
       run.migrations.push(entry);
-      if (detected.value.pending === 0) continue;
+      const selected = kinds.has(migration.kind);
+      if (detected.value.pending === 0) {
+        if (selected) settled.push(migration.id);
+        continue;
+      }
       entry.state = "pending";
-      const blocked = !options.apply ? "plan-only" : waiting ? "earlier-pending" : dependencyPending ? "dependency-pending" : migration.blobWrites && !options.blobWrites ? "blob-writes" : undefined;
+      const blocked: MigrationRun["blocked"] = !selected ? (migration.kind === "cleanup" ? "cleanup" : "not-selected")
+        : !options.apply ? "plan-only"
+        : waiting ? "earlier-pending"
+        : dependencyPending ? "dependency-pending"
+        : migration.blobWrites && !options.blobWrites ? "blob-writes"
+        : unanswered(migration, ctx.answers) ? "needs-answer"
+        : undefined;
       if (options.plan !== false) {
         const planned = await migration.plan(ctx);
         if (isErr(planned)) return planned;
@@ -382,7 +412,7 @@ export async function runShapeMigrations(options: RunOptions): Promise<Result<Ru
       }
       if (blocked !== undefined) {
         entry.blocked = blocked;
-        waiting = true;
+        if (blocked !== "cleanup") waiting = true;
         continue;
       }
       const outcome = await migration.apply(ctx);
@@ -395,6 +425,7 @@ export async function runShapeMigrations(options: RunOptions): Promise<Result<Ru
       }
       entry.state = "applied";
       applied.push(migration.id);
+      settled.push(migration.id);
     }
     if (waiting) {
       run.state = "pending";
@@ -405,7 +436,7 @@ export async function runShapeMigrations(options: RunOptions): Promise<Result<Ru
       run.state = "unrecorded";
       continue;
     }
-    const written = await writeVersion(options.db, row, storage.module, storage.version, run.migrations.map((m) => m.id), ctx.now());
+    const written = await writeVersion(options.db, row, storage.module, storage.version, settled, ctx.now());
     if (isErr(written)) return written;
     run.state = applied.length > 0 ? "migrated" : "recorded";
   }
@@ -422,19 +453,20 @@ export function refusalOf(run: ModuleRun, mode: StorageMigrationsMode): string |
   if (run.state === "too-new") return `${run.module}: the stored data has storage version ${run.stored ?? "?"}, newer than ${run.version} of this release; start the release that wrote it, or restore the backup taken before the update`;
   if (run.state === "too-old") return `${run.module}: the stored data has storage version ${run.stored ?? "?"}, older than this release converts; update through ${majorOf(run.version) - 1}.x first`;
   if (run.state !== "pending") return null;
-  const waiting = run.migrations.filter((m) => m.state === "pending");
-  const withBlobs = waiting.filter((m) => m.blobWrites);
+  const waiting = run.migrations.filter((m) => m.state === "pending" && m.blocked !== "cleanup");
+  const offlineOnly = waiting.filter((m) => m.blobWrites || m.kind === "ask");
   const listed = waiting.map(pendingText).join("; ");
   const offline = `run ${waiting.length === 1 ? "it" : "them"} on a copy of the data with \`${OFFLINE_COMMAND}\`, or let \`${UPDATE_COMMAND}\` run ${waiting.length === 1 ? "it" : "them"}`;
-  if (mode === "apply" && withBlobs.length > 0) return `${run.module}: the stored data needs storage migration ${listed}; a migration that writes blobs never runs at start-up – ${offline}, then start this release`;
-  if (withBlobs.length > 0) return `${run.module}: the stored data needs storage migration ${listed}; ${offline}, then start this release`;
+  if (mode === "apply" && offlineOnly.length > 0) return `${run.module}: the stored data needs storage migration ${listed}; a migration that ${offlineOnly.some((m) => m.blobWrites) ? "writes blobs" : "asks a question"} never runs at start-up – ${offline}, then start this release`;
+  if (offlineOnly.length > 0) return `${run.module}: the stored data needs storage migration ${listed}; ${offline}, then start this release`;
   return `${run.module}: the stored data needs storage migration ${listed}; set storageMigrations: "apply" to run it at start-up, or ${offline}`;
 }
 
 /**
  * The start-up guard of a module with storage migrations. `check` detects and refuses data in an old form;
- * `apply` also runs the migrations without blob writes. A migration with blob writes never runs here, and no
- * migration is planned, so a refusal costs only the migrations' `detect`. On data
+ * `apply` also runs the migrations without blob writes. A migration with blob writes, an `ask` migration with a
+ * question and a cleanup never run here; a pending cleanup is no reason to refuse. No migration is planned, so a
+ * refusal costs only the migrations' `detect`. On data
  * that needs nothing the module's version row is recorded. The refusal is `STORAGE_REFUSED`, its message names
  * the migration ids and the command that runs them.
  */
@@ -443,7 +475,7 @@ export async function guardStorage(storage: ModuleStorage, options: { db: Persis
   if (isErr(report)) return report;
   const run = report.value.modules[0]!;
   const refusal = refusalOf(run, options.mode);
-  if (refusal !== null) return err(refused(refusal, { module: run.module, stored: run.stored, version: run.version, migrations: run.migrations.filter((m) => m.state === "pending").map((m) => m.id) }));
+  if (refusal !== null) return err(refused(refusal, { module: run.module, stored: run.stored, version: run.version, migrations: run.migrations.filter((m) => m.state === "pending" && m.blocked !== "cleanup").map((m) => m.id) }));
   return ok(run);
 }
 

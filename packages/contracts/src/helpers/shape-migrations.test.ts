@@ -296,6 +296,71 @@ describe("shape-migrations: the run loop", () => {
   });
 });
 
+describe("shape-migrations: kinds", () => {
+  const question = { id: "m:asked:keep", text: "Keep the old form?", choices: ["keep", "drop"], default: "keep" };
+
+  it("leaves a cleanup migration pending in a run that does not select it, after the other migrations, and still writes the version row", async () => {
+    const order: string[] = [];
+    const db = createFakePersistence();
+    const migrations = [{ ...rowOnly(order, "m:a-drop-old", "6.0.0", 1), kind: "cleanup" as const }, rowOnly(order, "m:b-convert", "6.0.0", 1)];
+    const report = expectOk(await runShapeMigrations({ storages: [storage("m/x", migrations)], db, blobs: memoryBlobs(), apply: true, blobWrites: true }));
+    expect(order).toEqual(["detect m:b-convert", "apply m:b-convert", "detect m:b-convert", "detect m:a-drop-old"]);
+    expect(report.modules[0]).toMatchObject({ state: "migrated", migrations: [{ id: "m:b-convert", state: "applied" }, { id: "m:a-drop-old", kind: "cleanup", state: "pending", blocked: "cleanup" }] });
+    expect(expectOk(await storageVersionOf(db, "m/x"))).toMatchObject({ version: "6.0.0", migrations: ["m:b-convert"] });
+  });
+
+  it("does not record a cleanup migration that found nothing in a run that did not select it", async () => {
+    const order: string[] = [];
+    const db = createFakePersistence();
+    const report = expectOk(await runShapeMigrations({ storages: [storage("m/x", [{ ...rowOnly(order, "m:drop-old", "6.0.0", 0), kind: "cleanup" }])], db, blobs: memoryBlobs(), apply: true, blobWrites: true }));
+    expect(report.modules[0]).toMatchObject({ state: "recorded", migrations: [{ id: "m:drop-old", state: "not-needed" }] });
+    expect(expectOk(await storageVersionOf(db, "m/x"))).toMatchObject({ version: "6.0.0", migrations: [] });
+  });
+
+  it("runs a cleanup migration of the stored version in a later run that selects it, and adds it to the version row", async () => {
+    const order: string[] = [];
+    const db = createFakePersistence();
+    const storages = [storage("m/x", [rowOnly(order, "m:convert", "6.0.0", 1), { ...rowOnly(order, "m:drop-old", "6.0.0", 1), kind: "cleanup" }])];
+    expectOk(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true }));
+    order.length = 0;
+    const main = expectOk(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true }));
+    expect(main.modules[0]).toMatchObject({ state: "current", migrations: [] });
+    expect(order).toEqual([]);
+    const cleanup = expectOk(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true, kinds: ["cleanup"] }));
+    expect(cleanup.modules[0]).toMatchObject({ state: "migrated", stored: "6.0.0", migrations: [{ id: "m:drop-old", state: "applied" }] });
+    expect(order).toEqual(["detect m:drop-old", "apply m:drop-old", "detect m:drop-old"]);
+    expect(expectOk(await storageVersionOf(db, "m/x"))).toMatchObject({ version: "6.0.0", migrations: ["m:convert", "m:drop-old"] });
+    order.length = 0;
+    expect(expectOk(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true, kinds: ["cleanup"] })).modules[0]!.state).toBe("current");
+    expect(order).toEqual([]);
+  });
+
+  it("leaves an ask migration with an unanswered question pending and holds back the version row until it is answered", async () => {
+    const order: string[] = [];
+    const db = createFakePersistence();
+    const storages = [storage("m/x", [{ ...rowOnly(order, "m:asked", "6.0.0", 1), kind: "ask", questions: [question] }])];
+    const unanswered = expectOk(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true }));
+    expect(unanswered.modules[0]).toMatchObject({ state: "pending", migrations: [{ id: "m:asked", state: "pending", blocked: "needs-answer" }] });
+    expect(order).not.toContain("apply m:asked");
+    expect(expectOk(await storageVersionOf(db, "m/x"))).toBeNull();
+    const answered = expectOk(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true, answers: { [question.id]: "keep" } }));
+    expect(answered.modules[0]).toMatchObject({ state: "migrated", migrations: [{ id: "m:asked", state: "applied" }] });
+  });
+
+  it("starts on data whose only pending migration is a cleanup, and refuses an unanswered ask migration at start-up without suggesting apply mode", async () => {
+    const db = createFakePersistence();
+    const cleanupOnly = storage("m/x", [{ ...rowOnly([], "m:drop-old", "6.0.0", 1), kind: "cleanup" }]);
+    for (const mode of ["check", "apply"] as const) expect(expectOk(await guardStorage(cleanupOnly, { db: createFakePersistence(), blobs: memoryBlobs(), mode })).state).toBe("recorded");
+    const asked = storage("m/y", [{ ...rowOnly([], "m:asked", "6.0.0", 1), kind: "ask", questions: [question] }]);
+    for (const mode of ["check", "apply"] as const) {
+      const refused = expectErr(await guardStorage(asked, { db, blobs: memoryBlobs(), mode }), "STORAGE_REFUSED");
+      expect(refused.message).toContain("m:asked");
+      expect(refused.message).not.toContain("storageMigrations");
+      expect(refused.message).toContain(OFFLINE_COMMAND);
+    }
+  });
+});
+
 describe("shape-migrations: interrupted runs", () => {
   async function finalStateAfterCrashAt(crashAt: number | null) {
     const db = createFakePersistence();

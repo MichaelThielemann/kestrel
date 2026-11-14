@@ -32,23 +32,29 @@ id `<package>:<name>`, the release it was `introducedIn`, a `kind` (`auto`, `ask
 whether it writes blobs, and `detect` (old form present?), `plan` (counts without writing), `apply`
 (chunked, each item idempotent, new keys before rows switch, never deletes or overwrites an
 authoritative row or blob) and an optional `verify` (default: `detect` finds nothing).
-`runShapeMigrations` runs them in dependency order and by `introducedIn`, and writes the module's
-row in `kestrel_storage_versions` only after every pending migration has been verified; a rerun
-after an abort continues, a second run writes nothing. With `apply: false` it only detects and
+`runShapeMigrations` runs them in dependency order and by `introducedIn`, cleanups last, and writes
+the module's row in `kestrel_storage_versions` only after every pending migration has been verified;
+a rerun after an abort continues, a second run writes nothing. The row lists the migrations that ran
+or found nothing, and a migration it lists never runs again. A run applies the kinds in `kinds`
+(default `auto` and `ask`): a cleanup runs only in a run that names `cleanup`, also after the row
+reached the release's version, and a pending cleanup does not hold the row back. An `ask` migration
+runs only with an answer to each of its questions in `answers`. With `apply: false` it only detects and
 plans and writes no version row unless `recordWhenCurrent` is set; `detect` and `plan` still prepare
 the collections they read, which adds the release's new fields, so a plan of data an older release
 still writes runs on a copy; `plan: false` skips `plan`. The `RunReport` lists each module
 (`ModuleRun`: stored and release version, state) and each migration (`MigrationRun`: what `detect`
 found, the `plan`, the `outcome`); a pending migration says why it was not applied in `blocked`
-(`plan-only`, `earlier-pending` for an earlier pending migration of the module,
-`dependency-pending` for an unfinished module it depends on, `blob-writes`). Data newer than the module's version, or
+(`cleanup` and `not-selected` for a kind the run did not select, `plan-only`, `earlier-pending` for an
+earlier pending migration of the module, `dependency-pending` for an unfinished module it depends on,
+`blob-writes`, `needs-answer`). Data newer than the module's version, or
 older than it converts, is left alone and reported (`update through <major>.x first`). Blobs are
 reached through an injected `BlobOps` (`copy`, `head`); `blobOpsOf(blobstore)` builds one from any
 `blobstore@1` by reading and writing the bytes, a runner with server-side copies passes its own.
 `guardStorage` is the start-up check behind a module's `storageMigrations` setting: `check` refuses
 data in an old form with `STORAGE_REFUSED`, naming the migrations and the command that runs them;
-`apply` also runs the migrations that write no blobs. A migration that writes blobs never runs at
-start-up, and the guard plans no migration, so a refusal costs only `detect`.
+`apply` also runs the migrations that write no blobs. A migration that writes blobs, an `ask`
+migration with a question and a cleanup never run at start-up; a pending cleanup is no reason to
+refuse. The guard plans no migration, so a refusal costs only `detect`.
 `helpers/session` is what an authn module shares with the others for browser sessions:
 `requestToken` reads a request's bearer token or session cookie (`__Host-kestrel_token`, or the name
 `sessionCookieName(secure)` gives) and says which it was,
