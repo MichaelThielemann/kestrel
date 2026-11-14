@@ -40,7 +40,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm vitest run packages/ops
+      - run: pnpm vitest run packages/ops packages/target-cloudfoundry packages/cli/test/ops.test.ts
   ops-published-runtime:
     runs-on: ubuntu-latest
     permissions:

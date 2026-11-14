@@ -111,6 +111,10 @@ describe("the ci workflow", () => {
     expect(macos).toMatch(/- run: pnpm install --frozen-lockfile\n\s+- run: pnpm vitest run packages\/ops/);
   });
 
+  it("runs the Cloud Foundry target and the CLI's operations commands on macOS too", () => {
+    expect(job(ci, "ops-macos")).toMatch(/- run: pnpm vitest run packages\/ops packages\/target-cloudfoundry packages\/cli\/test\/ops\.test\.ts$/m);
+  });
+
   it("boots the upgrade fixture on the published replication package of its release in a job of its own", () => {
     const published = job(ci, "ops-published-runtime");
     expect(published).toMatch(/runs-on: ubuntu-latest/);
