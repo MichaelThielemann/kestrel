@@ -199,6 +199,18 @@ describe("instanceLockFile", () => {
     expect(instanceLockFile(`file:${file}?vfs=unix&vfs=memdb`)).toBeUndefined();
   });
 
+  it("names the same lock for a file: URI with a drive letter as for the drive path itself on Windows", () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    try {
+      expect(lockFile("file:///C:/data/app.db")).toBe(lockFile("C:/data/app.db"));
+      expect(lockFile("file://localhost/C:/data/app.db?mode=rwc")).toBe(lockFile("C:/data/app.db"));
+    } finally {
+      if (platform !== undefined) Object.defineProperty(process, "platform", platform);
+    }
+    expect(process.platform === "win32" || lockFile("file:///C:/data/app.db") === "/C:/data/app.db.instance").toBe(true);
+  });
+
   it("follows a symlinked directory whose target does not exist yet", () => {
     symlinkSync("missing", join(dir, "link"));
     expect(lockFile(join(dir, "link", "app.db"))).toBe(`${join(dir, "missing", "app.db")}.instance`);

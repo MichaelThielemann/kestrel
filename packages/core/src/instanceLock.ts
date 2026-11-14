@@ -254,6 +254,7 @@ function databasePath(file: string): string | undefined {
     path = slash === -1 ? "" : path.slice(slash);
   }
   path = decoded(path);
+  if (process.platform === "win32" && /^\/[A-Za-z]:/.test(path)) path = path.slice(1);
   const params = new URLSearchParams(query);
   if (path === "" || path === MEMORY || params.getAll("mode").at(-1) === "memory" || params.getAll("vfs").at(-1) === "memdb") return undefined;
   return path;
