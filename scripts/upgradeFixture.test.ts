@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { createBlobstoreFilesystem } from "../packages/blobstore-filesystem/impl.ts";
 import { restoreFromBlobs } from "../packages/replication-sqlite/impl.ts";
@@ -104,6 +104,13 @@ describe("the 5.8.1 upgrade fixture: provenance", () => {
     const run = spawnSync(process.execPath, [join(link, "seed-upgrade-fixture.mjs"), "--bogus"], { encoding: "utf8" });
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("unknown argument --bogus");
+  });
+
+  it("can be imported by a process whose entry path does not exist", () => {
+    const run = spawnSync(process.execPath, ["-e", `import(${JSON.stringify(pathToFileURL(GENERATOR).href)}).then((m) => console.log(m.VERSION))`, "no-such-entry"], { encoding: "utf8" });
+    expect(run.stderr).toBe("");
+    expect(run.status).toBe(0);
+    expect(run.stdout.trim()).toBe("5.8.1");
   });
 
   it("ships the database as one self-contained file", () => {

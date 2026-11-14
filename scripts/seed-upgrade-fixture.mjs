@@ -298,7 +298,8 @@ async function seed() {
   writeFileSync(join(root, "seed-summary.json"), JSON.stringify(summary));
 }
 
-if (process.argv[1] !== undefined && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+const entry = process.argv[1];
+if (entry !== undefined && existsSync(entry) && realpathSync(entry) === fileURLToPath(import.meta.url)) {
   try {
     const options = parseArgs(process.argv.slice(2));
     if (options.seed) await seed();
