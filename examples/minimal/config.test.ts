@@ -848,7 +848,7 @@ describe("user deletion wiring", () => {
     expect(pipelines.get("reassignRevisionAuthor")).toEqual(["authn.verifyUser:result.reassignTo", "revisions.reassignAuthor"]);
     expect(pipelines.get("anonymizeAuditUser")).toEqual(["audit.anonymize"]);
     expect(pipelines.get("retryReassignRevisionAuthor")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:users.manage", "authn.requireAbsentUser", "authn.verifyUser:reassignTo", "revisions.reassignAuthor", "events.emit:user.revisionsReassignRetried", "events.relay"]);
-    expect(pipelines.get("auditUsers")).toEqual(["audit.record"]);
+    expect(pipelines.get("auditUsers")).toEqual(["audit.recordActor"]);
     expect(pipelines.get("retryAnonymizeAuditUser")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:users.manage", "authn.requireAbsentUser", "audit.anonymize", "events.emit:user.auditAnonymizeRetried", "events.relay"]);
     expect(pipelines.get("pruneAudit")).toEqual(["audit.prune"]);
   });
