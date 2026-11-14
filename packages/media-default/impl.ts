@@ -11,6 +11,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import { noteRead } from "@michaelthielemann/kestrel/reads";
 import { imageSize } from "./imageSize.ts";
+import { stripImageMetadata } from "./stripMetadata.ts";
 
 export const COLLECTION = "media_items";
 export const FOLDERS = "media_folders";
@@ -120,6 +121,8 @@ export interface Config {
   anonymousList: "ids" | "all";
   /** How many days a trashed item is kept before `trashIds({ expired: true })` selects it; 30 when absent. */
   trashRetentionDays?: number | undefined;
+  /** Whether `upload` removes EXIF, XMP, IPTC, comments and the like from JPEG, PNG, WebP and GIF files before storing them; `true` when absent. */
+  stripImageMetadata?: boolean | undefined;
 }
 
 /** Why a trash, restore, selection or purge left an id alone. */
@@ -917,32 +920,38 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       const location = keyFor(folderPath.value, name);
       const released = await releaseFailed(location);
       if (isErr(released)) return released;
-      const checksum = createHash("sha256").update(file.data).digest("hex");
+      let data = file.data;
+      if (config.stripImageMetadata !== false && essence.startsWith("image/")) {
+        const stripped = stripImageMetadata(file.data);
+        if (stripped.kind === "stripped") data = stripped.data;
+        else if (stripped.kind === "malformed") logWarn(logger, `media/default: could not remove the metadata from ${name}, it is stored as uploaded`, { name });
+      }
+      const checksum = createHash("sha256").update(data).digest("hex");
       const existing = await existingFor(location, checksum);
       if (isErr(existing)) return existing;
       if (existing.value !== null) return ok({ item: existing.value, created: false });
       const parsedProvenance = parseProvenance(provenance);
       if (isErr(parsedProvenance)) return parsedProvenance;
-      const size = essence.startsWith("image/") ? imageSize(file.data) : null;
+      const size = essence.startsWith("image/") ? imageSize(data) : null;
       const id = randomUUID();
       const key = idKey(id, name);
       const at = now();
       const folderReady = await ensureFolder(folderPath.value);
       if (isErr(folderReady)) return folderReady;
       const created = await db.createOne<Document>(COLLECTION, {
-        id, filename: name, folder: folderPath.value, location, contentType, size: file.data.byteLength, key,
+        id, filename: name, folder: folderPath.value, location, contentType, size: data.byteLength, key,
         checksum, status: "uploading", createdAt: at, updatedAt: at,
         provenance: parsedProvenance.value, width: size?.width ?? null, height: size?.height ?? null, alt: {}, title: {}, description: {}, svgSanitized: sanitized,
       });
       if (isErr(created)) return created.error.code === "CONFLICT" ? err(locationConflict(location)) : created;
-      const stored = await blobs.put(key, file.data, { contentType });
+      const stored = await blobs.put(key, data, { contentType });
       if (isErr(stored)) {
         const marked = await db.updateOne(COLLECTION, id, { status: "failed", updatedAt: now() });
         if (isErr(marked)) logger.error(`media/default: could not mark ${id} as failed`, { id, key, error: marked.error.message });
         return stored;
       }
       if (config.publicCopy !== undefined) {
-        const copied = await blobs.put(copyKey(id, name), file.data, { contentType: publishedTypeOf({ id, key, contentType, svgSanitized: sanitized }) });
+        const copied = await blobs.put(copyKey(id, name), data, { contentType: publishedTypeOf({ id, key, contentType, svgSanitized: sanitized }) });
         if (isErr(copied)) {
           const removedBlob = await blobs.remove(key);
           if (isErr(removedBlob)) logger.error(`media/default: could not delete blob ${key} after a failed public copy`, { id, key, error: removedBlob.error.message });

@@ -444,6 +444,11 @@
               "default": "media.list",
               "description": "The permission a signed-in caller needs to list the library or its folders when an authz module is loaded"
             },
+            "stripImageMetadata": {
+              "type": "boolean",
+              "default": true,
+              "description": "Remove EXIF (including GPS), XMP, IPTC, comments and embedded thumbnails from JPEG, PNG, WebP and GIF uploads before they are stored; the EXIF orientation is kept"
+            },
             "trashRetentionDays": {
               "type": "integer",
               "minimum": 1,
@@ -630,6 +635,17 @@
             "value": "media.list",
             "redacted": false,
             "default": "media.list"
+          },
+          {
+            "path": "stripImageMetadata",
+            "type": "boolean",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": true,
+            "redacted": false,
+            "default": true
           },
           {
             "path": "trashRetentionDays",

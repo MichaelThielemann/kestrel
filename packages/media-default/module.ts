@@ -31,6 +31,7 @@ export const configSchema = z
     maxLimit: z.number().int().min(1).default(200),
     defaultLimit: z.number().int().min(1).optional(),
     listPermission: z.string().min(1).default("media.list").describe("The permission a signed-in caller needs to list the library or its folders when an authz module is loaded"),
+    stripImageMetadata: z.boolean().default(true).describe("Remove EXIF (including GPS), XMP, IPTC, comments and embedded thumbnails from JPEG, PNG, WebP and GIF uploads before they are stored; the EXIF orientation is kept"),
     trashRetentionDays: z.number().int().min(1).default(30).describe("How many days a trashed item is kept before media.selectExpiredTrash selects it for media.purge"),
     storageMigrations: z.enum(["check", "apply"]).default("check").describe('What setup does with stored data in an older storage shape: "check" refuses to start and names the migration, "apply" runs the migrations that write no blobs. A migration that writes blobs, such as media-default:id-key-layout, never runs at start-up'),
   })

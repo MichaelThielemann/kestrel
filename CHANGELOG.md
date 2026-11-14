@@ -1751,6 +1751,13 @@ Net changes since 5.8.2.
   out) instead of preparing every call's SQL again, and binds `LIMIT` and `OFFSET` as parameters so
   pages of different sizes share one statement. A `findMany` whose page holds every match no longer
   runs a second `COUNT(*)`.
+- `media-default` removes metadata from JPEG, PNG, WebP and GIF files before it stores them: EXIF
+  with the GPS position, XMP, IPTC, comments, text chunks, embedded thumbnails and trailing data, so a
+  published original no longer reveals where and with what a photo was taken. Pixels, colour
+  profiles and animation are copied byte for byte, and the EXIF orientation stays as the only tag.
+  The stored file, its `size` and its checksum are those of the stripped bytes. New option
+  `stripImageMetadata` (default `true`); `false` stores uploads as sent. Files uploaded earlier keep
+  their metadata.
 
 ### Fixed
 

@@ -328,6 +328,7 @@ pipelines.
 Config: `allowedTypes` (`image/*`, `application/pdf`, `*` or `*/*`), `deniedTypes` (default
 `image/svg+xml`, `text/html`, `application/xhtml+xml` — they can carry scripts; both lists are
 patterns matched against the media type without parameters, ignoring case, see above), `maxBytes`,
+`stripImageMetadata` (default `true`),
 `prefix` (default `media/`, must end with `/`), `publicPath` (default `/media`), `publicCopy`
 (optional `{ prefix }`), `uploadStaleAfterMs` (default 15 minutes), `anonymousList` (`"ids"` default,
 or `"all"` for a public catalogue), `listPermission` (default `media.list`), `maxLimit` (default 200) and `defaultLimit` (default `maxLimit`, never
@@ -335,6 +336,30 @@ above it, or setup fails), `locales`/`defaultLocale`. `media.list` without `limi
 `defaultLimit` items with the full `total`, refuses a `limit` above `maxLimit` (400), and reads at most
 `maxLimit` of the `ids` it is given. `trashRetentionDays` (default 30, a whole number of at least
 1) is how long an item stays in the trash before `media.selectExpiredTrash` selects it.
+
+## Image metadata
+
+A photo carries more than pixels: EXIF holds the GPS position, the camera, timestamps and often a
+thumbnail of the original, and XMP, IPTC and comments can hold names and captions. The original is
+what `publicCopy` and `media.serve` publish, so `media.upload` removes that metadata before it stores
+the file (`stripImageMetadata`, default `true`; set it to `false` to store the bytes as sent):
+
+- JPEG: EXIF, XMP, IPTC and other application segments, comments, the thumbnail inside the JFIF header,
+  multi-picture data and everything after the end-of-image marker. The ICC profile and the Adobe colour
+  transform stay.
+- PNG: text chunks (`tEXt`, `zTXt`, `iTXt`), `eXIf`, `tIME`, unknown chunks and everything after `IEND`.
+  Chunks that decide how the pixels look (palette, transparency, gamma, `sRGB`, `iCCP`, `pHYs`, animation)
+  stay.
+- WebP: the `EXIF` and `XMP ` chunks and unknown chunks; the colour profile, alpha and animation stay.
+- GIF: comment extensions, XMP and data after the trailer.
+
+The pixel data is copied byte for byte, nothing is decoded or re-encoded, so the image looks the same
+and an upload costs no quality. The pixels are not rotated either, so the EXIF orientation (2 to 8)
+stays as the only tag, in a minimal EXIF block, and the image variants and browsers keep applying it.
+The item's `size` and the checksum behind the idempotent re-upload are those of the stored bytes: the
+same file sent again is still answered as the item that is already there. Other types (AVIF, HEIC,
+TIFF, PDF, ...) are stored as sent. A JPEG, PNG, WebP or GIF that cannot be read to its end is stored
+as sent as well, and the module logs a warning naming the file.
 
 ## Anonymous reads
 
@@ -483,6 +508,7 @@ Not included: image resizing, tags, linking media to content documents.
 | `maxLimit` | integer | no | `200` |
 | `defaultLimit` | integer | no | – |
 | `listPermission` | string | no | `"media.list"` |
+| `stripImageMetadata` | boolean | no | `true` |
 | `trashRetentionDays` | integer | no | `30` |
 | `storageMigrations` | enum | no | `"check"` |
 
