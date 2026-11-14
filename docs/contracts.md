@@ -304,7 +304,7 @@ Not every file under `packages/contracts/src/` is a contract plus its test. The 
 - **`links.ts`** declares the frozen `content@1` underpinning (`INTERNAL_REF`, `InternalRef`,
   `LinkTarget`) at the package's top level; **`helpers/links.ts`**'s `collectInternalRefs` is its
   runtime counterpart and may change independently. **`helpers/persistence.owned`,
-  `helpers/mediaType`, `helpers/content-schema`, `helpers/content-locale` and `helpers/json-schema`**, documented in
+  `helpers/mediaType`, `helpers/content-schema`, `helpers/content-locale`, `helpers/json-schema` and `helpers/html-allowlist`**, documented in
   `packages/contracts/README.md`, are pure helpers shared by modules — not contracts either.
 
 ## Reads a render can see

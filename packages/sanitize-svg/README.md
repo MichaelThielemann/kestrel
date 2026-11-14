@@ -8,7 +8,9 @@ declared as another image type (or PDF) and its bytes are SVG markup (`verifiedM
 `<script>`, `<style>`, `<foreignObject>`, `<image>`, `on*` handlers, `animate*`/`set`, and any
 `href`/`xlink:href` that is not an internal `#...` reference, and any attribute holding a `url(...)`
 that does not point to a `#fragment` of the same file (`fill="url(http://…)"` goes, `fill="url(#g)"`
-stays). Serve a sanitized SVG with `Content-Security-Policy: default-src 'none'; sandbox`, as the
+stays). The same goes for an attribute other than `font-family` that quotes a string outside a `url(#…)`, calls an
+image function (`image-set()`, `-webkit-image-set()`, `cross-fade()`, `element()`, `image()`, `src()`) or uses a CSS
+escape: `mask="image-set('http://…' 1x)"` goes. Serve a sanitized SVG with `Content-Security-Policy: default-src 'none'; sandbox`, as the
 Node origin does, so that nothing in the file can load a resource. Inline delivery of sanitized SVGs
 still needs `image/svg+xml` in core's `http.inlineTypes` – and the other way round: that entry
 without this module (or another one registering `sanitize.svg`) fails the boot. `media-default`

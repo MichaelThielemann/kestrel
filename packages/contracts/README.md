@@ -124,6 +124,10 @@ sets a reader consults for the portability marking), `helpers/events.envelope` (
 `parseEmitSpec`, `withEventIdentity`, `relaySummary`, `mergeRelayReport` — runtime logic built on the
 frozen shapes in `events.steps`), `helpers/persistence.owned` (`ownedPersistence`),
 `helpers/content-locale` (`satisfiesFilter`, `publishedLocale`, `narrowListTranslations`),
+`helpers/html-allowlist` (`HTML_ALLOWED_TAGS`, `HTML_ALLOWED_ATTRIBUTES`, `HTML_ALLOWED_SCHEMES`, `HTML_IMG_SCHEMES`,
+`HTML_ID_PATTERN`, `isAllowedHtmlUrl`, `normalizeHtmlAttributes`),
+`helpers/session` (`SESSION_COOKIE`, `SECURE_SESSION_COOKIE`, `sessionCookieName`, `requestToken`, `sessionCookie`,
+`clearedSessionCookie`, `crossOriginRefusal`),
 `helpers/content-schema` (`documentSchema`, `fieldSchema`), `helpers/json-schema` (`resolveSchema`,
 `isSchemaNode`, `jsonTypeOf`, `declaresType`, `typeTag` — JSON Schema resolution shared by the walkers of
 `validate-jsonschema` and `references-default`), `helpers/links` (`collectInternalRefs`),

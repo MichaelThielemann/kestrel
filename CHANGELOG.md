@@ -880,8 +880,10 @@ Net changes since 5.8.2.
   the same name declares it in `query`; `migrations.apply` reads `dry` from `ctx.body`.
 - `sanitize-svg`: **an attribute holding a `url()` that does not point to a `#fragment` of the same file
   is removed** (`fill="url(http://…)"`, `filter`, `mask`, `clip-path`, `marker-*`, a `url()` with quotes or
-  spaces, a `data:` or protocol-relative target), together with any attribute whose value uses a CSS escape.
-  `fill="url(#gradient)"` and every attribute without a `url()` are unchanged. `style` and `<style>` stay removed.
+  spaces, a `data:` or protocol-relative target), together with any attribute other than `font-family` whose value
+  quotes a string outside a `url(#…)`, calls `image-set()`, `-webkit-image-set()`, `cross-fade()`, `element()`,
+  `image()` or `src()`, or uses a CSS escape.
+  `fill="url(#gradient)"` and every other attribute are unchanged. `style` and `<style>` stay removed.
 - `validate-jsonschema`: **the HTML sanitizer gives every link whose `target` is not `_self` (in any
   case) `rel="noopener noreferrer"` and removes `opener`** (`target="_BLANK" rel="opener"` and
   `target="win1"` were left open), keeps other `rel` tokens such as `nofollow`, and drops an `href` or `src`
