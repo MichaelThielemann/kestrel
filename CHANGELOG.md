@@ -1869,7 +1869,9 @@ Net changes since 5.8.2.
 - `persistence/sqlite` and `fakePersistence` look fields up by their own name, so a sort or filter on a
   name `Object.prototype` defines (`constructor`, `toString`) is an unknown field like any other.
   `persistence/sqlite` no longer reads a filter value whose only key is such a name as an operator; it is
-  an equality value.
+  an equality value. `createOne` and `createMany` store `null` for an omitted field named like an
+  `Object.prototype` member instead of reading the inherited value (a boolean field became `true`, a
+  string or json field failed the insert).
 
 ## 5.8.2 – 2026-09-27
 
