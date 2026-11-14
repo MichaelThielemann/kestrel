@@ -59,8 +59,14 @@ trigger implementations, tests) is private and not importable. `@michaelthielema
 root: `boot`, `checkBoot`, `defineContract`, `defineModule`, `definePipeline`, `defineConfig`, the
 HTTP helpers an adapter needs, the error and result vocabulary) and `@michaelthielemann/kestrel/<name>`
 for `atomic`, `cast`, `catalogue`, `context`, `defineConfig`, `defineContract`, `defineModule`,
-`definePipeline`, `errors`, `load`, `logger`, `reads`, `result`, `runner`, `schema` and
-`testing/runPipeline`. `reads` (`observeReads`, `noteRead`, `unobserved`) lets a caller see what the providers
+`definePipeline`, `errors`, `instanceLock`, `load`, `logger`, `reads`, `result`, `runner`, `schema` and
+`testing/runPipeline`. `instanceLock` (`acquireInstanceLock`, `instanceLockFile`) keeps a second process off a
+database file: the lock is a sidecar `<file>.instance` next to the database, never a row inside it, so it never
+travels with a replica, snapshot or restore. A lock whose heartbeat (every 10 s) is older than 60 s, or whose
+process on the same host is gone, is taken over; any other makes `acquireInstanceLock` throw a `KestrelBootError`
+with code `instance-locked` that names the holder's host, PID and start time. Several holders in one process share
+the lock, `:memory:` takes none, and `health()` turns `restartRequired` once another instance took the lock over.
+`reads` (`observeReads`, `noteRead`, `unobserved`) lets a caller see what the providers
 answered while a function ran, in the same process and async context; `delivery-static` uses it to record what a
 render read (see `docs/contracts.md`). The core imports no contract, no module and no host framework; ESLint
 enforces that for `core`, `contracts` (only the core) and the `h3` adapter (only `h3` and the core).

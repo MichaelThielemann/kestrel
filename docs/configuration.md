@@ -290,6 +290,10 @@ code it does not recognize rather than assume this list is complete.
 
 A module's `setup()` that throws is `setup-failed`, naming the module, unless it throws a
 `KestrelBootError` of its own: the problem then keeps that error's code, module and reason.
+`instance-locked` is one such code: a module that keeps a second process off its database file
+throws it from `setup()` through `acquireInstanceLock` (`@michaelthielemann/kestrel/instanceLock`)
+when another live process holds the file. The reason names that process's host, PID and start
+time, and the module setting that allows several processes on purpose.
 
 Module code that throws while boot registers or resolves steps is reported like any other problem.
 A module's `steps()` that throws is `steps-threw`, its `describe()` `describe-threw`, both naming
