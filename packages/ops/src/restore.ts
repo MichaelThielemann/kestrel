@@ -381,7 +381,12 @@ export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptio
     const bytes = blobs.reduce((n, b) => n + b.size, 0);
     await confirm(ctx.answers, "confirm", `download ${blobs.length} original(s), ${(bytes / 1024 / 1024).toFixed(1)} MiB, into ${dir}/blobs`);
   }
-  const created = existsSync(dir) ? null : (mkdirSync(dir, { recursive: true, mode: 0o700 }) ?? null);
+  const createdDirs: string[] = [];
+  const makeDir = (path: string): void => {
+    const first = mkdirSync(path, { recursive: true, mode: 0o700 });
+    if (first !== undefined) createdDirs.push(first);
+  };
+  makeDir(dir);
   const written: string[] = [];
   try {
     closeSync(openSync(file, "wx", 0o600));
@@ -393,14 +398,14 @@ export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptio
         if (data === null) throw new OpsError(`backup object ${entry.object} is missing`, 1, entry.key);
         const out = join(dir, "blobs", entry.key);
         if (!resolve(out).startsWith(join(dir, "blobs") + "/")) throw new OpsError(`refusing to write ${entry.key} outside ${dir}/blobs`, 1, entry.key);
-        mkdirSync(dirname(out), { recursive: true, mode: 0o700 });
+        makeDir(dirname(out));
         writeFileSync(out, data, { mode: 0o600, flag: "wx" });
         written.push(out);
       }
     }
   } catch (cause) {
     for (const path of written) rmSync(path, { force: true });
-    if (created !== null) rmSync(created, { recursive: true, force: true });
+    for (const created of createdDirs.reverse()) rmSync(created, { recursive: true, force: true });
     throw cause;
   }
   return { file, sessionsDeleted, originals: written.length - 1 };
