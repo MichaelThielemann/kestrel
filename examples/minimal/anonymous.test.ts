@@ -385,6 +385,61 @@ describe("examples/minimal: what a caller without an identity receives", () => {
   });
 });
 
+describe("examples/minimal: sorting and query parameters over HTTP", () => {
+  let example: Awaited<ReturnType<typeof bootExample>> | undefined;
+  let token = "";
+  let mediaId = "";
+
+  beforeAll(async () => {
+    example = await bootExample();
+    const seeded = await seed(example.base);
+    token = seeded.token;
+    mediaId = seeded.mediaId;
+  });
+  afterAll(async () => {
+    await example?.dispose();
+  });
+
+  const base = () => {
+    if (example === undefined) throw new Error("the example did not boot");
+    return example.base;
+  };
+
+  it("answers an anonymous caller 400 for a sort by a field its grant leaves out, a prototype member or an unknown field", async () => {
+    for (const sort of ["parent", "-parent", "constructor", "toString", "nope"]) {
+      expect((await request(base(), "GET", `/pages?sort=${sort}`)).status, sort).toBe(400);
+    }
+    expect((await request(base(), "GET", `/media?ids=${mediaId}&sort=folder`)).status).toBe(400);
+    expect((await request(base(), "GET", `/media?ids=${mediaId}&sort=size`)).status).toBe(200);
+  });
+
+  it("answers 200 for a sort by a granted field or a system field, and ignores an unrelated query key", async () => {
+    for (const sort of ["slug", "-title", "id", "createdAt", "-updatedAt"]) {
+      expect((await request(base(), "GET", `/pages?sort=${sort}`)).status, sort).toBe(200);
+    }
+    expect((await request(base(), "GET", "/pages?_=1")).status).toBe(200);
+  });
+
+  it("lets a signed-in role without a field grant sort by any field", async () => {
+    expect((await request(base(), "GET", "/pages?sort=parent", { token })).status).toBe(200);
+    expect((await request(base(), "GET", "/admin/pages?sort=-parent", { token })).status).toBe(200);
+  });
+
+  it("answers 400 for a body member sent in the query and applies nothing", async () => {
+    const refused = await request(base(), "POST", "/users?roles=admin", { token, json: { username: "viewer", password: "a-long-enough-password" } });
+    expect(refused.status).toBe(400);
+    expect((await request(base(), "POST", "/admin/migrations/apply?dry=true", { token, json: {} })).status).toBe(400);
+    const users = await request(base(), "GET", "/users", { token });
+    expect(users.status).toBe(200);
+    expect(users.text).not.toContain("viewer");
+  });
+
+  it("accepts a locale in the query of a write, where the step declares it", async () => {
+    const created = await request(base(), "POST", "/pages?locale=en", { token, json: { slug: "english", title: "English", status: "draft" } });
+    expect(created.status, created.text).toBe(200);
+  });
+});
+
 describe("examples/minimal: a public read without the field step", () => {
   it("does not boot", async () => {
     const pipelines = await loadPipelines(root, "pipelines");
