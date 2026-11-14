@@ -77,7 +77,7 @@ function isDemotedSvg(row: Row): boolean {
   return nameFor(row.filename ?? urlNameOf(row.key), row.contentType, true) !== nameOf(row);
 }
 
-type SvgOutcome = { sanitized: Uint8Array | null } | { refused: string };
+type SvgOutcome = { sanitized: Uint8Array } | { refused: string };
 
 const SVG = "image/svg+xml";
 
@@ -174,10 +174,10 @@ export function storage(config: StorageConfig = {}, deps: StorageDeps = {}): Mod
     });
   };
 
-  const lostOriginals = async (rows: readonly Row[], exists: (key: string) => Promise<Result<boolean, ShapeMigrationError>>): Promise<Result<Set<string>, ShapeMigrationError>> => {
+  const lostOriginals = async (rows: readonly Row[], exists: (key: string) => Promise<Result<boolean, ShapeMigrationError>>, cleaned: ReadonlySet<string>): Promise<Result<Set<string>, ShapeMigrationError>> => {
     const lost = new Set<string>();
     for (const { row, key } of assign(rows, prefix).pending) {
-      if (isTrashed(row) || key === row.key) continue;
+      if (isTrashed(row) || key === row.key || cleaned.has(row.id)) continue;
       const found = await anyOf(exists, [row.key, key, `${prefix}${row.id}/${nameOf(row)}`]);
       if (isErr(found)) return found;
       if (!found.value) lost.add(row.id);
@@ -185,17 +185,34 @@ export function storage(config: StorageConfig = {}, deps: StorageDeps = {}): Mod
     return ok(lost);
   };
 
+  const cleanedEarlier = async (ctx: MigrationContext, clean: SvgSanitizer, row: Row, owned: ReadonlySet<string>): Promise<Result<Uint8Array | null, ShapeMigrationError>> => {
+    const folder = `${prefix}${row.id}/`;
+    const listed = await ctx.blobs.list(folder);
+    if (isErr(listed)) return listed;
+    const found: Uint8Array[] = [];
+    for (const { key } of listed.value) {
+      if (key.slice(folder.length).includes("/") || !key.endsWith(".svg") || owned.has(key)) continue;
+      const read = await ctx.blobs.get(key);
+      if (isErr(read)) return read;
+      if (read.value === null) continue;
+      const again = await clean({ filename: row.filename ?? urlNameOf(row.key), contentType: row.contentType, data: read.value });
+      if (!isErr(again) && Buffer.from(again.value).equals(read.value)) found.push(read.value);
+    }
+    return ok(found.length === 1 ? found[0]! : null);
+  };
+
   const svgOutcomes = async (ctx: MigrationContext, rows: readonly Row[]): Promise<Result<Map<string, SvgOutcome> | null, ShapeMigrationError>> => {
     if (sanitizeSvg === undefined) return ok(null);
     const outcomes = new Map<string, SvgOutcome>();
+    const owned = new Set(rows.map((r) => r.key));
     for (const row of rows) {
       if (canonicalIdOf(row.key, prefix) === row.id || !isDemotedSvg(row)) continue;
       const read = await ctx.blobs.get(row.key);
       if (isErr(read)) return read;
       if (read.value === null) {
-        const earlier = await ctx.blobs.list(`${prefix}${row.id}/`);
+        const earlier = await cleanedEarlier(ctx, sanitizeSvg, row, owned);
         if (isErr(earlier)) return earlier;
-        if (earlier.value.some((b) => !b.key.slice(prefix.length + row.id.length + 1).includes("/") && b.key.endsWith(".svg"))) outcomes.set(row.id, { sanitized: null });
+        if (earlier.value !== null) outcomes.set(row.id, { sanitized: earlier.value });
         continue;
       }
       const cleaned = await sanitizeSvg({ filename: row.filename ?? urlNameOf(row.key), contentType: row.contentType, data: read.value });
@@ -213,7 +230,8 @@ export function storage(config: StorageConfig = {}, deps: StorageDeps = {}): Mod
       const outcome = svgs.value?.get(row.id);
       return outcome !== undefined && "sanitized" in outcome ? { ...row, svgSanitized: true, contentType: SVG } : row;
     });
-    const lost = answer.value === "trash" ? await lostOriginals(marked, exists) : ok(new Set<string>());
+    const cleaned = new Set([...(svgs.value ?? new Map<string, SvgOutcome>())].filter(([, outcome]) => "sanitized" in outcome).map(([id]) => id));
+    const lost = answer.value === "trash" ? await lostOriginals(marked, exists, cleaned) : ok(new Set<string>());
     if (isErr(lost)) return lost;
     const effective = marked.map((row): Row => (lost.value.has(row.id) ? { ...row, status: "trashed", location: null } : row));
     return ok({ lost: lost.value, work: assign(effective, prefix), svgs: svgs.value });
@@ -278,7 +296,8 @@ export function storage(config: StorageConfig = {}, deps: StorageDeps = {}): Mod
         if (isErr(source)) return source;
         const target = source.value ? ok(true) : await exists.value(key);
         if (isErr(target)) return target;
-        if (source.value) copies += 1;
+        const svg = svgs?.get(row.id);
+        if (source.value || (!target.value && svg !== undefined && "sanitized" in svg)) copies += 1;
         else if (!target.value) {
           missing += 1;
           notes.push({ item: row.id, reason: `original ${row.key} is missing` });
@@ -313,7 +332,7 @@ export function storage(config: StorageConfig = {}, deps: StorageDeps = {}): Mod
       for (const { row, name, key, location } of work.pending) {
         const patch: Record<string, unknown> = { key, filename: name, location };
         const svg = svgs?.get(row.id);
-        const cleaned = svg !== undefined && "sanitized" in svg ? svg : null;
+        const cleaned = svg !== undefined && "sanitized" in svg ? svg.sanitized : null;
         if (key !== row.key && isDemotedSvg(row)) {
           svgDemoted += 1;
           notes.push(demotedNote(row, name, demotionReason(svgs, row)));
@@ -331,23 +350,27 @@ export function storage(config: StorageConfig = {}, deps: StorageDeps = {}): Mod
           if (isErr(source)) return source;
           const target = await ctx.blobOps.head(key);
           if (isErr(target)) return target;
-          if (source.value === null && target.value === null) {
+          if (source.value === null && target.value === null && cleaned === null) {
             notes.push({ item: row.id, reason: `original ${row.key} is missing` });
-          } else if (source.value === null && target.value !== null) {
+          } else if (source.value === null && target.value !== null && cleaned === null) {
             const targetSha = await blobSha256(ctx, key, target.value);
             if (isErr(targetSha)) return targetSha;
-            if (cleaned === null && (target.value.size !== row.size || (row.checksum !== null && targetSha.value !== row.checksum))) {
+            if (target.value.size !== row.size || (row.checksum !== null && targetSha.value !== row.checksum)) {
               notes.push({ item: row.id, reason: `the bytes at ${key} differ from the item's recorded size or checksum, and its original ${row.key} is gone; the item records those of ${key}` });
             }
             Object.assign(patch, { size: target.value.size, checksum: targetSha.value });
-          } else if (source.value !== null) {
-            const sourceSha = await blobSha256(ctx, row.key, source.value);
-            if (isErr(sourceSha)) return sourceSha;
-            if (source.value.size !== row.size || (row.checksum !== null && sourceSha.value !== row.checksum)) {
-              notes.push({ item: row.id, reason: `the bytes at ${row.key} differ from the item's recorded size or checksum; the item records those of the copy` });
+          } else {
+            let sourceSha: string | null = null;
+            if (source.value !== null) {
+              const read = await blobSha256(ctx, row.key, source.value);
+              if (isErr(read)) return read;
+              sourceSha = read.value;
+              if (source.value.size !== row.size || (row.checksum !== null && sourceSha !== row.checksum)) {
+                notes.push({ item: row.id, reason: `the bytes at ${row.key} differ from the item's recorded size or checksum; the item records those of the copy` });
+              }
             }
-            const bytes = cleaned?.sanitized ?? null;
-            const want = bytes === null ? { size: source.value.size, sha: sourceSha.value } : { size: bytes.byteLength, sha: sha256Of(bytes) };
+            const bytes = cleaned;
+            const want = bytes === null ? { size: source.value!.size, sha: sourceSha! } : { size: bytes.byteLength, sha: sha256Of(bytes) };
             Object.assign(patch, { size: want.size, checksum: want.sha });
             const targetSha = target.value === null ? ok(null) : await blobSha256(ctx, key, target.value);
             if (isErr(targetSha)) return targetSha;

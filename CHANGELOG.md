@@ -923,7 +923,8 @@ Net changes since 5.8.2.
     is kept and reported, and its old key is recorded too. `storage(config, { sanitizeSvg })` cleans each
     5.x SVG with the given sanitizer and stores it as `<stem>.svg`, `image/svg+xml`, with `svgSanitized`
     set, `updatedAt` set to the time of the run and the same id (`svgSanitized`). A 5.x SVG the sanitizer refuses, one whose original is
-    missing, and every 5.x SVG without a sanitizer becomes `<stem>-svg.bin`, served as
+    missing (unless the one `.svg` file in its `<prefix><id>/` folder that no item uses as its key is a cleaned copy an earlier run
+    wrote, which the sanitizer answers unchanged), and every 5.x SVG without a sanitizer becomes `<stem>-svg.bin`, served as
     `application/octet-stream`; the run lists each one with the reason (`svgDemoted`), and uploading it
     again through `sanitize.svg` serves it as an image.
   - `images-default:variant-slots` fills in the `slot` of 5.x variant and retired rows, keeping the

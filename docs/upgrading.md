@@ -236,7 +236,10 @@ no longer shows it. That happens when `sanitize.svg` refuses the file (markup wi
 a file above its `maxBytes`), when the cleaned file's root element is not in the SVG namespace (an
 SVG that declares the namespace through an entity of its DOCTYPE, which the cleaning removes, as
 some older drawing programs export it), when its original is missing, and for every 5.x SVG when no
-module of the project registers `sanitize.svg`, which the report says in a note.
+module of the project registers `sanitize.svg`, which the report says in a note. An SVG whose
+original is missing stays an image only when an earlier, interrupted run already wrote its cleaned
+copy: the one `.svg` file in the item's `<id>/` folder that no other item uses as its key and that
+`sanitize.svg` leaves unchanged.
 
 - `migrate --plan` names each such item with the reason, such as "is an SVG that sanitize.svg
   refuses (invalid svg: …)", and counts them as `svgDemoted`; check that list before the update.

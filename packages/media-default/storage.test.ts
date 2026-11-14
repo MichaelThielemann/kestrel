@@ -512,6 +512,39 @@ describe("media-default storage: 5.x SVGs with a sanitizer", () => {
     expect([row.key, row.svgSanitized === true]).toEqual(["media/s3/gone-svg.bin", false]);
   });
 
+  it("keeps an SVG whose original is missing a download when the only SVG in its id folder is the 5.x file of another item, and leaves that file to its owner", async () => {
+    for (const other of ["a0", "t6"]) {
+      const { db, blobs } = await oldStore([{ id: "s5", folder: "", filename: "badge.svg", contentType: "image/svg+xml" }, { id: other, folder: "s5", filename: "badge.svg", contentType: "image/png", blob: DIRTY_SVG }], false);
+      const plan = expectOk(await runShapeMigrations({ storages: [storage({}, { sanitizeSvg: stubSanitizer() })], db, blobs, apply: false, blobWrites: true, answers: { [MISSING_ORIGINAL.id]: "keep" } })).modules[0]!.migrations[0]!.plan!;
+      expect(plan.counts, other).toMatchObject({ svgSanitized: 0, svgDemoted: 1, missingOriginals: 1 });
+      const outcome = expectOk(await migrateSanitizing(db, blobs, stubSanitizer(), { [MISSING_ORIGINAL.id]: "keep" })).modules[0]!.migrations[0]!.outcome!;
+      expect(outcome.counts, other).toMatchObject({ svgSanitized: 0, svgDemoted: 1, missingOriginals: 1 });
+      const rows = await rowsOf(db);
+      const svg = rows.find((r) => r.id === "s5")!;
+      expect([svg.key, svg.svgSanitized === true], other).toEqual(["media/s5/badge-svg.bin", false]);
+      expect(rows.find((r) => r.id === other)!.key, other).toBe(`media/${other}/badge.png`);
+      const media = await createMediaDefault({ ...CONFIG, publicCopy: { prefix: "site/" } }, blobs, db, silentLogger);
+      expectOk(await media.syncPublic());
+      const published = expectOk(await blobs.list("site/")).map((b) => b.key);
+      expect(published.filter((key) => key.endsWith(".svg")), other).toEqual([]);
+    }
+  });
+
+  it("keeps an SVG whose original is missing an image from a cleaned copy in its id folder only when the sanitizer leaves that copy as it is", async () => {
+    for (const [copy, expected] of [[CLEAN_SVG, { key: "media/s7/logo.svg", svgSanitized: true, checksum: sha(bytes(CLEAN_SVG)) }], [DIRTY_SVG, { key: "media/s7/logo-svg.bin", svgSanitized: false }]] as const) {
+      const { db, blobs } = await oldStore([{ id: "s7", folder: "brand", filename: "logo.svg", contentType: "image/svg+xml" }], false);
+      expectOk(await blobs.put("media/s7/logo.svg", bytes(copy)));
+      const plan = expectOk(await runShapeMigrations({ storages: [storage({}, { sanitizeSvg: stubSanitizer() })], db, blobs, apply: false, blobWrites: true, answers: { [MISSING_ORIGINAL.id]: "keep" } })).modules[0]!.migrations[0]!.plan!;
+      const sanitized = expected.svgSanitized ? 1 : 0;
+      expect(plan.counts, copy).toMatchObject({ svgSanitized: sanitized, svgDemoted: 1 - sanitized, missingOriginals: 1 - sanitized });
+      const outcome = expectOk(await migrateSanitizing(db, blobs, stubSanitizer(), { [MISSING_ORIGINAL.id]: "keep" })).modules[0]!.migrations[0]!.outcome!;
+      expect(outcome.counts, copy).toMatchObject({ svgSanitized: sanitized, svgDemoted: 1 - sanitized, missingOriginals: 1 - sanitized });
+      const row = (await rowsOf(db))[0]!;
+      expect({ key: row.key, svgSanitized: row.svgSanitized === true, ...(expected.svgSanitized ? { checksum: row.checksum } : {}) }, copy).toEqual(expected);
+      if (!expected.svgSanitized) expect(outcome.notes.some((n) => n.item === "s7" && n.reason.endsWith("is missing")), copy).toBe(true);
+    }
+  });
+
   it("calls the sanitizer for no item and writes nothing on a second run", async () => {
     const { db, blobs } = await oldStore(SVG_ITEMS, false);
     expectOk(await migrateSanitizing(db, blobs, stubSanitizer()));
