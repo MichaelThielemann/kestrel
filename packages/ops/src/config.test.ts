@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createHarness, LOCATION, PREFIXES } from "./harness.fixture.ts";
 import { environmentProblems, type Environment } from "./environments.ts";
@@ -43,6 +46,43 @@ describe("environment checks", () => {
       expect([...bucket.objects.keys()].filter((k) => k.startsWith(LOCATION))).toEqual(backupKeys);
       expect((await h.app.status()).state).toBe("started");
       expect((await h.run(["status"])).code).toBe(1);
+    } finally {
+      await h.dispose();
+    }
+  });
+});
+
+describe("--answers", () => {
+  it("reads a relative answers file from the directory the tool was called in, also when the environments file lies elsewhere, as in a bundle", async () => {
+    const h = createHarness({ store: memoryStore(new MemoryBucket("answers-cwd")) });
+    const caller = mkdtempSync(join(tmpdir(), "kestrel-ops-caller-"));
+    const before = process.cwd();
+    try {
+      await h.app.start();
+      await h.app.seed();
+      writeFileSync(join(caller, "answers.json"), JSON.stringify({ "unsealed-stop": "accept" }));
+      h.app.kill();
+      process.chdir(caller);
+      const run = await h.run(["backup", "create", "--freeze", "--answers", "answers.json", "--json"]);
+      expect(run.stderr).not.toContain("ENOENT");
+      expect(run.code).toBe(0);
+    } finally {
+      process.chdir(before);
+      rmSync(caller, { recursive: true, force: true });
+      await h.dispose();
+    }
+  });
+
+  it("reports a missing or unreadable answers file as a configuration error with exit 2", async () => {
+    const h = createHarness({ store: memoryStore(new MemoryBucket("answers-missing")) });
+    try {
+      const missing = await h.run(["backup", "list", "--answers", join(h.root, "nowhere.json")]);
+      expect(missing.code).toBe(2);
+      expect(missing.stderr).toContain("--answers");
+      writeFileSync(join(h.root, "broken.json"), "{ not json");
+      const broken = await h.run(["backup", "list", "--answers", join(h.root, "broken.json")]);
+      expect(broken.code).toBe(2);
+      expect(broken.stderr).toContain("--answers");
     } finally {
       await h.dispose();
     }

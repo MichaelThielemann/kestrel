@@ -89,7 +89,8 @@ in the background with only the variables in `env` (and `PATH`), its pid kept in
 generation, as a container with an empty disk does; a restore then promotes a generation. `disk:
 "persistent"` keeps the file, and a restore places the database as `<database>.restore`, which
 `replication-sqlite` applies at the next start. Any other `adapter` is imported by package name and must
-export `createTarget(config, { root, clock })`.
+export `createTarget(config, { root, clock })`. `root`, against which relative paths such as `dir` resolve,
+is the directory that holds `kestrel.environments.json`; in a bundle that is `.kestrel-ops/` itself.
 
 ## Backups
 ```
@@ -191,7 +192,8 @@ passed its name.
 | `prune-delete` | before prune deletes | answers yes |
 | `break-lock` | `--break-lock` finds a lock another run holds | never |
 
-`--answers <file>` is a JSON object from id to answer (`"yes"` or `"accept"`). Without a terminal and
+`--answers <file>` is a JSON object from id to answer (`"yes"` or `"accept"`); a relative path is read from
+the directory the tool is called in, and a file that is missing or not JSON stops the run with exit 2. Without a terminal and
 without an answer, the run stops at the question with exit 1.
 
 ## Retention and prune

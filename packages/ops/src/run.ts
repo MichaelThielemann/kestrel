@@ -138,9 +138,14 @@ async function loadTarget(env: Environment, options: RunOptions, root: string, c
   return boundaryCast<TargetFactory>(create, "host")(config, { root, clock });
 }
 
-function readAnswers(file: string | null, root: string): Record<string, string> {
+function readAnswers(file: string | null): Record<string, string> {
   if (file === null) return {};
-  const value = parseJson(new Uint8Array(readFileSync(resolve(root, file))));
+  let value: unknown;
+  try {
+    value = parseJson(new Uint8Array(readFileSync(resolve(file))));
+  } catch (cause) {
+    throw new OpsError(`${file}: cannot read the answers file: ${cause instanceof Error ? cause.message : String(cause)}`, 2, "--answers");
+  }
   if (typeof value !== "object" || value === null || Array.isArray(value) || !Object.values(value).every((v) => typeof v === "string")) throw new OpsError(`${file}: answers must map question ids to strings`, 2, "--answers");
   return boundaryCast<Record<string, string>>(value, "json");
 }
@@ -220,7 +225,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
       location: environment.backups.prefix,
       target,
       out,
-      answers: { answers: readAnswers(value(parsed, "--answers"), root), yes: parsed.flags.has("--yes"), ...(prompt ? { prompt } : {}) },
+      answers: { answers: readAnswers(value(parsed, "--answers")), yes: parsed.flags.has("--yes"), ...(prompt ? { prompt } : {}) },
       clock,
       redactor,
       workspace,
