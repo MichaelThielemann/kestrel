@@ -170,7 +170,8 @@ with the manifest, runs a full `integrity_check`, counts the rows of every table
 a row references has an entry and an object of the recorded size and that every delivery key has one, and
 hashes a sample of originals (25 or 2 %, whichever is more, at most 200) against the checksum of their row.
 Listings may lag behind writes: an object the listing does not show yet is looked up with a HEAD before it
-counts as missing, a backup copies a key only after a HEAD found no object under it, and the delivery prefix
+counts as missing, a backup copies a key only after a HEAD found no object under it (an object there whose size differs from
+the source's is damaged: the backup stops with exit 1 and names it, and never writes over it), and the delivery prefix
 is listed until two listings agree.
 
 ## Restore

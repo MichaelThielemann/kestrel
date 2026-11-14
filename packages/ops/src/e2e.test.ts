@@ -39,6 +39,32 @@ describe("backup and restore against an in-memory store", () => {
     }
   });
 
+  it("never overwrites a damaged object of the backup location: the next backup stops and names it", async () => {
+    const bucket = new MemoryBucket("damaged-object");
+    const h = createHarness({ store: memoryStore(bucket) });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const first = await h.run(["backup", "create", "--freeze", "--json"]);
+      expect(first.code).toBe(0);
+      const object = [...bucket.objects.keys()].find((key) => key.startsWith(`${LOCATION}objects/${PREFIXES.media}m2/`));
+      if (object === undefined) throw new Error("the backup holds no object of m2");
+      bucket.tamper(object, new TextEncoder().encode("cut"));
+      const writesBefore = bucket.writes.length;
+
+      const second = await h.run(["backup", "create", "--json"]);
+      expect(second.code).toBe(1);
+      expect(second.stderr).toContain(object.slice(LOCATION.length));
+      expect(second.stderr).toContain("damaged");
+      expect(bucket.writes.slice(writesBefore).filter((w) => w.key.startsWith(LOCATION) && w.op !== "delete" && w.existed)).toEqual([]);
+      expect(bucket.writes.slice(writesBefore).filter((w) => w.key === object)).toEqual([]);
+      expect(bucket.objects.get(object)?.data.byteLength).toBe(3);
+      expect((await h.run(["backup", "verify", String(first.json.id)])).code).toBe(1);
+    } finally {
+      await h.dispose();
+    }
+  });
+
   it("puts an edit made after the restore began into the pre-restore backup, and restoring that backup brings it back", async () => {
     const h = createHarness({ store: memoryStore(new MemoryBucket("safety")) });
     try {

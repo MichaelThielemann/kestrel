@@ -78,6 +78,7 @@ async function copyIntoObjects(ctx: OpsContext, info: ObjectInfo, existing: Map<
     const entry = (objectEtag: string): CopiedEntry => ({ key: source.key, size: source.size, etag: source.etag, object: objectKey, objectEtag });
     const known = existing.get(object) ?? (await ctx.backups.head(object));
     if (known && known.size === source.size) return { entry: entry(known.etag), copied: false };
+    if (known) throw new OpsError(`${objectKey} holds ${known.size} bytes where ${source.key} has ${source.size}: the backup copy is damaged, and a key of the backup location is never overwritten; verify the backups that list it, then remove it so the next backup copies it again`, 1, objectKey);
     let streamed: Uint8Array | null;
     try {
       streamed = await transfer(ctx.app, source.key, ctx.backups, object, source.etag);
