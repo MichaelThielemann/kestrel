@@ -92,6 +92,20 @@ describe("media.upload removes image metadata", () => {
     expect(store.blobs.size).toBe(1);
   });
 
+  it("answers a file stored without its metadata as the existing item once stripping is off", async () => {
+    const store = fakeBlobstore();
+    const persistence = createFakePersistence();
+    const logger: Logger = { step() {}, info() {}, error() {}, warn() {} };
+    const stripping = await createMediaDefault(CONFIG, store, persistence, logger, () => 7);
+    const sending = await createMediaDefault({ ...CONFIG, stripImageMetadata: false }, store, persistence, logger, () => 7);
+    const first = expectOk(await stripping.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: jpeg() }));
+    const again = expectOk(await sending.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: jpeg() }));
+    expect(first.created).toBe(true);
+    expect(again.created).toBe(false);
+    expect(again.item.id).toBe(first.item.id);
+    expect(store.blobs.size).toBe(1);
+  });
+
   it("still rejects different bytes at an occupied location", async () => {
     const { media } = await setup();
     expectOk(await media.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: jpeg(1) }));
@@ -113,6 +127,14 @@ describe("media.upload removes image metadata", () => {
     expectOk(await media.upload({ filename: "broken.jpg", contentType: "image/jpeg", data: broken }));
     expect(Array.from([...blobs.values()][0]!)).toEqual(Array.from(broken));
     expect(warnings.some((w) => w.includes("could not remove the metadata"))).toBe(true);
+  });
+
+  it("removes the metadata of a raster image whose declared type is not an image type", async () => {
+    const { media, blobs } = await setup({ ...CONFIG, allowedTypes: ["*"] });
+    const { item } = expectOk(await media.upload({ filename: "photo.jpg", contentType: "application/octet-stream", data: jpeg() }));
+    expect(item.contentType).toBe("application/octet-stream");
+    expect(containsGps([...blobs.values()][0]!)).toBe(false);
+    expect(item.size).toBe([...blobs.values()][0]!.byteLength);
   });
 
   it("leaves files that are not rasters alone", async () => {

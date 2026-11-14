@@ -921,7 +921,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       const released = await releaseFailed(location);
       if (isErr(released)) return released;
       let data = file.data;
-      if (config.stripImageMetadata !== false && essence.startsWith("image/")) {
+      if (config.stripImageMetadata !== false) {
         const stripped = stripImageMetadata(file.data);
         if (stripped.kind === "stripped") data = stripped.data;
         else if (stripped.kind === "malformed") logWarn(logger, `media/default: could not remove the metadata from ${name}, it is stored as uploaded`, { name });
