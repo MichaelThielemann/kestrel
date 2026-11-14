@@ -426,6 +426,23 @@ stored framing gives the size; a row for a size nobody declares any more is igno
 
 Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered HTML.
 
+## Storage migrations
+
+`@michaelthielemann/kestrel-images-default/storage` exports `storage()`, the module's storage for
+`helpers/shape-migrations` of `kestrel-contracts`, and `migrations`. Its one migration,
+`images-default:variant-slots` (introduced in 6.0.0, after `media-default:id-key-layout`), fills in
+the `slot` that 5.x rows lack: `<mediaId>/<size>` on each `images_variants` row and
+`<mediaId>/<file>` on each `images_retired` row. Where several variant rows share a slot, the newest
+finished row stays and the others are dropped and reported; a row without an item, a size or a file
+is dropped and reported too. Variant keys did not change, so no blob is written: rows are derived
+data, and the next sync renders whatever is missing.
+
+`storageMigrations` (default `check`) decides what setup does with such rows: `check` refuses to
+start, naming the migration, the count and how to run it; `apply` runs the migration at start-up.
+Offline it runs with `kestrel upgrade migrate --db <file> --blobs-dir <dir>` or as part of
+`kestrel update`. A second run changes nothing; a run that stops halfway is finished by running it
+again.
+
 ## What happens when generation fails or hangs
 
 **A crash mid-render** leaves the variant row in the state it had (`planned`, `pending` or `error`)
@@ -524,6 +541,7 @@ begun.
 | `staleAfterMs` | integer | no | `60000` |
 | `maxAttempts` | integer | no | `5` |
 | `renderTimeoutMs` | integer | no | `30000` |
+| `storageMigrations` | enum | no | `"check"` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|

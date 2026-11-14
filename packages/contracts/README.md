@@ -25,6 +25,23 @@ that can change the store between a consumer's calls.
 `helpers/persistence`'s `fieldDefinition`, `helpers/renderer`'s `renderFailed` and
 `helpers/migrations`'s `migrationFailed` normalize a schema field and build a contract's own
 `KestrelError` respectively — runtime functions next to a frozen contract, not part of it.
+`helpers/shape-migrations` runs a module's storage-shape migrations. A module describes its storage
+as a `ModuleStorage`: its name, the shape `version` it writes, the oldest stored version it
+converts (`convertsFrom`), the modules it depends on, and its `ShapeMigration`s. A migration has an
+id `<package>:<name>`, the release it was `introducedIn`, a `kind` (`auto`, `ask`, `cleanup`),
+whether it writes blobs, and `detect` (old form present?), `plan` (counts without writing), `apply`
+(chunked, each item idempotent, new keys before rows switch, never deletes or overwrites an
+authoritative row or blob) and an optional `verify` (default: `detect` finds nothing).
+`runShapeMigrations` runs them in dependency order and by `introducedIn`, and writes the module's
+row in `kestrel_storage_versions` only after every pending migration has been verified; a rerun
+after an abort continues, a second run writes nothing. Data newer than the module's version, or
+older than it converts, is left alone and reported (`update through <major>.x first`). Blobs are
+reached through an injected `BlobOps` (`copy`, `head`); `blobOpsOf(blobstore)` builds one from any
+`blobstore@1` by reading and writing the bytes, a runner with server-side copies passes its own.
+`guardStorage` is the start-up check behind a module's `storageMigrations` setting: `check` refuses
+data in an old form with `STORAGE_REFUSED`, naming the migrations and the command that runs them;
+`apply` also runs the migrations that write no blobs. A migration that writes blobs never runs at
+start-up.
 `helpers/session` is what an authn module shares with the others for browser sessions:
 `requestToken` reads a request's bearer token or session cookie (`__Host-kestrel_token`, or the name
 `sessionCookieName(secure)` gives) and says which it was,
@@ -92,8 +109,12 @@ frozen shapes in `events.steps`), `helpers/persistence.owned` (`ownedPersistence
 `helpers/mediaType` (`parseMediaType`, `mediaTypeEssence`, `canonicalMediaType`, `publicFormOf`,
 `mediaTypeMatches`, `mediaTypeAllowed`, `sniffMediaType`, `verifiedMediaType`, `contentMatchesMediaType`,
 `EXTENSION_BY_TYPE`, `NEUTRAL_TYPE`, `NEUTRAL_EXTENSION`),
-`helpers/persistence` (`fieldDefinition`), `helpers/renderer` (`renderFailed`) and
-`helpers/migrations` (`migrationFailed`).
+`helpers/persistence` (`fieldDefinition`), `helpers/renderer` (`renderFailed`),
+`helpers/migrations` (`migrationFailed`) and `helpers/shape-migrations` (`runShapeMigrations`,
+`guardStorage`, `refusalOf`, `blobOpsOf`, `blobSha256`, `answerOf`, `orderStorages`,
+`orderMigrations`, `compareVersions`, `readStorageVersions`, `storageVersionOf`, `sha256Of`,
+`storageMigrationFailed`, `STORAGE_VERSIONS`, `STORAGE_VERSIONS_SCHEMA`, `OFFLINE_COMMAND`,
+`UPDATE_COMMAND`).
 
 `errors` re-exports `@michaelthielemann/kestrel/errors` and `@michaelthielemann/kestrel/result` and
 stays at its top-level path. `testing/*` (`fakePersistence`, `fakeAuthn`, `fakeMedia`, `result`) are

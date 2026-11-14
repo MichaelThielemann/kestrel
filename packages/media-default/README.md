@@ -393,7 +393,7 @@ unavailable):
 | `media.reconcile`, `media.reconcileDelete`, `media.syncPublic`, `media.export:<dir>` | – |
 
 `media.reconcile` lists the blobs under `prefix` and compares them with the `media_items` keys:
-`{ blobsWithoutRow, rowsWithoutBlob }`. With `delete: true` it deletes the blobs nothing points at;
+`{ blobsWithoutRow, rowsWithoutBlob, legacyKeys }`. With `delete: true` it deletes the blobs nothing points at;
 `media.reconcileDelete` is the same step with the deletion fixed in the pipeline instead of the
 request, so a route can offer the report and the cleanup as two different endpoints;
 rows are never deleted, because a row is the only record that a file was ever meant to exist. A key
@@ -403,7 +403,39 @@ for each, and no item has that id at all. Anything else under `prefix` is never 
 `media/`) or equals it (`media/<id>/thumb.webp` next to the original), a file directly under
 `prefix`, a deeper key, or any file under the id of an item that exists. A row of an upload that is in flight right now shows up under `rowsWithoutBlob`, so run it
 from a cron trigger rather than after every write; no trigger is wired here, that is the
-consumer's job.
+consumer's job. `legacyKeys` lists the blobs of the 5.x layout that the conversion below recorded
+in `media_legacy_keys`: they are reported apart from `blobsWithoutRow` and never deleted, also not
+by `media.reconcileDelete`, so a backup taken before the conversion still finds every original it
+names.
+
+## Storage migrations
+
+`@michaelthielemann/kestrel-media-default/storage` exports `storage(config)`, the module's storage
+for `helpers/shape-migrations` of `kestrel-contracts`, and `migrations`. Its one migration,
+`media-default:id-key-layout` (introduced in 6.0.0), converts the items a 5.x release stored under
+`<prefix><folder>/<filename>`:
+
+- the item's name is `nameFor(filename, contentType)`, the name an upload of the same file gets;
+  when its folder already holds that name, the first free `<stem>-<n>.<ext>`;
+- the original is copied to `<prefix><id>/<name>`, and the copy's size and sha256 are checked
+  against the original before the item switches to it;
+- `location` is filled in, so each name is unique within its folder;
+- the old blob stays, and its key is recorded in `media_legacy_keys` together with every other 5.x
+  key found under `prefix`;
+- an item whose original is missing keeps its row and is reported; with the answer `trash` to the
+  question `media-default:id-key-layout:missing-original` it is moved to the trash instead.
+
+The migration writes blobs, so it never runs when the module starts. It runs offline on a copy of
+the data (`kestrel upgrade migrate --db <file> --blobs-dir <dir>`) or as part of `kestrel update`.
+It works through the items in chunks and each item on its own, so a run that stops halfway is
+finished by running it again, and a second run changes nothing. Afterwards the module's row in
+`kestrel_storage_versions` says `6.0.0`.
+
+`storageMigrations` (default `check`) decides what setup does with data in an older storage shape:
+`check` refuses to start and names the migration and the command that runs it; `apply` runs the
+migrations that write no blobs and still refuses one that does, which for this module is every
+migration. Data whose version row names a newer release, or one older than the module converts, is
+refused either way.
 
 ## Behaviour
 
@@ -417,9 +449,8 @@ produce the internal metadata-sidecar suffix.
 `media.update` validates the whole patch, text fields included, before touching the row; it never
 calls the blobstore, since neither a rename nor a move ever changes a key.
 
-No data migration: setup fails on start if a stored item's key is not `<prefix><id>/<name>`, naming
-the first such item and the count of items affected. A store from a version before this scheme must
-start empty.
+Setup also fails on start if a stored item's key is not `<prefix><id>/<name>`, naming the first such
+item, the count of items affected and the migration that converts them.
 
 Not included: image resizing, tags, linking media to content documents.
 
@@ -444,6 +475,7 @@ Not included: image resizing, tags, linking media to content documents.
 | `defaultLimit` | integer | no | – |
 | `listPermission` | string | no | `"media.list"` |
 | `trashRetentionDays` | integer | no | `30` |
+| `storageMigrations` | enum | no | `"check"` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
@@ -467,8 +499,8 @@ Not included: image resizing, tags, linking media to content documents.
 | `media.selectAllTrash` | Select every trashed item into result.ids for media.purge | – | `result` | – | { ids: string[], skipped: object[], … } | – | – | no |
 | `media.selectExpiredTrash` | Select the trashed items whose trashRetentionDays have run out into result.ids for media.purge | – | `result` | – | { ids: string[], skipped: object[], … } | – | – | no |
 | `media.purge` | Delete trashed items for good, each as media.remove: the ids in result.ids when an earlier step selected them (its result.skipped is kept), otherwise body.ids (at most 200); an item whose purge stopped halfway is finished, any other id that is not trashed is skipped | `result.ids?`, `result.skipped?` | `result` | { ids?: string[] } | { ids: string[], skipped: object[], … } | 400 no ids selected and no body.ids, or more than 200 body.ids | – | no |
-| `media.reconcile` | Compare the blobs under the media prefix with the media_items rows; with `delete` also removes blobs that no row points at (rows are never deleted) | – | `result` | { delete?: boolean } | { blobsWithoutRow: string[], rowsWithoutBlob: string[], … } | – | – | no |
-| `media.reconcileDelete` | Like media.reconcile, but always deletes the orphan blobs – the deletion is in the pipeline, not in the request | – | `result` | – | { blobsWithoutRow: string[], rowsWithoutBlob: string[], … } | – | – | no |
+| `media.reconcile` | Compare the blobs under the media prefix with the media_items rows; with `delete` also removes blobs that no row points at (rows are never deleted, nor the 5.x-layout blobs listed in legacyKeys) | – | `result` | { delete?: boolean } | { blobsWithoutRow: string[], rowsWithoutBlob: string[], legacyKeys: string[], … } | – | – | no |
+| `media.reconcileDelete` | Like media.reconcile, but always deletes the orphan blobs – the deletion is in the pipeline, not in the request | – | `result` | – | { blobsWithoutRow: string[], rowsWithoutBlob: string[], legacyKeys: string[], … } | – | – | no |
 | `media.syncPublic` | Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed, trashed or deleted items and foreign files, re-reading an item before its copy goes (adds _publicMedia: { written, removed, missing } to the result) | – | `result._publicMedia` | – | { _publicMedia: object, … } | – | – | no |
 | `media.export:<arg>` | Copy every ready media item to <arg>/<folder>/<filename> | – | `result` | – | { written: number, skipped: number, missing: number, conflicts: number, … } | – | – | no |
 

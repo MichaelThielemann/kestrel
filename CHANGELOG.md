@@ -802,6 +802,28 @@ Net changes since 5.8.2.
 
 ### Added
 
+- **5.x media are converted, not discarded.** New helper `helpers/shape-migrations` in
+  `kestrel-contracts` runs a module's storage-shape migrations in dependency order and by the release
+  that introduced them, verifies each and then records the module's storage version in the
+  collection `kestrel_storage_versions`. A run that stops halfway is finished by running it again; a
+  second run writes nothing; data newer than the release, or older than a module converts, is
+  refused (`update through <major>.x first`). Blobs are copied through an injected `BlobOps`
+  (`copy`, `head`); `blobOpsOf` builds one from any `blobstore@1`.
+  - `media-default` and `images-default` export `./storage` (`storage(config)`, `migrations`).
+    `media-default:id-key-layout` copies each original a 5.x release stored under
+    `<prefix><folder>/<filename>` to `<prefix><id>/<name>`, checks size and sha256, switches the item
+    and fills in a unique `location` (a name its folder already holds becomes `<stem>-<n>.<ext>`). The
+    old blob stays and its key is recorded in `media_legacy_keys`; an item whose original is missing
+    is kept and reported. `images-default:variant-slots` fills in the `slot` of 5.x variant and
+    retired rows, keeping the newest finished row of a slot and reporting the rows it drops.
+  - Both modules take `storageMigrations: "check" | "apply"` (default `check`). `check` refuses to
+    start on data in an older shape and names the migration and the command that runs it
+    (`kestrel upgrade migrate --db <file> --blobs-dir <dir>`, or `kestrel update`); `apply` runs
+    migrations that write no blobs. A migration that writes blobs, such as the media conversion,
+    never runs at start-up.
+  - `media.reconcile` and `media.reconcileDelete` gain `legacyKeys`: the recorded 5.x blobs, reported
+    apart from `blobsWithoutRow` and never deleted.
+
 - `replication-sqlite` documents its replica layout as a storage format (README, "Replica layout") and
   adds three files to a generation. Teardown writes `sealed.json` (`{ lineage, lastFrame, segments, at }`)
   once the frames committed since the last sync are shipped; only the newest generation of a process that

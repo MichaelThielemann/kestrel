@@ -449,6 +449,15 @@
               "minimum": 1,
               "default": 30,
               "description": "How many days a trashed item is kept before media.selectExpiredTrash selects it for media.purge"
+            },
+            "storageMigrations": {
+              "type": "string",
+              "enum": [
+                "check",
+                "apply"
+              ],
+              "default": "check",
+              "description": "What setup does with stored data in an older storage shape: \"check\" refuses to start and names the migration, \"apply\" runs the migrations that write no blobs. A migration that writes blobs, such as media-default:id-key-layout, never runs at start-up"
             }
           },
           "additionalProperties": false
@@ -632,6 +641,17 @@
             "value": 30,
             "redacted": false,
             "default": 30
+          },
+          {
+            "path": "storageMigrations",
+            "type": "enum",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": "check",
+            "redacted": false,
+            "default": "check"
           }
         ]
       },
@@ -773,6 +793,15 @@
               "type": "integer",
               "exclusiveMinimum": 0,
               "default": 30000
+            },
+            "storageMigrations": {
+              "type": "string",
+              "enum": [
+                "check",
+                "apply"
+              ],
+              "default": "check",
+              "description": "What setup does with stored data in an older storage shape: \"check\" refuses to start and names the migration, \"apply\" runs images-default:variant-slots at start-up"
             }
           },
           "additionalProperties": false
@@ -875,6 +904,17 @@
             "value": 30000,
             "redacted": false,
             "default": 30000
+          },
+          {
+            "path": "storageMigrations",
+            "type": "enum",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": "check",
+            "redacted": false,
+            "default": "check"
           }
         ]
       },
@@ -6246,7 +6286,7 @@
       "module": "media/default",
       "factory": false,
       "description": {
-        "summary": "Compare the blobs under the media prefix with the media_items rows; with `delete` also removes blobs that no row points at (rows are never deleted)",
+        "summary": "Compare the blobs under the media prefix with the media_items rows; with `delete` also removes blobs that no row points at (rows are never deleted, nor the 5.x-layout blobs listed in legacyKeys)",
         "reads": [],
         "writes": [
           "result"
@@ -6274,11 +6314,19 @@
               "items": {
                 "type": "string"
               }
+            },
+            "legacyKeys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "blobs in the 5.x key layout that media-default:id-key-layout recorded; never deleted"
             }
           },
           "required": [
             "blobsWithoutRow",
-            "rowsWithoutBlob"
+            "rowsWithoutBlob",
+            "legacyKeys"
           ]
         }
       }
@@ -6307,11 +6355,19 @@
               "items": {
                 "type": "string"
               }
+            },
+            "legacyKeys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "blobs in the 5.x key layout that media-default:id-key-layout recorded; never deleted"
             }
           },
           "required": [
             "blobsWithoutRow",
-            "rowsWithoutBlob"
+            "rowsWithoutBlob",
+            "legacyKeys"
           ]
         }
       }
