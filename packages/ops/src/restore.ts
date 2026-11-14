@@ -5,8 +5,8 @@ import { startTarget, stopTarget, type OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
 import { fromJsonl, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
-import { acknowledgement, buildDatabase, promote, stableGenerations, type Acknowledgement, type Promoted } from "./replica.ts";
-import { serverClock } from "./serverTime.ts";
+import { acknowledgement, buildDatabase, checkPromotable, promote, stableGenerations, type Acknowledgement, type Promoted } from "./replica.ts";
+import { appClock } from "./serverTime.ts";
 import { deleteSessions, hasAccessChanges, integrityCheck, lossReport, sha256, vacuumInto, type LossReport } from "./sqlite.ts";
 import { listMap, stableList, transfer, type ObjectInfo } from "./store.ts";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -164,6 +164,10 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
     return { ...base, noop: true };
   }
 
+  const clock = ctx.target.transport === "promote" ? await appClock(ctx) : null;
+  if (clock !== null) checkPromotable(await ctx.target.status(), clock.skewMs);
+  else if (!ctx.target.installDatabase) throw new OpsError("the target can take neither a promoted generation nor a database file", 2, "target");
+
   let safetyBackup: string | null = null;
   if (options.noSafetyBackup) ctx.out.warn("no pre-restore backup: --no-safety-backup");
   else {
@@ -183,8 +187,7 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   if (verdict !== "ok") throw new OpsError(`the database to restore fails integrity_check: ${verdict}`, 1, "db.sqlite");
   let promoted: Promoted | null = null;
   let ack: Acknowledgement | null = null;
-  if (ctx.target.transport === "promote") {
-    const clock = await serverClock(ctx.backups, ctx.location, ctx.runId, ctx.clock, ctx.poll);
+  if (clock !== null) {
     promoted = await promote({ store: ctx.app, prefix: ctx.env.app.replicaPrefix, target: ctx.target, database: prepared, origin: { kind: "restore", source: manifest.id }, serverNow: clock.now, skewMs: clock.skewMs, clock: ctx.clock, poll: ctx.poll });
     await ctx.journal.record("promote", "done", { generation: promoted.generation, sha256: promoted.sha256 });
     const sleep = ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));

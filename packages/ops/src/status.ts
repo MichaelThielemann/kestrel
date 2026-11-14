@@ -5,7 +5,7 @@ import { listRuns, openRuns, type RunSummary } from "./journal.ts";
 import { keys } from "./layout.ts";
 import { heldLocks, type HeldLock } from "./lock.ts";
 import { listGenerations } from "./replica.ts";
-import { serverClock } from "./serverTime.ts";
+import { appClock } from "./serverTime.ts";
 import type { ObjectStore } from "./store.ts";
 import type { TargetFacts, TargetStatus } from "./target.ts";
 
@@ -55,7 +55,7 @@ export async function status(ctx: OpsContext, appCredentialStore: ObjectStore | 
   const targetStatus = await ctx.target.status();
   const gens = await listGenerations(ctx.app, ctx.env.app.replicaPrefix);
   const newest = gens.at(-1) ?? null;
-  const clock = await serverClock(ctx.backups, ctx.location, ctx.runId, ctx.clock, ctx.poll);
+  const clock = await appClock(ctx);
   const problems = environmentProblems(ctx.env);
   const protectedFromApp = await probeProtection(ctx.backups, appCredentialStore, ctx.location, ctx.runId);
   if (protectedFromApp === "no") problems.push("the app's credentials can delete backups");

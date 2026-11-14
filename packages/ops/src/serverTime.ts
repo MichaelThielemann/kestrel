@@ -1,3 +1,4 @@
+import type { OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
 import { keys } from "./layout.ts";
 import type { PollOptions } from "./replica.ts";
@@ -35,4 +36,14 @@ export async function serverClock(store: ObjectStore, location: string, runId: s
   } finally {
     await store.delete(key);
   }
+}
+
+/**
+ * The clock of the store the replica lives in, which names and orders its generations. The probe goes to the backup
+ * location when that shares the app's store, otherwise below the replica prefix, outside the `gen/` keys a runtime
+ * reads.
+ */
+export function appClock(ctx: Pick<OpsContext, "app" | "env" | "location" | "runId" | "clock" | "poll">): Promise<ServerClock> {
+  const location = ctx.env.backups.storage === undefined ? ctx.location : ctx.env.app.replicaPrefix;
+  return serverClock(ctx.app, location, ctx.runId, ctx.clock, ctx.poll);
 }

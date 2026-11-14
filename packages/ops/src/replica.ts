@@ -10,7 +10,7 @@ import { OpsError } from "./errors.ts";
 import { hex, jsonBytes, parseJson, stamp, unstamp, type SealState } from "./layout.ts";
 import { integrityCheck, sha256, sha256File, vacuumInto } from "./sqlite.ts";
 import type { ObjectInfo, ObjectStore } from "./store.ts";
-import type { Target } from "./target.ts";
+import type { Target, TargetStatus } from "./target.ts";
 
 /** One replica generation as listed: its snapshot, its WAL segments and the side files next to them. */
 export interface Generation {
@@ -193,6 +193,12 @@ export interface Promoted {
 /** The largest clock difference between this machine and the store that a promotion accepts. */
 export const MAX_SKEW_MS = 30_000;
 
+/** Throws unless the target is stopped with no running instance and `skewMs` is within {@link MAX_SKEW_MS}. */
+export function checkPromotable(status: TargetStatus, skewMs: number): void {
+  if (status.state !== "stopped" || status.instances > 0) throw new OpsError(`refusing to promote: the target is ${status.state} with ${status.instances} running instance(s); it must be stopped`, 1, "target");
+  if (Math.abs(skewMs) > MAX_SKEW_MS) throw new OpsError(`refusing to promote: this machine's clock is ${Math.round(skewMs / 1000)} s off the store's (limit ${MAX_SKEW_MS / 1000} s)`, 1, "clock");
+}
+
 /**
  * Makes `database` the newest replica generation, so the next start of the stopped target restores it. Refuses
  * unless the target is stopped with no instance and the local clock is within {@link MAX_SKEW_MS} of the server's.
@@ -201,9 +207,7 @@ export const MAX_SKEW_MS = 30_000;
  * consecutive listings and read back to check its hash and integrity.
  */
 export async function promote(input: PromoteInput): Promise<Promoted> {
-  const status = await input.target.status();
-  if (status.state !== "stopped" || status.instances > 0) throw new OpsError(`refusing to promote: the target is ${status.state} with ${status.instances} running instance(s); it must be stopped`, 1, "target");
-  if (Math.abs(input.skewMs) > MAX_SKEW_MS) throw new OpsError(`refusing to promote: this machine's clock is ${Math.round(input.skewMs / 1000)} s off the store's (limit ${MAX_SKEW_MS / 1000} s)`, 1, "clock");
+  checkPromotable(await input.target.status(), input.skewMs);
   const existing = await stableGenerations(input.store, input.prefix, input.poll);
   const newest = existing.at(-1);
   const floor = newest ? newest.at + 1000 : 0;

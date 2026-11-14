@@ -168,8 +168,11 @@ report the restore, so output derived from the database is rendered again, and a
 output.
 
 Promotion refuses unless the target is stopped with no running instance, and when this machine's clock is
-more than 30 s off the store's. The store's time comes from the `LastModified` of a probe object found by
-listing, since some stores send no usable `Date` header. The generation is listed until it is the newest in
+more than 30 s off the store's; the restore checks both before it writes the `pre-restore` backup, so a
+refusal leaves the store as it was and starts the app again. The store's time comes from the `LastModified` of
+a probe object found by listing, since some stores send no usable `Date` header. It is measured at the store
+the replica lives in: in the backup location when that shares the app's store, otherwise below the replica
+prefix, outside the keys a runtime reads. `status` shows the same measurement. The generation is listed until it is the newest in
 consecutive listings, then read back, hashed and integrity-checked; the app starts once the store's time has
 passed its name.
 
