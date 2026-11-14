@@ -1782,7 +1782,7 @@ Net changes since 5.8.2.
   Cloud Foundry space, through the `cf` CLI. It reads state and instances through the v3 API, recognises a
   stopped app only with no instance in any state but `DOWN`, and ends every command with exit 1 while the
   app is scaled to more than one instance or a deployment, such as a rolling push, is active, a live backup
-  included, and while a started app is scaled to 0 instances. It acts only while cf targets the configured org and space and never names another app, so a
+  included, and while the app, started or stopped, is scaled to 0 instances. It acts only while cf targets the configured org and space and never names another app, so a
   static web server next to it in the same manifest is never touched; stop, start and the droplet change go
   to the app's guid through the v3 API, and `cf apply-manifest` and `cf logs` run only after `cf target` and
   the app's guid were read again. A stop waits until no instance shuts down any more, as a Cloud Controller

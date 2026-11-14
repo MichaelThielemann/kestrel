@@ -45,8 +45,8 @@ The `target` block of an environment in `kestrel.environments.json` names this p
   in any state but `DOWN`; an instance that is `STARTING` or `CRASHED` counts as running. An app scaled to more
   than one instance, or one with an active deployment (a rolling or canary push), ends every command with
   exit 1 before anything is stopped or started, a live backup included: two instances would write to the same
-  replica. A started app scaled to 0 instances ends with exit 1 as well, naming `cf scale <app> -i 1` and
-  `cf stop <app>`, and a stopped one scaled to 0 is not started: no instance would ever become ready.
+  replica. An app scaled to 0 instances, started or stopped, ends with exit 1 as well, naming `cf scale <app> -i 1`
+  and `cf stop <app>`: no instance would ever become ready, so a restore stops before it changes anything.
 - **Stop** sends the stop action to the app and waits until it reads `stopped` with no instance; a status read
   that fails during the wait is repeated until the stop timeout (120 s). The Cloud Controller answers the stop
   request before the instance receives its stop signal, so the instance's shutdown, in which the replica is

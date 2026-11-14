@@ -121,7 +121,7 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     return parsed.data;
   };
 
-  const requireOneInstance = async (guid: string): Promise<{ running: number; desired: number }> => {
+  const requireOneInstance = async (guid: string): Promise<number> => {
     const deployments = await api(`/v3/deployments?app_guids=${guid}&status_values=ACTIVE`, listSchema);
     if (deployments.resources.length > 0) throw new OpsError(`a deployment of ${app} is in progress, such as a rolling push; wait until it ends or run cf cancel-deployment ${app}`, 1, "target");
     const process = await api(`/v3/apps/${guid}/processes/web`, processSchema);
@@ -129,29 +129,22 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     const running = stats.resources.filter((r) => r.state !== "DOWN").length;
     const instances = Math.max(process.instances, running);
     if (instances > 1) throw new OpsError(`${app} is scaled to ${instances} instances; backup and restore need exactly one (cf scale ${app} -i 1)`, 1, "target");
-    return { running, desired: process.instances };
-  };
-
-  const scaledToNone = `${app} is scaled to 0 instances; backup and restore need exactly one (cf scale ${app} -i 1)`;
-
-  const read = async (): Promise<TargetStatus & { desired: number }> => {
-    const guid = await appGuid();
-    const { running, desired } = await requireOneInstance(guid);
-    const { state } = await api(`/v3/apps/${guid}`, appSchema);
-    if (state === "STARTED" && desired === 0) throw new OpsError(`${scaledToNone}, or cf stop ${app} to take it offline`, 1, "target");
-    return { state: state === "STARTED" ? "started" : state === "STOPPED" ? "stopped" : "unknown", instances: running, desired };
+    if (process.instances === 0) throw new OpsError(`${app} is scaled to 0 instances; backup and restore need exactly one: cf scale ${app} -i 1, after cf stop ${app} to keep it offline, since scaling a stopped app does not start it`, 1, "target");
+    return running;
   };
 
   const status = async (): Promise<TargetStatus> => {
-    const { state, instances } = await read();
-    return { state, instances };
+    const guid = await appGuid();
+    const running = await requireOneInstance(guid);
+    const { state } = await api(`/v3/apps/${guid}`, appSchema);
+    return { state: state === "STARTED" ? "started" : state === "STOPPED" ? "stopped" : "unknown", instances: running };
   };
 
-  const readRepeated = async (): Promise<TargetStatus & { desired: number }> => {
+  const readRepeated = async (): Promise<TargetStatus> => {
     const deadline = deps.clock() + readTimeoutMs;
     for (;;) {
       try {
-        return await read();
+        return await status();
       } catch (error) {
         if (!(error instanceof CfApiError) || deps.clock() >= deadline) throw error;
       }
@@ -230,7 +223,7 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     },
 
     async start() {
-      let now: TargetStatus & { desired: number };
+      let now: TargetStatus;
       try {
         now = await readRepeated();
       } catch (error) {
@@ -238,7 +231,6 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
         throw new OpsError(`the state of ${app} could not be read before the start: ${messageOf(error)}; it stays as it is until it is started with cf start ${app} in ${config.org}/${config.space}`, 1, "target");
       }
       if (now.state === "started" && now.instances > 0) throw new OpsError(`${app} is already running`, 1, "target");
-      if (now.desired === 0) throw new OpsError(scaledToNone, 1, "target");
       try {
         await api(`/v3/apps/${await appGuid()}/actions/start`, appSchema, "POST");
       } catch (error) {

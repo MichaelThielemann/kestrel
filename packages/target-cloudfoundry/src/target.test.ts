@@ -136,16 +136,19 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     expect(error.message).toContain(`cf scale ${API.name} -i 1`);
     expect(error.message).toContain(`cf stop ${API.name}`);
     await failure(t.stop());
+    expect((await failure(t.describe())).exitCode).toBe(1);
     expect(cf.actions).toEqual([]);
   });
 
-  it("refuses with exit 1 to start a stopped app scaled to no instance", async () => {
+  it("refuses with exit 1 a stopped app scaled to no instance in its status, description and start, before anything changes", async () => {
     Object.assign(cf.app(API.name), { state: "STOPPED", instances: 0, running: 0, ready: 0 });
     const t = await target();
-    expect(await t.status()).toEqual({ state: "stopped", instances: 0 });
-    const error = await failure(t.start());
-    expect(error.exitCode).toBe(1);
-    expect(error.message).toContain(`cf scale ${API.name} -i 1`);
+    for (const call of [() => t.status(), () => t.describe(), () => t.start(), () => t.setDroplet("0b1e9d4c-2f3a-4e5b-8c6d-7a8b9c0d1e2f")]) {
+      const error = await failure(call());
+      expect(error.exitCode).toBe(1);
+      expect(error.message).toContain("0 instances");
+      expect(error.message).toContain(`cf scale ${API.name} -i 1`);
+    }
     expect(cf.actions).toEqual([]);
   });
 

@@ -259,6 +259,33 @@ describe.skipIf(!endpoint)("kestrel backup, restore and status on a Cloud Foundr
     expect(app.running).toBe(true);
   }, 120_000);
 
+  it("refuses with exit 1 to restore over a stopped app scaled to 0 instances before it writes anything, and to back up a started one", async () => {
+    await app.start();
+    await app.seed();
+    const created = await kestrel(["backup", "create", "--freeze", "--json"]);
+    expect(created.code).toBe(0);
+    const id = String(created.json.id);
+    await app.stop();
+    Object.assign(api, { state: "STOPPED", instances: 0, running: 0, ready: 0 });
+    const actions = cf.actions.length;
+    const keys = async (): Promise<string[]> => (await store.list("")).map((info) => info.key).filter((key) => !key.startsWith(`${LOCATION}locks/`)).sort();
+    const before = await keys();
+    const status = await kestrel(["status"]);
+    expect(status.code).toBe(1);
+    expect(status.stderr).toContain(`cf scale ${API.name} -i 1`);
+    const restored = await kestrel(["restore", "--backup", id, "--yes", "--answers", answers({ "access-changes": "accept" })]);
+    expect(restored.code).toBe(1);
+    expect(restored.stderr).toContain("0 instances");
+    expect(restored.stderr).not.toContain("changed the store");
+    expect(await keys()).toEqual(before);
+    expect(cf.actions).toHaveLength(actions);
+    Object.assign(api, { state: "STARTED" });
+    const live = await kestrel(["backup", "create", "--kind", "scheduled"]);
+    expect(live.code).toBe(1);
+    expect(live.stderr).toContain("0 instances");
+    expect(await keys()).toEqual(before);
+  }, 180_000);
+
   it("refuses with exit 1 an app scaled to two instances before it stops anything", async () => {
     await app.start();
     await app.seed();
