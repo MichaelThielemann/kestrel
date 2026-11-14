@@ -43,6 +43,18 @@ Ids, blob paths and timestamps are new on every run, so two runs are not byte-id
 the manifest, the special cases it names and the row counts are stable. `sharp` and `zod` are not pinned by kestrel; their resolved versions are recorded
 in the manifest.
 
+## Booting it on its own release
+
+`scripts/upgradeFixtureRelease.test.ts` boots the release the fixture comes from on a copy of the data,
+before and after `kestrel upgrade migrate --plan` read it, and checks that it signs in, serves a medium
+and lists the pages. It needs that release installed and is skipped otherwise. Point it at the project
+directory `--keep-work` leaves (`<work>/project`), or at any copy of the tag's `examples/minimal` with
+the release's packages installed; the test itself reads no network:
+
+```
+KESTREL_UPGRADE_RELEASE_PROJECT=<work>/project pnpm vitest run scripts/upgradeFixtureRelease.test.ts
+```
+
 ## Reading it in a test
 
 Boot the fixture with the configuration recorded in `manifest.json` under `config`: the three image
