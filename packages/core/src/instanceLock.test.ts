@@ -13,6 +13,7 @@ interface LockRecord {
   pid: number;
   pidNamespace: string;
   processStart: string;
+  clockStart: number;
   bootId: string;
   host: string;
   startedAt: string;
@@ -84,19 +85,23 @@ function lockFile(path: string): string {
 function readRecord(): LockRecord {
   const parsed: unknown = JSON.parse(readFileSync(lockFile(file), "utf8"));
   if (typeof parsed !== "object" || parsed === null) throw new Error("lock file is not an object");
-  return { ...{ instanceId: "", pid: 0, pidNamespace: "", processStart: "", bootId: "", host: "", startedAt: "", heartbeatAt: "", ttlMs: 0, threads: {} }, ...parsed };
+  return { ...{ instanceId: "", pid: 0, pidNamespace: "", processStart: "", clockStart: 0, bootId: "", host: "", startedAt: "", heartbeatAt: "", ttlMs: 0, threads: {} }, ...parsed };
 }
 
 function writeRecord(record: Partial<LockRecord>): LockRecord {
   const now = new Date().toISOString();
-  const full: LockRecord = { instanceId: randomUUID(), pid: 4242, pidNamespace: ownPidNamespace(), processStart: "1", bootId: randomUUID(), host: "other-host", startedAt: now, heartbeatAt: now, ttlMs: 60_000, threads: { [randomUUID()]: now }, ...record };
+  const full: LockRecord = { instanceId: randomUUID(), pid: 4242, pidNamespace: ownPidNamespace(), processStart: "1", clockStart: 1, bootId: randomUUID(), host: "other-host", startedAt: now, heartbeatAt: now, ttlMs: 60_000, threads: { [randomUUID()]: now }, ...record };
   writeFileSync(lockFile(file), JSON.stringify(full));
   return full;
 }
 
-function writeGuard(holder: { pid: number; processStart?: string; pidNamespace?: string; host?: string; bootId?: string }, ageMs = 0): string {
+function ownClockStart(): number {
+  return Math.round(Number(process.hrtime.bigint()) / 1e6 - process.uptime() * 1000);
+}
+
+function writeGuard(holder: { pid: number; processStart?: string; pidNamespace?: string; host?: string; bootId?: string; threadId?: number }, ageMs = 0): string {
   const guard = `${lockFile(file)}.takeover`;
-  writeFileSync(guard, JSON.stringify({ token: randomUUID(), pidNamespace: ownPidNamespace(), processStart: "1", ...onThisHost, ...holder }));
+  writeFileSync(guard, JSON.stringify({ token: randomUUID(), pidNamespace: ownPidNamespace(), processStart: "1", threadId: 0, ...onThisHost, ...holder }));
   const at = new Date(Date.now() - ageMs);
   utimesSync(guard, at, at);
   return guard;
@@ -182,7 +187,7 @@ describe("instanceLockFile", () => {
   });
 
   it("names no lock file for an in-memory or temporary database, which takes no lock", () => {
-    for (const name of [":memory:", "", "file::memory:", "file::memory:?cache=shared", "file:memdb1?mode=memory&cache=shared", "file:", "file:?mode=ro"]) {
+    for (const name of [":memory:", "", "file::memory:", "file::memory:?cache=shared", "file:memdb1?mode=memory&cache=shared", "file:", "file:?mode=ro", "file:/scratch?vfs=memdb", "file:/var/lib/app/app.db?vfs=memdb"]) {
       expect(instanceLockFile(name)).toBeUndefined();
     }
   });
@@ -226,9 +231,10 @@ describe("acquireInstanceLock", () => {
   });
 
   it("takes no lock and creates no file for an in-memory or temporary database named by a file: URI", () => {
-    for (const uri of ["file::memory:", "file::memory:?cache=shared", "file:memdb1?mode=memory&cache=shared", "file:"]) {
+    for (const uri of ["file::memory:", "file::memory:?cache=shared", "file:memdb1?mode=memory&cache=shared", "file:", "file:/scratch?vfs=memdb", `file:${file}?vfs=memdb`]) {
       expect(take(uri).health()).toEqual({ ok: true });
     }
+    expect(existsSync(lockFile(file))).toBe(false);
     expect(existsSync(join(process.cwd(), "file::memory:.instance"))).toBe(false);
     expect(existsSync(join(process.cwd(), "file:memdb1?mode=memory&cache=shared.instance"))).toBe(false);
   });

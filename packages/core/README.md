@@ -73,7 +73,7 @@ the new namespace the old one's id. A process that exits on its own, through `pr
 exception gives up its lock on exit; only a killed process leaves it behind. Several holders in one process share
 the lock, also across worker threads, and the file goes with the last release; within one thread the first holder's
 options apply.
-In-memory and temporary databases (`:memory:`, an empty name, `file:` URIs with `mode=memory`) take none and
+In-memory and temporary databases (`:memory:`, an empty name, `file:` URIs with `mode=memory` or `vfs=memdb`) take none and
 `instanceLockFile` returns `undefined` for them, and
 `health()` turns `restartRequired` once another instance took the lock over.
 `reads` (`observeReads`, `noteRead`, `unobserved`) lets a caller see what the providers

@@ -155,8 +155,8 @@ export function instanceLockFile(file: string): string | undefined {
  * Takes the lock that keeps a second process off the same database file. The lock is a sidecar
  * file next to the database (see {@link instanceLockFile}), never a row inside it, so it cannot
  * travel with a replica, snapshot or restore. An in-memory or temporary database takes no lock:
- * `:memory:`, the empty name, and a `file:` URI with the path `:memory:`, an empty path or
- * `mode=memory`.
+ * `:memory:`, the empty name, and a `file:` URI with the path `:memory:`, an empty path,
+ * `mode=memory` or `vfs=memdb`.
  *
  * A lock is taken over when its heartbeat is older than the longer of `ttlMs` and the TTL the
  * lock file records. A lock written on this machine (the same Linux boot id, or the same hostname
@@ -235,7 +235,8 @@ function databasePath(file: string): string | undefined {
     path = slash === -1 ? "" : path.slice(slash);
   }
   path = decoded(path);
-  if (path === "" || path === MEMORY || new URLSearchParams(query).get("mode") === "memory") return undefined;
+  const params = new URLSearchParams(query);
+  if (path === "" || path === MEMORY || params.get("mode") === "memory" || params.get("vfs") === "memdb") return undefined;
   return path;
 }
 
