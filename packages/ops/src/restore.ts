@@ -149,11 +149,11 @@ async function readCurrent(ctx: OpsContext, stoppedAt: number): Promise<Current>
   const prefix = ctx.env.app.replicaPrefix;
   const newest = (await stableGenerations(ctx.app, prefix, ctx.poll)).at(-1);
   if (!newest) return { kind: "unreadable", reason: `the replica under ${prefix} has no generation` };
-  const seal = await sealOf(ctx.app, prefix, newest, runtimeVersion(await ctx.target.describe()));
+  const seal = await sealOf(ctx.app, prefix, newest, runtimeVersion(await ctx.target.describe()), ctx.poll);
   await acceptSeal(ctx, seal, stoppedAt);
   const file = ctx.workspace.path("current.db");
   try {
-    await buildDatabase(ctx.app, prefix, seal.generation, file);
+    await buildDatabase(ctx.app, prefix, seal.listed, file);
   } catch (cause) {
     if (cause instanceof OpsError) return { kind: "unreadable", reason: cause.message };
     throw cause;
@@ -263,7 +263,7 @@ export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptio
   if (options.backupId === null) {
     const newest = (await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).at(-1);
     if (!newest) throw new OpsError(`the replica under ${ctx.env.app.replicaPrefix} has no generation`, 1, ctx.env.app.replicaPrefix);
-    await buildDatabase(ctx.app, ctx.env.app.replicaPrefix, newest.name, source);
+    await buildDatabase(ctx.app, ctx.env.app.replicaPrefix, newest, source);
   } else {
     const manifest = await readManifest(ctx, options.backupId);
     if (manifest === null) throw new OpsError(`backup ${options.backupId} does not exist or is incomplete`, 1, options.backupId);

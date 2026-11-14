@@ -24,7 +24,7 @@ export interface Generation {
 }
 
 const GEN = /^gen\/(\d{8}T\d{6}Z(?:-[0-9a-f]+)?)\/(.+)$/;
-const SEGMENT = /^wal\/\d+-\d+-(\d{8}T\d{6}Z)\.wal$/;
+const SEGMENT = /^wal\/\d+-(\d+)-(\d{8}T\d{6}Z)\.wal$/;
 
 /** Generations under `prefix`, oldest first by name: the order every runtime restores by. */
 export async function listGenerations(store: ObjectStore, prefix: string): Promise<Generation[]> {
@@ -43,7 +43,7 @@ export async function listGenerations(store: ObjectStore, prefix: string): Promi
     if (rest === "snapshot.db") gen.snapshot = info;
     else if (segment) {
       gen.segments.push(info);
-      gen.lastFrameAt = Math.max(gen.lastFrameAt, unstamp(segment[1] ?? ""));
+      gen.lastFrameAt = Math.max(gen.lastFrameAt, unstamp(segment[2] ?? ""));
     } else gen.files[rest] = info;
   }
   return [...byName.values()].filter((g) => g.snapshot !== null).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -107,17 +107,27 @@ export function blobstoreOf(store: ObjectStore): Blobstore {
   };
 }
 
-/** Rebuilds the database of `generation` (snapshot plus every segment) into `outFile`, which passes `quick_check`. */
-export async function buildDatabase(store: ObjectStore, prefix: string, generation: string, outFile: string): Promise<{ generation: string; at: number }> {
-  const result = await restoreFromBlobs(blobstoreOf(store), prefix, { generation }, outFile);
-  if (isErr(result)) throw new OpsError(`cannot rebuild generation ${generation}: ${result.error.message}`, 1, `${prefix}gen/${generation}`);
+/**
+ * Rebuilds the database of `generation` from its snapshot and exactly the segments that listing shows into `outFile`,
+ * which passes `quick_check`. A later listing that lags behind cannot drop a segment.
+ */
+export async function buildDatabase(store: ObjectStore, prefix: string, generation: Generation, outFile: string): Promise<{ generation: string; at: number }> {
+  const listed = [generation.snapshot, ...generation.segments].filter((info): info is ObjectInfo => info !== null).map((info) => ({ key: info.key, size: info.size }));
+  const blobs: Blobstore = { ...blobstoreOf(store), list: async () => ok(listed) };
+  const result = await restoreFromBlobs(blobs, prefix, { generation: generation.name }, outFile);
+  if (isErr(result)) throw new OpsError(`cannot rebuild generation ${generation.name}: ${result.error.message}`, 1, `${prefix}gen/${generation.name}`);
   return result.value;
 }
 
 /** `gen/<g>/sealed.json`: the teardown's proof that every frame up to `lastFrame` was shipped. */
 export interface Seal {
+  /** The WAL lineage of the last frames, the first number of a segment key. */
   lineage: number;
+  /** How many frames of that lineage's WAL the replica holds. */
   lastFrame: number;
+  /** How many WAL segments the generation holds; their sequence numbers, the second number of a segment key, run from 0 to `segments - 1`. */
+  segments: number;
+  /** When the seal was written, in epoch milliseconds. */
   at: number;
 }
 
@@ -128,6 +138,8 @@ export interface SealReport {
   lastFrameAt: number;
   seal: Seal | null;
   runtime: string | null;
+  /** The generation as listed; for a seal, a listing that shows every segment it counts. */
+  listed: Generation;
 }
 
 /** The first major of the replication runtime that seals its replica at teardown. */
@@ -139,22 +151,40 @@ const majorOf = (version: string | null): number | null => {
 };
 
 function isSeal(value: unknown): value is Seal {
-  return typeof value === "object" && value !== null && typeof Reflect.get(value, "lastFrame") === "number" && typeof Reflect.get(value, "at") === "number";
+  if (typeof value !== "object" || value === null) return false;
+  const segments: unknown = Reflect.get(value, "segments");
+  return typeof Reflect.get(value, "lastFrame") === "number" && typeof Reflect.get(value, "at") === "number" && typeof segments === "number" && Number.isSafeInteger(segments) && segments >= 0;
 }
 
+const missingSegments = (generation: Generation, segments: number): number => {
+  const seen = new Set(generation.segments.map((info) => Number(SEGMENT.exec(info.key.slice(info.key.indexOf("/wal/") + 1))?.[1])));
+  let missing = 0;
+  for (let seq = 0; seq < segments; seq++) if (!seen.has(seq)) missing += 1;
+  return missing;
+};
+
 /**
- * Classifies the newest generation of a stopped replica. A valid `sealed.json` makes it sealed whatever the runtime
- * version; without one it is unsealed (a sealing runtime stopped without teardown), unsupported (a runtime before the
- * sealing major) or unknown (the target cannot tell the runtime version).
+ * Classifies the newest generation of a stopped replica. A valid `sealed.json`, read from the store whether or not
+ * the listing shows it, makes it sealed whatever the runtime version; the replica is then listed again until it
+ * shows every segment the seal counts, and refused when it does not within `poll.attempts` listings. Without a seal
+ * the generation is unsealed (a sealing runtime stopped without teardown), unsupported (a runtime before the sealing
+ * major) or unknown (the target cannot tell the runtime version).
  */
-export async function sealOf(store: ObjectStore, prefix: string, generation: Generation, runtime: string | null): Promise<SealReport> {
-  const base = { generation: generation.name, lastFrameAt: generation.lastFrameAt, runtime };
-  const info = generation.files["sealed.json"];
-  const data = info ? await store.get(info.key) : null;
+export async function sealOf(store: ObjectStore, prefix: string, generation: Generation, runtime: string | null, poll: PollOptions = {}): Promise<SealReport> {
+  const data = await store.get(`${prefix}gen/${generation.name}/sealed.json`);
   const seal: unknown = data === null ? null : parseJson(data);
-  if (isSeal(seal)) return { ...base, state: "sealed", seal };
-  const major = majorOf(runtime);
-  return { ...base, state: major === null ? "unknown" : major < SEALING_MAJOR ? "unsupported" : "unsealed", seal: null };
+  if (!isSeal(seal)) {
+    const major = majorOf(runtime);
+    return { generation: generation.name, lastFrameAt: generation.lastFrameAt, runtime, state: major === null ? "unknown" : major < SEALING_MAJOR ? "unsupported" : "unsealed", seal: null, listed: generation };
+  }
+  const sleep = poll.sleep ?? defaultSleep;
+  let listed = generation;
+  for (let i = 0; missingSegments(listed, seal.segments) > 0; i++) {
+    if (i >= (poll.attempts ?? 30)) throw new OpsError(`generation ${generation.name} is sealed with ${seal.segments} segment(s), the listing shows ${seal.segments - missingSegments(listed, seal.segments)} after ${i} listings`, 1, `${prefix}gen/${generation.name}`);
+    await sleep(poll.delayMs ?? 1000);
+    listed = (await listGenerations(store, prefix)).find((g) => g.name === generation.name) ?? listed;
+  }
+  return { generation: generation.name, lastFrameAt: listed.lastFrameAt, runtime, state: "sealed", seal, listed };
 }
 
 /** `gen/<g>/origin.json` next to a promoted snapshot, written after it as the last file of the placement: tells a runtime that understands it that its start is a restore. */

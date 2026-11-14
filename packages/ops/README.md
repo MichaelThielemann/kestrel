@@ -127,7 +127,8 @@ difference after the stop.
 
 A frozen backup records how the replica proves the stop was complete. A runtime that seals its replica
 writes `gen/<generation>/sealed.json` at teardown: the backup reads `sealed`, whatever version the target
-reports. Without it the backup reads `unsealed` (the process stopped without teardown, so frames written after
+reports, once a listing shows every WAL segment the seal counts, and builds the database from that listing; a
+listing that keeps lacking one stops the backup with exit 1. Without it the backup reads `unsealed` (the process stopped without teardown, so frames written after
 its last sync may be missing), `unsupported` for a runtime before 6, or `unknown` when the target cannot tell
 the runtime version. All three show the time of the last shipped segment and need the answer
 `unsealed-stop`. A backup of a running app reads `live`. The `local` target reads the runtime version from
@@ -168,14 +169,16 @@ before step 4, it starts the app again; after that the app stays stopped and the
 A promoted generation is a `VACUUM INTO` copy without `-wal`, named `gen/<yyyymmddThhmmssZ>/snapshot.db` by
 the store's time rounded up to the next second and at least one second after the newest generation. That
 plain time name is listed and restored by every replication runtime, which takes the newest generation by
-name. Next to it, `origin.json` (`{ kind, source, requestedAt, nonce }`) lets a runtime that understands it
+name. Next to it, written after the snapshot as the last file of the placement, `origin.json` (`{ kind,
+source, requestedAt, nonce }`, `requestedAt` as ISO 8601) lets a runtime that understands it
 report the restore, so output derived from the database is rendered again, and acknowledge it with an
 `applied.json` carrying the same nonce; the tool reports `applied` or `unconfirmed`. A runtime that ignores
 `origin.json` still restores the generation; the restored delivery prefix then stands for the rendered
 output.
 
-Promotion refuses unless the target is stopped with no running instance, and when this machine's clock is
-more than 30 s off the store's; the restore checks both before it writes the `pre-restore` backup, so a
+Promotion refuses unless the target is stopped with no running instance, when this machine's clock is more
+than 30 s off the store's, and when the newest generation is stamped more than 30 s after the store's time,
+since the app could only start once the store's time passed the new name; the restore checks all three before it writes the `pre-restore` backup, so a
 refusal leaves the store as it was and starts the app again. The store's time comes from the `LastModified` of
 a probe object found by listing, since some stores send no usable `Date` header. It is measured at the store
 the replica lives in: in the backup location when that shares the app's store, otherwise below the replica

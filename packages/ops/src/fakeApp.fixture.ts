@@ -7,6 +7,7 @@ import { createReplicationSqlite, restoreFromBlobs, type Replication } from "@mi
 import { isErr } from "@michaelthielemann/kestrel/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { blobstoreOf, listGenerations } from "./replica.ts";
+import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { ObjectStore } from "./store.ts";
 import type { Target, TargetFacts, TargetStatus } from "./target.ts";
 
@@ -50,6 +51,7 @@ export class FakeApp implements Target {
   replication: Replication | null = null;
   starts = 0;
   restoredFrom: string | null = null;
+  private readonly segmentKeys = new Map<string, Set<string>>();
 
   constructor(readonly options: FakeAppOptions) {
     mkdirSync(options.dir, { recursive: true });
@@ -82,13 +84,23 @@ export class FakeApp implements Target {
       if (this.sealing && origin && newest.name === restored.value.generation) {
         const data = await store.get(origin.key);
         const parsed = boundaryCast<{ nonce: string }>(JSON.parse(new TextDecoder().decode(data ?? new Uint8Array())), "json");
-        await store.put(`${prefixes.replica}gen/${newest.name}/applied.json`, encode(JSON.stringify({ generation: newest.name, nonce: parsed.nonce, at: Date.now() })));
+        await store.put(`${prefixes.replica}gen/${newest.name}/applied.json`, encode(JSON.stringify({ generation: newest.name, nonce: parsed.nonce, restoredAt: Date.now() })));
       }
     }
     this.db = new DatabaseSync(this.file);
     this.db.exec("PRAGMA journal_mode = WAL");
     for (const sql of TABLES) this.db.exec(sql);
-    this.replication = createReplicationSqlite({ file: this.file, prefix: prefixes.replica, checkpointBytes: 4 * 1024 * 1024, checkpointSeconds: 300, snapshotSeconds: 86400, retentionSeconds: 172800, restoreOnStart: true }, blobstoreOf(store), Date.now, { checkIntervalMs: 60_000 });
+    const blobs = blobstoreOf(store);
+    const counting: Blobstore = {
+      ...blobs,
+      put: async (key, data, options) => {
+        const put = await blobs.put(key, data, options);
+        const generation = /\/gen\/([^/]+)\/wal\//.exec(key)?.[1];
+        if (!isErr(put) && generation !== undefined) this.segmentKeys.set(generation, (this.segmentKeys.get(generation) ?? new Set()).add(key));
+        return put;
+      },
+    };
+    this.replication = createReplicationSqlite({ file: this.file, prefix: prefixes.replica, checkpointBytes: 4 * 1024 * 1024, checkpointSeconds: 300, snapshotSeconds: 86400, retentionSeconds: 172800, restoreOnStart: true }, counting, Date.now, { checkIntervalMs: 60_000 });
     await this.sync();
     this.starts += 1;
   }
@@ -102,7 +114,7 @@ export class FakeApp implements Target {
     if (this.db !== null && this.replication !== null) {
       await this.sync();
       const state = await this.replication.status();
-      if (this.sealing && state.generation !== null) await this.options.store.put(`${this.options.prefixes.replica}gen/${state.generation}/sealed.json`, encode(JSON.stringify({ lineage: state.lineage, lastFrame: state.shippedFrames, at: Date.now() })));
+      if (this.sealing && state.generation !== null) await this.options.store.put(`${this.options.prefixes.replica}gen/${state.generation}/sealed.json`, encode(JSON.stringify({ lineage: state.lineage, lastFrame: state.shippedFrames, segments: this.segmentKeys.get(state.generation)?.size ?? 0, at: Date.now() })));
     }
     this.close();
     return { stoppedAt: Date.now() };

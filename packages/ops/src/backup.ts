@@ -58,7 +58,7 @@ export async function readSeal(ctx: OpsContext): Promise<SealReport> {
   const gens = await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll);
   const newest = gens.at(-1);
   if (!newest) throw new OpsError(`the replica under ${ctx.env.app.replicaPrefix} has no generation`, 1, ctx.env.app.replicaPrefix);
-  return sealOf(ctx.app, ctx.env.app.replicaPrefix, newest, runtimeVersion(await ctx.target.describe()));
+  return sealOf(ctx.app, ctx.env.app.replicaPrefix, newest, runtimeVersion(await ctx.target.describe()), ctx.poll);
 }
 
 type CopiedEntry = { key: string; size: number; etag: string; object: string; objectEtag: string };
@@ -136,13 +136,13 @@ async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: Exclud
     const gens = await stableGenerations(ctx.app, app.replicaPrefix, ctx.poll);
     const newest = gens.at(-1);
     if (!newest) throw new OpsError(`the replica under ${app.replicaPrefix} has no generation`, 1, app.replicaPrefix);
-    seal = { state: "live", generation: newest.name, lastFrameAt: newest.lastFrameAt, seal: null, runtime: runtimeVersion(facts) };
+    seal = { state: "live", generation: newest.name, lastFrameAt: newest.lastFrameAt, seal: null, runtime: runtimeVersion(facts), listed: newest };
   }
   let dbFile: string | null = null;
   let db: Manifest["db"] = null;
   if (seal !== null) {
     const built = ctx.workspace.path(`${id}.source.db`);
-    await buildDatabase(ctx.app, app.replicaPrefix, seal.generation, built);
+    await buildDatabase(ctx.app, app.replicaPrefix, seal.listed, built);
     dbFile = ctx.workspace.path(`${id}.db`);
     vacuumInto(built, dbFile);
     const integrity = integrityCheck(dbFile);
