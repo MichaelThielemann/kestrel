@@ -268,7 +268,8 @@ describe.skipIf(!endpoint)("kestrel backup, restore and status on a Cloud Foundr
     await app.stop();
     Object.assign(api, { state: "STOPPED", instances: 0, running: 0, ready: 0 });
     const actions = cf.actions.length;
-    const keys = async (): Promise<string[]> => (await store.list("")).map((info) => info.key).filter((key) => !key.startsWith(`${LOCATION}locks/`)).sort();
+    const bookkeeping = (key: string): boolean => key.startsWith(`${LOCATION}locks/`) || key.startsWith(`${LOCATION}runs/`) || key.includes("/verify/");
+    const keys = async (): Promise<string[]> => (await store.list("")).map((info) => info.key).filter((key) => !bookkeeping(key)).sort();
     const before = await keys();
     const status = await kestrel(["status"]);
     expect(status.code).toBe(1);
