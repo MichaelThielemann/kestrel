@@ -791,6 +791,14 @@ Net changes since 5.8.2.
   of another meaning. User ids of `authn-multi` are UUIDs; a project with another auth module whose
   ids have a different form has to anonymise through its own step. It still clears the identity id and
   every param that holds the user's id, whatever the param is called.
+- `persistence@1`'s `findMany` has three overloads (`withTotal: false` answers a page without `total`).
+  A custom `Persistence` provider or a wrapper that assigns `findMany` as an arrow function without
+  parameter types no longer compiles, since the parameters are typed from all three overloads at once
+  (TS2322). A wrapper that does not pass `withTotal` on types its parameters explicitly
+  (`<T extends Document>(collection: string, filter: Filter, options?: FindOptions)`); one that does
+  declares the three overloads the contract lists and implements them in one function, as
+  `persistence/sqlite` does. A test double can use `vi.spyOn(persistence, "findMany")` instead. Callers
+  are unaffected.
 
 ### Added
 
@@ -1535,7 +1543,7 @@ Net changes since 5.8.2.
   in `blobstore-s3`.
 - `persistence@1`: `findMany` takes `withTotal` (type `FindManyOptions`, beside `FindOptions`). With
   `withTotal: false` the page has no `total` and the provider runs no count (`PageWithoutTotal`); the
-  default and `true` count as before, so existing callers are unaffected. A caller that passes a
+  default and `true` count as before, so callers are unaffected. A caller that passes a
   boolean it only knows at run time gets `total?: number`. A custom `Persistence` provider or a
   wrapper that forwards `findMany` takes the new options and leaves `total` out when `withTotal` is
   `false`; `ownedPersistence` and `fakePersistence` do, and the contract suite checks it.
