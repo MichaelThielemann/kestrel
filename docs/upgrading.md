@@ -1,9 +1,9 @@
 # Upgrading: 5.x -> 6.0.0
 
 `kestrel upgrade` finds the 6.0.0 breaks a 5.8 project meets, previews a fix for the ones it can
-edit mechanically, asks about the ones only a person can decide, and reads a database copy for the
-checks only stored data can answer. It never installs, commits, pushes or reaches the network on its
-own. The command belongs to `@michaelthielemann/kestrel-cli`; the engine behind it is the library
+edit mechanically, asks about the ones only a person can decide, reads a database copy for the
+checks only stored data can answer, and converts the stored media of a copy to the 6.0.0 storage
+shape. It never installs, commits, pushes or reaches the network on its own. The command belongs to `@michaelthielemann/kestrel-cli`; the engine behind it is the library
 `@michaelthielemann/kestrel-upgrade`.
 
 A 5.8 project does not have the 6.0 CLI yet, so the first runs fetch it without installing it. Use
@@ -120,6 +120,11 @@ pipeline or a dead-letter row with no pipeline assigned, and translations publis
 their own ([`data/translation-slug`](#data-translation-slug)). Take a consistent snapshot close to
 cutover (a replication snapshot, or `sqlite3 <db> ".backup <copy>"`).
 
+The `data` command also runs the detection step of the storage migrations that `media-default`
+and `images-default` export under `./storage`, as the project has them installed, and reports data
+in the 5.x shape as [`data/media-layout`](#data-media-layout). [Converting the stored
+media](#7-converting-the-stored-media) runs those migrations.
+
 `delivery-static` deletes files in the blob store once after the upgrade, in a `delivery.resumeStale`
 run of the recovery cron and without a command of its own: see
 [delivery-orphan-removal](#delivery-orphan-removal). That removal and the restore
@@ -128,7 +133,83 @@ after `start()` (see [delivery-restore-check](#delivery-restore-check)). With `r
 `backup-blobstore` backing up the database, wire their `checkRestored` step directly before
 `delivery.checkBuild`, so that a restored database is rendered again and never runs that removal.
 
-## 7. Known devices at sign-in
+## 7. Converting the stored media
+
+6.0.0 stores an original under `<prefix><id>/<name>`, where 5.x stored it under
+`<prefix><folder>/<filename>`, and gives every variant row a `slot`. `media-default` and
+`images-default` refuse to start on 5.x data and name the storage migration that converts it
+(`storageMigrations: "check"`, the default). The media conversion copies blobs, so it never runs at
+start-up. Run it once, offline, on a copy of the data:
+
+```
+kestrel upgrade migrate --db <copy of the database> --blobs-dir <copy of the blob store> --root <project>
+```
+
+1. Stop the 5.8 instance, so that the database and the blob store no longer change.
+2. Copy both: the database file (`sqlite3 <db> ".backup <copy>"`, or the file of the stopped
+   instance) and the root of the filesystem blob store with everything below it. Keep the originals
+   as they are; they are the backup that 5.8 starts on again if the update is abandoned.
+3. With the 6.0.0 packages installed, run `migrate --plan` on the copy to see what it would
+   convert, then `migrate` without `--plan` to convert it.
+4. Run `kestrel upgrade data --db <copy> --root <project>`; `data/media-layout` no longer appears.
+5. Start 6.0.0 on the converted copy. Run `media.syncPublic` and `images.syncPublic` (with
+   `publicCopy`) and publish the site again, so that the public copies and the exported pages use
+   the new keys.
+
+`migrate` works in place on the files it is given. It runs the storage migrations of every module
+whose collections the database holds, taken from the `./storage` export of the module package the
+project has installed (found from the project or from one of its direct dependencies), through the
+project's own `persistence-sqlite` and `blobstore-filesystem`, in order: `media-default:id-key-layout`,
+then `images-default:variant-slots`. The media prefix comes from `media-default`'s entry in
+`kestrel.config.ts`; without a `kestrel.config.ts` (a project a host package loads) it is
+`media/`. Each original is copied to its new key, checked against the item's size and sha256 (a
+difference is reported, and the item records those of the copy), and only then is the item
+switched to it. The duplicate variant rows of a slot are reduced to the newest finished one. Each
+module then gets a storage version row, which the start-up check of 6.0.0 reads.
+
+- `--plan` detects and counts without converting a row or writing a blob. To read the data it adds
+  the 6.0.0 columns to the copy, which a 5.8 instance would not mind.
+- `--answers <file>` answers the questions of a migration, for example
+  `{ "media-default:id-key-layout:missing-original": "trash" }` to move an item whose original is
+  missing to the trash instead of keeping it (`keep`, the default).
+- `--json` prints the report (`schema: 1`, one entry per module with its migrations, what they found
+  and what they did).
+- Exit codes: `0` every module is in the 6.0.0 shape, `1` a migration is still pending (always
+  after `--plan` on 5.x data) or the stored data is older or newer than 6.0.0 reads, `2` the run
+  could not start or a migration failed.
+
+A second run finds nothing to do and changes nothing. A run that stops part-way, through an error
+or a killed process, leaves the copy in a state the next run continues from; nothing of what it
+already did is undone, and the result is the same as that of an uninterrupted run. The command
+neither takes nor honours the instance lock (see [`runtime/single-process`](#runtime-single-process)):
+a `<file>.instance` that the stopped instance left next to the copy does not stop it, and it says
+so. Make sure no process uses the copy while it runs.
+
+### Leftovers
+
+The conversion leaves these in place on purpose:
+
+- The 5.x originals under `<prefix><folder>/<filename>`. Their keys are recorded in
+  `media_legacy_keys`; `media.reconcile` lists them as `legacyKeys`, apart from `blobsWithoutRow`,
+  and `media.reconcileDelete` never deletes them. They keep the backup taken before the conversion
+  complete until the update is accepted.
+- An item whose original was missing keeps its row (or moves to the trash, see `--answers`);
+  `media.reconcile` lists its new key under `rowsWithoutBlob`. Its variants still serve.
+- Some of the 5.x static export copies under the delivery prefix (`site/media/<folder>/<filename>`
+  and `….<size>.<ext>`). `media.syncPublic` removes those exactly one folder deep, because they sit
+  where its own copies `<id>/<name>` go; a copy directly under the media path or in a deeper folder
+  stays. [`data/site-media-leftovers`](#data-site-media-leftovers) reports the directory while it
+  holds anything; delete what is left by hand once every page that might link it is published again.
+
+### Not included
+
+- Converting media in an S3 bucket. `migrate` reads and writes a filesystem blob tree only; for a
+  bucket, `kestrel update` runs the same migrations with server-side copies.
+- Deleting the 5.x originals and their `media_legacy_keys` rows. That is a separate cleanup after the
+  update has been accepted.
+- Any change to the 5.8 data: the copy is converted, the original stays a 5.8 backup.
+
+## 8. Known devices at sign-in
 
 Nothing changes until a project opts in. A `username` bucket in front of the login blocks the account
 for everyone once its budget is used up, whoever sent the attempts. To keep the owner's own devices out
@@ -220,7 +301,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`responses/binary-cache-control`](#responses-binary-cache-control) | source | none (info) | a local module mentioning `cache-control` near a binary step result |
 | [`pipelines/images-plan`](#pipelines-images-plan) | source | manual (warning) | a pipeline calling `images.plan` directly |
 | [`data/translation-slug`](#data-translation-slug) | data | manual (error) | a stored translation of a routed type that is published without a slug of its own, or below a page without a slug in its locale |
-| [`data/media-layout`](#data-media-layout) | data | none (error) | a stored `media_items` key off-layout, or a pre-6.0 `images_variants`/`images_retired` row with no `slot` |
+| [`data/media-layout`](#data-media-layout) | data | none (error / warning) | media or variant rows in the 5.x storage shape, found by the storage migrations `media-default` and `images-default` export; `kestrel upgrade migrate` converts them |
 | [`data/redirect-reserved-paths`](#data-redirect-reserved-paths) | data | manual (warning) | a stored `redirects-default` rule or automatic redirect whose source can match a reserved path (`/admin`, `/api`, `/media` unless `reservedPaths` says otherwise) |
 | [`data/site-media-leftovers`](#data-site-media-leftovers) | data | manual (warning) | a leftover 5.x static export copy `media.syncPublic` never touches |
 | [`data/blobstore-tmp-suffix`](#data-blobstore-tmp-suffix) | data | none (info) | a stored filesystem-blobstore key already ending in `.kestrel-tmp` |
@@ -604,11 +685,16 @@ there. Give that page a slug in the locale, or withdraw the documents below it. 
 the API, or with a migration on the running instance, then run `data` again.
 
 #### data-media-layout
-The `data` command's own SQL check: a `media_items` row whose key is not `<prefix><id>/<name>` makes
-setup stop in 6.0.0 (start with an empty media store instead); a pre-6.0.0 `images_variants` or
-`images_retired` row with no `slot` is invisible to the new `ownerOf` lookup — Node 404s it and a
-sync treats its copy as foreign — and setup requires both collections empty. Error, no fix: the
-project's own data determines whether this is even reachable.
+The detection step of the storage migrations that `media-default` and `images-default` export
+under `./storage`, run by the `data` command on its own copy of the database. An error names the
+module, the pending migration (`media-default:id-key-layout` for a `media_items` row whose key is not
+`<prefix><id>/<name>` or that has no `location`, `images-default:variant-slots` for an
+`images_variants` or `images_retired` row with no `slot`), how many items it found with a few of
+their ids, and the command that converts them: setup refuses such data in 6.0.0. Run
+[`kestrel upgrade migrate`](#7-converting-the-stored-media) on a copy of the data. A stored storage
+version that 6.0.0 does not read is an error too. When the installed module has no `./storage`
+export (its 5.x release is still installed), the finding is a warning: install the 6.0.0 packages
+and run `data` again.
 
 #### data-redirect-reserved-paths
 A rule stored by the redirect editor whose `from` equals, lies below or, through a wildcard (`/**`,
@@ -1055,7 +1141,8 @@ use" below for the full plugin API surface.
 
 - Run a module's `setup()` outside the sandbox table without `--run-setup <use>` naming it.
 - Prompt without a terminal, or write under `--write` without one unless `--yes` says so.
-- Write anything outside `fix --write` (and `--out`/`--save-answers`, when asked).
+- Write anything outside `fix --write` (and `--out`/`--save-answers`, when asked) and `migrate`, which
+  writes only into the database copy and the blob directory it is given.
 - Accept a torn database copy.
 - Install, commit, push, or reach the network on its own; it prints `pnpm install` as the next step.
 

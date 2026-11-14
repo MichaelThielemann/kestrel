@@ -55,7 +55,7 @@ running instance with a login, a content type and a step of your own.
 | `@michaelthielemann/kestrel-revisions-default` | revisions@1: a full snapshot per save, branching through a parent pointer, restore as a new save, retention with a prune step. |
 | `@michaelthielemann/kestrel-sanitize-svg` | Step sanitize.svg: strips scripts, event handlers and external references from uploaded SVG files. |
 | `@michaelthielemann/kestrel-site-default` | site@1: path <-> document resolution and internal link rewriting on top of content@1. |
-| `@michaelthielemann/kestrel-upgrade` | The 5.8 -> 6.0 upgrade engine behind `kestrel upgrade`: check, fix and data, an exported sandbox helper and the plugin API host packages register their rules and project loader through. |
+| `@michaelthielemann/kestrel-upgrade` | The 5.8 -> 6.0 upgrade engine behind `kestrel upgrade`: check, fix, data and the offline storage migration of a database and blob copy (migrate), an exported sandbox helper and the plugin API host packages register their rules and project loader through. |
 | `@michaelthielemann/kestrel-validate-jsonschema` | Step validate.check:<type>.<field>: validates a payload field against a JSON Schema file (ajv). |
 <!-- kestrel-docs:end -->
 
@@ -124,7 +124,7 @@ only where a hidden constraint is not obvious from the code.
 | [`docs/contracts.md`](docs/contracts.md) | Defining a contract, the rules it must follow, worked examples, and the content model as configuration. |
 | [`docs/submodule-template.md`](docs/submodule-template.md) | Shipping a submodule as a package: file layout, `module.ts`/`impl.ts` shape, checklist before "done". |
 | [`docs/api.md`](docs/api.md) | The HTTP API of the example instance — read before touching a route or a response shape. |
-| [`docs/upgrading.md`](docs/upgrading.md) | Moving a 5.8 project to 6.0.0 with `kestrel upgrade`: what it finds, what it fixes, the data check, CI use, and how a host package registers its plugin. |
+| [`docs/upgrading.md`](docs/upgrading.md) | Moving a 5.8 project to 6.0.0 with `kestrel upgrade`: what it finds, what it fixes, the data check, converting the stored media of a copy with `migrate`, CI use, and how a host package registers its plugin. |
 | [`examples/minimal`](examples/minimal) | Every shipped module wired up in one instance; the reference `docs/api.md` describes. |
 | [`RELEASING.md`](RELEASING.md) | Version bump, smoke test and publish steps. |
 | [`CHANGELOG.md`](CHANGELOG.md) | Every behaviour change visible to a consumer, newest first under `## Unreleased`. |

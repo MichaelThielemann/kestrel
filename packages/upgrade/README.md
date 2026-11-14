@@ -3,7 +3,8 @@
 **What.** The library behind `kestrel upgrade` (the command lives in `@michaelthielemann/kestrel-cli`):
 it finds the breaks a 5.8 project meets on 6.0.0, preview and apply a fix for the ones that can be edited mechanically, ask about the ones a
 person must decide, offer switching event delivery to the queue where the project can support it,
-and read a copy of a project's database for the checks only stored data can answer.
+read a copy of a project's database for the checks only stored data can answer, and convert a copy
+of the stored media to the 6.0.0 storage shape.
 
 **Why.** Every break in `CHANGELOG.md`'s Breaking section is real, but a consumer should not have
 to read the whole file and grep their own project for each item by hand. This package turns that
@@ -21,6 +22,7 @@ kestrel upgrade check [--root <dir>] [--entry <file>] [--json] [--fail-on error|
 kestrel upgrade fix   [--write] [--yes] [--answers <file>] [--save-answers <file>] [--allow-dirty]
                       [--data-report <file>] (+ the check flags)
 kestrel upgrade data  --db <sqlite file> --root <dir> [--json] [--out <file>]
+kestrel upgrade migrate --db <sqlite file> --blobs-dir <dir> [--root <dir>] [--plan] [--answers <file>] [--json]
 ```
 
 `check` never writes anything. `fix` without `--write` previews every finding, showing a unified
@@ -33,9 +35,19 @@ JSON the `data` command's own `--out <file>` writes, read back through `RuleCont
 plugin's own `LoadedProject.data` so a report never overwrites it). `data` copies the given SQLite
 file (and any `-wal`/`-shm` siblings), verifies the copy with `PRAGMA quick_check` — the only SQL
 the tool issues itself — then reads it through the project's own installed `persistence-sqlite`, so
-the storage layout stays that module's knowledge. Exit codes: `0` nothing at or above `--fail-on`
+the storage layout stays that module's knowledge; its `data/media-layout` check runs the detection
+step of the storage migrations `media-default` and `images-default` export under `./storage`.
+`migrate` converts a copy of the database and of the filesystem blob store in place: it runs those
+storage migrations through the project's own `persistence-sqlite` and `blobstore-filesystem`
+(each package found from the project or one of its direct dependencies), writes each new blob
+before the row switches to it, leaves the old blobs where they are, and continues where an
+interrupted run stopped; a second run changes nothing. `--plan` only detects and counts. It neither
+takes nor honours the instance lock of the database, so a lock file left next to the copy does not
+stop it. `docs/upgrading.md` § "Converting the stored media" walks through it. Exit codes: `0` nothing at or above `--fail-on`
 (default `error`), `1` at least one finding, `2` the tool could not run (bad arguments, a dirty
-write target, a copy that fails `quick_check`, an `--answers` value outside its question's choices).
+write target, a copy that fails `quick_check`, an `--answers` value outside its question's choices,
+a storage migration that failed); for `migrate`, `1` means a migration is still pending or the
+stored data is older or newer than this release reads.
 An `--answers` id no pass asked is ignored with a warning. `fix --write` applies edits that only
 appear after earlier ones in the same run, for at most five passes.
 
@@ -62,4 +74,7 @@ inspection commands share with the engine; none of these subpaths loads the sour
 
 **Not included.** Installing, committing, pushing or reaching the network — the tool prints the next
 command and lets the consumer run it. Draining a queue, renaming a stored column or any other write
-to a live database — the `data` command only reads.
+to a live database — the `data` command only reads, and `migrate` writes only into the copy it is
+given. Converting media in an S3 bucket — `migrate` reads and writes a filesystem blob tree; the
+update tooling runs the same migrations against a bucket. Deleting the 5.x originals the conversion
+leaves behind, which is a separate cleanup.

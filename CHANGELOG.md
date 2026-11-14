@@ -930,6 +930,16 @@ Net changes since 5.8.2.
     never runs at start-up.
   - `media.reconcile` and `media.reconcileDelete` gain `legacyKeys`: the recorded 5.x blobs, reported
     apart from `blobsWithoutRow` and never deleted.
+  - `kestrel upgrade migrate --db <file> --blobs-dir <dir> [--root <dir>] [--plan] [--answers <file>] [--json]`
+    converts a copy of the database and of the filesystem blob store in place, offline and without
+    network access: it runs the storage migrations of every module whose collections the database
+    holds, from the `./storage` export of the module package the project has installed (found from the
+    project or one of its direct dependencies), through the project's own `persistence-sqlite` and
+    `blobstore-filesystem`. Old blobs stay where they are; a second run changes nothing; a run after an
+    interruption continues where it stopped. `--plan` only detects and counts. It neither takes nor
+    honours the instance lock, so a lock file left next to the copy does not stop it. Exit `0` when
+    every module is in this release's shape, `1` when a migration is still pending, `2` when the run
+    could not start or a migration failed. `docs/upgrading.md` § "Converting the stored media".
 
 - `replication-sqlite` documents its replica layout as a storage format (README, "Replica layout") and
   adds three files to a generation. Teardown writes `sealed.json` (`{ lineage, lastFrame, segments, at }`)
@@ -995,6 +1005,10 @@ Net changes since 5.8.2.
   as a CI gate. `explain <pipeline>` / `explain --event <name>` shows steps, atomic groups, emitted
   events, the relay, listeners and their delivery (direct, or queue with lane and relay), as text,
   `--json` or `--mermaid`. `manifest` prints `describe()` of the checked project.
+- `kestrel upgrade`'s new info rule `runtime/single-process` names every `persistence-sqlite`,
+  `replication-sqlite` and `backup-blobstore` entry that takes the instance lock on its database file,
+  once per entry, and stays quiet for an in-memory database or `allowConcurrentProcesses: true`.
+  `types/breaking-signatures` names `MediaItem.sourceChecksum`.
 - `@michaelthielemann/kestrel-upgrade` gains the subpaths `./hosts` (`scanHosts`,
   `loadHostPlugins`, `selectHostPlugin`), `./project` (`loadBackendProject`, which takes the
   project core's loaders as an optional third argument) and `./scratch` (`createScratchCopy`,
@@ -1284,9 +1298,10 @@ Net changes since 5.8.2.
   that does not also listen to `images.variantsChanged`.
   `types/breaking-signatures` and `responses/breaking-step-shapes` are extended for `Media`/`Images`'s own shape
   changes and the `media.*`/`images.*` steps affected. Three `data` command checks:
-  `data/media-layout` (error) reads `media_items` for an off-layout key and
-  `images_variants`/`images_retired` for a pre-6.0.0 row with no `slot`, both of which now fail the
-  matching module's `setup()`; `data/site-media-leftovers` (warning, manual) lists files still sitting
+  `data/media-layout` (error) runs the detection of the storage migrations `media-default` and
+  `images-default` export under `./storage` and names the pending migration and
+  `kestrel upgrade migrate`, for data their `setup()` now refuses (a warning when the installed
+  release has no `./storage` export); `data/site-media-leftovers` (warning, manual) lists files still sitting
   under the 5.x delivery-static media export directory; `data/blobstore-tmp-suffix` (info) lists stored
   filesystem-blobstore keys already ending in the suffix 6.0.0 reserves for its own atomic writes. An
   edit can also create a brand-new file (a `create` edit, refused if the path already exists, or if a
