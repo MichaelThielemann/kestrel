@@ -18,6 +18,7 @@
     "./defineModule": "./src/defineModule.ts",
     "./definePipeline": "./src/definePipeline.ts",
     "./errors": "./src/errors.ts",
+    "./instanceLock": "./src/instanceLock.ts",
     "./load": "./src/load.ts",
     "./logger": "./src/logger.ts",
     "./reads": "./src/reads.ts",
@@ -67,6 +68,10 @@
       "./errors": {
         "types": "./dist/errors.d.ts",
         "default": "./dist/errors.js"
+      },
+      "./instanceLock": {
+        "types": "./dist/instanceLock.d.ts",
+        "default": "./dist/instanceLock.js"
       },
       "./load": {
         "types": "./dist/load.d.ts",
