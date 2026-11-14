@@ -1312,6 +1312,43 @@ describe("acquireInstanceLock across processes", () => {
     ]);
   }, 30_000);
 
+  it("takes the lock and keeps other processes off on a file system without hard links, and removes it on exit", async () => {
+    const script = join(dir, `no-links-${randomUUID()}.mjs`);
+    writeFileSync(
+      script,
+      [
+        "import fs from \"node:fs\";",
+        "import { syncBuiltinESMExports } from \"node:module\";",
+        "fs.linkSync = () => { throw Object.assign(new Error(\"EPERM: operation not permitted, link\"), { code: \"EPERM\" }); };",
+        "syncBuiltinESMExports();",
+        `const { acquireInstanceLock } = await import(${JSON.stringify(LOCK_MODULE)});`,
+        "const [file] = process.argv.slice(2);",
+        "let line;",
+        "try {",
+        "  acquireInstanceLock(file, { module: \"store/sqlite\" });",
+        "  line = \"won\";",
+        "} catch (err) {",
+        "  line = `lost:${err.code ?? err.message}`;",
+        "}",
+        "process.stdout.write(line + \"\\n\");",
+        "process.stdin.resume();",
+        "process.stdin.on(\"end\", () => process.exit(0));",
+      ].join("\n"),
+    );
+    const holder = start(script, 0);
+    expect(await holder.line).toBe("won");
+    expect(readRecord().pid).toBe(holder.child.pid);
+    const second = start(script, 0);
+    expect(await second.line).toBe("lost:instance-locked");
+    const err = thrownBy(() => take(file));
+    expect(err instanceof KestrelBootError ? err.code : err).toBe("instance-locked");
+    second.child.stdin?.end();
+    holder.child.stdin?.end();
+    await Promise.all([exited(holder.child), exited(second.child)]);
+    expect(existsSync(lockFile(file))).toBe(false);
+    expect(existsSync(`${lockFile(file)}.takeover`)).toBe(false);
+  }, 30_000);
+
   it("leaves the lock free when a process cannot finish writing it", async () => {
     const failing = start(childScript(), 0, ["/bin/sh", "-c", 'ulimit -f 0; exec "$0" "$@"', process.execPath]);
     expect(await failing.line.catch(() => "died")).not.toBe("won");

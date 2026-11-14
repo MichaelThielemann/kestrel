@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { hostname, uptime } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, sep } from "node:path";
 import { threadId } from "node:worker_threads";
@@ -96,6 +96,7 @@ const CLOCK_SLACK_MS = 50;
 const CLOCK_SAMPLES = 5;
 const MAX_LINK_HOPS = 40;
 const MAX_TIMER_MS = 2 ** 31 - 1;
+const NO_HARD_LINKS = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"]);
 const HOLDERS_KEY = Symbol.for("kestrel.instanceLocks");
 const EXIT_KEY = Symbol.for("kestrel.instanceLocks.exit");
 
@@ -243,7 +244,9 @@ export function instanceLockFile(file: string): string | undefined {
  * Once another instance took the lock over, the next call does not join the lost share but takes
  * the lock anew or throws like a first call. A thread that ends without releasing stops counting
  * once its share is older than `ttlMs`. The heartbeat runs on a timer that does not keep the
- * process alive.
+ * process alive. The lock file and the takeover marker appear complete through a hard link; on a
+ * file system without hard links, such as FAT or exFAT, they are written in place, and another
+ * process that reads one in that moment refuses as for an unreadable lock file.
  */
 export function acquireInstanceLock(file: string, opts: InstanceLockOptions): InstanceLock {
   const timing = timingOf(opts);
@@ -536,14 +539,41 @@ function createExclusive(path: string, content: string): boolean {
   const tmp = siblingPath(path, "tmp");
   try {
     writeFileSync(tmp, content, { flag: "wx" });
-    linkSync(tmp, path);
-    return true;
-  } catch (err) {
-    if (errorCode(err) === "EEXIST") return false;
-    throw err;
+    return linkExclusive(tmp, path, content);
   } finally {
     rmSync(tmp, { force: true });
   }
+}
+
+function linkExclusive(from: string, to: string, content: string): boolean {
+  try {
+    linkSync(from, to);
+    return true;
+  } catch (err) {
+    const code = errorCode(err);
+    if (code === "EEXIST") return false;
+    if (typeof code !== "string" || !NO_HARD_LINKS.has(code)) throw err;
+  }
+  return writeExclusive(to, content);
+}
+
+function writeExclusive(path: string, content: string): boolean {
+  let fd: number;
+  try {
+    fd = openSync(path, "wx");
+  } catch (err) {
+    if (errorCode(err) === "EEXIST") return false;
+    throw err;
+  }
+  try {
+    writeFileSync(fd, content);
+  } catch (err) {
+    closeSync(fd);
+    rmSync(path, { force: true });
+    throw err;
+  }
+  closeSync(fd);
+  return true;
 }
 
 function siblingPath(path: string, suffix: string): string {
@@ -589,9 +619,8 @@ function clearAbandonedGuard(guard: string): void {
     throw err;
   }
   try {
-    if (readQuietly(aside) !== raw) linkSync(aside, guard);
-  } catch (err) {
-    if (errorCode(err) !== "EEXIST") throw err;
+    const moved = readQuietly(aside);
+    if (moved !== undefined && moved !== raw) linkExclusive(aside, guard, moved);
   } finally {
     rmSync(aside, { force: true });
   }
