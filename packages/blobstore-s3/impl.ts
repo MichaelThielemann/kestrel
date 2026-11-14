@@ -52,7 +52,8 @@ export interface BlobstoreS3 extends Blobstore {
 const TRANSIENT_NAMES = new Set(["TimeoutError", "NetworkingError", "AbortError"]);
 const TRANSIENT_CODES = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "EAI_AGAIN"]);
 
-function isTransient(cause: unknown): boolean {
+/** Whether an SDK error is a failure worth retrying later: a 5xx or 429 status, a retryable flag, or a network-level error. */
+export function isTransient(cause: unknown): boolean {
   const e = boundaryCast<{ name?: string; code?: string; $retryable?: unknown; $metadata?: { httpStatusCode?: number } }>(cause, "host");
   const status = e.$metadata?.httpStatusCode;
   if (status !== undefined && (status >= 500 || status === 429)) return true;

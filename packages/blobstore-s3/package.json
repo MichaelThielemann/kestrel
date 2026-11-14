@@ -9,7 +9,8 @@
   },
   "exports": {
     ".": "./module.ts",
-    "./impl": "./impl.ts"
+    "./impl": "./impl.ts",
+    "./admin": "./admin.ts"
   },
   "publishConfig": {
     "exports": {
@@ -20,6 +21,10 @@
       "./impl": {
         "types": "./dist/impl.d.ts",
         "default": "./dist/impl.js"
+      },
+      "./admin": {
+        "types": "./dist/admin.d.ts",
+        "default": "./dist/admin.js"
       }
     }
   },
