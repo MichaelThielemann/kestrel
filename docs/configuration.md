@@ -93,8 +93,9 @@ that shares it: another instance took the lock over, or its file was gone after 
 not renewed it for longer than its TTL. The process no longer holds the database alone and has to
 be restarted.
 
-After a clean `stop()` the next start takes the lock at once. After an unclean stop it waits for
-the old lock to expire, as described under [Error codes](#error-codes).
+After a clean `stop()` the next start takes the lock at once. After an unclean stop it can wait for
+the old lock to expire, unless the old process is provably gone on this machine, as described under
+[Error codes](#error-codes).
 
 ### Host-supplied defaults
 

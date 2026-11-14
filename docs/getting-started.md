@@ -199,10 +199,12 @@ WantedBy=multi-user.target
 
 `SIGTERM` from `systemctl stop` drains running requests before the process exits.
 
-Only one process at a time runs on a database file. After an unclean stop (a crash, a power cut, a
-restart of the machine) the next start is refused until the old process's lock has expired, up to
-60 s by default. `RestartSec=15s` spaces the retries so that systemd does not give up on the unit
-within that time. [One process per database file](configuration.md#one-process-per-database-file)
+Only one process at a time runs on a database file. After a power cut or a restart of the machine
+the next start is refused until the old process's lock has expired, up to 60 s by default.
+`RestartSec=15s` spaces the retries so that systemd does not give up on the unit within that time.
+After a crash the next start on the same machine takes the lock at once: a process that ends through
+an exception or `process.exit()` gives the lock up as it exits, and the lock of a killed process
+is taken over as soon as that process is gone. [One process per database file](configuration.md#one-process-per-database-file)
 explains the lock, and [Error codes](configuration.md#error-codes) the refusal `instance-locked`.
 
 ## 6. Your own module
