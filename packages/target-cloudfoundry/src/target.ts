@@ -40,6 +40,7 @@ const listSchema = z.object({ resources: z.array(z.unknown()) });
 const dropletSchema = z.object({ guid: z.string() });
 const currentDropletSchema = z.object({ data: z.object({ guid: z.string() }).nullable() });
 const envSchema = z.object({ var: z.record(z.string(), z.unknown()).nullish() });
+const revisionsSchema = z.object({ resources: z.array(z.object({ guid: z.string(), version: z.number().int() })) });
 const eventsSchema = z.object({ resources: z.array(z.object({ type: z.string(), created_at: z.string() })) });
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
@@ -108,8 +109,7 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     return parsed.data;
   };
 
-  const status = async (): Promise<TargetStatus> => {
-    const guid = await appGuid();
+  const requireOneInstance = async (guid: string): Promise<number> => {
     const deployments = await api(`/v3/deployments?app_guids=${guid}&status_values=ACTIVE`, listSchema);
     if (deployments.resources.length > 0) throw new OpsError(`a deployment of ${app} is in progress, such as a rolling push; wait until it ends or run cf cancel-deployment ${app}`, 1, "target");
     const process = await api(`/v3/apps/${guid}/processes/web`, processSchema);
@@ -117,6 +117,12 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     const running = stats.resources.filter((r) => r.state !== "DOWN").length;
     const instances = Math.max(process.instances, running);
     if (instances > 1) throw new OpsError(`${app} is scaled to ${instances} instances; backup and restore need exactly one (cf scale ${app} -i 1)`, 1, "target");
+    return running;
+  };
+
+  const status = async (): Promise<TargetStatus> => {
+    const guid = await appGuid();
+    const running = await requireOneInstance(guid);
     const { state } = await api(`/v3/apps/${guid}`, appSchema);
     return { state: state === "STARTED" ? "started" : state === "STOPPED" ? "stopped" : "unknown", instances: running };
   };
@@ -146,9 +152,12 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
 
     async describe(): Promise<TargetFacts> {
       const guid = await appGuid();
+      await requireOneInstance(guid);
       const droplet = await api(`/v3/apps/${guid}/droplets/current`, dropletSchema).catch(() => null);
+      const revisions = await api(`/v3/apps/${guid}/revisions?order_by=-created_at&per_page=1`, revisionsSchema);
+      const latest = revisions.resources[0];
       const variables = await api(`/v3/apps/${guid}/environment_variables`, envSchema);
-      return { kind: "cloudfoundry", packages: installedPackages(resolve(deps.root, config.dir)), org: config.org, space: config.space, app, appGuid: guid, droplet: droplet?.guid ?? null, envNames: Object.keys(variables.var ?? {}).sort() };
+      return { kind: "cloudfoundry", packages: installedPackages(resolve(deps.root, config.dir)), org: config.org, space: config.space, app, appGuid: guid, droplet: droplet?.guid ?? null, revision: latest === undefined ? null : { guid: latest.guid, version: latest.version }, envNames: Object.keys(variables.var ?? {}).sort() };
     },
 
     status,

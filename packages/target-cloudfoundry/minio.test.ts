@@ -149,7 +149,7 @@ describe.skipIf(!endpoint)("kestrel backup, restore and status on a Cloud Foundr
     expect(created.stderr).toBe("");
     expect(created.code).toBe(0);
     const id = String(created.json.id);
-    expect(created.json.manifest).toMatchObject({ kind: "manual", frozen: true, source: { seal: "sealed" }, blobs: { count: 3 }, site: { count: 4 }, target: { kind: "cloudfoundry", app: API.name, appGuid: API.guid, envNames: ["STORAGE_SECRET"] } });
+    expect(created.json.manifest).toMatchObject({ kind: "manual", frozen: true, source: { seal: "sealed" }, blobs: { count: 3 }, site: { count: 4 }, target: { kind: "cloudfoundry", app: API.name, appGuid: API.guid, revision: { guid: "e2a4c6f8-0000-4000-8000-000000000003", version: 3 }, envNames: ["STORAGE_SECRET"] } });
     expect(app.running).toBe(true);
     expect(api.state).toBe("STARTED");
     expect(cf.actions).toEqual([{ app: API.name, space: "dev", action: "stop" }, { app: API.name, space: "dev", action: "start" }]);
@@ -230,6 +230,9 @@ describe.skipIf(!endpoint)("kestrel backup, restore and status on a Cloud Foundr
     const created = await kestrel(["backup", "create", "--freeze"]);
     expect(created.code).toBe(1);
     expect(created.stderr).toContain(`cf scale ${API.name} -i 1`);
+    const live = await kestrel(["backup", "create", "--kind", "scheduled"]);
+    expect(live.code).toBe(1);
+    expect(live.stderr).toContain("2 instances");
     expect(cf.actions).toEqual([]);
     expect(app.running).toBe(true);
   }, 120_000);

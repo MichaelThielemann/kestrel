@@ -267,9 +267,24 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     writeFileSync(join(root, "package.json"), JSON.stringify({ dependencies: { "@michaelthielemann/kestrel-replication-sqlite": "^6.0.0" } }));
     writeFileSync(join(root, "node_modules", "@michaelthielemann", "kestrel-replication-sqlite", "package.json"), JSON.stringify({ name: "@michaelthielemann/kestrel-replication-sqlite", version: "6.0.0" }));
     const facts = await (await target()).describe();
-    expect(facts).toMatchObject({ kind: "cloudfoundry", app: API.name, appGuid: API.guid, org: "example-org", space: "dev", droplet: "d7c1a3e0-0000-4000-8000-000000000001", envNames: ["NODE_ENV", "STORAGE_SECRET"], packages: { "@michaelthielemann/kestrel-replication-sqlite": "6.0.0" } });
+    expect(facts).toMatchObject({ kind: "cloudfoundry", app: API.name, appGuid: API.guid, org: "example-org", space: "dev", droplet: "d7c1a3e0-0000-4000-8000-000000000001", revision: { guid: "e2a4c6f8-0000-4000-8000-000000000003", version: 3 }, envNames: ["NODE_ENV", "STORAGE_SECRET"], packages: { "@michaelthielemann/kestrel-replication-sqlite": "6.0.0" } });
     expect(JSON.stringify(facts)).not.toContain(SECRET);
     expect(namesOtherApp()).toEqual([]);
+    cf.app(API.name).revision = null;
+    expect((await (await target()).describe()).revision).toBeNull();
+  });
+
+  it("refuses with exit 1 to describe an app scaled to more than one instance or with an active deployment", async () => {
+    const app = cf.app(API.name);
+    app.instances = 2;
+    const scaled = await failure((await target()).describe());
+    expect(scaled.exitCode).toBe(1);
+    expect(scaled.message).toContain("2 instances");
+    app.instances = 1;
+    cf.activeDeployments.add(API.guid);
+    const deploying = await failure((await target()).describe());
+    expect(deploying.exitCode).toBe(1);
+    expect(deploying.message).toContain("deployment");
   });
 
   it("shows stop and crash events and teardown error lines as evidence for a stop without a seal", async () => {
