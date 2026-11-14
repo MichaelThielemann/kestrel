@@ -71,3 +71,11 @@ describe("the upgrade README names every query the tool sends to SQLite itself",
     expect(readme).toContain("PRAGMA table_info");
   });
 });
+
+describe("the media conversion docs say how to go on when every original is lost", () => {
+  it("names --originals-gone in the steps and in the usage line", () => {
+    const section = mediaConversionSection(readFileSync(DOCS_FILE, "utf8"));
+    expect(section).toContain("`--originals-gone`");
+    expect(readFileSync(join(HERE, "..", "README.md"), "utf8")).toContain("[--originals-gone]");
+  });
+});

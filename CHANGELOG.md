@@ -930,7 +930,7 @@ Net changes since 5.8.2.
     never runs at start-up.
   - `media.reconcile` and `media.reconcileDelete` gain `legacyKeys`: the recorded 5.x blobs, reported
     apart from `blobsWithoutRow` and never deleted.
-  - `kestrel upgrade migrate --db <file> --blobs-dir <dir> [--root <dir>] [--plan] [--answers <file>] [--media-prefix <prefix>] [--json]`
+  - `kestrel upgrade migrate --db <file> --blobs-dir <dir> [--root <dir>] [--plan] [--answers <file>] [--originals-gone] [--media-prefix <prefix>] [--json]`
     converts a copy of the database and of the filesystem blob store in place, offline and without
     network access: it runs the storage migrations of every module whose collections the database
     holds, from the `./storage` export of the module package the project has installed (found from the
@@ -939,8 +939,9 @@ Net changes since 5.8.2.
     interruption continues where it stopped. `--plan` only detects and counts. An item whose original is
     not under `--blobs-dir` stops the run before anything is converted, with exit `2`, until
     `--answers` answers `media-default:id-key-layout:missing-original` with `keep` or `trash`; when no
-    original is found at all and `--blobs-dir` holds no blob under the media key prefix, it stops
-    whatever the answers say. A database SQLite cannot open for lack of space or write access next to
+    original is found at all and `--blobs-dir` holds no blob under the media key prefix, it names what
+    `--blobs-dir` holds and stops whatever the answers say, unless `--originals-gone` confirms that it
+    is the root of a store whose originals are all lost; the answer then applies to every item. A database SQLite cannot open for lack of space or write access next to
     it is named as such, apart from one that fails `quick_check`. The module
     configs come from `kestrel.config.ts`, or through the project's host plugin when that file does not
     load by itself; when neither loads, migrate stops with exit `2` before converting anything, unless
@@ -949,7 +950,7 @@ Net changes since 5.8.2.
     honours the instance lock, so a lock file left next to the copy does not stop it. Exit `0` when
     every module is in this release's shape, `1` when a migration is still pending or the stored data
     is older or newer than this release reads, `2` when the run could not start, an original is
-    missing without an answer, or a migration failed. `docs/upgrading.md` § "Converting the stored media".
+    missing without an answer, no original is found without `--originals-gone`, or a migration failed. `docs/upgrading.md` § "Converting the stored media".
 
 - `replication-sqlite` documents its replica layout as a storage format (README, "Replica layout") and
   adds three files to a generation. Teardown writes `sealed.json` (`{ lineage, lastFrame, segments, at }`)

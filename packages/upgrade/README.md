@@ -22,7 +22,7 @@ kestrel upgrade check [--root <dir>] [--entry <file>] [--json] [--fail-on error|
 kestrel upgrade fix   [--write] [--yes] [--answers <file>] [--save-answers <file>] [--allow-dirty]
                       [--data-report <file>] (+ the check flags)
 kestrel upgrade data  --db <sqlite file> --root <dir> [--json] [--out <file>]
-kestrel upgrade migrate --db <sqlite file> --blobs-dir <dir> [--root <dir>] [--plan] [--answers <file>] [--media-prefix <prefix>] [--json]
+kestrel upgrade migrate --db <sqlite file> --blobs-dir <dir> [--root <dir>] [--plan] [--answers <file>] [--originals-gone] [--media-prefix <prefix>] [--json]
 ```
 
 `check` never writes anything. `fix` without `--write` previews every finding, showing a unified
@@ -49,7 +49,8 @@ stop it. `docs/upgrading.md` § "Converting the stored media" walks through it. 
 write target, a copy that fails `quick_check`, an `--answers` value outside its question's choices,
 a storage migration that failed, and for `migrate` also a database SQLite cannot open, an original
 missing without an `--answers` value for `media-default:id-key-layout:missing-original`, or a
-`--blobs-dir` under which no original is found at all, whatever the answers say); for `migrate`,
+`--blobs-dir` under which no original is found at all, whatever the answers say, unless
+`--originals-gone` confirms that it is the root of a store whose originals are all lost); for `migrate`,
 `1` means a migration is still pending or the stored data is older or newer than this release reads.
 An `--answers` id no pass asked is ignored with a warning. `fix --write` applies edits that only
 appear after earlier ones in the same run, for at most five passes.

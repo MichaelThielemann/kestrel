@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
@@ -44,6 +44,8 @@ export interface MigrateStepOptions {
   plugins?: readonly UpgradePlugin[];
   /** The media key prefix to convert to, in place of the one of `media-default`'s config. */
   mediaPrefix?: string;
+  /** Confirms that `blobsDir` is the root of the copied blob store although none of the originals is under it, so the answer to `media-default:id-key-layout:missing-original` applies to every item. */
+  originalsGone?: boolean;
 }
 
 interface ClosablePersistence extends Persistence {
@@ -107,21 +109,51 @@ async function guarded<T>(task: () => Promise<Result<T, { message: string }>>): 
 
 const MISSING_ORIGINALS = { migration: "media-default:id-key-layout", question: "media-default:id-key-layout:missing-original" } as const;
 
-function missingOriginals(modules: readonly ModuleRun[], answers: Readonly<Record<string, string>> | undefined, blobsDir: string, treeEmpty: boolean): string | undefined {
+interface OriginalsCheck {
+  blobsDir: string;
+  prefix: string;
+  nowhere: boolean;
+  originalsGone: boolean;
+}
+
+interface MissingOriginals {
+  stop?: string;
+  note?: string;
+}
+
+const ENTRIES_SHOWN = 5;
+
+function entriesOf(dir: string): string {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true }).map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).sort();
+  } catch {
+    return `--blobs-dir "${dir}" could not be listed`;
+  }
+  if (entries.length === 0) return `--blobs-dir "${dir}" is empty`;
+  const shown = entries.slice(0, ENTRIES_SHOWN).join(", ") + (entries.length > ENTRIES_SHOWN ? ` and ${entries.length - ENTRIES_SHOWN} more` : "");
+  return `--blobs-dir holds ${shown}`;
+}
+
+function missingOriginals(modules: readonly ModuleRun[], answers: Readonly<Record<string, string>> | undefined, check: OriginalsCheck): MissingOriginals {
   for (const module of modules) {
     for (const migration of module.migrations) {
       const counts = migration.id === MISSING_ORIGINALS.migration ? migration.plan?.counts : undefined;
       const missing = counts?.missingOriginals ?? 0;
       if (counts === undefined || missing === 0) continue;
-      const nowhere = (counts.copies ?? 0) === 0 && treeEmpty;
-      if (answers?.[MISSING_ORIGINALS.question] !== undefined && !nowhere) continue;
+      const nowhere = (counts.copies ?? 0) === 0 && check.nowhere;
+      const answer = answers?.[MISSING_ORIGINALS.question];
+      if (answer !== undefined && (!nowhere || check.originalsGone)) {
+        if (nowhere) return { note: `--originals-gone: none of the originals is under --blobs-dir "${check.blobsDir}", and the ${missing} item(s) of ${module.module} without one are answered "${answer}"` };
+        continue;
+      }
       const examples = (migration.plan?.notes ?? []).filter((n) => n.reason.endsWith(" is missing")).slice(0, 3).map((n) => `${n.item} (${n.reason})`);
-      const head = `${missing} of ${counts.items ?? missing} item(s) of ${module.module} have no original under --blobs-dir "${blobsDir}", e.g. ${examples.join(", ")}`;
-      if (nowhere) return `${head}; none of the originals is there and the directory holds no blob under the media key prefix, so --blobs-dir most likely names another directory than the root of the copied blob store, such as one a level too deep; an answer to ${MISSING_ORIGINALS.question} does not cover this, so name the root of the copy`;
-      return `${head}; check that --blobs-dir is the copy of the directory the project's blobstore-filesystem root points at, and when the originals are gone for good, answer ${MISSING_ORIGINALS.question} in an --answers file: "keep" switches the items anyway and media.reconcile lists them, "trash" moves them to the trash`;
+      const head = `${missing} of ${counts.items ?? missing} item(s) of ${module.module} have no original under --blobs-dir "${check.blobsDir}", e.g. ${examples.join(", ")}`;
+      if (nowhere && !check.originalsGone) return { stop: `${head}; none of the originals is there and no blob is under the media key prefix "${check.prefix}"; ${entriesOf(check.blobsDir)}. It most likely names another directory than the root of the copied blob store, such as one a level too deep, and then an answer to ${MISSING_ORIGINALS.question} does not cover this: name the root of the copy. When it is that root and every original is gone for good, run again with --originals-gone and an answer to ${MISSING_ORIGINALS.question} in an --answers file` };
+      return { stop: `${head}; check that --blobs-dir is the copy of the directory the project's blobstore-filesystem root points at, and when the originals are gone for good, answer ${MISSING_ORIGINALS.question} in an --answers file: "keep" switches the items anyway and media.reconcile lists them, "trash" moves them to the trash` };
     }
   }
-  return undefined;
+  return {};
 }
 
 async function holdsNothingUnder(blobs: Blobstore, prefix: string): Promise<boolean> {
@@ -152,12 +184,13 @@ function finished(run: ModuleRun): boolean {
  * Before it applies anything, a plan of the same run looks for items whose original is not under
  * `blobsDir`; unless `answers` answers `media-default:id-key-layout:missing-original`, such an item
  * stops the run with nothing converted, and a `plan` run names them in a note. When none of the
- * originals is found and `blobsDir` holds no blob under the media key prefix, the run stops whatever
- * the answers say. A database SQLite cannot open, such as one in a directory without free space or
+ * originals is found and `blobsDir` holds no blob under the media key prefix, the run names what
+ * `blobsDir` holds and stops, unless `originalsGone` confirms that it is the root of the copied blob
+ * store and `answers` answers that question; the answer then applies to every item. A database SQLite cannot open, such as one in a directory without free space or
  * write access, is reported as such and not as a failed `quick_check`.
  * Exit code `0` when every module is in this release's shape, `1` when a migration is still pending
  * or the stored data is too old or too new, `2` when the run could not start, an original is missing
- * without an answer, no original is found at all, or a migration failed or threw.
+ * without an answer, no original is found at all without `originalsGone`, or a migration failed or threw.
  */
 export async function runMigrateStep(options: MigrateStepOptions): Promise<MigrateStepResult> {
   const { dbFile, blobsDir, root } = options;
@@ -189,16 +222,18 @@ export async function runMigrateStep(options: MigrateStepOptions): Promise<Migra
     if (options.plan !== true) {
       const preview = await guarded(() => runShapeMigrations({ ...shared, apply: false }));
       if (isErr(preview)) return { exitCode: 2, error: `${preview.error}; nothing was converted` };
-      const treeEmpty = originalsNowhere(preview.value.modules) && (await holdsNothingUnder(stores.blobs, convertsTo));
-      const unanswered = missingOriginals(preview.value.modules, options.answers, blobsDir, treeEmpty);
-      if (unanswered !== undefined) return { exitCode: 2, error: `${unanswered}; nothing was converted` };
+      const nowhere = originalsNowhere(preview.value.modules) && (await holdsNothingUnder(stores.blobs, convertsTo));
+      const checked = missingOriginals(preview.value.modules, options.answers, { blobsDir, prefix: convertsTo, nowhere, originalsGone: options.originalsGone === true });
+      if (checked.stop !== undefined) return { exitCode: 2, error: `${checked.stop}; nothing was converted` };
+      if (checked.note !== undefined) notes.push(checked.note);
     }
     const run = await guarded(() => runShapeMigrations({ ...shared, apply: options.plan !== true }));
     if (isErr(run)) return { exitCode: 2, error: `${run.error}; nothing that ran before this is undone, so running migrate again continues from here` };
     if (options.plan === true) {
-      const treeEmpty = originalsNowhere(run.value.modules) && (await holdsNothingUnder(stores.blobs, convertsTo));
-      const unanswered = missingOriginals(run.value.modules, options.answers, blobsDir, treeEmpty);
-      if (unanswered !== undefined) notes.push(`${unanswered}; migrate without --plan refuses to convert anything until then`);
+      const nowhere = originalsNowhere(run.value.modules) && (await holdsNothingUnder(stores.blobs, convertsTo));
+      const checked = missingOriginals(run.value.modules, options.answers, { blobsDir, prefix: convertsTo, nowhere, originalsGone: options.originalsGone === true });
+      if (checked.stop !== undefined) notes.push(`${checked.stop}; migrate without --plan refuses to convert anything until then`);
+      if (checked.note !== undefined) notes.push(checked.note);
     }
     const report: MigrateReport = { schema: 1, tool: { name: "kestrel-upgrade", version: toolVersion() }, command: "migrate", db: dbFile, blobsDir, applied: options.plan !== true, modules: run.value.modules, notes };
     return { exitCode: run.value.modules.every(finished) ? 0 : 1, report };

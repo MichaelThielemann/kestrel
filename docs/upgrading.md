@@ -183,9 +183,16 @@ module then gets a storage version row, which the start-up check of 6.0.0 reads.
   `media-default:id-key-layout:missing-original`. When none of the originals is there and
   `--blobs-dir` holds no blob under the media key prefix, it most likely names another directory
   than the copy of the blob store's root, such as a directory one level too deep; the run then stops
-  with exit code `2` whatever the answers say. `--plan` reports the same as a note. An item switched
+  with exit code `2` whatever the answers say, and names what `--blobs-dir` holds. `--plan` reports
+  the same as a note. An item switched
   with `keep` is not looked at again by a later run: when its original turns up after all, copy it
   to the item's new key (`media.reconcile` lists that key under `rowsWithoutBlob`).
+- `--originals-gone` is for a blob store whose originals are all lost: it confirms that
+  `--blobs-dir` is the root of the copy although none of the originals is under it. Together with an
+  answer to `media-default:id-key-layout:missing-original`, the run then applies that answer to every
+  item and says so in a note. Check the entries the refusal names first: the root holds the other
+  prefixes of the store, such as the variants of `images-default` or the delivery prefix, while a
+  directory a level too deep holds the folders and files of the media themselves.
 - `--media-prefix <prefix>` names the media key prefix (`media-default`'s `prefix`, such as
   `media/`) in place of the one of the config, also when the config does not load.
 - `--json` prints the report (`schema: 1`, one entry per module with its migrations, what they found
@@ -193,7 +200,7 @@ module then gets a storage version row, which the start-up check of 6.0.0 reads.
 - Exit codes: `0` every module is in the 6.0.0 shape, `1` a migration is still pending (always
   after `--plan` on 5.x data) or the stored data is older or newer than 6.0.0 reads, `2` the run
   could not start, an original is missing without an answer, no original is under `--blobs-dir` at
-  all, or a migration failed.
+  all and `--originals-gone` is not given, or a migration failed.
 - A database that does not pass `PRAGMA quick_check` stops the run with exit code `2` before
   anything is converted; take a consistent copy. A database SQLite cannot open at all, because its
   directory has no free space or no write access for the `-wal` and `-shm` files, is reported as

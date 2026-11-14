@@ -1006,7 +1006,7 @@ async function runMigrate(args: ParsedArgs, stdout: (line: string) => void, stde
     stderr(`--media-prefix must be one or more "<segment>/" parts, as media-default's prefix, e.g. "media/"; got "${mediaPrefix}"`);
     return 2;
   }
-  const result = await runMigrateStep({ dbFile: resolve(db), blobsDir: resolve(blobsDir), root, plan: boolFlag(args, "plan"), plugins: options.plugins ?? [], ...(answers === undefined ? {} : { answers }), ...(mediaPrefix === undefined ? {} : { mediaPrefix }) });
+  const result = await runMigrateStep({ dbFile: resolve(db), blobsDir: resolve(blobsDir), root, plan: boolFlag(args, "plan"), originalsGone: boolFlag(args, "originals-gone"), plugins: options.plugins ?? [], ...(answers === undefined ? {} : { answers }), ...(mediaPrefix === undefined ? {} : { mediaPrefix }) });
   if (result.error !== undefined) {
     stderr(result.error);
     return result.exitCode;

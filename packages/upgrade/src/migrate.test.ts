@@ -405,6 +405,58 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
     expect(tableRows(copy.db, "media_legacy_keys")).toEqual([]);
   });
 
+  it("names the entries of a --blobs-dir without any original and the option for originals that are gone for good", async () => {
+    const copy = fixtureCopy();
+    rmSync(join(copy.blobs, "media"), { recursive: true });
+    const answers = join(copy.dir, "trash.json");
+    writeFileSync(answers, JSON.stringify({ [MISSING_ORIGINAL]: "trash" }));
+    const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", answers]);
+    expect(run.code).toBe(2);
+    expect(run.errors).toContain("media-variants/");
+    expect(run.errors).toContain("site/");
+    expect(run.errors).toContain("--originals-gone");
+    expect(run.errors).toContain("nothing was converted");
+    expect(tableRows(copy.db, "kestrel_storage_versions")).toEqual([]);
+  });
+
+  it("converts a copy whose originals are all gone once --originals-gone confirms the answer for them", async () => {
+    const copy = fixtureCopy();
+    rmSync(join(copy.blobs, "media"), { recursive: true });
+    const answers = join(copy.dir, "trash.json");
+    writeFileSync(answers, JSON.stringify({ [MISSING_ORIGINAL]: "trash" }));
+    const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", answers, "--originals-gone", "--json"]);
+    expect(run.code, run.errors).toBe(0);
+    const report = boundaryCast<MigrateReport>(JSON.parse(run.out), "json");
+    expect(report.modules.map((m) => [m.module, m.state])).toEqual([
+      ["media/default", "migrated"],
+      ["images/default", "migrated"],
+    ]);
+    expect(report.notes.some((n) => n.includes("--originals-gone") && n.includes("7 item(s)") && n.includes("trash"))).toBe(true);
+    expect(rows(copy.db, "SELECT DISTINCT status FROM media_items")).toEqual([{ status: "trashed" }]);
+    expect(rows(copy.db, "SELECT module FROM kestrel_storage_versions ORDER BY module").map((r) => r.module)).toEqual(["images/default", "media/default"]);
+    expect((await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--plan"])).code).toBe(0);
+  });
+
+  it("still needs an answer for the missing originals with --originals-gone", async () => {
+    const copy = fixtureCopy();
+    rmSync(join(copy.blobs, "media"), { recursive: true });
+    const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--originals-gone"]);
+    expect(run.code).toBe(2);
+    expect(run.errors).toContain(MISSING_ORIGINAL);
+    expect(run.errors).toContain("nothing was converted");
+    expect(tableRows(copy.db, "kestrel_storage_versions")).toEqual([]);
+  });
+
+  it("says that a --blobs-dir without any original is empty when it holds nothing at all", async () => {
+    const copy = fixtureCopy();
+    const empty = join(copy.dir, "empty");
+    mkdirSync(empty);
+    const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", empty, "--answers", keepFile(copy)]);
+    expect(run.code).toBe(2);
+    expect(run.errors).toContain(`--blobs-dir "${empty}" is empty`);
+    expect(tableRows(copy.db, "kestrel_storage_versions")).toEqual([]);
+  });
+
   it("names a --blobs-dir without any original in a plan also when the answers say keep", async () => {
     const copy = fixtureCopy();
     const empty = join(copy.dir, "empty");
