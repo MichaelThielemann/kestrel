@@ -888,7 +888,9 @@ A save can be answered before its page is rendered. With `events-queue`, put `pu
 
 `PATCH /pages/:id` then returns once the atomic group has committed and the event row is written;
 the lane's worker claims the row on its next poll (`pollMs`) and renders it, so the response time no
-longer includes the renderer. The response says so: `_events.status` is `"pending"` and the
+longer includes the renderer. The poll can still fall into the time the request spends delivering
+other subscribers through the relay; with `relayPipelines: []`, or only short relayed subscribers,
+that window shrinks to the span between writing the row and sending the response. The response says so: `_events.status` is `"pending"` and the
 `publishPage` entry has `status: "queued"`. The wiring is a choice of `events-queue` alone,
 `events-direct` always delivers inline. `relayPipelines` stays at its default `"all"` here, which
 still lets the relay deliver every other subscriber of the event inside the request. Set it to an
@@ -908,14 +910,20 @@ What this does and does not change:
   status; for a single save, `publishedAt` newer than the save at that point is reliable.
 - Delivery is at least once for the queue row, not for the render. A render that fails
   (`RENDER_FAILED`, a timeout, a reserved path, a failed blob write) is recorded on the status row
-  as `state: "error"`, keeps the previous output and is not retried: the step still succeeds and the
-  row is done. Only a failing step, such as a `TRANSIENT` from `content@1`, `site@1` or the
-  persistence, is retried with `backoffSeconds` and ends dead after `maxAttempts`.
-  `delivery.publish` is idempotent, so a repeated run writes the same output. The output stays
-  as it was until the next save or `publishAll`.
+  as `state: "error"` and the step still succeeds, so the queue row is done and the queue does not
+  retry it. A renderer failure, a timeout or a reserved path keeps the previous output. A failed
+  blob write does not: files written before the failure (earlier formats, a page file before its
+  assets) can already hold the new render while the row reports `error`. Only a failing step, such
+  as a `TRANSIENT` from `content@1`, `site@1` or the persistence, is retried with `backoffSeconds`
+  and ends dead after `maxAttempts`. `delivery.publish` is idempotent, so a repeated run writes the
+  same output. The output is rendered again as soon as it is marked: by a mark it already carried,
+  by a change to something it read, by `markAll` or by a new build, with `backoffSeconds` and
+  `maxAttempts` of the `dependencies` settings of `delivery-static`. Otherwise it stays as it was until the next save or
+  `publishAll`.
 - Without a `coalesceKey` on the event, every save writes its own row and runs its own render, so
-  five quick saves of one page render five times, in order of the lane's single worker. Rows are
-  not merged.
+  five quick saves of one page render five times, one at a time and in creation order within one
+  process; with several processes sharing the queue, rows of one lane run in parallel and can finish
+  in any order. Rows are not merged.
 - No order is guaranteed between the pipelines subscribed to one event, nor between lanes. Anything
   that has to run after the page is written (an export, a notification) belongs in the same
   pipeline after `delivery.publish`, not in a second subscriber.

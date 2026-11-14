@@ -69,7 +69,8 @@ that saved the document: the response comes back after the render. To answer the
 the publishing pipeline its own lane in `events-queue`; the relay never claims a lane row, so the
 response then carries `_events.status: "pending"` and the lane writes the output afterwards. Visitor
 latency is unchanged, the render still runs in the same process. A render failure is recorded on the
-status row and not retried. The wiring, the read-back through `delivery.readStatus` and the delivery
+status row and the queue does not retry it; the output is rendered again once something marks it
+(see "Re-rendering dependents, never inside the request") or on the next save. The wiring, the read-back through `delivery.readStatus` and the delivery
 guarantees are described in the pipelines guide under `events.relay`.
 
 ## Index files
