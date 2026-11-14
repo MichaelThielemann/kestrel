@@ -6,7 +6,7 @@ import type { ModuleHealth } from "./defineModule.ts";
 import { boundaryCast } from "./cast.ts";
 import { KestrelBootError } from "./errors.ts";
 
-/** Options for {@link acquireInstanceLock}. */
+/** Options for {@link acquireInstanceLock}. Within one thread only the first holder's options take effect. */
 export interface InstanceLockOptions {
   /** The module taking the lock, named as `KestrelBootError.module` when another process holds it. */
   module: string;
@@ -23,7 +23,8 @@ export interface InstanceLock {
   /**
    * Gives up this holder's share; the lock file is removed with the last share in the process.
    * Calling it again does nothing. It never throws: a lock file it cannot remove is taken over
-   * once its heartbeat is older than the TTL, or at once on this host when the process has ended.
+   * once its heartbeat is older than the TTL, or at once in this PID namespace once the process
+   * has ended.
    */
   release(): void;
   /**
@@ -108,15 +109,16 @@ export function instanceLockFile(file: string): string {
  *
  * A lock is taken over when its heartbeat is older than `ttlMs`. A lock written on this host in
  * this PID namespace is also taken over at once when its process no longer runs, or when it
- * carries this process's PID and a start time earlier than this process's own (a container
- * restarted under the same PID). A lock from another PID namespace, such as another container
- * with the same hostname, is judged by its heartbeat alone. Any other lock makes the call throw a
+ * carries this process's PID and a start time earlier than this process's own (an earlier process
+ * under the same PID). A lock from another PID namespace, such as another container with the same
+ * hostname or the previous run of a restarted container, is judged by its heartbeat alone, so a
+ * container restarted after a crash waits up to `ttlMs`. Any other lock makes the call throw a
  * `KestrelBootError` with code `instance-locked` naming that process's host, PID and start time
  * and the `optOut` setting; `module` should be the calling module's name so that boot reports
  * that code.
  *
  * Several holders in one process share one lock, also across copies of this module and across
- * worker threads; the options of the first holder in a thread apply. The last holder in a thread
+ * worker threads. The last holder in a thread
  * to call `release()` deletes the lock file, and a holder in another thread writes it again with
  * its next heartbeat. The heartbeat runs on a timer that does not keep the process alive.
  */
