@@ -198,7 +198,8 @@ is listed until two listings agree.
    too; a written delivery key counts as read back once a HEAD shows its size with an ETag other than the one before.
 6. The login sessions of the restored database are emptied: everyone signs in again.
 7. The database is promoted as the newest replica generation, or placed as `<database>.restore`, and the app
-   is started.
+   is started. `<database>.restore` is copied under a temporary name next to it, flushed and then renamed, so a
+   start never finds a partial file.
 
 When nothing differs from the backup apart from login sessions, the restore asks nothing more, starts the app
 again and changes nothing; the sessions stay. When it stops

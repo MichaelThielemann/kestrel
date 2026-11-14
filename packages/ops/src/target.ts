@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { uptime } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -36,7 +37,7 @@ export interface Target {
   start(): Promise<void>;
   /** Waits until the app answers its readiness check; false after `timeoutMs`. */
   waitReady(timeoutMs: number): Promise<boolean>;
-  /** Places a restored database for the next start; only for `transport: "file"`. */
+  /** Places a restored database for the next start, whole or not at all; only for `transport: "file"`. */
   installDatabase?(file: string): Promise<void>;
   /** Evidence for a stop without a seal, shown next to the question whether to go on. */
   stopEvidence?(): Promise<string[]>;
@@ -229,7 +230,20 @@ export const localTarget: TargetFactory = (raw, deps) => {
     async installDatabase(file) {
       if (running() !== null) throw new OpsError("refusing to place a database while the app runs", 1, "target");
       mkdirSync(dirname(database), { recursive: true });
-      copyFileSync(file, `${database}.restore`);
+      const part = `${database}.restore.${randomBytes(4).toString("hex")}.part`;
+      try {
+        copyFileSync(file, part);
+        const fd = openSync(part, "r+");
+        try {
+          fsyncSync(fd);
+        } finally {
+          closeSync(fd);
+        }
+        renameSync(part, `${database}.restore`);
+      } catch (cause) {
+        rmSync(part, { force: true });
+        throw cause;
+      }
     },
     async stopEvidence() {
       return [`local app in ${config.dir}: stopped by the tool, no platform event log`];
