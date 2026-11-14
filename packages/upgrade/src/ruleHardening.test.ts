@@ -159,7 +159,7 @@ function customModule(options: { query?: string[]; input?: string[]; name?: stri
   });
 }
 
-function factoryModule(options: { query?: string[]; input?: string[]; throwing?: boolean } = {}): ModuleDefinition {
+function factoryModule(options: { query?: string[]; input?: string[]; throwing?: boolean; staticDescription?: boolean } = {}): ModuleDefinition {
   const input = options.input ?? ["role"];
   const query = options.query;
   return defineModule({
@@ -174,6 +174,18 @@ function factoryModule(options: { query?: string[]; input?: string[]; throwing?:
       return { assign: stepFactory(() => async (ctx: Context) => ok(ctx)) };
     },
     describe() {
+      if (options.staticDescription === true) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion, @typescript-eslint/consistent-type-assertions
+        return {
+          assign: {
+            summary: "assigns",
+            reads: [],
+            writes: [],
+            input: { type: "object", properties: Object.fromEntries(input.map((k) => [k, { type: "string" }])) },
+            ...(query === undefined ? {} : { query: Object.fromEntries(query.map((k) => [k, { type: "string" }])) }),
+          },
+        } as never;
+      }
       return {
         assign: (arg: string) => {
           if (options.throwing === true) throw new Error(`no description for ${arg}`);
@@ -191,14 +203,14 @@ function factoryModule(options: { query?: string[]; input?: string[]; throwing?:
 }
 
 describe("pipelines/query-body-member", () => {
-  async function scenario(source: string, options: { query?: string[]; input?: string[]; http?: boolean; steps?: string[] } = {}) {
+  async function scenario(source: string, options: { query?: string[]; input?: string[]; http?: boolean; steps?: string[]; trigger?: string } = {}) {
     const file = join(dir, "custom.ts");
     await writeFile(file, source);
     return project({
       loaded: [customModule(options)],
       moduleFiles: { "custom/module": file },
       pipelines: [{ name: "assignRole", steps: options.steps ?? ["custom.assign"] }],
-      triggers: [options.http === false ? { event: "x.y", pipeline: "assignRole" } : { http: "POST /assign", pipeline: "assignRole" }],
+      triggers: [options.http === false ? { event: "x.y", pipeline: "assignRole" } : { http: options.trigger ?? "POST /assign", pipeline: "assignRole" }],
     });
   }
 
@@ -239,7 +251,7 @@ describe("pipelines/query-body-member", () => {
   });
 
   it("recognises a destructuring read from the query", async () => {
-    for (const source of ["const { role } = ctx.query;\n", "const { page, role = 'x' } = ctx.query;\n", "const { role: r } = query;\n", 'const { "role": r } = ctx.query;\n', "const { role } = ctx?.query ?? {};\n"]) {
+    for (const source of ["const { role } = ctx.query;\n", "const { page, role = 'x' } = ctx.query;\n", "const { query } = ctx;\nconst { role: r } = query;\n", "const { role: r } = ctx.query;\n", 'const { "role": r } = ctx.query;\n', "const { role } = ctx?.query ?? {};\n"]) {
       const findings = await queryBodyMemberRule.check(contextFor(await scenario(source)));
       expect(findings, source).toHaveLength(1);
     }
@@ -251,8 +263,147 @@ describe("pipelines/query-body-member", () => {
     }
   });
 
+  describe("on a route without a request body", () => {
+    it("reports every input member the step does not declare in its query, without a read in the source", async () => {
+      for (const trigger of ["GET /assign", "HEAD /assign", "get /assign"]) {
+        const findings = await queryBodyMemberRule.check(contextFor(await scenario("const role = ctx.payload.role;\n", { trigger })));
+        expect(findings, trigger).toHaveLength(1);
+        expect(findings[0]).toMatchObject({ severity: "warning", fix: { kind: "manual" }, docs: upgradingDocs("pipelines-query-body-member"), where: { pipeline: "assignRole" } });
+        expect(findings[0]?.message).toContain('"role"');
+        expect(findings[0]?.message).toContain(trigger);
+      }
+    });
+
+    it("reports one finding per undeclared member", async () => {
+      const findings = await queryBodyMemberRule.check(contextFor(await scenario("", { trigger: "GET /assign", input: ["role", "page", "q"], query: ["page"] })));
+      expect(findings.map((f) => f.id).sort()).toEqual(["pipelines/query-body-member:assignRole:custom.assign:q", "pipelines/query-body-member:assignRole:custom.assign:role"]);
+    });
+
+    it("stays quiet for members the step declares in its query", async () => {
+      expect(await queryBodyMemberRule.check(contextFor(await scenario("const role = ctx.payload.role;\n", { trigger: "GET /assign", query: ["role"] })))).toEqual([]);
+    });
+
+    it("reports a member once when the source reads it from the query as well", async () => {
+      const findings = await queryBodyMemberRule.check(contextFor(await scenario("const role = ctx.query.role;\n", { trigger: "GET /assign" })));
+      expect(findings).toHaveLength(1);
+    });
+
+    it("applies to a pipeline that a GET trigger and another trigger both start", async () => {
+      const p = await scenario("const role = ctx.payload.role;\n");
+      const both = { ...p, input: { ...p.input, config: { ...p.input.config, triggers: [...p.input.config.triggers, { http: "GET /assign", pipeline: "assignRole" }] } } };
+      expect(await queryBodyMemberRule.check(contextFor(both))).toHaveLength(1);
+    });
+
+    it("leaves a route that takes a body to the source reads", async () => {
+      for (const trigger of ["POST /assign", "PUT /assign", "PATCH /assign", "DELETE /assign"]) {
+        expect(await queryBodyMemberRule.check(contextFor(await scenario("const role = ctx.payload.role;\n", { trigger }))), trigger).toEqual([]);
+      }
+    });
+
+    it("stays quiet for a GET pipeline that runs no step of the project's own modules", async () => {
+      const p = project({ pipelines: [{ name: "assignRole", steps: ["content.list:pages"] }], triggers: [{ http: "GET /pages", pipeline: "assignRole" }] });
+      expect(await queryBodyMemberRule.check(contextFor(p))).toEqual([]);
+    });
+  });
+
+  describe("reads of the query inside the module file", () => {
+    const twoSteps = (listBody: string, createBody: string) => `
+import { defineModule } from "@michaelthielemann/kestrel";
+export default defineModule({
+  steps() {
+    return {
+      list: async (ctx) => {
+${listBody}
+        return ctx;
+      },
+      create: async (ctx) => {
+${createBody}
+        return ctx;
+      },
+    };
+  },
+});
+`;
+
+    async function members(source: string, step: string) {
+      const file = join(dir, "members.ts");
+      await writeFile(file, source);
+      const entry = (query: string[]) => ({ summary: "s", reads: [], writes: [], input: { type: "object", properties: { name: { type: "string" }, role: { type: "string" } } }, ...(query.length === 0 ? {} : { query: Object.fromEntries(query.map((k) => [k, { type: "string" }])) }) });
+      const module = defineModule({
+        name: "members/local",
+        provides: [],
+        requires: [],
+        configSchema: z.object({}),
+        async setup() {
+          return {};
+        },
+        steps() {
+          return { list: async (ctx: Context) => ok(ctx), create: async (ctx: Context) => ok(ctx) };
+        },
+        describe() {
+          return { list: entry(["role"]), create: entry([]) };
+        },
+      });
+      const p = project({ loaded: [module], moduleFiles: { "members/local": file }, pipelines: [{ name: "run", steps: [step] }], triggers: [{ http: "POST /members", pipeline: "run" }] });
+      return queryBodyMemberRule.check(contextFor(p));
+    }
+
+    it("ignores a read of the query that belongs to another step of the same file", async () => {
+      expect(await members(twoSteps("const r = ctx.query.role;", "const r = ctx.body.role;"), "members.create")).toEqual([]);
+    });
+
+    it("still reports the step whose own function reads the key", async () => {
+      const findings = await members(twoSteps("const r = ctx.body.role;", "const r = ctx.query.role;"), "members.create");
+      expect(findings).toHaveLength(1);
+      expect(findings[0]?.message).toContain('"role"');
+    });
+
+    it("ignores a local variable that is only named query", async () => {
+      const source = twoSteps("", 'const query = { role: ctx.body.role ?? "member" };\n        const found = query.role;');
+      expect(await members(source, "members.create")).toEqual([]);
+    });
+
+    it("follows a query taken out of the context and an alias of it", async () => {
+      for (const body of ["const { query } = ctx;\n        const r = query.role;", "const q = ctx.query;\n        const r = q.role;", "const { role } = ctx.query ?? {};", "const r = (ctx.query as Record<string, string>).role;"]) {
+        expect(await members(twoSteps("", body), "members.create"), body).toHaveLength(1);
+      }
+    });
+
+    it("follows a step that is a named function of the file", async () => {
+      const source = `
+export default defineModule({
+  steps() {
+    return { create: createMember, list };
+  },
+});
+function createMember(ctx) {
+  return helper(ctx);
+}
+const helper = (ctx) => ctx.query.role;
+const list = (ctx) => ctx.body.role;
+`;
+      expect(await members(source, "members.create")).toHaveLength(1);
+      expect(await members(source, "members.list")).toEqual([]);
+    });
+
+    it("follows a step written as an object method", async () => {
+      const source = `
+export default defineModule({
+  steps() {
+    return {
+      create(ctx) {
+        return ctx.query.role;
+      },
+    };
+  },
+});
+`;
+      expect(await members(source, "members.create")).toHaveLength(1);
+    });
+  });
+
   describe("for a step factory", () => {
-    async function factoryScenario(options: { query?: string[]; input?: string[]; throwing?: boolean; steps?: string[]; source?: string } = {}) {
+    async function factoryScenario(options: { query?: string[]; input?: string[]; throwing?: boolean; staticDescription?: boolean; steps?: string[]; source?: string } = {}) {
       const file = join(dir, "custom.ts");
       await writeFile(file, options.source ?? "const role = ctx.query.role;\n");
       return project({
@@ -277,6 +428,15 @@ describe("pipelines/query-body-member", () => {
 
     it("stays quiet when the step declares the key in describe().query", async () => {
       expect(await queryBodyMemberRule.check(contextFor(await factoryScenario({ query: ["role"] })))).toEqual([]);
+    });
+
+    it("uses a static description for every argument, and for none", async () => {
+      for (const steps of [["custom.assign:x"], ["custom.assign"]]) {
+        const findings = await queryBodyMemberRule.check(contextFor(await factoryScenario({ staticDescription: true, steps })));
+        expect(findings, steps.join()).toHaveLength(1);
+        expect(findings[0]?.message).toContain('"role"');
+      }
+      expect(await queryBodyMemberRule.check(contextFor(await factoryScenario({ staticDescription: true, query: ["role"] })))).toEqual([]);
     });
 
     it("stays quiet without an argument, and when the description cannot be resolved for it", async () => {
@@ -321,27 +481,50 @@ describe("pipelines/query-body-member", () => {
 describe("runtime/sort-field-grant", () => {
   const listing = (steps: string[], http = true) => project({ pipelines: [{ name: "listPages", steps }], triggers: [http ? { http: "GET /pages", pipeline: "listPages" } : { cron: "0 * * * *", pipeline: "listPages" }] });
 
-  it("names an HTTP pipeline that lists content and says what a sort may name now", async () => {
+  it("names an HTTP pipeline that lists content and says what a sort may name", async () => {
     const findings = await sortFieldGrantRule.check(contextFor(listing(["content.list:pages"])));
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ severity: "info", fix: { kind: "none" }, docs: upgradingDocs("runtime-sort-field-grant"), where: { pipeline: "listPages" } });
     expect(findings[0]?.message).toContain("pages");
     expect(findings[0]?.message).toContain("constructor");
+    expect(findings[0]?.message).not.toContain("field grant");
   });
 
-  it("names a media listing", async () => {
-    const findings = await sortFieldGrantRule.check(contextFor(listing(["media.list"])));
+  it("names a pipeline that ends a list with authz.fields, whatever step produces the list", async () => {
+    const findings = await sortFieldGrantRule.check(contextFor(listing(["search.pages", "authz.fields:pages?shape=list"])));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain("pages");
+    expect(findings[0]?.message).toContain("field grant");
+    expect(findings[0]?.message).not.toContain("constructor");
+  });
+
+  it("says both things for a content list that authz.fields narrows", async () => {
+    const findings = await sortFieldGrantRule.check(contextFor(listing(["content.list:pages", "authz.fields:pages?shape=list"])));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain("field grant");
+    expect(findings[0]?.message).toContain("constructor");
+  });
+
+  it("names a media listing only when authz.fields narrows it", async () => {
+    const findings = await sortFieldGrantRule.check(contextFor(listing(["media.list", "authz.fields:media?shape=list"])));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.message).toContain("media");
     expect(findings[0]?.message).not.toContain("constructor");
+    expect(await sortFieldGrantRule.check(contextFor(listing(["authn.identifyUser", "media.list"])))).toEqual([]);
+  });
+
+  it("ignores authz.fields for a shape other than a list", async () => {
+    expect(await sortFieldGrantRule.check(contextFor(listing(["media.download", "authz.fields:mediaFile?shape=file"])))).toEqual([]);
+    expect(await sortFieldGrantRule.check(contextFor(listing(["content.get:pages", "authz.fields:pages?shape=item"])))).toEqual([]);
   });
 
   it("reports one finding per pipeline even when it lists twice", async () => {
     expect(await sortFieldGrantRule.check(contextFor(listing(["content.list:pages", "content.list:posts"])))).toHaveLength(1);
+    expect(await sortFieldGrantRule.check(contextFor(listing(["authz.fields:pages?shape=list", "authz.fields:posts?shape=list"])))).toHaveLength(1);
   });
 
   it("stays quiet for a pipeline that is not reachable over HTTP or lists nothing", async () => {
-    expect(await sortFieldGrantRule.check(contextFor(listing(["content.list:pages"], false)))).toEqual([]);
+    expect(await sortFieldGrantRule.check(contextFor(listing(["content.list:pages", "authz.fields:pages?shape=list"], false)))).toEqual([]);
     expect(await sortFieldGrantRule.check(contextFor(listing(["content.get:pages"])))).toEqual([]);
   });
 });
