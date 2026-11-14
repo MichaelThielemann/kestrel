@@ -515,6 +515,37 @@ describe("images/default variants[].crop in images.attach", () => {
     for (const open of [first, images]) await open.close();
   });
 
+  it("writes the public copies of a shown item and a missing public copy without reading the copies they replace, and keeps the path", async () => {
+    const w = await world();
+    let copyReads = 0;
+    const counting: Blobstore = {
+      ...w.blobs,
+      get: async (key) => {
+        if (key.startsWith("site/")) copyReads += 1;
+        return w.blobs.get(key);
+      },
+    };
+    const images = await w.open([SQUARE], render, { blobs: counting });
+    expectOk(await images.setFraming("m1", RIGHT_CROP));
+    expectOk(await images.generate("m1"));
+    const before = (await attached(images)).get("square")!;
+    const rendered = await renderedBytes(images, "m1", "square.webp");
+
+    expectOk(await images.hide(["m1"]));
+    expectOk(await images.show(["m1"]));
+    await whenIdle(images);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(rendered);
+
+    w.blobs.blobs.delete("site/media/m1/variants/square.webp");
+    w.events.emitted.length = 0;
+    expect(expectOk(await images.syncPublic()).written).toBe(1);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(rendered);
+    expect(w.events.emitted).toEqual([]);
+    expect((await attached(images)).get("square")).toEqual(before);
+    expect(copyReads).toBe(0);
+    await images.close();
+  });
+
   it("answers the original at a size added to the configuration whose first render stayed at its key after its copy and removal failed, while the entry lists crop null", async () => {
     const w = await world();
     const inside = await w.open([THUMB]);

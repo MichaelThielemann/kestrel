@@ -69,7 +69,7 @@ export interface Variant extends Document {
   crop: string | null;
   /** The crop of the bytes the last finished render left at the path, in the form of `crop`; `""` or `null` for the centre or no render yet. */
   renderedCrop: string | null;
-  /** How many renders of the row left their bytes at its path (marked `done`, or a failed attempt whose bytes could not be taken back), counting one more when the row was placed at a path that held bytes before, and raised to at least `2` when its public copy is written over other bytes; `0` or `null` for none. From `2` on, the variant's public URL carries `?v=`. */
+  /** How many renders of the row left their bytes at its path (marked `done`, or a failed attempt whose bytes could not be taken back), counting one more when the row was placed at a path that held bytes before, and raised to at least `2` when `syncPublic` rewrites a public copy of another byte size; `0` or `null` for none. From `2` on, the variant's public URL carries `?v=`. */
   renders: number | null;
   /** The width of the original after its EXIF orientation, as the row was planned; `0` or `null` when it is not known. */
   originalWidth: number | null;
@@ -190,7 +190,7 @@ export interface Images {
   variantCounts(mediaIds: string[]): Promise<Result<Map<string, VariantCounts>, KestrelError>>;
   read(mediaId: string, file: string): Promise<Result<VariantBlob | null, KestrelError>>;
   exportTo(dir: string): Promise<Result<{ written: number; skipped: number }, KestrelError>>;
-  /** The variant's public URL, `<publicPath>/<id>/variants/<file>`; from the row's second finished render on (`renders` from `2` on, a count a format change keeps, or raises by one when the new path held bytes before, and that a public copy written over other bytes raises), followed by `?v=<token>`, which no other render of that path is given. */
+  /** The variant's public URL, `<publicPath>/<id>/variants/<file>`; from the row's second finished render on (`renders` from `2` on, a count a format change keeps, or raises by one when the new path held bytes before, and that `syncPublic` raises when it rewrites a public copy of another byte size), followed by `?v=<token>`, which no other render of that path is given. */
   publicPath(mediaId: string, variant: Variant): string;
   publicCopyEnabled(): boolean;
   syncPublic(): Promise<Result<PublicSync, KestrelError>>;
@@ -304,10 +304,6 @@ async function pool<T>(tasks: Array<() => Promise<Result<T, KestrelError>>>, lim
 
 function cropOf(row: Pick<Variant, "crop">): string {
   return row.crop ?? "";
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return Buffer.from(a.buffer, a.byteOffset, a.byteLength).equals(Buffer.from(b.buffer, b.byteOffset, b.byteLength));
 }
 
 function renderedCropOf(row: Pick<Variant, "renderedCrop">): string {
@@ -910,26 +906,24 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return isErr(undone) ? undone : ok(false);
   }
 
-  async function writeRowCopy(lease: Lease, item: MediaFile, row: Variant): Promise<Result<CopyOutcome, KestrelError>> {
+  async function writeRowCopy(lease: Lease, item: MediaFile, row: Variant, replacing = false): Promise<Result<CopyOutcome, KestrelError>> {
     const content = await contentFor(item, row);
     if (isErr(content) || content.value === null) return isErr(content) ? content : ok("missing");
-    const held = await blobs.get(copyKey(item.id, fileOf(row)));
-    if (isErr(held)) return held;
     const put = await putCopyHeld(lease, fileOf(row), content.value.data, content.value.contentType);
     if (isErr(put) || put.value !== true) return isErr(put) ? put : ok("skipped");
     const kept = await keepCopyOwned(lease, fileOf(row), true);
     if (isErr(kept) || !kept.value) return isErr(kept) ? kept : ok("skipped");
-    if (held.value === null || sameBytes(held.value, content.value.data)) return ok("written");
+    if (!replacing) return ok("written");
     const renewed = await updateAsRead(row, { renders: Math.max((row.renders ?? 0) + 1, 2) });
     if (isErr(renewed)) return renewed;
     if (renewed.value !== null) raiseVariantsChanged([item.id]);
     return ok("written");
   }
 
-  async function writeOwnedCopy(lease: Lease, media: MediaFile, file: string): Promise<Result<CopyOutcome, KestrelError>> {
+  async function writeOwnedCopy(lease: Lease, media: MediaFile, file: string, replacing = false): Promise<Result<CopyOutcome, KestrelError>> {
     const owner = await ownerOf(media.id, file);
     if (isErr(owner)) return owner;
-    if (owner.value.row !== null) return writeRowCopy(lease, media, owner.value.row);
+    if (owner.value.row !== null) return writeRowCopy(lease, media, owner.value.row, replacing);
     if (owner.value.retired === null) return ok("skipped");
     const original = await contentFor(media, null);
     if (isErr(original) || original.value === null) return isErr(original) ? original : ok("missing");
@@ -2157,7 +2151,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         owned.add(key);
         const entry = files.get(key);
         if (entry !== undefined && (expectedSize === null || expectedSize === undefined || entry.size === expectedSize)) return ok(undefined);
-        const kept = await withItem(media.id, (lease) => writeOwnedCopy(lease, media, file), async (): Promise<Result<CopyOutcome, KestrelError>> => ok("skipped"));
+        const kept = await withItem(media.id, (lease) => writeOwnedCopy(lease, media, file, entry !== undefined), async (): Promise<Result<CopyOutcome, KestrelError>> => ok("skipped"));
         if (isErr(kept)) return kept;
         if (kept.value === "written") written += 1;
         if (kept.value === "missing") missing += 1;
