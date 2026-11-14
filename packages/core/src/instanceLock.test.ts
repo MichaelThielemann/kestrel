@@ -409,6 +409,8 @@ describe("acquireInstanceLock across processes", () => {
       [
         `import { acquireInstanceLock } from ${JSON.stringify(LOCK_MODULE)};`,
         "const [file, startAt] = process.argv.slice(2);",
+        "const idle = Number(startAt) - Date.now() - 30;",
+        "if (idle > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, idle);",
         "while (Date.now() < Number(startAt)) {}",
         "let line;",
         "try {",
