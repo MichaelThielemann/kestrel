@@ -760,6 +760,15 @@ describe("acquireInstanceLock", () => {
     expect(readRecord()).toEqual(foreign);
   });
 
+  it("refuses a further holder in this thread once another instance took the lock over, before any heartbeat noticed it", () => {
+    const first = take(file, { ttlMs: 3_000, heartbeatMs: 1_000 });
+    const foreign = writeRecord({ host: "web-2", pid: 311 });
+    const err = thrownBy(() => take(file));
+    expect(err instanceof KestrelBootError ? err.code : err).toBe("instance-locked");
+    expect(first.health()).toMatchObject({ ok: false, restartRequired: true });
+    expect(readRecord()).toEqual(foreign);
+  });
+
   it("refuses a fresh foreign lock after this process lost the lock, instead of handing out the lost share", () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     const lost = take(file);

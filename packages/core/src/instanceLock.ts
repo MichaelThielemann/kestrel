@@ -253,6 +253,7 @@ export function acquireInstanceLock(file: string, opts: InstanceLockOptions): In
   const lockPath = instanceLockFile(file);
   if (lockPath === undefined) return UNLOCKED;
   const current = holders.get(lockPath);
+  if (current?.health.ok === true) beat(current);
   if (current !== undefined && !current.health.ok) {
     holders.delete(lockPath);
     unwatchExitWhenIdle();
