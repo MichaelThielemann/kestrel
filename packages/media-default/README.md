@@ -416,13 +416,15 @@ for `helpers/shape-migrations` of `kestrel-contracts`, and `migrations`. Its one
 `<prefix><folder>/<filename>`:
 
 - the item's name is `nameFor(filename, contentType)`, the name an upload of the same file gets;
-  when its folder already holds that name, the first free `<stem>-<n>.<ext>`. A 5.x SVG has no
+  a name only that item has in its folder stays, and of items whose names collide one keeps the name
+  and the others get the first free `<stem>-<n>.<ext>`. A 5.x SVG has no
   record of passing `sanitize.svg`, so it becomes `<stem>-svg.bin` and is served as
   `application/octet-stream`; the run lists each one (`svgDemoted`), and uploading the file again
   through `sanitize.svg` serves it as an image;
 - the original is copied to `<prefix><id>/<name>`, and the copy's size and sha256 are checked
   against the original before the item switches to it; the item records the copy's size and sha256,
-  and when they differ from what the 5.x row recorded the run reports the item;
+  and when they differ from what the 5.x row recorded the run reports the item; an item whose
+  original is gone but whose copy already lies at its new key records the size and sha256 of that copy;
 - `location` is filled in, so each name is unique within its folder;
 - the old blob stays, and its key is recorded in `media_legacy_keys` (also when the original is
   missing, so a file put back under that key later is never taken for an orphan), together with every other

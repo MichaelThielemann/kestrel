@@ -812,14 +812,17 @@ Net changes since 5.8.2.
   the kind `cleanup`, also after the version was recorded; an `ask` migration waits for an answer to
   each of its questions. Blobs are copied through an injected `BlobOps`
   (`copy`, `head`); `blobOpsOf` builds one from any `blobstore@1`.
-  - `media-default` and `images-default` export `./storage` (`storage(config)`, `migrations`).
+  - `media-default` exports `./storage` (`storage(config)`, `migrations`), `images-default` exports
+    `./storage` (`storage()`, `migrations`).
     `media-default:id-key-layout` copies each original a 5.x release stored under
     `<prefix><folder>/<filename>` to `<prefix><id>/<name>`, checks size and sha256, switches the item
     and fills in a unique `location` (a name its folder already holds becomes `<stem>-<n>.<ext>`). The
     old blob stays and its key is recorded in `media_legacy_keys`; an item whose original is missing
     is kept and reported, and its old key is recorded too. A 5.x SVG becomes `<stem>-svg.bin`, served
-    as `application/octet-stream`, and is reported until it is uploaded again through `sanitize.svg`. `images-default:variant-slots` fills in the `slot` of 5.x variant and
-    retired rows, keeping the newest finished row of a slot and reporting the rows it drops.
+    as `application/octet-stream`; the run lists each one (`svgDemoted`), and uploading it again
+    through `sanitize.svg` serves it as an image.
+  - `images-default:variant-slots` fills in the `slot` of 5.x variant and retired rows, keeping the
+    newest finished row of a slot and reporting the rows it drops.
   - Both modules take `storageMigrations: "check" | "apply"` (default `check`). `check` refuses to
     start on data in an older shape and names the migration and the command that runs it
     (`kestrel upgrade migrate --db <file> --blobs-dir <dir>`, or `kestrel update`); `apply` runs
