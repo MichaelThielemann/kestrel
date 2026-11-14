@@ -259,8 +259,11 @@ a probe object found by listing (`createS3Admin().serverTime`, the probe lies un
 removed again), since some stores send no usable `Date` header. It is measured at the store
 the replica lives in: in the backup location when that shares the app's store, otherwise below the replica
 prefix, outside the keys a runtime reads. `status` shows the same measurement. The generation is listed until it is the newest in
-consecutive listings, then read back, hashed and integrity-checked; the app starts once the store's time has
-passed its name.
+consecutive listings, then read back, hashed and integrity-checked; the app starts once both the store's time
+and this machine's clock have reached the second after its name, since a runtime before 6 names the generation
+it starts by its own clock alone and would otherwise sort it before the promoted one. For the `local` target this
+machine's clock is the app's; a target on another machine is assumed to keep its clock within a second of the
+store's.
 
 ## Questions
 | Id | Asked | `--yes` |

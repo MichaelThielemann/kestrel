@@ -69,8 +69,8 @@ export async function snapshotOnlyGeneration(store: ObjectStore, at: number, dat
 
 /**
  * A stand-in for an app on the published 5.8.1 packages on an ephemeral disk: every start restores the generation
- * that sorts last by name, whatever files lie next to it, and writes a generation named by the start time that holds
- * only its snapshot.
+ * that sorts last by name, whatever files lie next to it, and writes a generation named by its own clock at the start,
+ * with no lower bound, that holds only its snapshot.
  */
 export class FiveEightApp implements Target {
   readonly transport = "promote" as const;
@@ -100,7 +100,7 @@ export class FiveEightApp implements Target {
     rmSync(this.file, { force: true });
     await buildDatabase(this.store, FIXTURE_REPLICA, await completeGeneration(this.store, FIXTURE_REPLICA, newest), this.file);
     this.restoredFrom = newest.name;
-    await snapshotOnlyGeneration(this.store, Math.max(Date.now(), newest.at + 1000), this.file);
+    await snapshotOnlyGeneration(this.store, Date.now(), this.file);
     this.running = true;
   }
 

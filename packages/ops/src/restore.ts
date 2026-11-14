@@ -280,7 +280,8 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
       } });
     await ctx.journal.record("promote", "done", { generation: promoted.generation, sha256: promoted.sha256 });
     const sleep = ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
-    while (clock.now() <= promoted.at) await sleep(Math.min(1000, promoted.at - clock.now() + 1));
+    const behind = (): number => promoted.at + 1000 - Math.min(clock.now(), ctx.clock());
+    while (behind() > 0) await sleep(Math.min(1000, behind()));
   } else {
     if (!ctx.target.installDatabase) throw new OpsError("the target can take neither a promoted generation nor a database file", 2, "target");
     beforeWrite();
