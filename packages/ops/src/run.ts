@@ -286,6 +286,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
       if (dir === undefined) throw new OpsError("restore --to local needs a directory", 2, "--to");
       const backupId = value(parsed, "--backup");
       if ((backupId === null) === !parsed.flags.has("--latest")) throw new OpsError("restore --to local needs --backup <id> or --latest", 2, "--backup");
+      if (backupId === null && parsed.flags.has("--with-media")) throw new OpsError("--with-media needs --backup <id>", 2, "--with-media");
       const result = await restoreToLocal(ctx, { dir, backupId, withMedia: parsed.flags.has("--with-media"), keepSessions: parsed.flags.has("--keep-sessions") });
       out.info(`wrote ${result.file} (${result.sessionsDeleted} session(s) removed, ${result.originals} original(s))`);
       emit("restore-local", { ok: true, ...result });

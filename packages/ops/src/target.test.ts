@@ -93,6 +93,12 @@ describe("restore --to local", () => {
       expect(latest.json).toMatchObject({ sessionsDeleted: 0 });
       expect((await h.run(["restore", "--to", "local", out, "--latest"])).code).toBe(1);
       expect((await h.run(["restore", "--to", "local", join(h.root, "x")])).code).toBe(2);
+      const media = join(h.root, "media");
+      const refused = await h.run(["restore", "--to", "local", media, "--latest", "--with-media", "--yes"]);
+      expect(refused.code).toBe(2);
+      expect(refused.stderr).toContain("--with-media needs --backup <id>");
+      expect(existsSync(join(media, "kestrel.db"))).toBe(false);
+      expect((await h.run(["restore", "--to", "local", media, "--backup", String(backup.json.id), "--with-media", "--yes"])).code).toBe(0);
     } finally {
       await h.dispose();
     }

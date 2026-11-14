@@ -252,6 +252,7 @@ export interface LocalRestoreOptions {
 export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptions): Promise<{ file: string; sessionsDeleted: number; originals: number }> {
   const dir = resolve(options.dir);
   const file = join(dir, "kestrel.db");
+  if (options.withMedia && options.backupId === null) throw new OpsError("--with-media needs --backup <id>", 2, "--with-media");
   if (existsSync(file)) throw new OpsError(`${file} exists; choose an empty directory`, 1, file);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const source = ctx.workspace.path("local-source.db");
@@ -270,7 +271,6 @@ export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptio
   vacuumInto(source, file);
   let originals = 0;
   if (options.withMedia) {
-    if (options.backupId === null) throw new OpsError("--with-media needs --backup <id>", 2, "--with-media");
     const bytes = blobs.reduce((n, b) => n + b.size, 0);
     await confirm(ctx.answers, "confirm", `download ${blobs.length} original(s), ${(bytes / 1024 / 1024).toFixed(1)} MiB, into ${dir}/blobs`);
     for (const entry of blobs) {
