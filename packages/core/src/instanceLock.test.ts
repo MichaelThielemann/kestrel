@@ -1327,6 +1327,26 @@ describe("acquireInstanceLock across processes", () => {
     }
   }, 30_000);
 
+  it("names the lock of a database on Windows as the system opens it: .. applies to the name as written, and links are followed in names with forward slashes", () => {
+    const links = { "C:\\Users\\me\\proj": "D:\\code\\proj", "C:\\x\\y\\app.db": "other.db", "C:\\a": "E:\\real\\a" };
+    const names = ["..\\data\\app.db", "C:/x/y/app.db", "C:\\x\\y\\app.db", "C:/a/b/app.db", "C:\\a\\b\\app.db"];
+    const result = patchedRun(
+      [],
+      [
+        "const path = (await import(\"node:path\")).default;",
+        "for (const key of [\"basename\", \"dirname\", \"isAbsolute\", \"join\", \"parse\", \"resolve\", \"sep\"]) path[key] = path.win32[key];",
+        `const links = ${JSON.stringify(links)};`,
+        "fs.readlinkSync = (link) => { if (Object.hasOwn(links, link)) return links[link]; throw Object.assign(new Error(\"EINVAL: invalid argument, readlink\"), { code: \"EINVAL\" }); };",
+        "fs.realpathSync.native = (name) => { throw Object.assign(new Error(`ENOENT: no such file or directory, realpath '${name}'`), { code: \"ENOENT\" }); };",
+        "syncBuiltinESMExports();",
+        "Object.defineProperty(process, \"platform\", { value: \"win32\", configurable: true });",
+        "process.cwd = () => \"C:\\\\Users\\\\me\\\\proj\";",
+        `process.stdout.write(JSON.stringify(${JSON.stringify(names)}.map((name) => instanceLockFile(name))));`,
+      ],
+    );
+    expect(result).toEqual(["C:\\Users\\me\\data\\app.db.instance", "C:\\x\\y\\other.db.instance", "C:\\x\\y\\other.db.instance", "E:\\real\\a\\b\\app.db.instance", "E:\\real\\a\\b\\app.db.instance"]);
+  }, 30_000);
+
   it("shares a lock of this process after the hostname changed, whatever its heartbeat age, where the system offers no boot id", () => {
     const result = patchedRun(
       [...HIDE_PROC, "os.hostname = () => \"laptop.home.example\";"],

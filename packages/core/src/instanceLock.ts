@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { closeSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { hostname, uptime } from "node:os";
-import { basename, dirname, isAbsolute, join, parse, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
 import { threadId } from "node:worker_threads";
 import type { ModuleHealth } from "./defineModule.ts";
 import { boundaryCast } from "./cast.ts";
@@ -181,9 +181,10 @@ function bootId(): string {
 
 /**
  * The lock file for a database file: the file's real path with `.instance` appended, resolved
- * through symlinks, including ones whose target does not exist yet, and with each `..` applied
- * to the directory a symlink leads to, as the system opens the file, so that every spelling of
- * one database names the same lock before and after the database file is created. A SQLite
+ * through symlinks, including ones whose target does not exist yet, so that every spelling of
+ * one database names the same lock before and after the database file is created. Each `..`
+ * applies as the system opens the file: on Windows to the name as written, elsewhere to the
+ * directory a symlink leads to. A SQLite
  * `file:` URI names the lock of the file in its path. `undefined` for a name that takes no lock
  * (see {@link acquireInstanceLock}): an in-memory or temporary database. The lock also
  * writes short-lived siblings whose names start with this path; a process that ends abruptly
@@ -325,6 +326,33 @@ function canonicalPath(file: string): string {
 }
 
 function physicalPath(absolute: string): string {
+  return process.platform === "win32" ? windowsPhysicalPath(absolute) : posixPhysicalPath(absolute);
+}
+
+function windowsPhysicalPath(absolute: string): string {
+  let path = resolve(absolute);
+  for (let hops = 0; hops < MAX_LINK_HOPS; hops++) {
+    const followed = followFirstLink(path);
+    if (followed === undefined) return path;
+    path = followed;
+  }
+  return path;
+}
+
+function followFirstLink(path: string): string | undefined {
+  const { root } = parse(path);
+  const parts = path.slice(root.length).split(sep).filter((part) => part !== "");
+  let current = root;
+  for (const [index, part] of parts.entries()) {
+    const next = join(current, part);
+    const target = linkTarget(next);
+    if (target !== undefined) return resolve(current, target, ...parts.slice(index + 1));
+    current = next;
+  }
+  return undefined;
+}
+
+function posixPhysicalPath(absolute: string): string {
   let current = parse(absolute).root;
   const pending = absolute.slice(current.length).split(sep).reverse();
   let hops = 0;
