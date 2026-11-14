@@ -7,12 +7,12 @@ the originating pipeline are never stored. Requires `persistence@1`.
 
 **Personal data.** An entry names a user only by id: `identityId` (who acted) and any param that
 carries a user id (who was acted upon); no username, no token, no body. `audit.anonymize` removes
-both for one user — `identityId` becomes `null` and every param naming them is dropped, while the
-event and its time stay, so the log keeps telling that something happened without telling who. An
+both for one user — `identityId` becomes `null` and every id param (`id`, `userId`, `author_id` and the like)
+holding their id is dropped, while the event, its time and any param of another name stay, so the log keeps telling that something happened without telling who. An
 entry is never moved to another user: a login belongs to nobody else. Run it from a pipeline on
 `user.deleted`; it is idempotent, so a failed run can simply be repeated from an admin route. That
 route must run `authn.requireAbsentUser` first: the step acts on whatever id it is given, so on an
-existing user it would erase their trail. Emit an event after the step and record it with
+existing user it would erase their trail, and it refuses a value that is not a user id. Emit an event after the step and record it with
 `audit.recordActor`, which keeps the caller, the event and its time but not the params and id that name the
 user, to leave a trace of who ran the repair without undoing the anonymisation.
 
@@ -51,7 +51,7 @@ unavailable; it never fails otherwise.
 |---|---|---|---|---|---|---|---|---|
 | `audit.record` | Persist an audit log entry for an emitted event | `payload` | – | object | – | – | – | no |
 | `audit.recordActor` | Persist an audit log entry for an emitted event with its caller and address but without its params and id, so it names no one the event was about | `payload` | – | object | – | – | – | no |
-| `audit.anonymize` | Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param naming them go, the event and its time stay | `params.id`, `payload` | `result` | object | { entries: number, … } | 400 no user id | – | no |
+| `audit.anonymize` | Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every id param holding it go, the event, its time and the other params stay | `params.id`, `payload` | `result` | object | { entries: number, … } | 400 no user id | – | no |
 | `audit.prune` | Remove every audit entry older than the configured `retentionDays` | – | `result` | – | { removed: number, … } | 400 no `retentionDays` configured | – | no |
 
 Pipelines in `examples/minimal` using these steps:

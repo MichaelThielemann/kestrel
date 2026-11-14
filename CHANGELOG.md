@@ -765,10 +765,14 @@ Net changes since 5.8.2.
   `POST /admin/users/:id/audit/anonymize`, answer 409 `CONFLICT` while `:id` still names a user,
   active or not, so they can no longer rewrite the revisions or erase the audit trail of an existing
   account. The guard is the new step `authn.requireAbsentUser`, which reads `params.id` and is
-  `atomicSafe`; a project that exposes `revisions.reassignAuthor` or `audit.anonymize` on a route of
-  its own should run it first. Each successful run raises `user.revisionsReassignRetried` or
+  `atomicSafe`, and refuses an id that is not a UUID with 400 `VALIDATION`, so the routes cannot be
+  aimed at a username, a step name or a page id; a project that exposes `revisions.reassignAuthor` or
+  `audit.anonymize` on a route of its own should run it first. Each successful run raises `user.revisionsReassignRetried` or
   `user.auditAnonymizeRetried`, which `examples/minimal` records through an `auditUsers` pipeline, so
   the log shows who ran the repair without naming the deleted user. Both routes now end in `events.relay`, so their responses carry `_events`.
+- `audit.anonymize` clears the identity id and only those params that are id params (`id`, `userId`,
+  `author_id` and the like) and hold the user's id. A param of another name, such as the `username` of
+  a failed sign-in, keeps its value even when it equals the id.
 
 ### Added
 

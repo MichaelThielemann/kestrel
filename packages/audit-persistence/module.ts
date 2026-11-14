@@ -76,7 +76,7 @@ export default defineModule({
     record: { summary: "Persist an audit log entry for an emitted event", reads: ["payload"], writes: [], input: { type: "object", additionalProperties: true } },
     recordActor: { summary: "Persist an audit log entry for an emitted event with its caller and address but without its params and id, so it names no one the event was about", reads: ["payload"], writes: [], input: { type: "object", additionalProperties: true } },
     anonymize: {
-      summary: "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param naming them go, the event and its time stay",
+      summary: "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every id param holding it go, the event, its time and the other params stay",
       reads: ["params.id", "payload"],
       writes: ["result"],
       input: { type: "object", additionalProperties: true },

@@ -57,6 +57,17 @@ describe("audit/persistence", () => {
     expect(expectOk(await db.count(COLLECTION, { identityId: "u2" }))).toBe(1);
   });
 
+  it("drops only the params that carry a user id and keeps other params whose value equals it", async () => {
+    const db = createFakePersistence();
+    const audit = await createAuditPersistence(db);
+    expectOk(await audit.record({ eventId: null, event: "auth.failed", at: 1, identityId: null, params: { pipeline: "login", step: "authn.login", username: "mallory" } }));
+    expectOk(await audit.record({ eventId: null, event: "page.updated", at: 2, identityId: "admin", params: { id: "mallory", userId: "mallory", author_id: "mallory", slug: "mallory" } }));
+
+    expect(expectOk(await audit.anonymize("mallory"))).toBe(1);
+    expect(expectOk(await db.findOne<{ params: Record<string, string> }>(COLLECTION, { at: 1 }))?.params).toEqual({ pipeline: "login", step: "authn.login", username: "mallory" });
+    expect(expectOk(await db.findOne<{ params: Record<string, string> }>(COLLECTION, { at: 2 }))?.params).toEqual({ slug: "mallory" });
+  });
+
   it("changes nothing on a second anonymise of the same user", async () => {
     const db = createFakePersistence();
     const audit = await createAuditPersistence(db);

@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { boot, defineModule, definePipeline, err, failure, KestrelBootError } from "@michaelthielemann/kestrel";
 import { loadConfig, loadModules, loadPipelines } from "@michaelthielemann/kestrel/load";
 import type { RevisionPage } from "@michaelthielemann/kestrel-contracts/revisions";
@@ -1414,6 +1414,31 @@ describe("the retry routes act only on the id of a deleted user", () => {
       const again = await kestrel.run("retryAnonymizeAuditUser", { trigger, headers: bearer(admin.token), params: { id: editor.id } });
       expect(again.status).toBe(200);
       expect(JSON.stringify(await auditRows(capture))).not.toContain(editor.id);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("refuses an id that is no user id and leaves the logged sign-in attempts as they are", async () => {
+    const capture: { persistence?: Persistence } = {};
+    const { kestrel, dispose } = await bootIsolated(undefined, capture);
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      await createEditor(kestrel, admin, "mallory");
+      const failed = await kestrel.run("login", { trigger, payload: { username: "mallory", password: "wrong-password" } });
+      expect(failed.status).toBe(401);
+      await vi.waitFor(async () => expect((await auditRows(capture)).some((row) => row.event === "auth.failed")).toBe(true));
+      const before = await auditRows(capture);
+
+      for (const id of ["mallory", "authn.login", "login"]) {
+        const anonymize = await kestrel.run("retryAnonymizeAuditUser", { trigger, headers: bearer(admin.token), params: { id } });
+        expect(anonymize, id).toMatchObject({ status: 400, code: "VALIDATION" });
+        const reassignBody = { reassignTo: admin.identity.id };
+        const reassign = await kestrel.run("retryReassignRevisionAuthor", { trigger, headers: bearer(admin.token), params: { id }, payload: reassignBody, body: reassignBody });
+        expect(reassign, id).toMatchObject({ status: 400, code: "VALIDATION" });
+      }
+
+      expect(await auditRows(capture)).toEqual(before);
     } finally {
       await dispose();
     }

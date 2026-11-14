@@ -18,6 +18,8 @@ function payloadPath(ctx: Context, path: string): unknown {
   return path.split(".").reduce<unknown>((value, segment) => (isRecord(value) ? value[segment] : undefined), ctx.payload);
 }
 
+const USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const USER_REFERENCE_SCHEMA: JsonSchema = { type: ["string", "object", "null"], properties: { id: { type: "string" }, name: { type: "string" } }, required: ["id"] };
 
 function nestedInputSchema(path: string, leaf: JsonSchema): JsonSchema {
@@ -116,6 +118,7 @@ export default defineModule({
     requireAbsentUser: async (ctx: Context) => {
       const id = ctx.params.id;
       if (id === undefined) throw new Error("authn.requireAbsentUser: no params.id (boot's dataflow check already proved this route always provides it)");
+      if (!USER_ID.test(id)) return ctx.fail("VALIDATION", "authn.requireAbsentUser: params.id is not a user id");
       const user = await authn.getUser(id);
       if (isErr(user)) return ctx.fail(user.error);
       if (user.value) return ctx.fail("CONFLICT", `user ${id} still exists`);
@@ -267,10 +270,10 @@ export default defineModule({
       atomicSafe: true,
     }),
     requireAbsentUser: {
-      summary: "Require that params.id names no user, active or not; the guard of the routes that clean up after a deleted user",
+      summary: "Require that params.id is the id of no user, active or not; the guard of the routes that clean up after a deleted user. An id that has the shape of no user id (a UUID) is refused",
       reads: ["params.id"],
       writes: [],
-      errors: { 409: "the user still exists" },
+      errors: { 400: "params.id is not a user id", 409: "the user still exists" },
       atomicSafe: true,
     },
     createUser: {

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -213,7 +214,7 @@ describe("authn/multi module steps via runPipeline", () => {
     provesObjectBinding("authn/multi", "deleteUser");
   });
 
-  it("requireAbsentUser answers 409 CONFLICT for an active or a deactivated user and passes for an id that names no user", async () => {
+  it("requireAbsentUser answers 409 CONFLICT for an active or a deactivated user and passes for a user id that names no user", async () => {
     const { instance } = await boot();
     const created = await runPipeline(createUserPipeline, { body: { username: "carol", password: "long-enough" } }, { modules: [{ module, instance }] });
     const id = boundaryCast<{ id: string }>(created.result, "json").id;
@@ -229,8 +230,16 @@ describe("authn/multi module steps via runPipeline", () => {
     const gone = await runPipeline(requireAbsentUserPipeline, { params: { id } }, { modules: [{ module, instance }] });
     expect(gone.status).toBe(200);
 
-    const unknown = await runPipeline(requireAbsentUserPipeline, { params: { id: "never-existed" } }, { modules: [{ module, instance }] });
+    const unknown = await runPipeline(requireAbsentUserPipeline, { params: { id: randomUUID() } }, { modules: [{ module, instance }] });
     expect(unknown.status).toBe(200);
+  });
+
+  it("requireAbsentUser refuses an id that has the shape of no user id with 400 VALIDATION", async () => {
+    const { instance } = await boot();
+    for (const id of ["never-existed", "mallory", "authn.login", "login", "", "1234"]) {
+      const res = await runPipeline(requireAbsentUserPipeline, { params: { id } }, { modules: [{ module, instance }] });
+      expect(res, id).toMatchObject({ status: 400, code: "VALIDATION" });
+    }
   });
 
   function verify(pipeline: PipelineDefinition, body: Record<string, unknown>, instance: unknown) {
