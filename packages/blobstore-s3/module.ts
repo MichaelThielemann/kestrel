@@ -24,6 +24,7 @@ export const configSchema = z
     secretAccessKey: z.string().min(1).describe("secret").optional(),
     timeoutMs: z.number().int().positive().default(DEFAULT_TIMEOUT_MS),
     maxAttempts: z.number().int().min(1).default(DEFAULT_MAX_ATTEMPTS),
+    requestChecksumCalculation: z.enum(["WHEN_SUPPORTED", "WHEN_REQUIRED"]).optional(),
   })
   .strict()
   .superRefine((config, ctx) => {

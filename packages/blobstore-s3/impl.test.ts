@@ -93,6 +93,12 @@ describe("blobstore/s3", () => {
     expect(clientOptions({ bucket: "b", prefix: "" })).toMatchObject({ maxAttempts: DEFAULT_MAX_ATTEMPTS, requestHandler: { connectionTimeout: DEFAULT_TIMEOUT_MS, requestTimeout: DEFAULT_TIMEOUT_MS } });
   });
 
+  it("leaves the SDK's request checksum behaviour alone unless asked", () => {
+    expect(clientOptions({ bucket: "b", prefix: "" })).not.toHaveProperty("requestChecksumCalculation");
+    expect(clientOptions({ bucket: "b", prefix: "", requestChecksumCalculation: "WHEN_REQUIRED" })).toMatchObject({ requestChecksumCalculation: "WHEN_REQUIRED" });
+    expect(clientOptions({ bucket: "b", prefix: "", requestChecksumCalculation: "WHEN_SUPPORTED" })).toMatchObject({ requestChecksumCalculation: "WHEN_SUPPORTED" });
+  });
+
   it("close() destroys a real S3Client, and is a no-op for a stub client", () => {
     const destroy = vi.spyOn(S3Client.prototype, "destroy");
     createBlobstoreS3({ bucket: "b", prefix: "" }).close();

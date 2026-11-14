@@ -17,6 +17,8 @@ export interface Config {
   secretAccessKey?: string | undefined;
   timeoutMs?: number | undefined;
   maxAttempts?: number | undefined;
+  /** `"WHEN_REQUIRED"` stops the SDK from adding a checksum trailer to uploads; some S3-compatible stores reject or ignore it. */
+  requestChecksumCalculation?: "WHEN_SUPPORTED" | "WHEN_REQUIRED" | undefined;
 }
 
 export interface S3Like {
@@ -32,6 +34,7 @@ export function clientOptions(config: Config): S3ClientConfig {
   if (config.region !== undefined) options.region = config.region;
   if (config.endpoint !== undefined) options.endpoint = config.endpoint;
   if (config.forcePathStyle !== undefined) options.forcePathStyle = config.forcePathStyle;
+  if (config.requestChecksumCalculation !== undefined) options.requestChecksumCalculation = config.requestChecksumCalculation;
   if (config.accessKeyId !== undefined && config.secretAccessKey !== undefined) {
     options.credentials = { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey };
   }

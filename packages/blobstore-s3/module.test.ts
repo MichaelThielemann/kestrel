@@ -64,3 +64,12 @@ describe("blobstore/s3 endpoint transport", () => {
     }
   });
 });
+
+describe("blobstore/s3 request checksums", () => {
+  it("accepts WHEN_SUPPORTED and WHEN_REQUIRED and nothing else", () => {
+    expect(configSchema.parse({ bucket: "b", requestChecksumCalculation: "WHEN_REQUIRED" }).requestChecksumCalculation).toBe("WHEN_REQUIRED");
+    expect(configSchema.parse({ bucket: "b", requestChecksumCalculation: "WHEN_SUPPORTED" }).requestChecksumCalculation).toBe("WHEN_SUPPORTED");
+    expect(configSchema.parse({ bucket: "b" }).requestChecksumCalculation).toBeUndefined();
+    expect(configSchema.safeParse({ bucket: "b", requestChecksumCalculation: "never" }).success).toBe(false);
+  });
+});

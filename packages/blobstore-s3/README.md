@@ -10,6 +10,11 @@ only the public tree, `site/*`, see the key table in `media-default`'s README; t
 holds originals, database replicas and backups); `get` returns bytes only
 and `list` reports key and size. The store never wrote sidecar files.
 
+`requestChecksumCalculation` (`WHEN_SUPPORTED` or `WHEN_REQUIRED`) passes through to the SDK. Recent SDK
+versions add a CRC32 trailer to every upload; a store that does not understand it fails the request or
+ignores the trailer without verifying it. `WHEN_REQUIRED` sends a checksum only where the operation needs
+one. Unset keeps the SDK default.
+
 `endpoint` must be `https://`, or plain `http://` on a loopback address (`localhost`, `127.0.0.0/8`,
 `[::1]`), for example a MinIO next to the app. Any other plain `http://` endpoint is a config error at
 boot, since the access keys' signatures, every stored object and every replica snapshot would cross
@@ -50,5 +55,6 @@ is missing. Once the SDK's own `maxAttempts` are spent, `put`/`get`/`remove`/`mo
 | `secretAccessKey` | string | no | *(secret)* |
 | `timeoutMs` | integer | no | `10000` |
 | `maxAttempts` | integer | no | `3` |
+| `requestChecksumCalculation` | enum | no | – |
 
 <!-- kestrel-docs:end -->
