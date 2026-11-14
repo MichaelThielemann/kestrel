@@ -766,8 +766,8 @@ Net changes since 5.8.2.
   places a database into the replica writes the snapshot and then `origin.json`; a start that rebuilds
   the missing database from such a generation reports the restore through `replication.checkRestored`,
   so `delivery.checkBuild` renders every output again. Once a pipeline run through that step ended
-  without failure, the first successful sync after it writes `applied.json` naming the generation and the
-  `nonce` of `origin.json`; until then every generation the process starts carries a copy of
+  without failure, the first successful sync or teardown seal after it writes `applied.json` naming the
+  generation and the `nonce` of `origin.json`; until then every generation the process starts carries a copy of
   `origin.json`, so a start that stops earlier leaves the restore reported to the next one. A start that
   restores a generation with `applied.json` does not report the restore again. Whether a generation
   carries either file is read from the blobstore, not from a listing. `./impl` exports `listReplica()`,

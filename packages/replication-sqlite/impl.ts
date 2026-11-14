@@ -115,7 +115,7 @@ export interface Replication {
    * Ships every committed frame the replica lacks, then writes `sealed.json` into the current generation, once; a
    * later call answers the same seal. Takes no checkpoint, no periodic snapshot and prunes nothing. Without a
    * generation yet, it takes the first snapshot when the WAL holds committed frames and answers `null` without
-   * writing anything when it holds none.
+   * writing anything when it holds none. After the seal it writes the `applied.json` files a sync would write.
    */
   seal(): Promise<Result<(Seal & { generation: string }) | null, BlobstoreError>>;
   snapshot(): Promise<Result<{ generation: string; bytes: number }, BlobstoreError>>;
@@ -126,9 +126,9 @@ export interface Replication {
   /** Synchronous, no I/O: reports a prepared restore informationally, since the instance keeps serving until a host restarts it to apply it. */
   health(): ModuleHealth;
   /**
-   * Says that the reported restore of {@link ReplicationOptions.placedRestore} has been acted on: the next sync that
-   * starts afterwards and succeeds writes its `applied.json`, into the placed generation and into every generation
-   * this process started meanwhile. Does nothing without a placed restore.
+   * Says that the reported restore of {@link ReplicationOptions.placedRestore} has been acted on: the next sync or
+   * seal that starts afterwards and succeeds writes its `applied.json`, into the placed generation and into every
+   * generation this process started meanwhile. Does nothing without a placed restore.
    */
   restoreHandled(): void;
 }
@@ -710,6 +710,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     seal: () =>
       exclusive(async (): Promise<Result<(Seal & { generation: string }) | null, BlobstoreError>> => {
         if (sealedAs !== null) return ok(sealedAs);
+        const acknowledging = placedRestore !== null && handled;
         if (generation === null) {
           const wal = readCommittedSync(fromStart);
           if (!wal || wal.frames === 0) return ok(null);
@@ -724,6 +725,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
         const put = await blobs.put(markerKey(config.prefix, current, "sealed"), new TextEncoder().encode(JSON.stringify(seal)), { contentType: "application/json" });
         if (isErr(put)) return put;
         sealedAs = { generation: current, ...seal };
+        if (acknowledging) await acknowledge();
         return ok(sealedAs);
       }),
     points: () => listPoints(blobs, config.prefix),

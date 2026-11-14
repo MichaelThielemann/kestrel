@@ -683,6 +683,19 @@ describe("replication/sqlite acknowledgement of a placed restore", () => {
     expect(acknowledged).toBe(1);
   });
 
+  it("acknowledges at the seal when the report was handled before it, and not when it was not", async () => {
+    for (const handled of [true, false]) {
+      const blobs = fakeBlobs();
+      const clock = manualClock();
+      const { replication, insert } = start(blobs, clock);
+      insert(1);
+      if (handled) replication.restoreHandled();
+      const sealed = expectOk(await replication.seal());
+      if (sealed === null) throw new Error("expected a seal");
+      expect(keysOf(blobs, "applied.json")).toEqual(handled ? [`replica/gen/${sealed.generation}/applied.json`, "replica/gen/20260101T000000Z/applied.json"].sort() : []);
+    }
+  });
+
   it("writes at the next sync only the applied.json files that a failed sync could not write", async () => {
     const blobs = fakeBlobs();
     const clock = manualClock();
