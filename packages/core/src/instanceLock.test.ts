@@ -484,6 +484,21 @@ describe("acquireInstanceLock", () => {
     expect(existsSync(lockFile(file))).toBe(false);
   });
 
+  it("shares a lock of this process that records another hostname, and records this machine's hostname from then on", () => {
+    const sibling = writeRecord({ bootId: ownBootId(), host: "other-name", pid: process.pid, processStart: ownProcessStart(), clockStart: ownClockStart() });
+    const lock = take(file);
+    expect(readRecord().instanceId).toBe(sibling.instanceId);
+    expect(readRecord().host).toBe(hostname());
+    expect(lock.health()).toEqual({ ok: true });
+  });
+
+  it.runIf(ownBootId() !== "")("does not count a lock as this process's when it records no boot id on a machine that has one", () => {
+    const foreign = writeRecord({ host: hostname(), bootId: "", pid: process.pid, processStart: ownProcessStart(), clockStart: ownClockStart() });
+    take(file);
+    expect(readRecord().instanceId).not.toBe(foreign.instanceId);
+    expect(readRecord().bootId).toBe(ownBootId());
+  });
+
   it.runIf(ownBootId() !== "")("refuses a fresh lock from another machine with the same hostname and pid namespace, even when no process here has its pid", () => {
     writeRecord({ host: hostname(), bootId: randomUUID(), pid: deadPid() });
     const err = thrownBy(() => take(file));
@@ -1213,6 +1228,31 @@ describe("acquireInstanceLock across processes", () => {
     writeGuard({ pid: process.pid, processStart: "1", pidNamespace: "", bootId: "", host: hostname() }, 3_600_000);
     const result = patchedRun(HIDE_PROC, ["const began = performance.now();", "const { outcome } = attempt();", "process.stdout.write(JSON.stringify({ outcome, fast: performance.now() - began < 3_000 }));"]);
     expect(result).toEqual({ outcome: "won", fast: true });
+  }, 30_000);
+
+  it("shares a lock of this process after the hostname changed, whatever its heartbeat age, where the system offers no boot id", () => {
+    const result = patchedRun(
+      [...HIDE_PROC, "os.hostname = () => \"laptop.home.example\";"],
+      [
+        "const clockStart = Math.round(Number(process.hrtime.bigint()) / 1e6 - process.uptime() * 1000);",
+        "const results = [];",
+        "for (const age of [0, 3_600_000]) {",
+        "  const at = new Date(Date.now() - age).toISOString();",
+        "  const record = { instanceId: crypto.randomUUID(), pid: process.pid, pidNamespace: \"\", processStart: \"\", clockStart, bootId: \"\", host: \"laptop.office.example\", startedAt: at, heartbeatAt: at, ttlMs: 60_000, threads: { [crypto.randomUUID()]: at } };",
+        "  fs.writeFileSync(lockPath, JSON.stringify(record));",
+        "  const { lock, outcome } = attempt();",
+        "  const after = JSON.parse(fs.readFileSync(lockPath, \"utf8\"));",
+        "  results.push({ outcome, joined: after.instanceId === record.instanceId, threads: Object.keys(after.threads).length, host: after.host });",
+        "  lock?.release();",
+        "  fs.rmSync(lockPath, { force: true });",
+        "}",
+        "process.stdout.write(JSON.stringify(results));",
+      ],
+    );
+    expect(result).toEqual([
+      { outcome: "won", joined: true, threads: 2, host: "laptop.home.example" },
+      { outcome: "won", joined: true, threads: 1, host: "laptop.home.example" },
+    ]);
   }, 30_000);
 
   it("leaves the lock free when a process cannot finish writing it", async () => {

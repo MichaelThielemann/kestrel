@@ -197,8 +197,9 @@ export function instanceLockFile(file: string): string | undefined {
  * these codes.
  *
  * Several holders in one process share one lock, also across copies of this module and across
- * worker threads, whatever the age of the lock's heartbeat; without `/proc` this process is told
- * by its start on the monotonic clock. The last of them to call `release()` deletes the lock file.
+ * worker threads, whatever the age of the lock's heartbeat and whatever the hostname it records.
+ * This process is told by its PID, PID namespace, boot id and start time, and without `/proc` by
+ * its start on the monotonic clock. The last of them to call `release()` deletes the lock file.
  * Once another instance took the lock over, the next call does not join the lost share but takes
  * the lock anew or throws like a first call. A thread that ends without releasing stops counting
  * once its share is older than `ttlMs`. The heartbeat runs on a timer that does not keep the
@@ -371,7 +372,7 @@ function renewed(record: LockRecord, token: string, ttlMs: number): LockRecord {
   const now = new Date();
   const ttl = Math.max(record.ttlMs, ttlMs);
   const threads = Object.entries({ ...record.threads, [token]: now.toISOString() }).filter(([, at]) => now.getTime() - Date.parse(at) <= ttl);
-  return { ...record, heartbeatAt: now.toISOString(), ttlMs: ttl, threads: Object.fromEntries(threads) };
+  return { ...record, host: hostname(), heartbeatAt: now.toISOString(), ttlMs: ttl, threads: Object.fromEntries(threads) };
 }
 
 function hold(lockPath: string, record: LockRecord, token: string, ttlMs: number, heartbeatMs: number): Holder {
@@ -614,10 +615,9 @@ function readLock(lockPath: string): Seen {
 function judge(seen: Exclude<Seen, { kind: "absent" }>, ttlMs: number): "stale" | "this-process" | "taken" {
   if (seen.kind === "unreadable") return Date.now() - seen.mtimeMs > ttlMs ? "stale" : "taken";
   const { record } = seen;
-  const here = sameKernel(record) && record.pidNamespace === PID_NAMESPACE;
-  if (here && record.pid === process.pid && sameProcess(record)) return "this-process";
+  if (record.pid === process.pid && record.pidNamespace === PID_NAMESPACE && record.bootId === BOOT_ID && sameProcess(record)) return "this-process";
   if (!(Date.now() - Date.parse(record.heartbeatAt) <= Math.max(ttlMs, record.ttlMs))) return "stale";
-  if (!here) return "taken";
+  if (!(sameKernel(record) && record.pidNamespace === PID_NAMESPACE)) return "taken";
   if (record.pid === process.pid) return "stale";
   return runs(record.pid, record.processStart) ? "taken" : "stale";
 }
