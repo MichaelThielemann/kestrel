@@ -16,7 +16,8 @@ Net changes since 5.8.2.
   `-shm`, a staged restore and the restore records next to it stay as they were, and `restoreOnStart` creates no
   file. The lock is the sidecar `<file>.instance` next to the database, never a row inside it, and it is not part
   of a snapshot, a replica or a backup; the lock also writes short-lived siblings whose names start with
-  `<file>.instance`, and none of them belongs in a copy of the data directory. The modules of one process that
+  `<file>.instance`, and none of them belongs in a copy of the data directory (the scratch copy of `kestrel check`,
+  `explain`, `manifest`, `openapi` and `upgrade` leaves them out). The modules of one process that
   name the same file share the lock, and the lock file goes with the last of them; `replication-sqlite` gives its
   share up only after its teardown has shipped the last WAL frames and sealed the generation. An in-memory
   database takes no lock. `kestrel.health()` reports a lost lock (another instance took it over, or its file was

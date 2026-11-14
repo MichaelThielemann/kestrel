@@ -9,7 +9,7 @@ const run = promisify(execFile);
 
 const EXCLUDED_DIRS = new Set(["node_modules", "dist"]);
 const MAX_BYTES = 10 * 1024 * 1024;
-const EXCLUDED_FILE_PATTERNS = [/^\.env(\..*)?$/, /\.db(-wal|-shm)?$/i, /\.sqlite3?(-wal|-shm)?$/i];
+const EXCLUDED_FILE_PATTERNS = [/^\.env(\..*)?$/, /\.db(-wal|-shm)?$/i, /\.sqlite3?(-wal|-shm)?$/i, /\.instance(\..*)?$/];
 
 function isExcludedFile(name: string): boolean {
   return EXCLUDED_FILE_PATTERNS.some((pattern) => pattern.test(name));

@@ -234,7 +234,9 @@ or its major differs from the CLI's, it exits 2 before loading anything.
 
 **`check`, `explain`, `manifest`, `openapi`** load the project named by `--root` (default: the
 current directory) into a scratch copy, which is also the process's working directory while they
-run, and remove the copy afterwards. Nothing is written into the project. Storage modules are
+run, and remove the copy afterwards. Nothing is written into the project. The copy leaves out
+`.env` files, database files and instance lock files (`<file>.instance` and its siblings), so a
+module that takes the lock on a relative path takes it in the copy. Storage modules are
 rewritten into the copy by the sandbox described below; a module the sandbox does not know runs its
 `setup()` only when `--run-setup <use>` names it, and otherwise its pipelines are reported as not
 checked.

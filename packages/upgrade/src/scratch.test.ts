@@ -58,6 +58,20 @@ describe("createScratchCopy, outside a git repository", () => {
     expect(existsSync(join(scratch.dir, "data.db-wal"))).toBe(false);
   });
 
+  it("never copies a database's instance lock file or the lock's transient siblings into the scratch copy", async () => {
+    await writeFile(join(dir, "kestrel.config.ts"), "export default {};\n");
+    await mkdir(join(dir, "data"), { recursive: true });
+    const lockFiles = ["x.db.instance", "x.db.instance.takeover", "x.db.instance.0b5f2a64-7c1d-4e8f-9a3b-2d6c8e1f4a70.tmp", "x.db.instance.takeover.0b5f2a64-7c1d-4e8f-9a3b-2d6c8e1f4a70.stale"];
+    for (const name of lockFiles) await writeFile(join(dir, "data", name), "{}");
+    await writeFile(join(dir, "data", "notes.json"), "{}");
+
+    const scratch = await createScratchCopy(dir);
+    cleanupDirs.push(scratch.dir);
+
+    expect(existsSync(join(scratch.dir, "data", "notes.json"))).toBe(true);
+    for (const name of lockFiles) expect(existsSync(join(scratch.dir, "data", name)), name).toBe(false);
+  });
+
   it("skips every hidden directory and dist, and still copies a hidden file", async () => {
     await writeFile(join(dir, "kestrel.config.ts"), "export default {};\n");
     await writeFile(join(dir, ".npmrc"), "engine-strict=true\n");
@@ -179,6 +193,21 @@ describe("createScratchCopy, inside a git repository", () => {
     await run("git", ["add", "-A", "-f"], { cwd: dir });
     await run("git", ["commit", "-m", "initial"], { cwd: dir });
   }
+
+  it("leaves a database's instance lock file out of the copy when data/ is not ignored", async () => {
+    await initRepo();
+    await writeFile(join(dir, "kestrel.config.ts"), "export default {};\n");
+    await mkdir(join(dir, "data"), { recursive: true });
+    await writeFile(join(dir, "data", "x.db.instance"), "{}");
+    await writeFile(join(dir, "data", "x.db.instance.takeover"), "{}");
+
+    const scratch = await createScratchCopy(dir);
+    cleanupDirs.push(scratch.dir);
+
+    expect(existsSync(join(scratch.dir, "kestrel.config.ts"))).toBe(true);
+    expect(existsSync(join(scratch.dir, "data", "x.db.instance"))).toBe(false);
+    expect(existsSync(join(scratch.dir, "data", "x.db.instance.takeover"))).toBe(false);
+  });
 
   it("leaves tracked secrets, database files and oversized files out of the copy", async () => {
     await initRepo();

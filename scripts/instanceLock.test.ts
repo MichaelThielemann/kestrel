@@ -20,7 +20,7 @@ import blobstoreFilesystem from "../packages/blobstore-filesystem/module.ts";
 import persistenceSqlite from "../packages/persistence-sqlite/module.ts";
 import replicationSqlite from "../packages/replication-sqlite/module.ts";
 import { sandboxBootInput } from "../packages/upgrade/src/sandbox.ts";
-import { copyProject, freePort, MINIMAL, runCli, startAndStop } from "../packages/cli/test/harness.ts";
+import { copyProject, FIXTURES, freePort, MINIMAL, runCli, startAndStop } from "../packages/cli/test/harness.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE = join(ROOT, "fixtures", "upgrade", "5.8.1");
@@ -373,6 +373,25 @@ describe("boot checks and the instance lock", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).not.toContain("instance-locked");
     expect(readdirSync(join(project, "data"))).toEqual(["kestrel.db.instance"]);
+    expect(readFileSync(lockFileOf(file), "utf8")).toBe(held);
+  });
+
+  it("checks a project module that takes the lock on a relative path with kestrel check --run-setup while another process holds that file", { timeout: 60_000 }, async () => {
+    const project = copyProject(join(FIXTURES, "setup-marker"), "lock-project-module");
+    dirs.push(project);
+    writeFileSync(join(project, "kestrel.config.ts"), 'import { defineConfig } from "@michaelthielemann/kestrel/defineConfig";\n\nexport default defineConfig({\n  modules: [{ use: "./modules/journal.ts", config: {} }],\n  triggers: [],\n});\n');
+    writeFileSync(
+      join(project, "modules", "journal.ts"),
+      'import { z } from "zod";\nimport { defineModule } from "@michaelthielemann/kestrel/defineModule";\nimport { acquireInstanceLock, type InstanceLock } from "@michaelthielemann/kestrel/instanceLock";\n\nexport default defineModule({\n  name: "journal/local",\n  provides: [],\n  requires: [],\n  configSchema: z.object({}).strict(),\n  async setup(): Promise<InstanceLock> {\n    return acquireInstanceLock("./data/journal.db", { module: "journal/local" });\n  },\n  teardown(lock: InstanceLock) {\n    lock.release();\n  },\n});\n',
+    );
+    const file = join(project, "data", "journal.db");
+    const held = holdForeignLock(file);
+
+    const result = await runCli(["check", "--json", "--root", project, "--run-setup", "./modules/journal.ts"]);
+
+    expect(result.stdout).not.toContain("instance-locked");
+    expect(result.code).toBe(0);
+    expect(readdirSync(join(project, "data"))).toEqual(["journal.db.instance"]);
     expect(readFileSync(lockFileOf(file), "utf8")).toBe(held);
   });
 });
