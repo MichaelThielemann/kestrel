@@ -124,7 +124,8 @@
         }
       ]
     },
-    "httpTriggers": false
+    "httpTriggers": false,
+    "triggers": "event-only"
   },
   "collections": {
     "audit_entries": 3,

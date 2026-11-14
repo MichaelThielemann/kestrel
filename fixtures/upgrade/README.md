@@ -39,15 +39,16 @@ The generator needs network access, `git` with the tag `v5.8.1` and Node 22.18 o
 4. replicates in several steps, stops the instance, backs the database up twice and copies `data/` to the
    output directory.
 
-Ids and timestamps are new on every run, so two runs are not byte-identical; the manifest and the
-counts are stable. `sharp` and `zod` are not pinned by kestrel; their resolved versions are recorded
+Ids, blob paths and timestamps are new on every run, so two runs are not byte-identical; the shape of
+the manifest, the special cases it names and the row counts are stable. `sharp` and `zod` are not pinned by kestrel; their resolved versions are recorded
 in the manifest.
 
 ## Reading it in a test
 
 Boot the fixture with the configuration recorded in `manifest.json` under `config`: the three image
 sizes (`config.images.sizes`, the same specs `images_variants.spec` holds) replace the default sizes of
-`images-default`, and no HTTP triggers are registered (`config.httpTriggers`). With the default sizes
+`images-default`, and only the event triggers are registered: no HTTP triggers and no cron triggers (`config.httpTriggers`,
+`config.triggers`). A cron run would change the data of the copy, for example by expiring the admin session. With the default sizes
 every `thumb` and `small` variant counts as outdated and every `wide` variant as an orphaned size.
 
 Open a copy of `kestrel.db`, never the file itself: SQLite creates `-wal` and `-shm` next to a

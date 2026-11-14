@@ -32,7 +32,7 @@ interface Manifest {
   duplicatedVariant: { mediaId: string; size: string; rows: number };
   pages: Record<string, string>;
   imageSizes: string[];
-  config: { images: { sizes: Array<{ name: string; width: number; height: number; fit: string; format: string; quality: number }> }; httpTriggers: boolean };
+  config: { images: { sizes: Array<{ name: string; width: number; height: number; fit: string; format: string; quality: number }> }; httpTriggers: boolean; triggers: string };
   collections: Record<string, number>;
   blobs: string[];
 }
@@ -173,6 +173,7 @@ describe("the 5.8.1 upgrade fixture: database", () => {
 
   it("records the image sizes and trigger setup the instance booted with", () => {
     expect(manifest.config.httpTriggers).toBe(false);
+    expect(manifest.config.triggers).toBe("event-only");
     const specs = new Map(manifest.config.images.sizes.map((size) => [size.name, `${size.width}x${size.height}:${size.fit}:${size.format}:${size.quality}`]));
     expect([...specs.keys()].sort()).toEqual([...manifest.imageSizes].sort());
     const stored = rows<{ size: string; spec: string }>("select distinct size, spec from images_variants");

@@ -291,7 +291,7 @@ async function seed() {
     duplicatedVariant: { mediaId: media.galleryPhoto.id, size: "thumb", rows: 3 },
     pages: { home: home.id, about: about.id, gallery: gallery.id, draft: draft.id },
     imageSizes: IMAGE_SIZES.map((size) => size.name),
-    config: { images: { sizes: IMAGE_SIZES }, httpTriggers: false },
+    config: { images: { sizes: IMAGE_SIZES }, httpTriggers: false, triggers: "event-only" },
     collections: counts,
     backup: { key: BACKUP_KEY, versions: backedUp.value.versions },
   };
