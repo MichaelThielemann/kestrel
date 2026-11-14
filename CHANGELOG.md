@@ -1775,32 +1775,33 @@ Net changes since 5.8.2.
   `@michaelthielemann/kestrel-ops` on the environments of `kestrel.environments.json`. The CLI does not
   depend on kestrel-ops and loads it only when one of them runs, from the project first, then from next to
   the CLI; without it they print how to install it and exit 2, and the other commands, `upgrade` included,
-  never load it or an S3 client. `update` answers 2 while the installed kestrel-ops brings no update
-  assistant; exit 3 is reserved for an update that was rolled back. `kestrel --help` lists the four
-  commands.
+  never load kestrel-ops. `update` answers 2 while the installed kestrel-ops brings no update assistant;
+  exit 3 is reserved for an update that was rolled back. `kestrel --help` lists the four commands.
 - New package `@michaelthielemann/kestrel-target-cloudfoundry`: a `kestrel-ops` target for one app in a
-  Cloud Foundry space, through the `cf` CLI. It reads state and instances through the v3 API, recognises a
-  stopped app only with no instance in any state but `DOWN`, and ends every command with exit 1 while the
-  app is scaled to more than one instance or a deployment, such as a rolling push, is active, a live backup
-  included, and while the app, started or stopped, is scaled to 0 instances. It acts only while cf targets the configured org and space and never names another app, so a
-  static web server next to it in the same manifest is never touched; stop, start and the droplet change go
-  to the app's guid through the v3 API, and `cf apply-manifest` and `cf logs` run only after `cf target` and
-  the app's guid were read again. A stop waits until no instance shuts down any more, as a Cloud Controller
-  with the `STOPPING` instance state reports it; when it sees no instance shut down, it waits
-  `stopGraceSeconds` (default 15) after the stop request, covering the shutdown in which the replica is
-  sealed. A stop, a start and the readiness wait repeat failed status reads, also
-  a `cf curl` that ran out of time or ended by a signal, until their timeout; a stop whose request failed goes on once the app reads stopped, a failed stop says that
-  the app may stay stopped, and a start whose request failed counts
-  as done once the app reads started. A backup records the app's guid, droplet (null only when the app has
-  none), newest revision and the names, never the values, of its environment variables, next to the
-  installed versions of the packages the `package.json` in `dir` declares; without one, none. `applyManifest()`
-  reads the manifest as YAML 1.1 with merge keys, with dates and clock times kept as strings and integers
-  kept digit for digit, as cf does,
-  and applies only its version and the app's resolved entry through `cf apply-manifest --vars-file`, with
-  the values in a 0600 file removed afterwards, also on failure, on exit and on SIGINT, SIGTERM or SIGHUP; no
-  value is passed on a command line and `cf set-env` is never used. A placeholder without a source or with
-  a dot, or an entry that scales the web process to another count than 1, ends with exit 2 before cf runs. cf runs with
-  colored and trace output switched off.
+  Cloud Foundry space, through the `cf` CLI. It reads state and instances through the v3 API and recognises
+  a stopped app only with no instance in any state but `DOWN`. `status`, `backup create` (live or frozen)
+  and `restore` into the environment end with exit 1 before anything is stopped or started while the app is scaled to
+  more than one instance or to 0 instances, started or stopped, or while a deployment, such as a rolling
+  push, is active; `backup list`, `verify`, `prune` and `restore --to local` never read the target. It acts
+  only while cf targets the configured org and space and never names another app, so a static web server
+  next to it in the same manifest is never touched; stop, start and the droplet change go to the app's guid
+  through the v3 API, and `cf apply-manifest` and `cf logs` run only after `cf target` and the app's guid
+  were read again. A stop waits until no instance shuts down any more, as a Cloud Controller with the
+  `STOPPING` instance state reports it; when it sees no instance shut down, it waits `stopGraceSeconds`
+  (default 15) after the stop request, covering the shutdown in which the replica is sealed. A stop, a start
+  and the readiness wait repeat failed status reads, also a `cf curl` that ran out of time or ended by a
+  signal, until their timeout; a stop whose request failed goes on once the app reads stopped, a failed stop
+  says that the app may stay stopped, and a start whose request failed counts as done once the app reads
+  started. A backup records the app's guid, droplet (null only when the app has none), newest revision and
+  the names, never the values, of its environment variables, next to the installed versions of the
+  packages the `package.json` in `dir` declares and the runtime packages they bring; without that file,
+  none. `applyManifest()` reads the manifest as YAML 1.1 with merge keys, with dates and clock times kept as
+  strings and integers kept digit for digit, as cf does, and applies only its version and the app's
+  resolved entry through `cf apply-manifest --vars-file`, with the values in a 0600 file removed
+  afterwards, also on failure, on exit and on SIGINT, SIGTERM or SIGHUP; no value is passed on a command
+  line and `cf set-env` is never used. A placeholder without a source or with a dot, or an entry that
+  scales the web process to another count than 1, ends with exit 2 before cf runs. cf runs with colored and
+  trace output switched off.
 
 ### Changed
 

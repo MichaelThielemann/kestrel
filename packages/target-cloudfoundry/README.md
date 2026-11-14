@@ -42,25 +42,29 @@ The `target` block of an environment in `kestrel.environments.json` names this p
 ## Behaviour
 - **Status** reads the app's state, the desired instance count of its `web` process and the state of each
   instance through the v3 API (`cf curl`). An app reads `stopped` once it reports `STOPPED` and no instance is
-  in any state but `DOWN`; an instance that is `STARTING` or `CRASHED` counts as running. An app scaled to more
-  than one instance, or one with an active deployment (a rolling or canary push), ends every command with
-  exit 1 before anything is stopped or started, a live backup included: two instances would write to the same
-  replica. An app scaled to 0 instances, started or stopped, ends with exit 1 as well, naming `cf scale <app> -i 1`
-  and `cf stop <app>`: no instance would ever become ready, so a restore stops before it changes anything.
+  in any state but `DOWN`; an instance that is `STARTING`, `STOPPING` or `CRASHED` counts as running.
+- **Refusals.** `kestrel-ops` reads the target in `status`, `backup create` and `restore` into the environment; a live
+  backup only describes the app, a frozen backup and a restore also stop and start it. `backup list`,
+  `backup verify`, `backup prune` and `restore --to local` never read it. An app scaled to more than one
+  instance, or one with an active deployment (a rolling or canary push), ends each of these reads with exit 1
+  before anything is stopped or started, the live backup included: two instances would write to the same
+  replica. So does an app scaled to 0 instances, started or stopped, naming `cf scale <app> -i 1` and
+  `cf stop <app>`: no instance would ever become ready, so a restore ends before it changes anything.
 - **Stop** sends the stop action to the app and waits until it reads `stopped` with no instance; a status read
   that fails during the wait is repeated until the stop timeout (120 s). The Cloud Controller answers the stop
   request before the instance receives its stop signal, so the instance's shutdown, in which the replica is
   synced and sealed, runs after the answer. A Cloud Controller with the `STOPPING` instance state (property
-  `cc.app_instance_stopping_state`) lists the instance as `STOPPING` until its container is gone, and the target
-  waits for that. Without that state the instance reads `DOWN` at once; when the target sees no instance shut
-  down, it waits until `stopGraceSeconds` have passed since the stop request. When cf answers the stop request
-  with an error but the app reads `STOPPED` afterwards, the target goes on waiting as after a stop that was
-  answered. When the stop request fails otherwise or the wait fails, the error says that the app may stay stopped and names `cf start` to start it again. **Start**
-  repeats a failing status read for up to 30 s, then sends the start action; when cf answers that request
-  with an error but the app reads `STARTED` afterwards, the start counts as done. Readiness is an instance in
-  state `RUNNING`, and then `readyUrl` answering 200 when it is set; a failing read during that wait counts as
-  not ready yet and is repeated until the wait ends. A `cf curl` that does not finish within 120 s or ends by a
-  signal counts as a failing read.
+  `cc.app_instance_stopping_state`) lists the instance as `STOPPING` until its container is gone, and the
+  target waits for that. Without that state the instance reads `DOWN` at once; when the target sees no
+  instance shut down, it waits until `stopGraceSeconds` have passed since the stop request. When cf answers
+  the stop request with an error but the app reads `STOPPED` afterwards, the target goes on waiting as after
+  an answered stop. When the stop request fails otherwise or the wait fails, the error says that the app may
+  stay stopped and names `cf start` to start it again.
+- **Start** repeats a failing status read for up to 30 s, then sends the start action; when cf answers that
+  request with an error but the app reads `STARTED` afterwards, the start counts as done. Readiness is an
+  instance in state `RUNNING`, and then `readyUrl` answering 200 when it is set; a failing read during that
+  wait counts as not ready yet and is repeated until the wait ends. A `cf curl` that does not finish within
+  120 s or ends by a signal counts as a failing read.
 - **Describe** records the app's guid, its current droplet (null only when the platform answers that the app
   has none), its newest revision (guid and version, or null) and the names of its environment variables,
   never their values, next to the installed package versions. A read that fails ends the description with
