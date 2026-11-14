@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { boot as bootKestrel } from "@michaelthielemann/kestrel";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
@@ -13,6 +13,17 @@ import module from "./module.ts";
 const KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const DEVICE_KEY = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 const PASSWORD = "the owner's long password";
+const STEP_MS = 30_000;
+const MID_STEP = Math.floor(1_800_000_000_000 / STEP_MS) * STEP_MS + STEP_MS / 2;
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(MID_STEP);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 async function bootSite(accountLimit: number, enforce: "all" | "none" = "all") {
   const kestrel = await bootKestrel({
@@ -48,12 +59,16 @@ async function bootSite(accountLimit: number, enforce: "all" | "none" = "all") {
   const started = await post("setup", { username: "owner", password: PASSWORD });
   const { secret } = boundaryCast<{ secret: string }>(started.result, "json");
   const code = (offset: number) => totp(base32Decode(secret), Math.floor(Date.now() / 30_000) + offset);
+  const wrong = () => {
+    const valid = [-1, 0, 1].map(code);
+    return ["000000", "111111"].find((candidate) => !valid.includes(candidate)) ?? "";
+  };
   const enrolled = await post("login", { username: "owner", password: PASSWORD, code: code(-1) });
   expect(enrolled.status).toBe(200);
   expect(enrolled.headers?.["set-cookie"]).toMatch(/^__Host-kestrel_token=/);
   const deviceCookie = enrolled.cookies?.[0] ?? "";
   expect(deviceCookie).toMatch(/^__Host-kestrel_device=[^;]+; Path=\/; Max-Age=\d+; HttpOnly; Secure; SameSite=Strict$/);
-  return { kestrel, post, code, device: { cookie: deviceCookie.split(";")[0] ?? "" } };
+  return { kestrel, post, code, wrong, device: { cookie: deviceCookie.split(";")[0] ?? "" } };
 }
 
 async function lookalikeCookies(post: Awaited<ReturnType<typeof bootSite>>["post"], names: string[], perName: number): Promise<{ cookie: string }[]> {
@@ -86,8 +101,7 @@ describe("sign-in from a known device", () => {
   });
 
   it("lets the owner's known device past a second factor that someone with the password locked with wrong codes", async () => {
-    const { kestrel, post, code, device } = await bootSite(100);
-    const wrong = () => (code(0) === "000000" ? "111111" : "000000");
+    const { kestrel, post, code, wrong, device } = await bootSite(100);
     const wave = await Promise.all(Array.from({ length: 20 }, () => post("login", { username: "owner", password: PASSWORD, code: wrong() })));
     expect(wave.filter((result) => result.status === 401)).toHaveLength(10);
     expect(wave.filter((result) => result.status === 429 && result.code === "RATE_LIMITED")).toHaveLength(10);
@@ -100,9 +114,8 @@ describe("sign-in from a known device", () => {
   });
 
   it("does not let the device cookies of look-alike accounts past the second-factor lock of the account they imitate", async () => {
-    const { kestrel, post, code, device } = await bootSite(1000, "none");
+    const { kestrel, post, code, wrong, device } = await bootSite(1000, "none");
     const cookies = await lookalikeCookies(post, ["Owner", "OWNER", "ｏｗｎｅｒ", " owner "], 5);
-    const wrong = () => (code(0) === "000000" ? "111111" : "000000");
     const wave = await Promise.all(cookies.map((cookie) => post("login", { username: "owner", password: PASSWORD, code: wrong() }, cookie)));
     expect(wave.filter((result) => result.status === 401)).toHaveLength(10);
     expect(wave.filter((result) => result.status === 429 && result.code === "RATE_LIMITED")).toHaveLength(10);
@@ -118,6 +131,32 @@ describe("sign-in from a known device", () => {
     expect(wave.filter((result) => result.status === 401)).toHaveLength(10);
     expect(wave.filter((result) => result.status === 429)).toHaveLength(50);
     expect((await post("login", { username: "owner", password: PASSWORD, code: code(0) }, device)).status).toBe(200);
+    await kestrel.stop();
+  });
+
+  it("accepts a code computed in the last millisecond of a time step after the clock has entered the next one", async () => {
+    const { kestrel, post, code, device } = await bootSite(10, "none");
+    vi.setSystemTime(MID_STEP + STEP_MS / 2 - 1);
+    const lastOfStep = code(0);
+    vi.setSystemTime(MID_STEP + STEP_MS / 2);
+    expect((await post("login", { username: "owner", password: PASSWORD, code: lastOfStep }, device)).status).toBe(200);
+    await kestrel.stop();
+  });
+
+  it("accepts the code of the next time step and refuses the codes two steps away on either side", async () => {
+    const { kestrel, post, code, device } = await bootSite(10, "none");
+    expect((await post("login", { username: "owner", password: PASSWORD, code: code(-2) }, device)).status).toBe(401);
+    expect((await post("login", { username: "owner", password: PASSWORD, code: code(2) }, device)).status).toBe(401);
+    expect((await post("login", { username: "owner", password: PASSWORD, code: code(1) }, device)).status).toBe(200);
+    expect((await post("login", { username: "owner", password: PASSWORD, code: code(0) }, device)).status).toBe(401);
+    await kestrel.stop();
+  });
+
+  it("refuses the enrollment code of a step that the clock has moved two steps past", async () => {
+    const { kestrel, post, code, device } = await bootSite(10, "none");
+    const stale = code(0);
+    vi.setSystemTime(MID_STEP + 2 * STEP_MS);
+    expect((await post("login", { username: "owner", password: PASSWORD, code: stale }, device)).status).toBe(401);
     await kestrel.stop();
   });
 });
