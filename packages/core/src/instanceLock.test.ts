@@ -75,8 +75,14 @@ function take(path: string, opts: Partial<Parameters<typeof acquireInstanceLock>
   return lock;
 }
 
+function lockFile(path: string): string {
+  const lockPath = instanceLockFile(path);
+  if (lockPath === undefined) throw new Error(`${path} names no lock file`);
+  return lockPath;
+}
+
 function readRecord(): LockRecord {
-  const parsed: unknown = JSON.parse(readFileSync(instanceLockFile(file), "utf8"));
+  const parsed: unknown = JSON.parse(readFileSync(lockFile(file), "utf8"));
   if (typeof parsed !== "object" || parsed === null) throw new Error("lock file is not an object");
   return { ...{ instanceId: "", pid: 0, pidNamespace: "", processStart: "", bootId: "", host: "", startedAt: "", heartbeatAt: "", ttlMs: 0, threads: {} }, ...parsed };
 }
@@ -84,12 +90,12 @@ function readRecord(): LockRecord {
 function writeRecord(record: Partial<LockRecord>): LockRecord {
   const now = new Date().toISOString();
   const full: LockRecord = { instanceId: randomUUID(), pid: 4242, pidNamespace: ownPidNamespace(), processStart: "1", bootId: randomUUID(), host: "other-host", startedAt: now, heartbeatAt: now, ttlMs: 60_000, threads: { [randomUUID()]: now }, ...record };
-  writeFileSync(instanceLockFile(file), JSON.stringify(full));
+  writeFileSync(lockFile(file), JSON.stringify(full));
   return full;
 }
 
 function writeGuard(holder: { pid: number; processStart?: string; pidNamespace?: string; host?: string; bootId?: string }, ageMs = 0): string {
-  const guard = `${instanceLockFile(file)}.takeover`;
+  const guard = `${lockFile(file)}.takeover`;
   writeFileSync(guard, JSON.stringify({ token: randomUUID(), pidNamespace: ownPidNamespace(), processStart: "1", ...onThisHost, ...holder }));
   const at = new Date(Date.now() - ageMs);
   utimesSync(guard, at, at);
@@ -130,22 +136,22 @@ afterEach(() => {
 
 describe("instanceLockFile", () => {
   it("is the database file with .instance appended, next to it", () => {
-    expect(instanceLockFile(file)).toBe(`${file}.instance`);
+    expect(lockFile(file)).toBe(`${file}.instance`);
   });
 
   it("names the same sidecar for every spelling of the same file", () => {
-    expect(instanceLockFile(join(dir, ".", "sub", "..", "app.db"))).toBe(instanceLockFile(file));
+    expect(lockFile(join(dir, ".", "sub", "..", "app.db"))).toBe(lockFile(file));
   });
 
   it("follows a symlinked database file whose target does not exist yet, so the lock stays the same once it is created", () => {
     mkdirSync(join(dir, "vol"));
     mkdirSync(join(dir, "data"));
     symlinkSync(join("..", "vol", "app.db"), join(dir, "data", "app.db"));
-    const before = instanceLockFile(join(dir, "data", "app.db"));
+    const before = lockFile(join(dir, "data", "app.db"));
     expect(before).toBe(`${join(dir, "vol", "app.db")}.instance`);
     writeFileSync(join(dir, "vol", "app.db"), "");
-    expect(instanceLockFile(join(dir, "data", "app.db"))).toBe(before);
-    expect(instanceLockFile(join(dir, "vol", "app.db"))).toBe(before);
+    expect(lockFile(join(dir, "data", "app.db"))).toBe(before);
+    expect(lockFile(join(dir, "vol", "app.db"))).toBe(before);
   });
 
   it("resolves .. after a symlinked directory from the link's target, as SQLite opens the file", () => {
@@ -153,16 +159,16 @@ describe("instanceLockFile", () => {
     mkdirSync(join(dir, "app", "releases", "shared"));
     symlinkSync(join("releases", "7"), join(dir, "app", "current"));
     const spelled = `${dir}/app/current/../shared/db.sqlite`;
-    expect(instanceLockFile(spelled)).toBe(`${join(dir, "app", "releases", "shared", "db.sqlite")}.instance`);
+    expect(lockFile(spelled)).toBe(`${join(dir, "app", "releases", "shared", "db.sqlite")}.instance`);
     writeFileSync(join(dir, "app", "releases", "shared", "db.sqlite"), "");
-    expect(instanceLockFile(spelled)).toBe(`${join(dir, "app", "releases", "shared", "db.sqlite")}.instance`);
+    expect(lockFile(spelled)).toBe(`${join(dir, "app", "releases", "shared", "db.sqlite")}.instance`);
   });
 
   it("resolves .. after a symlinked directory in a relative name from the link's target", () => {
     mkdirSync(join(dir, "app", "releases", "7"), { recursive: true });
     symlinkSync(join("releases", "7"), join(dir, "app", "current"));
     vi.spyOn(process, "cwd").mockReturnValue(join(dir, "app"));
-    expect(instanceLockFile("current/../shared/db.sqlite")).toBe(`${join(dir, "app", "releases", "shared", "db.sqlite")}.instance`);
+    expect(lockFile("current/../shared/db.sqlite")).toBe(`${join(dir, "app", "releases", "shared", "db.sqlite")}.instance`);
   });
 
   it("takes one lock for every spelling of a database behind a symlinked directory", () => {
@@ -175,9 +181,15 @@ describe("instanceLockFile", () => {
     expect(existsSync(`${join(dir, "app", "releases", "shared", "db.sqlite")}.instance`)).toBe(true);
   });
 
+  it("names no lock file for an in-memory or temporary database, which takes no lock", () => {
+    for (const name of [":memory:", "", "file::memory:", "file::memory:?cache=shared", "file:memdb1?mode=memory&cache=shared", "file:", "file:?mode=ro"]) {
+      expect(instanceLockFile(name)).toBeUndefined();
+    }
+  });
+
   it("follows a symlinked directory whose target does not exist yet", () => {
     symlinkSync("missing", join(dir, "link"));
-    expect(instanceLockFile(join(dir, "link", "app.db"))).toBe(`${join(dir, "missing", "app.db")}.instance`);
+    expect(lockFile(join(dir, "link", "app.db"))).toBe(`${join(dir, "missing", "app.db")}.instance`);
   });
 });
 
@@ -197,7 +209,7 @@ describe("acquireInstanceLock", () => {
   it("creates the database's directory when it does not exist yet", () => {
     file = join(dir, "nested", "deeper", "app.db");
     take(file);
-    expect(existsSync(instanceLockFile(file))).toBe(true);
+    expect(existsSync(lockFile(file))).toBe(true);
   });
 
   it("takes no lock and creates no file for an in-memory database", () => {
@@ -223,10 +235,10 @@ describe("acquireInstanceLock", () => {
 
   it("locks the database file a file: URI names", () => {
     take(`file:${file}?mode=rwc`);
-    expect(existsSync(instanceLockFile(file))).toBe(true);
+    expect(existsSync(lockFile(file))).toBe(true);
     expect(() => take(`file://${file}`)).not.toThrow();
-    expect(instanceLockFile(`file:${file}?mode=ro`)).toBe(instanceLockFile(file));
-    expect(instanceLockFile(`file:${join(dir, "my%20app.db")}`)).toBe(`${join(dir, "my app.db")}.instance`);
+    expect(lockFile(`file:${file}?mode=ro`)).toBe(lockFile(file));
+    expect(lockFile(`file:${join(dir, "my%20app.db")}`)).toBe(`${join(dir, "my app.db")}.instance`);
   });
 
   it("is shared by several holders in one process, and the file disappears only with the last release", () => {
@@ -234,12 +246,12 @@ describe("acquireInstanceLock", () => {
     const second = take(join(dir, ".", "app.db"));
     const id = readRecord().instanceId;
     first.release();
-    expect(existsSync(instanceLockFile(file))).toBe(true);
+    expect(existsSync(lockFile(file))).toBe(true);
     expect(readRecord().instanceId).toBe(id);
     first.release();
-    expect(existsSync(instanceLockFile(file))).toBe(true);
+    expect(existsSync(lockFile(file))).toBe(true);
     second.release();
-    expect(existsSync(instanceLockFile(file))).toBe(false);
+    expect(existsSync(lockFile(file))).toBe(false);
   });
 
   it("can be taken again after the last release", () => {
@@ -338,7 +350,7 @@ describe("acquireInstanceLock", () => {
       expect(err).toBeInstanceOf(KestrelBootError);
       expect(err instanceof KestrelBootError ? [err.code, err.module] : []).toEqual(["invalid-module-config", "store/sqlite"]);
     }
-    expect(existsSync(instanceLockFile(file))).toBe(false);
+    expect(existsSync(lockFile(file))).toBe(false);
   });
 
   it("takes over at once a lock of a dead process on the same host", () => {
@@ -403,7 +415,7 @@ describe("acquireInstanceLock", () => {
     const lock = take(file);
     vi.advanceTimersByTime(70_000);
     lock.release();
-    expect(existsSync(instanceLockFile(file))).toBe(false);
+    expect(existsSync(lockFile(file))).toBe(false);
   });
 
   it.runIf(ownBootId() !== "")("refuses a fresh lock from another machine with the same hostname and pid namespace, even when no process here has its pid", () => {
@@ -427,7 +439,7 @@ describe("acquireInstanceLock", () => {
     const reason = err instanceof KestrelBootError ? err.reason : "";
     expect(reason).toContain(`taken over automatically from ${new Date(heartbeatAt.getTime() + 60_000).toISOString()}`);
     expect(reason).toContain("earlier run");
-    expect(reason).toContain(`delete ${instanceLockFile(file)}`);
+    expect(reason).toContain(`delete ${lockFile(file)}`);
   });
 
   it("tells when a refused lock of another host is taken over, without suggesting to delete it", () => {
@@ -478,16 +490,16 @@ describe("acquireInstanceLock", () => {
   });
 
   it("refuses an unreadable lock file that was written within the TTL", () => {
-    writeFileSync(instanceLockFile(file), "");
+    writeFileSync(lockFile(file), "");
     const err = thrownBy(() => take(file));
     expect(err).toBeInstanceOf(KestrelBootError);
     expect(err instanceof KestrelBootError ? err.reason : "").toContain("unreadable");
   });
 
   it("takes over an unreadable lock file older than the TTL", () => {
-    writeFileSync(instanceLockFile(file), "{");
+    writeFileSync(lockFile(file), "{");
     const past = new Date(Date.now() - 120_000);
-    utimesSync(instanceLockFile(file), past, past);
+    utimesSync(lockFile(file), past, past);
     take(file);
     expect(readRecord().pid).toBe(process.pid);
   });
@@ -531,14 +543,14 @@ describe("acquireInstanceLock", () => {
     const lock = take(file);
     const guard = writeGuard({ pid: deadPid() });
     lock.release();
-    expect(existsSync(instanceLockFile(file))).toBe(false);
+    expect(existsSync(lockFile(file))).toBe(false);
     expect(existsSync(guard)).toBe(false);
   });
 
   it("clears a takeover marker left behind by a process that died while taking over", () => {
     const stale = new Date(Date.now() - 120_000).toISOString();
     writeRecord({ startedAt: stale, heartbeatAt: stale });
-    const marker = `${instanceLockFile(file)}.takeover`;
+    const marker = `${lockFile(file)}.takeover`;
     writeFileSync(marker, randomUUID());
     const past = new Date(Date.now() - 120_000);
     utimesSync(marker, past, past);
@@ -600,16 +612,16 @@ describe("acquireInstanceLock", () => {
     const joined = take(file);
     expect(readRecord().instanceId).toBe(id);
     renewed.release();
-    expect(existsSync(instanceLockFile(file))).toBe(true);
+    expect(existsSync(lockFile(file))).toBe(true);
     joined.release();
-    expect(existsSync(instanceLockFile(file))).toBe(false);
+    expect(existsSync(lockFile(file))).toBe(false);
   });
 
   it("recreates its sidecar when the file disappears while it holds the lock", () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     const lock = take(file);
     const id = readRecord().instanceId;
-    rmSync(instanceLockFile(file));
+    rmSync(lockFile(file));
     vi.advanceTimersByTime(10_000);
     expect(readRecord().instanceId).toBe(id);
     expect(lock.health()).toEqual({ ok: true });
@@ -626,7 +638,7 @@ describe("acquireInstanceLock", () => {
   });
 
   it("removes leftovers of earlier attempts older than the TTL once it holds the lock, and keeps younger ones and unrelated files", () => {
-    const lockPath = instanceLockFile(file);
+    const lockPath = lockFile(file);
     const old = [`${lockPath}.${randomUUID()}.tmp`, `${lockPath}.${randomUUID()}.stale`, `${lockPath}.takeover.${randomUUID()}.tmp`];
     const kept = [`${lockPath}.${randomUUID()}.tmp`, `${lockPath}.notes`, join(dir, `other.db.instance.${randomUUID()}.tmp`)];
     const past = new Date(Date.now() - 120_000);
@@ -819,14 +831,14 @@ describe("acquireInstanceLock across processes", () => {
     try {
       expect(await next()).toBe("held");
       main.release();
-      expect(existsSync(instanceLockFile(file))).toBe(true);
+      expect(existsSync(lockFile(file))).toBe(true);
       const other = start(childScript(), 0);
       expect(await other.line).toBe("lost:instance-locked");
       other.child.stdin?.end();
       const workerHealth = next();
       worker.postMessage("release");
       expect(await workerHealth).toEqual({ ok: true });
-      expect(existsSync(instanceLockFile(file))).toBe(false);
+      expect(existsSync(lockFile(file))).toBe(false);
     } finally {
       await worker.terminate();
     }
@@ -843,7 +855,7 @@ describe("acquireInstanceLock across processes", () => {
 
     holder.child.kill("SIGKILL");
     await exited(holder.child);
-    expect(existsSync(instanceLockFile(file))).toBe(true);
+    expect(existsSync(lockFile(file))).toBe(true);
 
     take(file);
     expect(readRecord().pid).toBe(process.pid);
@@ -880,7 +892,7 @@ describe("acquireInstanceLock across processes", () => {
     for (const ending of ["process.exit(3);", "setTimeout(() => { throw new Error(\"boom\"); }, 10);"]) {
       const run = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", endingScript(ending), file], { encoding: "utf8", timeout: 15_000 });
       expect(run.status).not.toBe(0);
-      expect(existsSync(instanceLockFile(file))).toBe(false);
+      expect(existsSync(lockFile(file))).toBe(false);
     }
   }, 20_000);
 
@@ -898,7 +910,7 @@ describe("acquireInstanceLock across processes", () => {
 
   it("lets exactly one of two processes win the race for a free lock", async () => {
     for (let round = 0; round < 3; round++) {
-      expect((await race(() => rmSync(instanceLockFile(file), { force: true }))).lines).toEqual(["lost:instance-locked", "won"]);
+      expect((await race(() => rmSync(lockFile(file), { force: true }))).lines).toEqual(["lost:instance-locked", "won"]);
     }
   }, 30_000);
 
@@ -915,7 +927,7 @@ describe("acquireInstanceLock across processes", () => {
       const { lines, record } = await race(() => writeRecord({ startedAt: stale, heartbeatAt: stale }), 4);
       expect(lines).toEqual(["lost:instance-locked", "lost:instance-locked", "lost:instance-locked", "won"]);
       expect(record.heartbeatAt).not.toBe(stale);
-      expect(existsSync(instanceLockFile(file))).toBe(false);
+      expect(existsSync(lockFile(file))).toBe(false);
     }
   }, 60_000);
 

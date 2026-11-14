@@ -140,13 +140,15 @@ function bootId(): string {
  * through symlinks, including ones whose target does not exist yet, and with each `..` applied
  * to the directory a symlink leads to, as the system opens the file, so that every spelling of
  * one database names the same lock before and after the database file is created. A SQLite
- * `file:` URI names the lock of the file in its path. The lock also
+ * `file:` URI names the lock of the file in its path. `undefined` for a name that takes no lock
+ * (see {@link acquireInstanceLock}): an in-memory or temporary database. The lock also
  * writes short-lived siblings whose names start with this path; a process that ends abruptly
  * can leave one behind, and the next process to take the lock removes those older than the TTL.
  * None of them belongs in a replica, snapshot or backup of the database.
  */
-export function instanceLockFile(file: string): string {
-  return `${canonicalPath(databasePath(file) ?? file)}.instance`;
+export function instanceLockFile(file: string): string | undefined {
+  const path = databasePath(file);
+  return path === undefined ? undefined : `${canonicalPath(path)}.instance`;
 }
 
 /**
@@ -185,9 +187,8 @@ export function instanceLockFile(file: string): string {
  */
 export function acquireInstanceLock(file: string, opts: InstanceLockOptions): InstanceLock {
   const timing = timingOf(opts);
-  const path = databasePath(file);
-  if (path === undefined) return UNLOCKED;
-  const lockPath = `${canonicalPath(path)}.instance`;
+  const lockPath = instanceLockFile(file);
+  if (lockPath === undefined) return UNLOCKED;
   const current = holders.get(lockPath);
   if (current !== undefined && !current.health.ok) holders.delete(lockPath);
   const holder = current?.health.ok === true ? current : take(file, lockPath, opts, timing);
