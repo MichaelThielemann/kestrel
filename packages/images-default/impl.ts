@@ -1128,15 +1128,12 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const oldFile = fileOf(row);
       const retired = await db.createOne<Retired>(RETIRED, { mediaId, file: oldFile, slot: slotOf(mediaId, oldFile), retiredAt: now() });
       if (isErr(retired) && retired.error.code !== "CONFLICT") return retired;
-      if (config.publicCopy !== undefined) {
-        const overwritten = await putCopyHeld(lease, oldFile, original.data, original.publishedType);
-        if (isErr(overwritten)) return overwritten;
-        if (overwritten.value === "lost") return ok({ changed });
-      }
       const fresh = newRow(item, size, decodable, ow, oh, framing);
       const heldBefore = await db.findOne<Retired>(RETIRED, { slot: slotOf(mediaId, fileOf(fresh)) });
       if (isErr(heldBefore)) return heldBefore;
       const renders = (row.renders ?? 0) + (heldBefore.value === null ? 0 : 1);
+      const may = await mayWrite(lease, false);
+      if (isErr(may) || !may.value) return isErr(may) ? may : ok({ changed });
       const replanned = await updateAsRead(row, { key: fresh.key, format: fresh.format, spec: fresh.spec, width: fresh.width, height: fresh.height, bytes: 0, state: "planned", error: fresh.error, attempts: 0, updatedAt: now(), crop: fresh.crop, renderedCrop: "", renders, originalWidth: fresh.originalWidth, originalHeight: fresh.originalHeight });
       if (isErr(replanned)) return replanned;
       if (replanned.value === null) {
@@ -1149,6 +1146,11 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       }
       const current = await db.deleteMany(RETIRED, { slot: slotOf(mediaId, fileOf(replanned.value)) });
       if (isErr(current)) return current;
+      if (config.publicCopy !== undefined) {
+        const overwritten = await putCopyHeld(lease, oldFile, original.data, original.publishedType);
+        if (isErr(overwritten)) return overwritten;
+        if (overwritten.value === "lost") return ok({ changed });
+      }
       toPlace.push(replanned.value);
     }
 

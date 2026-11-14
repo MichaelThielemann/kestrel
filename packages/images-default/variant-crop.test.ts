@@ -551,6 +551,38 @@ describe("images/default variants[].crop in images.attach", () => {
     for (const open of [full, small]) await open.close();
   });
 
+  it("keeps the listing, the origin and the public copy on the listed crop when the row update of a format change fails, and moves the row on a retry", async () => {
+    const w = await world();
+    const webp = await w.open([SQUARE]);
+    expectOk(await webp.setFraming("m1", RIGHT_CROP));
+    expectOk(await webp.generate("m1"));
+    const before = (await attached(webp)).get("square")!;
+    const rendered = await renderedBytes(webp, "m1", "square.webp");
+    await webp.close();
+
+    const updateMany = w.db.updateMany.bind(w.db);
+    let failMove = true;
+    w.db.updateMany = async (collection, filter, patch, ...rest) => {
+      if (failMove && collection === VARIANTS && "key" in patch) {
+        failMove = false;
+        return err(failure("TRANSIENT", "db unavailable"));
+      }
+      return updateMany(collection, filter, patch, ...rest);
+    };
+    const changed = await w.open([{ ...SQUARE, format: "original" }]);
+    expect((await changed.plan(["m1"])).ok).toBe(false);
+    expect((await attached(changed)).get("square")).toEqual(before);
+    expect(await renderedBytes(changed, "m1", "square.webp")).toEqual(rendered);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(rendered);
+
+    expectOk(await changed.plan(["m1"]));
+    expect((await attached(changed)).get("square")).toMatchObject({ state: "pending", crop: null, path: "/media/m1/variants/square.jpg" });
+    const original = expectOk(await w.media.load("m1"))!.data;
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(original);
+    expect(w.blobs.blobs.has("media-variants/m1/square.webp")).toBe(false);
+    await changed.close();
+  });
+
   it("keeps the path and raises no second images.variantsChanged when syncPublic meets a public copy another instance rewrote while it listed", async () => {
     const w = await world();
     let duringPrivateList: (() => Promise<void>) | null = null;
