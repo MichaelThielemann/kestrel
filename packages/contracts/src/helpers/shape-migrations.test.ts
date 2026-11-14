@@ -224,6 +224,18 @@ describe("shape-migrations: the run loop", () => {
     expect(expectOk(await storageVersionOf(db, "things/default"))).toMatchObject({ version: "6.0.0", migrations: ["things:new-keys"] });
   });
 
+  it("detects without planning when plan is off", async () => {
+    const order: string[] = [];
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    await seedThings(db, blobs, 2);
+    const planned: ShapeMigration = { ...moveThings(order), async plan() { order.push("plan"); return ok({ counts: {}, notes: [] }); } };
+    const report = expectOk(await runShapeMigrations({ storages: [storage("things/default", [planned])], db, blobs, apply: false, plan: false, blobWrites: true }));
+    expect(report.modules[0]!.migrations[0]).toMatchObject({ state: "pending", blocked: "plan-only", detected: { pending: 2 } });
+    expect(report.modules[0]!.migrations[0]!.plan).toBeUndefined();
+    expect(order).toEqual(["detect things:new-keys"]);
+  });
+
   it("writes no version row when apply is off and nothing is pending", async () => {
     const db = createFakePersistence();
     const counter = { writes: 0, crashAt: null };
@@ -326,6 +338,19 @@ describe("shape-migrations: the start-up guard", () => {
     expect(refused.message).toMatch(/never runs at start-up/);
     expect([...blobs.map.keys()]).toEqual(before);
     expect(expectOk(await storageVersionOf(db, "things/default"))).toBeNull();
+  });
+
+  it("detects without planning, in check mode and in apply mode", async () => {
+    const order: string[] = [];
+    const db = createFakePersistence();
+    const blobs = memoryBlobs();
+    await seedThings(db, blobs, 2);
+    const planned: ShapeMigration = { ...moveThings(order), async plan() { order.push("plan"); return ok({ counts: {}, notes: [] }); } };
+    for (const mode of ["check", "apply"] as const) {
+      const refused = expectErr(await guardStorage(storage("things/default", [planned]), { db, blobs, mode }), "STORAGE_REFUSED");
+      expect(refused.message).toContain("things:new-keys");
+    }
+    expect(order).toEqual(["detect things:new-keys", "detect things:new-keys"]);
   });
 
   it("runs a migration without blob writes in apply mode, and refuses it in check mode", async () => {

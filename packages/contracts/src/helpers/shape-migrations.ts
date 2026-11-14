@@ -177,6 +177,8 @@ export interface RunOptions {
   apply: boolean;
   /** With `apply: false`, still write the version row of a module none of whose migrations found anything; the start-up guard sets it. */
   recordWhenCurrent?: boolean;
+  /** `false` skips each pending migration's `plan`, so the report carries no `plan`; the start-up guard sets it. Default `true`. */
+  plan?: boolean;
   blobWrites: boolean;
   answers?: Readonly<Record<string, string>>;
   now?: () => number;
@@ -325,8 +327,8 @@ function contextOf(options: RunOptions): MigrationContext {
  * Brings each module's stored data to the shape of this release. Modules run in dependency order, a module's
  * migrations by `introducedIn`. A module's version row is read first: equal to `version` means nothing runs; newer
  * than `version`, or older than `convertsFrom`, leaves the module untouched (`too-new` / `too-old`). Otherwise every
- * migration introduced after the stored version (all of them when there is no row) is detected and, when allowed,
- * planned, applied and verified. The version row is written only after every pending migration of the module has
+ * migration introduced after the stored version (all of them when there is no row) is detected and, when it found
+ * something, planned unless `plan` is `false`, and when allowed applied and verified. The version row is written only after every pending migration of the module has
  * been verified, and with `apply: false` only when `recordWhenCurrent` is set and nothing was pending. A failing `apply` or `verify` ends the run with `Err`; rerunning continues where it stopped.
  */
 export async function runShapeMigrations(options: RunOptions): Promise<Result<RunReport, ShapeMigrationError>> {
@@ -362,10 +364,12 @@ export async function runShapeMigrations(options: RunOptions): Promise<Result<Ru
       run.migrations.push(entry);
       if (detected.value.pending === 0) continue;
       entry.state = "pending";
-      const planned = await migration.plan(ctx);
-      if (isErr(planned)) return planned;
-      entry.plan = planned.value;
       const blocked = !options.apply ? "plan-only" : waiting ? "earlier-pending" : dependencyPending ? "dependency-pending" : migration.blobWrites && !options.blobWrites ? "blob-writes" : undefined;
+      if (options.plan !== false) {
+        const planned = await migration.plan(ctx);
+        if (isErr(planned)) return planned;
+        entry.plan = planned.value;
+      }
       if (blocked !== undefined) {
         entry.blocked = blocked;
         waiting = true;
@@ -419,12 +423,13 @@ export function refusalOf(run: ModuleRun, mode: StorageMigrationsMode): string |
 
 /**
  * The start-up guard of a module with storage migrations. `check` detects and refuses data in an old form;
- * `apply` also runs the migrations without blob writes. A migration with blob writes never runs here. On data
+ * `apply` also runs the migrations without blob writes. A migration with blob writes never runs here, and no
+ * migration is planned, so a refusal costs only the migrations' `detect`. On data
  * that needs nothing the module's version row is recorded. The refusal is `STORAGE_REFUSED`, its message names
  * the migration ids and the command that runs them.
  */
 export async function guardStorage(storage: ModuleStorage, options: { db: Persistence; blobs: Blobstore; mode: StorageMigrationsMode; now?: () => number }): Promise<Result<ModuleRun, ShapeMigrationError>> {
-  const report = await runShapeMigrations({ storages: [storage], db: options.db, blobs: options.blobs, apply: options.mode === "apply", recordWhenCurrent: true, blobWrites: false, ...(options.now === undefined ? {} : { now: options.now }) });
+  const report = await runShapeMigrations({ storages: [storage], db: options.db, blobs: options.blobs, apply: options.mode === "apply", recordWhenCurrent: true, plan: false, blobWrites: false, ...(options.now === undefined ? {} : { now: options.now }) });
   if (isErr(report)) return report;
   const run = report.value.modules[0]!;
   const refusal = refusalOf(run, options.mode);

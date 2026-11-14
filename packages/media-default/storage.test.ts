@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createBlobstoreFilesystem } from "@michaelthielemann/kestrel-blobstore-filesystem/impl";
 import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { err, failure } from "@michaelthielemann/kestrel-contracts/errors";
 import { PERSISTENCE, type Document, type Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { guardStorage, runShapeMigrations, storageVersionOf } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
@@ -112,6 +113,27 @@ async function snapshot(db: Persistence, blobs: Blobstore) {
     version: version === null ? null : [version.version, version.migrations],
   };
 }
+
+function reading(blobs: Blobstore, reads: string[]): Blobstore {
+  return {
+    put: (key, data, options) => blobs.put(key, data, options),
+    get: (key) => {
+      reads.push(key);
+      return blobs.get(key);
+    },
+    remove: (key) => blobs.remove(key),
+    move: (from, to) => blobs.move(from, to),
+    list: (prefix) => blobs.list(prefix),
+  };
+}
+
+const unreachable: Blobstore = {
+  put: async () => err(failure("TRANSIENT", "blob store unreachable")),
+  get: async () => err(failure("TRANSIENT", "blob store unreachable")),
+  remove: async () => err(failure("TRANSIENT", "blob store unreachable")),
+  move: async () => err(failure("TRANSIENT", "blob store unreachable")),
+  list: async () => err(failure("TRANSIENT", "blob store unreachable")),
+};
 
 function deps(db: Persistence, blobs: Blobstore) {
   return {
@@ -293,6 +315,16 @@ describe("media-default storage: the start-up guard", () => {
   it("refuses 5.x data in check mode, naming the migration and the command", async () => {
     const { db, blobs } = await oldStore();
     await expect(module.setup(configSchema.parse({}), deps(db, blobs))).rejects.toThrow(/media-default:id-key-layout .*kestrel upgrade migrate --db <file> --blobs-dir <dir>/);
+  });
+
+  it("refuses 5.x data without reading a blob, also while the blob store answers only errors", async () => {
+    const { db, blobs } = await oldStore();
+    for (const storageMigrations of ["check", "apply"] as const) {
+      const reads: string[] = [];
+      await expect(module.setup(configSchema.parse({ storageMigrations }), deps(db, reading(blobs, reads)))).rejects.toThrow(/media-default:id-key-layout .*kestrel upgrade migrate/);
+      expect(reads).toEqual([]);
+      await expect(module.setup(configSchema.parse({ storageMigrations }), deps(db, unreachable))).rejects.toThrow(/media-default:id-key-layout .*kestrel upgrade migrate/);
+    }
   });
 
   it("never runs the conversion at start-up, also with storageMigrations: apply", async () => {
