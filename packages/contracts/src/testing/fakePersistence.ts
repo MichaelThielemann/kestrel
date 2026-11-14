@@ -5,7 +5,7 @@ import type { AtomicOutcome, AtomicScopeInfo, AtomicVerdict } from "@michaelthie
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { err, failure, ok, type Result } from "../errors.ts";
 import { fieldDefinition } from "../helpers/persistence.ts";
-import type { Document, FieldDefinition, FieldType, Filter, FindOptions, NewDocument, Page, Persistence, PersistenceError, Schema } from "../persistence.ts";
+import type { Document, FieldDefinition, FieldType, Filter, FindManyOptions, NewDocument, Page, PageWithoutTotal, Persistence, PersistenceError, Schema } from "../persistence.ts";
 
 type Row = Record<string, unknown>;
 type SqlValue = string | number | null;
@@ -118,7 +118,7 @@ function matchesCondition(column: Column, actual: SqlValue, op: string, expected
 
 export function matchesFilter(doc: Row, filter: Filter, schema?: Schema): boolean {
   return Object.entries(filter).every(([field, expected]) => {
-    if (schema && field !== "id" && !(field in schema)) throw new Error(`fakePersistence: unknown field "${field}"`);
+    if (schema && field !== "id" && !Object.hasOwn(schema, field)) throw new Error(`fakePersistence: unknown field "${field}"`);
     const column = columnOf(schema, field, doc[field]);
     const encoded = encode(column, doc[field]);
     return Object.entries(isCondition(expected) ? expected : { eq: expected }).every(([op, value]) => matchesCondition(column, encoded, op, value));
@@ -221,7 +221,7 @@ export function createFakePersistence(): FakePersistence {
   };
   const select = (collection: string, filter: Filter): Row[] => selectEntries(collection, filter).map(([, row]) => row);
   const sortKey = (schema: Schema, field: string, row: Row): SqlValue => {
-    if (field !== "id" && !(field in schema)) throw new Error(`fakePersistence: unknown field "${field}"`);
+    if (field !== "id" && !Object.hasOwn(schema, field)) throw new Error(`fakePersistence: unknown field "${field}"`);
     return encode(columnOf(schema, field, row[field]), row[field]);
   };
   const uniqueViolation = (collection: string, row: Row, exceptId: string | undefined): PersistenceError | null => {
@@ -241,7 +241,7 @@ export function createFakePersistence(): FakePersistence {
   const normalize = (schema: Schema, patch: Row): Row => {
     const out: Row = {};
     for (const [field, value] of Object.entries(patch)) {
-      if (field !== "id" && !(field in schema)) throw new Error(`fakePersistence: unknown field "${field}"`);
+      if (field !== "id" && !Object.hasOwn(schema, field)) throw new Error(`fakePersistence: unknown field "${field}"`);
       out[field] = value === undefined ? null : clone(value);
     }
     return out;
@@ -261,7 +261,7 @@ export function createFakePersistence(): FakePersistence {
       return ok(cloneAs<T>(row));
     });
 
-  const runFakeScope = async (body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
+  const runFakeScope = async (info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
     const failedPhase = pendingScopeFailure;
     pendingScopeFailure = null;
     if (failedPhase === "begin") return { kind: "failed", phase: "begin", error: failure("TRANSIENT", "fakePersistence: injected begin failure") };
@@ -288,7 +288,7 @@ export function createFakePersistence(): FakePersistence {
     if (timedOut) {
       restoreCollections(snapshot);
       store.state = "rolled-back";
-      return { kind: "failed", phase: "timeout", error: failure("TRANSIENT", "fakePersistence: atomic scope timed out") };
+      return { kind: "failed", phase: "timeout", error: failure("TRANSIENT", "fakePersistence: atomic scope timed out", { details: { reason: "scope-timeout", pipeline: info.pipeline } }) };
     }
     if (verdict === "rollback") {
       restoreCollections(snapshot);
@@ -306,15 +306,35 @@ export function createFakePersistence(): FakePersistence {
     return { kind: "settled", verdict: "commit" };
   };
 
-  const scope = async (_info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
+  const scope = async (info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
     if (inScope()) {
       return { kind: "failed", phase: "begin", error: failure("INTERNAL", "fakePersistence: an atomic scope is already open in this call chain") };
     }
-    return enqueue(() => runFakeScope(body)).catch((cause: unknown): AtomicOutcome => {
+    return enqueue(() => runFakeScope(info, body)).catch((cause: unknown): AtomicOutcome => {
       if (cause instanceof AcquireTimeout) return { kind: "failed", phase: "begin", error: timedOutWaiting() };
       throw cause;
     });
   };
+
+  function findMany<T extends Document>(collection: string, filter: Filter, options: FindManyOptions & { withTotal: false }): Promise<Result<PageWithoutTotal<T>, PersistenceError>>;
+  function findMany<T extends Document>(collection: string, filter: Filter, options?: FindManyOptions & { withTotal?: true | undefined }): Promise<Result<Page<T>, PersistenceError>>;
+  function findMany<T extends Document>(collection: string, filter: Filter, options?: FindManyOptions): Promise<Result<PageWithoutTotal<T> & { total?: number }, PersistenceError>>;
+  function findMany<T extends Document>(collection: string, filter: Filter, options: FindManyOptions = {}): Promise<Result<PageWithoutTotal<T> & { total?: number }, PersistenceError>> {
+    return routed(collection, () => {
+      const injectedError = injected();
+      if (injectedError) return err(injectedError);
+      const { schema } = table(collection);
+      let rows = select(collection, filter);
+      const total = rows.length;
+      for (const [field, dir] of Object.entries(options.sort ?? {}).reverse()) {
+        rows = [...rows].sort((a, b) => (dir === "asc" ? 1 : -1) * compareNullable(sortKey(schema, field, a), sortKey(schema, field, b)));
+      }
+      const offset = options.offset ?? 0;
+      rows = rows.slice(offset, options.limit === undefined ? undefined : offset + options.limit);
+      const items = rows.map((r) => cloneAs<T>(r));
+      return ok(options.withTotal === false ? { items } : { items, total });
+    });
+  }
 
   return {
     failNext(code) {
@@ -380,21 +400,7 @@ export function createFakePersistence(): FakePersistence {
         return ok(row ? cloneAs<T>(row) : null);
       });
     },
-    findMany<T extends Document>(collection: string, filter: Filter, options: FindOptions = {}): Promise<Result<Page<T>, PersistenceError>> {
-      return routed(collection, () => {
-        const injectedError = injected();
-        if (injectedError) return err(injectedError);
-        const { schema } = table(collection);
-        let rows = select(collection, filter);
-        const total = rows.length;
-        for (const [field, dir] of Object.entries(options.sort ?? {}).reverse()) {
-          rows = [...rows].sort((a, b) => (dir === "asc" ? 1 : -1) * compareNullable(sortKey(schema, field, a), sortKey(schema, field, b)));
-        }
-        const offset = options.offset ?? 0;
-        rows = rows.slice(offset, options.limit === undefined ? undefined : offset + options.limit);
-        return ok({ items: rows.map((r) => cloneAs<T>(r)), total });
-      });
-    },
+    findMany,
     count(collection, filter) {
       return routed(collection, () => {
         const injectedError = injected();

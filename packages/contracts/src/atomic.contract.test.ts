@@ -201,6 +201,21 @@ export function atomicScopeTests(make: () => Promise<AtomicScopeFixture>): void 
       await close();
     });
 
+    it("names the scope's pipeline and the reason on the timeout error", async () => {
+      const { db, scope, close } = await make();
+      expectOk(await db.ensureCollection("rows", { name: "string" }));
+      const outcome = await scope({ pipeline: "publish", group: 2 }, async () => {
+        await new Promise((r) => setTimeout(r, 1000));
+        return "commit";
+      });
+      expect(outcome.kind).toBe("failed");
+      if (outcome.kind !== "failed") return;
+      expect(outcome.phase).toBe("timeout");
+      expect(outcome.error).toMatchObject({ code: "TRANSIENT", status: 503, retryable: true });
+      expect(outcome.error.details).toEqual({ reason: "scope-timeout", pipeline: "publish" });
+      await close();
+    });
+
     it("a write scheduled from inside a timed-out scope's context, but not yet run when it settled, writes nothing", async () => {
       const { db, scope, close } = await make();
       expectOk(await db.ensureCollection("rows", { name: "string" }));
@@ -252,7 +267,10 @@ export function atomicScopeTests(make: () => Promise<AtomicScopeFixture>): void 
         return "commit";
       });
       expect(waiter.kind).toBe("failed");
-      if (waiter.kind === "failed") expect(waiter.phase).toBe("begin");
+      if (waiter.kind === "failed") {
+        expect(waiter.phase).toBe("begin");
+        expect(waiter.error.details?.reason).toBeUndefined();
+      }
       expect(waiterRan).toBe(false);
       await holder;
       expect(expectOk(await db.findOne<Row>("rows", { id: "holder" }))?.name).toBe("holder");

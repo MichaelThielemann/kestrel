@@ -55,7 +55,7 @@ export async function scan<T extends Document>(db: Persistence, collection: stri
   const out: T[] = [];
   let filter: Record<string, unknown> = { id: { gte: prefix } };
   for (;;) {
-    const page = await db.findMany<T>(collection, filter, { sort: { id: "asc" }, limit: SCAN_PAGE });
+    const page = await db.findMany<T>(collection, filter, { sort: { id: "asc" }, limit: SCAN_PAGE, withTotal: false });
     if (isErr(page)) return page;
     for (const row of page.value.items) {
       if (!row.id.startsWith(prefix)) return ok(out);

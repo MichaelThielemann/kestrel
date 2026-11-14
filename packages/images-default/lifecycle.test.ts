@@ -2,6 +2,7 @@ import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { createFakeMedia, type FakeMedia, type FakeMediaInput } from "@michaelthielemann/kestrel-contracts/testing/fakeMedia";
+import type { Document, Filter, FindOptions } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { failure } from "@michaelthielemann/kestrel/errors";
@@ -217,13 +218,13 @@ describe("images/default: images.syncPublic never removes a live variant", { tim
     const data = await jpeg(400, 300);
     const findMany = w.db.findMany.bind(w.db);
     let fired = false;
-    w.db.findMany = async (collection, filter, options) => {
+    w.db.findMany = async <T extends Document>(collection: string, filter: Filter, options?: FindOptions) => {
       if (!fired && collection === VARIANTS) {
         fired = true;
         await seed(w, "fresh", data);
         expectOk(await other.plan(["fresh"]));
       }
-      return findMany(collection, filter, options);
+      return findMany<T>(collection, filter, options);
     };
     const removed = recordRemovals(w);
     expectOk(await w.images.syncPublic());

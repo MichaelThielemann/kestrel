@@ -35,6 +35,18 @@ reports the *extended* result code in `errcode` (a primary-key collision is 1555
 masks it with `0xff` to get the primary code: 5 `SQLITE_BUSY`, 6 `SQLITE_LOCKED`, 19
 `SQLITE_CONSTRAINT`.
 
+**Statement cache.** Each connection keeps up to 256 prepared statements, keyed by their SQL text, and
+drops the least recently used one beyond that. A statement's text depends on the collection, the filter's
+fields and operators, the length of an `in` list and the sort, never on the values: `LIMIT` and `OFFSET`
+are bound parameters, so pages of any size share one statement. `ensureCollection` and `close()` empty
+the cache.
+
+**Counting.** `findMany` returns `total`, the number of matches, not only those on the page. A page that holds every
+match (no `limit` and no `offset`, or a short page at offset 0) knows its total without a second query;
+otherwise the module runs a `COUNT(*)` over the same filter. A call that passes `withTotal: false`
+gets the page without `total` and no count runs, which matters for a scan over a large collection that only
+walks pages.
+
 `persistence.snapshot:<file>` writes a transactionally consistent copy via
 `VACUUM INTO` (safe while writes are in flight) – back that file up, not the live database.
 `persistence.checkpoint` folds the WAL into the main file. Both are `Promise<void>`, routed through
@@ -67,7 +79,9 @@ independent budgets bound the wait: `acquireTimeoutMs` bounds how long a call or
 for its turn, `scopeTimeoutMs` bounds how long a group may hold the connection once it has it, timed
 from `BEGIN IMMEDIATE`. A call still waiting when `acquireTimeoutMs` runs out answers
 `Err(TRANSIENT)`, a group a failed `begin`, and neither runs afterwards, even if the connection
-frees up in that same moment. `checkpoint()` and `snapshot()` wait for their turn without this
+frees up in that same moment. A group that outlasts `scopeTimeoutMs` rolls back and answers
+`TRANSIENT` with `details: { reason: "scope-timeout", pipeline }`; the answer for a call or group that
+timed out waiting carries no `reason`. `checkpoint()` and `snapshot()` wait for their turn without this
 budget. `acquireTimeoutMs` defaults to `busyTimeoutMs + 10000` (`15000` when `busyTimeoutMs`
 is also left at its own default of `5000`). Setup rejects an explicit `acquireTimeoutMs` that does not
 exceed `busyTimeoutMs`, naming the key – `BEGIN IMMEDIATE` blocks the event loop for up to

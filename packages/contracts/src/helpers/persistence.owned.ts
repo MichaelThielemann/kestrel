@@ -1,4 +1,5 @@
-import type { Document, Filter, FindOptions, NewDocument, Persistence, Schema } from "../persistence.ts";
+import type { Document, Filter, FindManyOptions, NewDocument, Page, PageWithoutTotal, Persistence, PersistenceError, Schema } from "../persistence.ts";
+import type { Result } from "../errors.ts";
 
 /**
  * A view of `db` that reaches only `collections`. Any call naming another collection throws a wiring error
@@ -11,6 +12,13 @@ export function ownedPersistence(db: Persistence, owner: string, collections: re
   const assertOwn = (collection: string): void => {
     if (!own.has(collection)) throw new Error(`${owner}: collection "${collection}" is not one of this module's collections (${listed}); read another module's data through its contract`);
   };
+  function findMany<T extends Document>(collection: string, filter: Filter, options: FindManyOptions & { withTotal: false }): Promise<Result<PageWithoutTotal<T>, PersistenceError>>;
+  function findMany<T extends Document>(collection: string, filter: Filter, options?: FindManyOptions & { withTotal?: true | undefined }): Promise<Result<Page<T>, PersistenceError>>;
+  function findMany<T extends Document>(collection: string, filter: Filter, options?: FindManyOptions): Promise<Result<PageWithoutTotal<T> & { total?: number }, PersistenceError>>;
+  async function findMany<T extends Document>(collection: string, filter: Filter, options?: FindManyOptions): Promise<Result<PageWithoutTotal<T> & { total?: number }, PersistenceError>> {
+    assertOwn(collection);
+    return db.findMany<T>(collection, filter, options);
+  }
   return {
     async ensureCollection(name: string, schema: Schema) {
       assertOwn(name);
@@ -28,10 +36,7 @@ export function ownedPersistence(db: Persistence, owner: string, collections: re
       assertOwn(collection);
       return db.findOne<T>(collection, filter);
     },
-    async findMany<T extends Document>(collection: string, filter: Filter, options?: FindOptions) {
-      assertOwn(collection);
-      return db.findMany<T>(collection, filter, options);
-    },
+    findMany,
     async count(collection: string, filter: Filter) {
       assertOwn(collection);
       return db.count(collection, filter);

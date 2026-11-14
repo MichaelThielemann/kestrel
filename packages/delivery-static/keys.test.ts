@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createPersistenceSqlite } from "@michaelthielemann/kestrel-persistence-sqlite/impl";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
@@ -66,9 +66,13 @@ describe("delivery/static scan", () => {
     const under = Array.from({ length: 201 }, (_, i) => `T/x/${String(i).padStart(3, "0")}`);
     const after = Array.from({ length: 400 }, (_, i) => `T/y/${String(i).padStart(3, "0")}`);
     expectOk(await db.createMany<Document>("deps", [...under, ...after].map((id) => ({ id, note: "" }))));
-    const filters: unknown[] = [];
-    const spy: Persistence = { ...db, findMany: (collection, filter, options) => (filters.push(filter), db.findMany(collection, filter, options)) };
-    expect(expectOk(await scan<Document>(spy, "deps", "T/x/")).length).toBe(201);
+    const findMany = vi.spyOn(db, "findMany");
+    expect(expectOk(await scan<Document>(db, "deps", "T/x/")).length).toBe(201);
+    const filters = findMany.mock.calls.map(([, filter]) => filter);
     expect(filters).toEqual([{ id: { gte: "T/x/" } }, { id: { gt: "T/x/199" } }]);
+    expect(findMany.mock.calls.map(([, , options]) => options)).toEqual([
+      { sort: { id: "asc" }, limit: 200, withTotal: false },
+      { sort: { id: "asc" }, limit: 200, withTotal: false },
+    ]);
   });
 });

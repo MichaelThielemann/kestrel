@@ -202,6 +202,40 @@ export function persistenceContractTests(make: () => Promise<Persistence>) {
       expect(above.items.map((d) => d.id)).toEqual(["4", "1"]);
     });
 
+    describe("withTotal", () => {
+      it("counts every match, not only the page, when it is true or left out", async () => {
+        expectOk(await seed());
+        expect(expectOk(await db.findMany<Thing>("things", {}, { limit: 1 })).total).toBe(3);
+        expect(expectOk(await db.findMany<Thing>("things", { done: false }, { limit: 1, withTotal: true })).total).toBe(2);
+      });
+
+      it("returns the items without a total when it is false", async () => {
+        expectOk(await seed());
+        const page = expectOk(await db.findMany<Thing>("things", { done: false }, { sort: { id: "asc" }, limit: 1, withTotal: false }));
+        expect(page.items.map((d) => d.id)).toEqual(["a"]);
+        expect("total" in page).toBe(false);
+      });
+
+      it("types the result by the flag", async () => {
+        expectOk(await seed());
+        const counted = expectOk(await db.findMany<Thing>("things", {}));
+        const uncounted = expectOk(await db.findMany<Thing>("things", {}, { withTotal: false }));
+        const total: number = counted.total;
+        // @ts-expect-error a page requested without a total has none
+        void uncounted.total;
+        expect(total).toBe(3);
+      });
+    });
+
+    it("treats names that Object.prototype defines as unknown fields", async () => {
+      expectOk(await seed());
+      const sort: Record<string, "asc" | "desc"> = { ["constructor"]: "asc" as const };
+      await expect(db.findMany("things", {}, { sort })).rejects.toThrow(/unknown field "constructor"/);
+      await expect(db.findMany("things", { toString: 1 })).rejects.toThrow(/unknown field "toString"/);
+      await expect(db.findMany("things", { hasOwnProperty: { eq: 1 } })).rejects.toThrow(/unknown field "hasOwnProperty"/);
+      await expect(db.createOne("things", { name: "x", valueOf: 1 })).rejects.toThrow(/unknown field "valueOf"/);
+    });
+
     it("findMany sorts null fields first ascending and last descending", async () => {
       expectOk(await seed());
       expectOk(await db.createOne<Document>("things", { id: "d", name: "delta" }));

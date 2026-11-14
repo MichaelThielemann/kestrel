@@ -10,7 +10,10 @@ export interface AtomicScopeInfo {
 /** What the runner tells the scope when the group's steps are done: commit, or roll back. */
 export type AtomicVerdict = "commit" | "rollback";
 
-/** For `phase: "rollback"`, `original` carries the error that made the rollback necessary. */
+/**
+ * For `phase: "rollback"`, `original` carries the error that made the rollback necessary. For `phase: "timeout"`,
+ * `error.details` is `{ reason: "scope-timeout", pipeline }`, naming the pipeline whose group ran out of time.
+ */
 export type AtomicOutcome =
   | { kind: "settled"; verdict: AtomicVerdict }
   | { kind: "failed"; phase: "begin" | "commit" | "rollback" | "timeout"; error: KestrelError; original?: KestrelError };

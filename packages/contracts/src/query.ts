@@ -20,3 +20,12 @@ export interface Page<T> {
   items: T[];
   total: number;
 }
+
+/** What `Persistence.findMany` accepts beyond the shared query options. */
+export interface FindManyOptions extends FindOptions {
+  /** `false` returns the page without `total` and runs no count over the matches; `true` and an omitted value count them. */
+  withTotal?: boolean;
+}
+
+/** A page whose `total` was not requested: the same page, without the count. */
+export type PageWithoutTotal<T> = Pick<Page<T>, "items">;

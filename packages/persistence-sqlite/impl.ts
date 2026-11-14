@@ -2,14 +2,14 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
 import type { AtomicOutcome, AtomicScopeInfo, AtomicVerdict } from "@michaelthielemann/kestrel/atomic";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { ModuleHealth } from "@michaelthielemann/kestrel/defineModule";
 import { logWarn, silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { fieldDefinition } from "@michaelthielemann/kestrel-contracts/helpers/persistence";
-import type { Document, FieldDefinition, FieldType, Filter, FindOptions, NewDocument, Page, Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Document, FieldDefinition, FieldType, Filter, FindManyOptions, NewDocument, Page, PageWithoutTotal, Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
 
 export interface Config {
   file: string;
@@ -42,6 +42,9 @@ type Op = "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "in" | "like";
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const OPERATORS: Record<Op, string> = { eq: "=", ne: "!=", gt: ">", gte: ">=", lt: "<", lte: "<=", in: "IN", like: "LIKE" };
+
+/** How many prepared statements one connection keeps; the least recently used one is dropped beyond it. */
+export const STATEMENT_CACHE_LIMIT = 256;
 const COLUMN_TYPE: Record<FieldType, string> = { string: "TEXT", number: "REAL", boolean: "INTEGER", json: "TEXT" };
 
 function quote(identifier: string, what: string): string {
@@ -145,6 +148,23 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
   const als = new AsyncLocalStorage<ScopeStore>();
   let unusable = false;
 
+  const statements = new Map<string, StatementSync>();
+  const prepare = (sql: string): StatementSync => {
+    const cached = statements.get(sql);
+    if (cached !== undefined) {
+      statements.delete(sql);
+      statements.set(sql, cached);
+      return cached;
+    }
+    const statement = db.prepare(sql);
+    statements.set(sql, statement);
+    if (statements.size > STATEMENT_CACHE_LIMIT) {
+      const oldest = statements.keys().next();
+      if (!oldest.done) statements.delete(oldest.value);
+    }
+    return statement;
+  };
+
   let tail: Promise<void> = Promise.resolve();
   const enqueue = <T>(fn: () => Promise<T> | T, acquireMs?: number): Promise<T> => {
     let turn: "waiting" | "started" | "abandoned" = "waiting";
@@ -209,7 +229,8 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
   };
   const fieldType = (collection: string, field: string): FieldType | "id" => {
     if (field === "id") return "id";
-    const def = schemaOf(collection)[field];
+    const schema = schemaOf(collection);
+    const def = Object.hasOwn(schema, field) ? schema[field] : undefined;
     if (!def) throw new Error(`persistence/sqlite: unknown field "${field}" in collection "${collection}"`);
     return def.type;
   };
@@ -270,7 +291,7 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
   };
 
   const selectById = (collection: string, id: string): Result<Document | null, PersistenceError> => {
-    const row = run(() => db.prepare(`SELECT * FROM ${quote(collection, "collection")} WHERE "id" = ?`).get(id) as Row | undefined);
+    const row = run(() => prepare(`SELECT * FROM ${quote(collection, "collection")} WHERE "id" = ?`).get(id) as Row | undefined);
     if (isErr(row)) return row;
     return ok(row.value ? decode<Document>(collection, row.value) : null);
   };
@@ -282,7 +303,7 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
     const id = givenId ?? randomUUID();
     const columns = ["id", ...Object.keys(schema)];
     const values: SqlValue[] = [id, ...Object.entries(schema).map(([f, def]) => encode(def.type, fields[f]))];
-    const inserted = run(() => db.prepare(`INSERT INTO ${quote(collection, "collection")} (${columns.map((c) => quote(c, "field")).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`).run(...values));
+    const inserted = run(() => prepare(`INSERT INTO ${quote(collection, "collection")} (${columns.map((c) => quote(c, "field")).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`).run(...values));
     if (isErr(inserted)) {
       if (inserted.error.code !== "CONFLICT" || inserted.error.details?.field !== "id") return inserted;
       return err(failure("CONFLICT", `persistence/sqlite: "${collection}/${id}" already exists`, { cause: inserted.error.cause }));
@@ -311,7 +332,7 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
     return ok(out);
   };
 
-  const runScope = async (body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
+  const runScope = async (info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
     if (unusable) return { kind: "failed", phase: "begin", error: unusableError() };
     const beginError = execOrFail(db, "BEGIN IMMEDIATE", "begin");
     if (beginError) return { kind: "failed", phase: "begin", error: beginError };
@@ -359,17 +380,17 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
       logger.error("persistence/sqlite: rollback failed; the store is now unusable", { cause: rollbackError });
       return { kind: "failed", phase: "rollback", error: failure("INTERNAL", "persistence/sqlite: rollback failed", { cause: rollbackError }) };
     }
-    if (timedOut) return { kind: "failed", phase: "timeout", error: failure("TRANSIENT", "persistence/sqlite: atomic scope timed out") };
+    if (timedOut) return { kind: "failed", phase: "timeout", error: failure("TRANSIENT", "persistence/sqlite: atomic scope timed out", { details: { reason: "scope-timeout", pipeline: info.pipeline } }) };
     if (didThrow) throw thrown;
     return { kind: "settled", verdict: "rollback" };
   };
 
-  const scope = async (_info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
+  const scope = async (info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
     if (unusable) return { kind: "failed", phase: "begin", error: unusableError() };
     if (als.getStore() !== undefined) {
       return { kind: "failed", phase: "begin", error: failure("INTERNAL", "persistence/sqlite: an atomic scope is already open in this call chain") };
     }
-    return enqueue(() => runScope(body), acquireTimeoutMs).catch((cause: unknown): AtomicOutcome => {
+    return enqueue(() => runScope(info, body), acquireTimeoutMs).catch((cause: unknown): AtomicOutcome => {
       if (cause instanceof AcquireTimeout) return { kind: "failed", phase: "begin", error: timedOutWaiting() };
       throw cause;
     });
@@ -379,6 +400,35 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
     if (unusable) throw new UnusableStore();
     fn();
   };
+
+  function findMany<T extends Document>(collection: string, filter: Filter, options: FindManyOptions & { withTotal: false }): Promise<Result<PageWithoutTotal<T>, PersistenceError>>;
+  function findMany<T extends Document>(collection: string, filter: Filter, options?: FindManyOptions & { withTotal?: true | undefined }): Promise<Result<Page<T>, PersistenceError>>;
+  function findMany<T extends Document>(collection: string, filter: Filter, options?: FindManyOptions): Promise<Result<PageWithoutTotal<T> & { total?: number }, PersistenceError>>;
+  async function findMany<T extends Document>(collection: string, filter: Filter, options: FindManyOptions = {}): Promise<Result<PageWithoutTotal<T> & { total?: number }, PersistenceError>> {
+    return routed(collection, () => {
+      const table = quote(collection, "collection");
+      const w = where(collection, filter);
+      const order = Object.entries(options.sort ?? {}).map(([field, dir]) => {
+        fieldType(collection, field);
+        return `${quote(field, "field")} ${dir === "desc" ? "DESC" : "ASC"}`;
+      });
+      const params = [...w.params];
+      let sql = `SELECT * FROM ${table}${w.sql}`;
+      if (order.length > 0) sql += ` ORDER BY ${order.join(", ")}`;
+      if (options.limit !== undefined || options.offset !== undefined) {
+        sql += " LIMIT ? OFFSET ?";
+        params.push(options.limit ?? -1, options.offset ?? 0);
+      }
+      return run(() => {
+        const rows = prepare(sql).all(...params) as Row[];
+        const items = rows.map((r) => decode<T>(collection, r));
+        if (options.withTotal === false) return { items };
+        const whole = (options.offset ?? 0) === 0 && (options.limit === undefined || rows.length < options.limit);
+        const total = whole ? rows.length : boundaryCast<{ n: number }>(prepare(`SELECT COUNT(*) AS n FROM ${table}${w.sql}`).get(...w.params), "host").n;
+        return { items, total };
+      });
+    });
+  }
 
   return {
     checkpoint() {
@@ -408,6 +458,7 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
       return enqueue(whenUsable(run));
     },
     close() {
+      statements.clear();
       db.close();
     },
     scope,
@@ -445,6 +496,7 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
             }
           }
         });
+        statements.clear();
         if (isErr(created)) return created;
         schemas.set(name, definitions);
         return ok();
@@ -485,35 +537,18 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
     async findOne<T extends Document>(collection: string, filter: Filter): Promise<Result<T | null, PersistenceError>> {
       return routed(collection, () => {
         const w = where(collection, filter);
-        const row = run(() => db.prepare(`SELECT * FROM ${quote(collection, "collection")}${w.sql} LIMIT 1`).get(...w.params) as Row | undefined);
+        const row = run(() => prepare(`SELECT * FROM ${quote(collection, "collection")}${w.sql} LIMIT 1`).get(...w.params) as Row | undefined);
         if (isErr(row)) return row;
         return ok(row.value ? decode<T>(collection, row.value) : null);
       });
     },
 
-    async findMany<T extends Document>(collection: string, filter: Filter, options: FindOptions = {}): Promise<Result<Page<T>, PersistenceError>> {
-      return routed(collection, () => {
-        const table = quote(collection, "collection");
-        const w = where(collection, filter);
-        const order = Object.entries(options.sort ?? {}).map(([field, dir]) => {
-          fieldType(collection, field);
-          return `${quote(field, "field")} ${dir === "desc" ? "DESC" : "ASC"}`;
-        });
-        let sql = `SELECT * FROM ${table}${w.sql}`;
-        if (order.length > 0) sql += ` ORDER BY ${order.join(", ")}`;
-        if (options.limit !== undefined || options.offset !== undefined) sql += ` LIMIT ${options.limit ?? -1} OFFSET ${options.offset ?? 0}`;
-        return run(() => {
-          const rows = db.prepare(sql).all(...w.params) as Row[];
-          const total = boundaryCast<{ n: number }>(db.prepare(`SELECT COUNT(*) AS n FROM ${table}${w.sql}`).get(...w.params), "host").n;
-          return { items: rows.map((r) => decode<T>(collection, r)), total };
-        });
-      });
-    },
+    findMany,
 
     async count(collection, filter) {
       return routed(collection, () => {
         const w = where(collection, filter);
-        return run(() => boundaryCast<{ n: number }>(db.prepare(`SELECT COUNT(*) AS n FROM ${quote(collection, "collection")}${w.sql}`).get(...w.params), "host").n);
+        return run(() => boundaryCast<{ n: number }>(prepare(`SELECT COUNT(*) AS n FROM ${quote(collection, "collection")}${w.sql}`).get(...w.params), "host").n);
       });
     },
 
@@ -521,7 +556,7 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
       return routed(collection, () => {
         const set = setClause(collection, patch);
         if (set.sql !== "") {
-          const updated = run(() => db.prepare(`UPDATE ${quote(collection, "collection")} SET ${set.sql} WHERE "id" = ?`).run(...set.params, id));
+          const updated = run(() => prepare(`UPDATE ${quote(collection, "collection")} SET ${set.sql} WHERE "id" = ?`).run(...set.params, id));
           if (isErr(updated)) return updated;
         }
         const doc = selectById(collection, id);
@@ -536,13 +571,13 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
         const set = setClause(collection, patch);
         if (set.sql === "") return ok(0);
         const w = where(collection, filter);
-        return run(() => Number(db.prepare(`UPDATE ${quote(collection, "collection")} SET ${set.sql}${w.sql}`).run(...set.params, ...w.params).changes));
+        return run(() => Number(prepare(`UPDATE ${quote(collection, "collection")} SET ${set.sql}${w.sql}`).run(...set.params, ...w.params).changes));
       });
     },
 
     async deleteOne(collection, id) {
       return routed(collection, () => {
-        const deleted = run(() => db.prepare(`DELETE FROM ${quote(collection, "collection")} WHERE "id" = ?`).run(id));
+        const deleted = run(() => prepare(`DELETE FROM ${quote(collection, "collection")} WHERE "id" = ?`).run(id));
         if (isErr(deleted)) return deleted;
         return ok();
       });
@@ -551,18 +586,18 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
     async deleteMany(collection, filter) {
       return routed(collection, () => {
         const w = where(collection, filter);
-        return run(() => Number(db.prepare(`DELETE FROM ${quote(collection, "collection")}${w.sql}`).run(...w.params).changes));
+        return run(() => Number(prepare(`DELETE FROM ${quote(collection, "collection")}${w.sql}`).run(...w.params).changes));
       });
     },
   };
 }
 
 function isOperator(key: string): key is Op {
-  return key in OPERATORS;
+  return Object.hasOwn(OPERATORS, key);
 }
 
 function isCondition(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  return keys.length === 1 && keys[0] !== undefined && keys[0] in OPERATORS;
+  return keys.length === 1 && keys[0] !== undefined && isOperator(keys[0]);
 }
