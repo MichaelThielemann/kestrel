@@ -221,7 +221,8 @@ again and changes nothing; the sessions stay. When it stops
 before its first write to the app's store (a copy or removal in step 4 or 5, or the promotion or placement in
 step 7), it says the store is unchanged and starts the app again; after that write, until step 7 started the app,
 the app stays stopped and the output says so, naming the `pre-restore` backup when there is one. Once the app was started, the output says
-that instead: an app that does not become ready ends the restore with exit 1, while a check that fails once the
+that instead: an app that does not become ready, or one that starts a generation sorting before the promoted one
+(see the clock checks below), ends the restore with exit 1, while a check that fails once the
 app runs again, such as reading its acknowledgement or writing a journal entry, is a warning: the restore ends
 with exit 0, `unconfirmed` when the acknowledgement could not be read.
 
