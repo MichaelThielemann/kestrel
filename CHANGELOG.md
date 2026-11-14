@@ -904,12 +904,14 @@ Net changes since 5.8.2.
   `docs/upgrading.md` § Rule reference):
   - `authz/anonymous-read-only` (error, manual) names every entry of `authz-roles`' `anonymous` that is not a
     `<name>.read` permission, the entries boot now refuses.
-  - `pipelines/query-body-member` (warning, manual) names a step of the project's own modules that reads a
-    member of its `input` schema through `ctx.query` without declaring it in `describe().query`, and an
-    info finding names an HTTP pipeline running `migrations.apply`, whose `dry` is a body flag. A step built
-    by `stepFactory` is checked per argument, and a read by destructuring from `ctx.query` counts.
-  - `runtime/sort-field-grant` (info) names each HTTP pipeline running `content.list` or `media.list`, where
-    `sort` is now restricted to the fields the caller's grant names, and a name that is no field answers 400.
+  - `pipelines/query-body-member` (warning, manual) names a step of the project's own modules whose function reads
+    a member of its `input` schema from the query (`ctx.query`, or a `query` taken from the context) without declaring
+    it in `describe().query`, and every undeclared `input` member of a step on a `GET` or `HEAD` route, where the
+    query is the only place a member can come from. An info finding names an HTTP pipeline running
+    `migrations.apply`, whose `dry` is a body flag. A step built by `stepFactory` is checked per argument.
+  - `runtime/sort-field-grant` (info) names each HTTP pipeline ending a list with `authz.fields:<resource>?shape=list`,
+    where `sort` is now restricted to the fields the caller's grant names, and each running `content.list`, where a
+    name that is no field answers 400.
   - `runtime/user-cleanup-guard` (warning, manual) names an HTTP route running `audit.anonymize` or
     `revisions.reassignAuthor` without `authn.requireAbsentUser` before it.
 - `contracts`: `helpers/html-allowlist` holds the one allowlist for HTML shown to visitors: the lists

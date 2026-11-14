@@ -390,8 +390,8 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`runtime/restore-freshness`](#runtime-restore-freshness) | load | none (info) | `restoreOnStart` left on for `replication-sqlite`/`backup-blobstore` |
 | [`runtime/single-process`](#runtime-single-process) | load | none (info) | a `persistence-sqlite`, `replication-sqlite` or `backup-blobstore` entry, each of which takes the instance lock on its database file |
 | [`http/trusted-proxies`](#http-trusted-proxies) | load | none (info) | `http.trustProxy` or `http.trustedHeader` without `http.trustedProxies` |
-| [`pipelines/query-body-member`](#pipelines-query-body-member) | source | manual (warning) / none (info) | a step reading a member of its own input schema from the query without declaring it, and an HTTP pipeline running `migrations.apply` |
-| [`runtime/sort-field-grant`](#runtime-sort-field-grant) | load | none (info) | an HTTP pipeline running `content.list` or `media.list` |
+| [`pipelines/query-body-member`](#pipelines-query-body-member) | source | manual (warning) / none (info) | a step reading a member of its own input schema from the query without declaring it, every undeclared input member of a step on a `GET` or `HEAD` route, and an HTTP pipeline running `migrations.apply` |
+| [`runtime/sort-field-grant`](#runtime-sort-field-grant) | load | none (info) | an HTTP pipeline ending a list with `authz.fields:<resource>?shape=list`, and one running `content.list` |
 | [`runtime/user-cleanup-guard`](#runtime-user-cleanup-guard) | load | manual (warning) | an HTTP route running `audit.anonymize` or `revisions.reassignAuthor` without `authn.requireAbsentUser` before it |
 | [`delivery/dependents`](#delivery-dependents) | source | none (info) | `delivery-static` publishing on events without marking dependent outputs |
 | [`delivery/export-llms`](#delivery-export-llms) | load | auto / manual | a pipeline file naming the removed `delivery.exportLlms` |
@@ -867,14 +867,21 @@ migrations, because `dry` is a body flag. `content.create`, `content.set`, `cont
 `content.validate` declare `locale`, which stays valid in the query; a key the schema does not describe
 is still ignored.
 
-The rule reads the steps of the project's own modules: a step run by an HTTP pipeline whose source reads a
-member of its `input` schema through `ctx.query` and does not declare it in `query` gets a warning. A step
-built by `stepFactory` is checked with the description its `describe()` entry returns for the argument the
-pipeline gives it. Fix it by declaring the key in `describe().query`, or by reading it from the body and
-sending it there. It only sees the explicit reads `ctx.query.<key>`, `ctx.query["<key>"]` and a
-destructuring such as `const { <key> } = ctx.query`; a step that reads `ctx.payload.<member>` is refused the same way
-for a client that sends the member in the query. A second, informational finding names an HTTP pipeline
-that runs `migrations.apply`: send `dry` in the JSON body.
+The rule reads the steps of the project's own modules. A step run by an HTTP pipeline whose own function reads
+a member of its `input` schema through the query and does not declare it in `query` gets a warning. A `GET` or `HEAD`
+route has no body, so every member of the step's `input` schema that the step does not declare in `query`
+gets a warning there, whether or not the source reads it from the query or through `ctx.payload`. A step
+built by `stepFactory` is checked with the description its `describe()` entry gives for the argument the
+pipeline gives it, or with its static description. Fix it by declaring the key in `describe().query`, or
+by reading it from the body and sending it there.
+
+The source scan covers the function registered under the step's key in `steps()`, and the functions of the same
+file that function calls. It recognises `ctx.query.<key>`, `ctx.query["<key>"]`, a destructuring such as
+`const { <key> } = ctx.query`, and the same through a `query` taken from the context
+(`const { query } = ctx`) or assigned from `ctx.query`. A variable that is only named `query` does not count. On a route
+that takes a body, a step that reads `ctx.payload.<member>` is refused the same way for a client that
+sends the member in the query, but the scan cannot see that. A second, informational finding names an
+HTTP pipeline that runs `migrations.apply`: send `dry` in the JSON body.
 
 #### runtime-sort-field-grant
 A list can be ordered by a field its caller never receives, which shows the order of what the field
@@ -883,9 +890,11 @@ to a caller whose grant does not name the `sort` field whole: a hidden field, a 
 only in part, a name that is no member. `id`, `createdAt` and `updatedAt` stay sortable for every
 caller, and a caller whose roles have no field grant for the resource sorts by anything. Independent of
 grants, `content.list` answers `400` to a sort that names something that is no field of the type, such
-as `constructor` or `toString`. The finding names each HTTP pipeline running `content.list` or
-`media.list`; it cannot see the sort values your clients send. Check them, and add each field a public list
-is sorted by to the grant of the callers who sort by it.
+as `constructor` or `toString`. The finding names each HTTP pipeline that ends a list with
+`authz.fields:<resource>?shape=list`, whichever step produces the list, and each that runs `content.list`;
+a pipeline that lists media without `authz.fields` sorts as before. It cannot see the sort values your
+clients send. Check them, and add each field a public list is sorted by to the grant of the callers who
+sort by it.
 
 #### runtime-user-cleanup-guard
 `audit.anonymize` clears every trace of one user id from the audit log, and `revisions.reassignAuthor`
