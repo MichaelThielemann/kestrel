@@ -1,7 +1,7 @@
 import type { KestrelError } from "./errors.ts";
 
 export interface AtomicScopeInfo {
-  /** The pipeline whose group is being run. For logging only. */
+  /** The pipeline whose group is being run. A provider names it in `error.details.pipeline` when the group times out. */
   pipeline: string;
   /** The 1-based ordinal of the group inside that pipeline. For logging only. */
   group: number;
