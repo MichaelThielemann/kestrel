@@ -54,6 +54,41 @@ either module sits in `modules`. Naming a contract whose provider depends on the
 or transitively — including a module that both `requires` and declares `before` on the same
 contract — is a contradiction and fails the boot as a dependency cycle, naming the path.
 
+### One process per database file
+
+`persistence-sqlite`, `replication-sqlite` and `backup-blobstore` keep a second process off the
+database file their `file` names. Each one takes the instance lock on that file as the first thing
+its `setup()` does: before it opens the file, applies a staged restore or rebuilds a missing file
+from the replica or the backup. A second process that boots on the same file while the first one
+runs therefore fails with `instance-locked` (see [Error codes](#error-codes)), naming the host and
+PID of the process that holds the file, and leaves the database, its `-wal` and `-shm`, a staged
+restore and the restore records next to it as they were.
+
+The lock is the file `<file>.instance` next to the database, never a row inside it. It is not part
+of a snapshot, a replica or a backup, and it is not restored with one: a fresh container that
+rebuilds the database from the replica takes a new lock of its own. The lock also writes
+short-lived siblings whose names start with `<file>.instance`; leave all of them out of copies of
+the data directory. An in-memory database (`:memory:`) takes no lock.
+
+The modules of one process that name the same file share one lock, so `replication-sqlite` and
+`persistence-sqlite`, or `replication-sqlite` and `backup-blobstore`, on one file boot together.
+The lock file is removed when the last of them stops. `stop()` tears `persistence-sqlite` down
+before `replication-sqlite`, so the lock is held until the replica has received its last WAL frames
+and its seal. A module whose `setup()` fails gives its share up before boot reports the failure.
+
+To run several processes on one file on purpose, for example with `events-queue`, set
+`allowConcurrentProcesses: true` on every module that names the file. The setting has to match:
+one module of the file with it and another without it fails the boot with
+`invalid-module-config`, naming both modules.
+
+`kestrel.health()` reports a lost lock as `ok: false` with `restartRequired: true` for each module
+that shares it: another instance took the lock over, or its file was gone after the process had
+not renewed it for longer than its TTL. The process no longer holds the database alone and has to
+be restarted.
+
+After a clean `stop()` the next start takes the lock at once. After an unclean stop it waits for
+the old lock to expire, as described under [Error codes](#error-codes).
+
 ### Host-supplied defaults
 
 A tool that writes module entries on the consumer's behalf can hand its values over as defaults
@@ -259,7 +294,11 @@ dataflow, hooks, output declarations, attach — and returns every problem as da
 `warnings`, `notChecked`) instead of throwing at the first one. `setup` has no default: `"none"`
 runs no module code beyond `configSchema`, `"all"` runs every module's `setup()`, and
 `{ only: [...] }` names the config `use` entries whose `setup()` may run, since `setup()`,
-`attach()` and `teardown()` reach whatever storage a module's config names. Each problem's `code` is
+`attach()` and `teardown()` reach whatever storage a module's config names. With `"all"`, the
+storage modules take the instance lock on the real database file while the check runs and give it
+up before `checkBoot()` returns, so a check beside a running process reports `instance-locked` and
+changes nothing there. `kestrel check --run-setup` runs those modules against a database in a
+scratch directory and never takes the lock of the real one. Each problem's `code` is
 covered by semver from 6.0.0 and a reader must handle one it does not recognize; `reason` and every
 message text are not covered and may change in any release.
 

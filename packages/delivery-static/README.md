@@ -348,7 +348,8 @@ restore. A value that differs from it is a restore: `delivery.checkBuild` record
 page outputs (see below) as done, marks every output as for a new build, stores the build, then stores the value,
 logs a warning and answers `restored: true`. When one of these steps fails, or the boot stops before the check runs,
 the next check told the same value handles the restore again. Nothing else counts as a restore: an unclean stop, a
-crash during a re-render backlog, a restart, a second process on the same database and replication-sqlite's
+crash during a re-render backlog, a restart, a second process on the same database (which persistence-sqlite,
+replication-sqlite and backup-blobstore refuse at boot unless `allowConcurrentProcesses` is set) and replication-sqlite's
 rebuild of a missing database file under `restoreOnStart` (on an ephemeral disk, every start) leave the stored build
 as it is. The one exception is a rebuild from a generation placed with `origin.json` (see "Replica layout" in the
 replication-sqlite README): replication-sqlite reports that one, and `delivery.checkBuild` renders every output again.
