@@ -1,6 +1,6 @@
 const MASK = "[redacted]";
 
-/** Replaces every registered secret, and its URL-encoded form, in text before it leaves the process. */
+/** Replaces every registered secret, and its URL-encoded and JSON-escaped forms, in text before it leaves the process. */
 export class Redactor {
   readonly #secrets = new Set<string>();
 
@@ -10,6 +10,8 @@ export class Redactor {
     this.#secrets.add(value);
     const encoded = encodeURIComponent(value);
     if (encoded !== value) this.#secrets.add(encoded);
+    const escaped = JSON.stringify(value).slice(1, -1);
+    if (escaped !== value) this.#secrets.add(escaped);
   }
 
   apply(text: string): string {
@@ -20,6 +22,6 @@ export class Redactor {
 
   /** Serializes a value as JSON with every secret masked. */
   json(value: unknown, space?: number): string {
-    return this.apply(JSON.stringify(value, null, space));
+    return this.apply(JSON.stringify(value, (_key, field: unknown) => (typeof field === "string" ? this.apply(field) : field), space));
   }
 }

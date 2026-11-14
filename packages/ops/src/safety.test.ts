@@ -58,6 +58,43 @@ describe("secrets", () => {
     }
   });
 
+  it("masks a credential holding quotes, backslashes and line breaks also where it appears JSON-escaped", async () => {
+    const bucket = new MemoryBucket("secret-escaped");
+    const inner = memoryStore(bucket);
+    const commandSecret = 'pw"with\\quote\nsecond-line-4e5f';
+    let failing = false;
+    const store = {
+      ...inner,
+      list: async (prefix: string) => {
+        if (failing && prefix === "media/") throw new Error(`listing refused for ${commandSecret}`);
+        return inner.list(prefix);
+      },
+    };
+    const h = createHarness({ store });
+    try {
+      const envFile = join(h.root, "kestrel.environments.json");
+      writeFileSync(envFile, readFileSync(envFile, "utf8").replace('"secretAccessKey": {\n            "env": "OPS_SECRET_KEY"\n          }', '"secretAccessKey": { "command": ["pass", "show", "kestrel/ops"] }'));
+      const runCommand = async () => `${commandSecret}\n`;
+      await h.app.start();
+      await h.app.seed();
+      failing = true;
+      const failed = await h.run(["backup", "create", "--json"], { runCommand, stores: () => store });
+      expect(failed.code).toBe(1);
+      expect(String(failed.json.message)).toContain("listing refused for [redacted]");
+      const texts = [...h.outputs];
+      for (const [key, object] of bucket.objects) if (key.startsWith(`${LOCATION}runs/`)) texts.push(new TextDecoder().decode(object.data));
+      for (const file of filesUnder(join(h.root, "state"))) if (!file.endsWith(".db")) texts.push(readFileSync(file, "utf8"));
+      expect(texts.some((text) => text.includes("listing refused for [redacted]"))).toBe(true);
+      for (const text of texts) {
+        expect(text).not.toContain(commandSecret);
+        expect(text).not.toContain(JSON.stringify(commandSecret).slice(1, -1));
+        expect(text).not.toContain("second-line-4e5f");
+      }
+    } finally {
+      await h.dispose();
+    }
+  });
+
   it("masks a known credential in the text of a question asked at the terminal", async () => {
     const h = createHarness({ store: memoryStore(new MemoryBucket("secret-prompt")) });
     try {
