@@ -82,6 +82,7 @@ async function oldStore(): Promise<{ db: Persistence; blobs: Blobstore }> {
     if (item.blob !== undefined) expectOk(await blobs.put(key, data));
   }
   expectOk(await blobs.put("media/stray/left-behind.png", bytes("no row names me")));
+  expectOk(await blobs.put("media/variants/b2/thumb.webp", bytes("a variant another module keeps under this prefix")));
   expectOk(await db.ensureCollection("revisions", { document: "string", data: "json" }));
   expectOk(await db.createOne("revisions", { id: "r1", document: "page-1", data: { hero: { media: "b2" }, gallery: ["c3", "e5"] } }));
   return { db, blobs };
@@ -234,7 +235,7 @@ describe("media-default storage: the start-up guard", () => {
     const { db, blobs } = await oldStore();
     await expect(module.setup(configSchema.parse({ storageMigrations: "apply" }), deps(db, blobs))).rejects.toThrow(/writes blobs never runs at start-up/);
     expect((await rowsOf(db)).every((r) => !r.key.startsWith(`media/${r.id}/`))).toBe(true);
-    expect(expectOk(await blobs.list("media/")).map((b) => b.key).sort()).toEqual(OLD_KEYS);
+    expect(expectOk(await blobs.list("media/")).map((b) => b.key).sort()).toEqual([...OLD_KEYS, "media/variants/b2/thumb.webp"].sort());
   });
 
   it("records the version row on a fresh store and starts", async () => {

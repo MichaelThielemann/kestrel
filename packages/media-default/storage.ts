@@ -125,7 +125,7 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
 
   const recordLegacyKeys = async (ctx: MigrationContext, rows: readonly Row[]): Promise<Result<number, ShapeMigrationError>> => {
     const ids = new Set(rows.map((r) => r.id));
-    const owner = new Map(rows.map((r) => [r.key, r.id]));
+    const owner = new Map(rows.filter((r) => canonicalIdOf(r.key, prefix) !== r.id).map((r) => [r.key, r.id]));
     const known = await allRows<Document>(ctx.db, LEGACY_KEYS);
     if (isErr(known)) return known;
     const recorded = new Set(known.value.map((r) => r.key));
@@ -133,8 +133,8 @@ export function storage(config: StorageConfig = {}): ModuleStorage {
     if (isErr(listed)) return listed;
     let added = 0;
     for (const { key } of listed.value) {
-      const id = canonicalIdOf(key, prefix);
-      if ((id !== null && ids.has(id)) || recorded.has(key)) continue;
+      const folders = key.slice(prefix.length).split("/").slice(0, -1);
+      if (recorded.has(key) || (!owner.has(key) && folders.some((segment) => ids.has(segment)))) continue;
       const created = await ctx.db.createOne(LEGACY_KEYS, { key, mediaId: owner.get(key) ?? null, recordedAt: ctx.now() });
       if (isErr(created) && created.error.code !== "CONFLICT") return created;
       added += 1;
