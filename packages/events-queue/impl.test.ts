@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Document, Filter, FindOptions } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -1656,6 +1657,26 @@ describe("events/queue quiesce", () => {
     return { gate, release: () => release(), running, started: () => started() };
   }
 
+  function afterClaimWrite(db: ReturnType<typeof createFakePersistence>, hook: (claims: number) => void): () => number {
+    const updateMany = db.updateMany.bind(db);
+    let claims = 0;
+    vi.spyOn(db, "updateMany").mockImplementation(async <T extends Document>(collection: string, filter: Filter, patch: Partial<Omit<T, "id">>) => {
+      const result = await updateMany<T>(collection, filter, patch);
+      if (patch["state"] === "running") hook(++claims);
+      return result;
+    });
+    return () => claims;
+  }
+
+  function afterRead(db: ReturnType<typeof createFakePersistence>, hook: () => void): void {
+    const findMany = db.findMany.bind(db);
+    vi.spyOn(db, "findMany").mockImplementation(async <T extends Document>(collection: string, filter: Filter, options?: FindOptions) => {
+      const result = await findMany<T>(collection, filter, options);
+      hook();
+      return result;
+    });
+  }
+
   it("a tick after quiesce claims nothing, fans out nothing and does not touch the store, even once rows come due on the clock", async () => {
     const { db, queue, clock, rows } = await make({ delayMs: { p1: 1000 } });
     await queue.enqueue("x", { id: "unfanned" });
@@ -1690,8 +1711,60 @@ describe("events/queue quiesce", () => {
     expect(await rows()).toMatchObject([{ state: "pending", lockedBy: null }]);
   });
 
+  it("a lane tick that quiesce interrupts between reading its due row and claiming it claims nothing", async () => {
+    const { db, queue, rows } = await make({ lanes: { pages: ["render"] } });
+    let runs = 0;
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      runs++;
+      return OK;
+    });
+    await queue.enqueue("x", { coalesceKey: "k" });
+    afterRead(db, () => queue.quiesce());
+    const claims = afterClaimWrite(db, () => {});
+    expect(await queue.tickLane("pages")).toBe(0);
+    expect(claims()).toBe(0);
+    expect(runs).toBe(0);
+    expect((await rows()).map((r) => [r.state, r.attempts, r.lockedAt, r.lockedBy, r.coalesceKey])).toEqual([["pending", 0, null, null, "render:k"]]);
+  });
+
+  it("a lane row whose claim quiesce interrupts goes back to pending unlocked, with attempts and coalesceKey as before, and does not run", async () => {
+    const { db, queue, rows } = await make({ lanes: { pages: ["render"] } });
+    let runs = 0;
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      runs++;
+      return OK;
+    });
+    await queue.enqueue("x", { coalesceKey: "k" });
+    const row = expectOk(await db.findMany<QueueRow>(QUEUE, {})).items[0]!;
+    expectOk(await db.updateOne<QueueRow>(QUEUE, row.id, { attempts: 1 }));
+    const claims = afterClaimWrite(db, () => queue.quiesce());
+    expect(await queue.tickLane("pages")).toBe(0);
+    expect(claims()).toBe(1);
+    expect(runs).toBe(0);
+    expect((await rows()).map((r) => [r.state, r.attempts, r.lockedAt, r.lockedBy, r.coalesceKey])).toEqual([["pending", 1, null, null, "render:k"]]);
+  });
+
+  it("a main-lane claim that quiesce interrupts claims no further row of the batch and hands back the one it won", async () => {
+    const { db, queue, rows } = await make({ batch: 2 });
+    let runs = 0;
+    queue.setDelivery([{ event: "a", pipeline: "pa" }, { event: "b", pipeline: "pb" }], async () => {
+      runs++;
+      return OK;
+    });
+    await queue.enqueue("a", {});
+    await queue.enqueue("b", { coalesceKey: "k" });
+    const claims = afterClaimWrite(db, () => queue.quiesce());
+    expect(await queue.tick()).toBe(0);
+    expect(claims()).toBe(1);
+    expect(runs).toBe(0);
+    expect((await rows()).map((r) => [r.pipeline, r.state, r.attempts, r.lockedAt, r.lockedBy, r.coalesceKey])).toEqual([
+      ["pa", "pending", 0, null, null, null],
+      ["pb", "pending", 0, null, null, "pb:k"],
+    ]);
+  });
+
   it("the relay after quiesce claims nothing and reports its rows pending for the worker", async () => {
-    const { queue, rows } = await make();
+    const { db, queue, rows } = await make();
     let runs = 0;
     queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
       runs++;
@@ -1699,9 +1772,26 @@ describe("events/queue quiesce", () => {
     });
     await queue.enqueue("x", { runId: "run-1" });
     queue.quiesce();
+    const writes = vi.spyOn(db, "updateMany");
     expect(await queue.relay("run-1")).toEqual({ status: "pending", pipelines: [{ event: "x", pipeline: "p1", status: "pending", attempts: 0, dead: false, error: null }] });
+    expect(writes).not.toHaveBeenCalled();
     expect(runs).toBe(0);
     expect(await rows()).toMatchObject([{ state: "pending", lockedAt: null, lockedBy: null }]);
+  });
+
+  it("a relay claim that quiesce interrupts hands the row back pending, unlocked and with its coalesceKey, runs nothing and reports it pending", async () => {
+    const { db, queue, rows } = await make();
+    let runs = 0;
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      runs++;
+      return OK;
+    });
+    await queue.enqueue("x", { runId: "run-1", coalesceKey: "k" });
+    const claims = afterClaimWrite(db, () => queue.quiesce());
+    expect(await queue.relay("run-1")).toEqual({ status: "pending", pipelines: [{ event: "x", pipeline: "p1", status: "pending", attempts: 0, dead: false, error: null }] });
+    expect(claims()).toBe(1);
+    expect(runs).toBe(0);
+    expect((await rows()).map((r) => [r.state, r.attempts, r.lockedAt, r.lockedBy, r.coalesceKey])).toEqual([["pending", 0, null, null, "p1:k"]]);
   });
 
   it("a relay already delivering finishes its row and leaves the rest pending once quiesce comes", async () => {
