@@ -239,10 +239,15 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   }
   await startTarget(ctx);
   if (promoted !== null) {
-    ack = await acknowledgement(ctx.app, ctx.env.app.replicaPrefix, promoted, ctx.poll);
-    const gens = await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll);
-    ctx.out.info(ack === "applied" ? `the app reports the restore of ${promoted.generation}` : `the app did not acknowledge ${promoted.generation}; a runtime without restore reporting renders nothing again by itself`);
-    if (gens.at(-1)?.name === promoted.generation) ctx.out.warn("the app has not started its own generation yet");
+    try {
+      ack = await acknowledgement(ctx.app, ctx.env.app.replicaPrefix, promoted, ctx.poll);
+      const gens = await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll);
+      ctx.out.info(ack === "applied" ? `the app reports the restore of ${promoted.generation}` : `the app did not acknowledge ${promoted.generation}; a runtime without restore reporting renders nothing again by itself`);
+      if (gens.at(-1)?.name === promoted.generation) ctx.out.warn("the app has not started its own generation yet");
+    } catch (cause) {
+      ack = "unconfirmed";
+      ctx.out.warn(`the restore is done and the app started again, but checking whether it acknowledged ${promoted.generation} failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
   }
   await ctx.journal.record("restore", "done", { backupId: manifest.id, safetyBackup, acknowledgement: ack });
   return { ...base, safetyBackup, sessionsDeleted, promoted, acknowledgement: ack };

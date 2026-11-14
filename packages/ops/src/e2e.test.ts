@@ -90,6 +90,41 @@ describe("backup and restore against an in-memory store", () => {
     }
   });
 
+  it("reports a failed check after the app started again as a warning, not as a stopped app, and releases the pre-restore backup", async () => {
+    const inner = memoryStore(new MemoryBucket("after-start"));
+    let failFrom = Number.POSITIVE_INFINITY;
+    const h = createHarness({
+      store: {
+        ...inner,
+        list: async (prefix) => {
+          if (prefix === `${PREFIXES.replica}gen/` && h.app.starts >= failFrom) throw new Error("connection reset");
+          return inner.list(prefix);
+        },
+      },
+    });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const backup = await h.run(["backup", "create", "--freeze", "--json"]);
+      h.app.run(`UPDATE pages SET "body" = 'changed' WHERE "id" = 'home'`);
+      await h.app.sync();
+      failFrom = h.app.starts + 1;
+      const restored = await h.run(["restore", "--backup", String(backup.json.id), "--yes", "--answers", h.answers({ "access-changes": "accept" }), "--json"]);
+      failFrom = Number.POSITIVE_INFINITY;
+      expect(restored.stderr).not.toContain("the app stays stopped");
+      expect(restored.stderr).toContain("connection reset");
+      expect(restored.code).toBe(0);
+      expect(restored.json).toMatchObject({ acknowledgement: "unconfirmed" });
+      expect((await h.app.status()).state).toBe("started");
+      expect(h.app.rows("pages")).toContainEqual({ id: "home", title: "Home", body: "Welcome" });
+      const list = await h.run(["backup", "list"]);
+      expect(list.stdout).toContain(String(restored.json.safetyBackup));
+      expect(list.stdout).not.toContain("pinned by");
+    } finally {
+      await h.dispose();
+    }
+  });
+
   it("names a truncated db.sqlite and a missing object when verification fails, with exit 1", async () => {
     const bucket = new MemoryBucket("verify");
     const h = createHarness({ store: memoryStore(bucket) });

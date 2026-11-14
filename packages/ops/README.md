@@ -167,7 +167,9 @@ is listed until two listings agree.
    is started.
 
 When nothing differs from the backup, the restore starts the app again and changes nothing. When it stops
-before step 4, it starts the app again; after that the app stays stopped and the output says so.
+before step 4, it starts the app again; after that, until step 7 started the app, the app stays stopped and the
+output says so. A check that fails once the app runs again, such as reading its acknowledgement, is a warning:
+the restore ends with exit 0 and `unconfirmed`.
 
 ### Promotion
 A promoted generation is a `VACUUM INTO` copy without `-wal`, named `gen/<yyyymmddThhmmssZ>/snapshot.db` by
