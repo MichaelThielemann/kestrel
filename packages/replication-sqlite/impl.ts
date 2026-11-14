@@ -25,7 +25,7 @@ export interface Config {
 export interface ReplicationOptions {
   /** How often the WAL size is compared with `checkpointBytes` between syncs, in milliseconds. Default 1000. */
   checkIntervalMs?: number;
-  /** Receives the warning when another process is found writing to the same replica. Default: nothing is logged. */
+  /** Receives the warning when another process is found writing to the same replica, and the messages about acknowledging a reported restore from a placed generation. Default: nothing is logged. */
   logger?: Logger;
   /**
    * A listing of the replica made before the instance was created, such as the one a start restored from: its

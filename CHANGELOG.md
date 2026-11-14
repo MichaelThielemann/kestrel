@@ -781,7 +781,7 @@ Net changes since 5.8.2.
   `markerKey()`, `readOrigin()`, `readOriginNonce()`, `unplacedNewerGenerations()` and the types
   `GenerationMarker`, `Seal`, `Origin`, `Applied`, `PlacedRestore`, `ReplicaListing` and
   `SealedListingOptions`; `restoreFromBlobs()` takes an optional fifth argument `listed`, the points of a
-  listing already made, instead of listing again; `ReplicationOptions` gains `listedBefore`,
+  listing already made, instead of listing again; `ReplicationOptions` gains `logger`, `listedBefore`,
   `placedRestore` and `onAcknowledged`.
 - `replication-sqlite` notices another process writing to the same replica: a snapshot or WAL segment it
   did not write, outside a generation placed with `origin.json`, that the listing the start restored
