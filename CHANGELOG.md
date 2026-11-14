@@ -1221,8 +1221,9 @@ Net changes since 5.8.2.
   sidecar atomically before the restored file is moved into place. The check handles each value once
   and stores it in `delivery_state` last, so a restore whose boot stopped before the check or whose
   marking failed is handled by the next start, and logs a warning. replication-sqlite's rebuild of a
-  missing file under `restoreOnStart` and a database file copied into place by hand are no restore
-  here; run `delivery.markAll` for every delivered type after one. The result gains `restored`.
+  missing file under `restoreOnStart`, unless the generation it restores from was placed with
+  `origin.json` (replication-sqlite README, "Replica layout"), and a database file copied into place by
+  hand are no restore here; run `delivery.markAll` for every delivered type after one. The result gains `restored`.
   `kestrel upgrade` reports a pipeline that runs `delivery.checkBuild` without a `checkRestored` step
   directly before it, offering the step of either module only when its `file` is the
   `persistence-sqlite` file (`delivery/restore-check`).
