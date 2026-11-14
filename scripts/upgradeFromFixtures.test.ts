@@ -96,12 +96,14 @@ function mediaUrls(html: string): string[] {
 let fixtureBefore: Record<string, string>;
 let originalsBefore: Record<string, string>;
 let migratedState: { database: Record<string, unknown>; blobs: Record<string, string> };
+let typesBefore: Map<string, string>;
 
 beforeAll(() => {
   fixtureBefore = files(FIXTURE);
   copyFileSync(join(FIXTURE, "kestrel.db"), db);
   cpSync(join(FIXTURE, "blobs"), blobs, { recursive: true });
   originalsBefore = files(blobs);
+  typesBefore = new Map(query("SELECT id, contentType FROM media_items").map((r) => [String(r.id), String(r.contentType)]));
   writeFileSync(sidecar, leftoverLock);
 });
 
@@ -125,6 +127,11 @@ describe("upgrading the data of 5.8.1 to this release", () => {
       ["media/default", "migrated"],
       ["images/default", "migrated"],
     ]);
+    const svgIds = [...typesBefore].filter(([, type]) => type === "image/svg+xml").map(([id]) => id);
+    expect(svgIds.length).toBeGreaterThan(0);
+    const layout = report.modules.flatMap((m) => m.migrations).find((m) => m.id === "media-default:id-key-layout");
+    expect(layout?.outcome?.counts.svgDemoted).toBe(svgIds.length);
+    for (const id of svgIds) expect(layout?.outcome?.notes.find((n) => n.item === id)?.reason).toContain("application/octet-stream");
     expect(run.errors).toContain(".instance exists");
     expect(readFileSync(sidecar, "utf8")).toBe(leftoverLock);
 
@@ -192,10 +199,17 @@ describe("upgrading the data of 5.8.1 to this release", () => {
       const urls = [...new Set(pages.flatMap((page) => mediaUrls(readFileSync(join(blobs, "site", page), "utf8"))))].sort();
       expect(urls.some((url) => url.includes("/variants/"))).toBe(true);
       expect(urls.some((url) => !url.includes("/variants/"))).toBe(true);
+      const svgIds = [...typesBefore].filter(([, type]) => type === "image/svg+xml").map(([id]) => id);
+      expect(urls.filter((url) => svgIds.some((id) => url.startsWith(`/media/${id}/`)) && !url.includes("/variants/")).length).toBeGreaterThan(0);
       for (const url of urls) {
         const response = await fetch(`${base}${url}`);
         expect(response.status, url).toBe(200);
         await response.arrayBuffer();
+        const type = response.headers.get("content-type") ?? "";
+        const original = typesBefore.get(url.split("/")[2] ?? "");
+        if (url.includes("/variants/")) expect(type, url).toMatch(/^image\//);
+        else if (original === "image/svg+xml") expect(type, `${url} is a 5.x SVG and is served as a download`).toBe("application/octet-stream");
+        else expect(type.split(";")[0], url).toBe(original);
       }
     } finally {
       await kestrel.stop();

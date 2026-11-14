@@ -152,7 +152,8 @@ kestrel upgrade migrate --db <copy of the database> --blobs-dir <copy of the blo
    filesystem blob store with everything below it. Keep the originals as they are; they are the backup that 5.8 starts on again if the update is abandoned.
 3. With the 6.0.0 packages installed, run `migrate --plan` on the copy to see what it would
    convert, then `migrate` without `--plan` to convert it. When the plan names items whose original
-   is missing, decide for them with `--answers` (see below).
+   is missing, decide for them with `--answers` (see below). Every SVG it names is served as a
+   download from then on (see [SVG files](#svg-files)).
 4. Run `kestrel upgrade data --db <copy> --root <project>`; `data/media-layout` no longer appears.
 5. Start 6.0.0 on the converted copy. Run `media.syncPublic` and `images.syncPublic` (with
    `publicCopy`) and publish the site again, so that the public copies and the exported pages use
@@ -204,6 +205,21 @@ already did is undone, and the result is the same as that of an uninterrupted ru
 neither takes nor honours the instance lock (see [`runtime/single-process`](#runtime-single-process)):
 a `<file>.instance` that the stopped instance left next to the copy does not stop it, and it says
 so. Make sure no process uses the copy while it runs.
+
+### SVG files
+
+A 5.x release kept no record of whether a stored SVG passed `sanitize.svg`, so the conversion
+cannot tell a sanitised SVG from one that never was. Every 5.x SVG becomes `<id>/<stem>-svg.bin`,
+and 6.0.0 serves it, and writes its public copy, as `application/octet-stream`: its URL answers
+`200`, but an `<img>` or a CSS background no longer shows it. Logos and icons are the usual case.
+
+- `migrate --plan` names each such item ("is an SVG without a sanitize.svg record") and counts them
+  as `svgDemoted`; check that list before the update.
+- To show one as an image again, upload the file again through a pipeline that runs `sanitize.svg`
+  before `media.upload`. The upload is a new item with a new id, because the converted item keeps its
+  `.bin` name; point every page, setting and document that uses the old item at the new one and
+  publish them again, then delete the old item.
+- There is no way to sanitise the converted item in place.
 
 ### Leftovers
 

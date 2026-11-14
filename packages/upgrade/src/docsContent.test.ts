@@ -46,3 +46,19 @@ describe("the underscore-field docs describe the counted, data-verified behaviou
     expect(row).toContain("ask / auto");
   });
 });
+
+function mediaConversionSection(markdown: string): string {
+  const start = markdown.indexOf("## 7. Converting the stored media");
+  const end = markdown.indexOf("\n## ", start + 1);
+  return markdown.slice(start, end === -1 ? undefined : end);
+}
+
+describe("the media conversion docs name what happens to a 5.x SVG", () => {
+  it("says every 5.x SVG is served as application/octet-stream, how the plan lists them and that a new upload gets a new id", () => {
+    const section = mediaConversionSection(readFileSync(DOCS_FILE, "utf8"));
+    expect(section).toContain("### SVG files");
+    expect(section).toContain("application/octet-stream");
+    expect(section).toContain("svgDemoted");
+    expect(section).toMatch(/new item with a new id/);
+  });
+});
