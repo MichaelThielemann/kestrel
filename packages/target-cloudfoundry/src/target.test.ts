@@ -235,6 +235,7 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     expect(lagging.exitCode).toBe(1);
     expect(lagging.message).toContain("1 instance");
     expect(lagging.message).toContain(`cf start ${API.name}`);
+    Object.assign(cf.app(API.name), { state: "STARTED", running: 1, ready: 1, downAfter: 0 });
     cf.rejectedActions.add("stop");
     const refused = await failure(t.stop());
     expect(refused.exitCode).toBe(1);
@@ -260,6 +261,20 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     expect((await failure(t.applyManifest())).exitCode).toBe(1);
     expect(cf.applied).toEqual([]);
     expect(cf.actions).toEqual([]);
+  });
+
+  it("waits for the stop when the stop request fails but the app reads stopped afterwards", async () => {
+    let shutDown = false;
+    cf.lostAnswers.add("stop");
+    cf.hooks.stop = async () => {
+      await new Promise((done) => setTimeout(done, 300));
+      shutDown = true;
+    };
+    const t = await target();
+    await t.stop();
+    expect(shutDown).toBe(true);
+    expect(await t.status()).toEqual({ state: "stopped", instances: 0 });
+    expect(cf.actions.map((action) => action.action)).toEqual(["stop"]);
   });
 
   it("keeps reading through a failed status read before the start and starts the app", async () => {

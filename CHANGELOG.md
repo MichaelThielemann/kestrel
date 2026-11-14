@@ -1789,7 +1789,8 @@ Net changes since 5.8.2.
   with the `STOPPING` instance state reports it; when it sees no instance shut down, it waits
   `stopGraceSeconds` (default 15) after the stop request, covering the shutdown in which the replica is
   sealed. A stop, a start and the readiness wait repeat failed status reads until
-  their timeout; a failed stop says that the app may stay stopped, and a start whose request failed counts
+  their timeout; a stop whose request failed goes on once the app reads stopped, a failed stop says that
+  the app may stay stopped, and a start whose request failed counts
   as done once the app reads started. A backup records the app's guid, droplet (null only when the app has
   none), newest revision and the names, never the values, of its environment variables. `applyManifest()`
   reads the manifest as YAML 1.1 with merge keys and with dates and clock times kept as strings, as cf does,

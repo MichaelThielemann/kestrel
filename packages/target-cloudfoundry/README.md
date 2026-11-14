@@ -53,8 +53,9 @@ The `target` block of an environment in `kestrel.environments.json` names this p
   synced and sealed, runs after the answer. A Cloud Controller with the `STOPPING` instance state (property
   `cc.app_instance_stopping_state`) lists the instance as `STOPPING` until its container is gone, and the target
   waits for that. Without that state the instance reads `DOWN` at once; when the target sees no instance shut
-  down, it waits until `stopGraceSeconds` have passed since the stop request. When the stop request or the wait
-  fails, the error says that the app may stay stopped and names `cf start` to start it again. **Start**
+  down, it waits until `stopGraceSeconds` have passed since the stop request. When cf answers the stop request
+  with an error but the app reads `STOPPED` afterwards, the target goes on waiting as after a stop that was
+  answered. When the stop request fails otherwise or the wait fails, the error says that the app may stay stopped and names `cf start` to start it again. **Start**
   repeats a failing status read for up to 30 s, then sends the start action; when cf answers that request
   with an error but the app reads `STARTED` afterwards, the start counts as done. Readiness is an instance in
   state `RUNNING`, and then `readyUrl` answering 200 when it is set; a failing read during that wait counts as

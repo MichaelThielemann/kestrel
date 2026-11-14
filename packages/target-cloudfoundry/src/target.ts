@@ -203,7 +203,8 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
       try {
         await api(`/v3/apps/${await appGuid()}/actions/stop`, appSchema, "POST");
       } catch (error) {
-        throw new OpsError(`stopping ${app} failed: ${messageOf(error)}; cf app ${app} shows whether it stopped, and cf start ${app} in ${config.org}/${config.space} starts it again`, 1, "target");
+        const after = await readRepeated().catch(() => null);
+        if (after?.state !== "stopped") throw new OpsError(`stopping ${app} failed: ${messageOf(error)}; cf app ${app} shows whether it stopped, and cf start ${app} in ${config.org}/${config.space} starts it again`, 1, "target");
       }
       const graceMs = before.instances > 0 ? config.stopGraceSeconds * 1000 : 0;
       let sawShutdown = false;
