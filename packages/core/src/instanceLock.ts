@@ -42,6 +42,7 @@ interface LockRecord {
   host: string;
   startedAt: string;
   heartbeatAt: string;
+  threads: Record<string, string>;
 }
 
 type Seen = { kind: "absent" } | { kind: "held"; raw: string; record: LockRecord } | { kind: "unreadable"; raw: string; mtimeMs: number };
@@ -49,6 +50,8 @@ type Seen = { kind: "absent" } | { kind: "held"; raw: string; record: LockRecord
 interface Holder {
   lockPath: string;
   record: LockRecord;
+  token: string;
+  ttlMs: number;
   refs: number;
   timer: ReturnType<typeof setInterval> | undefined;
   health: ModuleHealth;
@@ -110,17 +113,18 @@ export function instanceLockFile(file: string): string {
  * A lock is taken over when its heartbeat is older than `ttlMs`. A lock written on this host in
  * this PID namespace is also taken over at once when its process no longer runs, or when it
  * carries this process's PID and a start time earlier than this process's own (an earlier process
- * under the same PID). A lock from another PID namespace, such as another container with the same
- * hostname or the previous run of a restarted container, is judged by its heartbeat alone, so a
- * container restarted after a crash waits up to `ttlMs`. Any other lock makes the call throw a
- * `KestrelBootError` with code `instance-locked` naming that process's host, PID and start time
- * and the `optOut` setting; `module` should be the calling module's name so that boot reports
- * that code.
+ * under the same PID). A lock from another host or another PID namespace, such as another
+ * container with the same hostname or the previous run of a restarted container, is judged by its
+ * heartbeat alone. Any lock that is not taken over makes the call throw a `KestrelBootError` with
+ * code `instance-locked` at once, without waiting; the reason names that process's host, PID and
+ * start time and the `optOut` setting. A restarted container whose previous run left the lock
+ * therefore fails to boot until `ttlMs` after that run's last heartbeat. `module` should be the
+ * calling module's name so that boot reports that code.
  *
  * Several holders in one process share one lock, also across copies of this module and across
- * worker threads. The last holder in a thread
- * to call `release()` deletes the lock file, and a holder in another thread writes it again with
- * its next heartbeat. The heartbeat runs on a timer that does not keep the process alive.
+ * worker threads; the last of them to call `release()` deletes the lock file. A thread that
+ * ends without releasing stops counting once its share is older than `ttlMs`. The heartbeat runs
+ * on a timer that does not keep the process alive.
  */
 export function acquireInstanceLock(file: string, opts: InstanceLockOptions): InstanceLock {
   if (file === MEMORY) return UNLOCKED;
@@ -164,14 +168,23 @@ function linkTarget(path: string): string | undefined {
 function take(file: string, lockPath: string, opts: InstanceLockOptions): Holder {
   const ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
   mkdirSync(dirname(lockPath), { recursive: true });
+  const token = randomUUID();
   const now = new Date().toISOString();
-  const record: LockRecord = { instanceId: randomUUID(), pid: process.pid, pidNamespace: PID_NAMESPACE, host: hostname(), startedAt: now, heartbeatAt: now };
-  const owned = claim(file, lockPath, record, ttlMs, opts);
+  const record: LockRecord = {
+    instanceId: randomUUID(),
+    pid: process.pid,
+    pidNamespace: PID_NAMESPACE,
+    host: hostname(),
+    startedAt: now,
+    heartbeatAt: now,
+    threads: { [token]: now },
+  };
+  const owned = claim(file, lockPath, record, token, ttlMs, opts);
   sweep(lockPath, ttlMs);
-  return hold(lockPath, owned, opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
+  return hold(lockPath, owned, token, ttlMs, opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
 }
 
-function claim(file: string, lockPath: string, record: LockRecord, ttlMs: number, opts: InstanceLockOptions): LockRecord {
+function claim(file: string, lockPath: string, record: LockRecord, token: string, ttlMs: number, opts: InstanceLockOptions): LockRecord {
   const content = JSON.stringify(record);
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     if (createExclusive(lockPath, content)) return record;
@@ -179,7 +192,13 @@ function claim(file: string, lockPath: string, record: LockRecord, ttlMs: number
     if (seen.kind === "absent") continue;
     const verdict = judge(seen, ttlMs);
     if (verdict === "taken") throw new KestrelBootError(opts.module, refusal(file, lockPath, seen, ttlMs, opts.optOut ?? DEFAULT_OPT_OUT), "instance-locked");
-    if (verdict === "this-process" && seen.kind === "held") return { ...seen.record };
+    if (verdict === "this-process" && seen.kind === "held") {
+      const joined = renewed(seen.record, token, ttlMs);
+      const outcome = guarded(lockPath, () => replaceIf(lockPath, seen.raw, JSON.stringify(joined)));
+      if (outcome === "replaced") return joined;
+      if (outcome === BUSY) pause(RETRY_PAUSE_MS);
+      continue;
+    }
     const outcome = guarded(lockPath, () => replaceIf(lockPath, seen.raw, content));
     if (outcome === "replaced" && ownedBy(lockPath, record.instanceId)) return record;
     if (outcome === BUSY) pause(RETRY_PAUSE_MS);
@@ -187,8 +206,14 @@ function claim(file: string, lockPath: string, record: LockRecord, ttlMs: number
   throw new KestrelBootError(opts.module, `${file}: could not take the instance lock ${lockPath} because other processes kept changing it; retry once they have settled`, "instance-locked");
 }
 
-function hold(lockPath: string, record: LockRecord, heartbeatMs: number): Holder {
-  const holder: Holder = { lockPath, record, refs: 0, timer: undefined, health: { ok: true } };
+function renewed(record: LockRecord, token: string, ttlMs: number): LockRecord {
+  const now = new Date();
+  const threads = Object.entries({ ...record.threads, [token]: now.toISOString() }).filter(([, at]) => now.getTime() - Date.parse(at) <= ttlMs);
+  return { ...record, heartbeatAt: now.toISOString(), threads: Object.fromEntries(threads) };
+}
+
+function hold(lockPath: string, record: LockRecord, token: string, ttlMs: number, heartbeatMs: number): Holder {
+  const holder: Holder = { lockPath, record, token, ttlMs, refs: 0, timer: undefined, health: { ok: true } };
   holder.timer = setInterval(() => beat(holder), heartbeatMs);
   holder.timer.unref();
   holders.set(lockPath, holder);
@@ -204,8 +229,8 @@ function beat(holder: Holder): void {
         lose(holder, seen.record);
         return;
       }
-      holder.record.heartbeatAt = new Date().toISOString();
-      const content = JSON.stringify(holder.record);
+      const next = renewed(seen.kind === "held" ? seen.record : { ...holder.record, threads: {} }, holder.token, holder.ttlMs);
+      const content = JSON.stringify(next);
       const outcome = seen.kind === "absent" ? createExclusive(holder.lockPath, content) : guarded(holder.lockPath, () => replaceIf(holder.lockPath, seen.raw, content));
       if (outcome === BUSY) return;
       if (outcome === true || outcome === "replaced") {
@@ -237,11 +262,23 @@ function drop(holder: Holder): void {
   stop(holder);
   holders.delete(holder.lockPath);
   if (lost) return;
-  try {
-    guarded(holder.lockPath, () => removeIfOwned(holder.lockPath, holder.record.instanceId));
-  } catch {
-    return;
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    try {
+      if (guarded(holder.lockPath, () => leave(holder)) !== BUSY) return;
+    } catch {
+      return;
+    }
+    pause(RETRY_PAUSE_MS);
   }
+}
+
+function leave(holder: Holder): void {
+  const seen = readLock(holder.lockPath);
+  if (seen.kind !== "held" || seen.record.instanceId !== holder.record.instanceId) return;
+  const now = Date.now();
+  const others = Object.entries(seen.record.threads).filter(([token, at]) => token !== holder.token && now - Date.parse(at) <= holder.ttlMs);
+  if (others.length === 0) rmSync(holder.lockPath, { force: true });
+  else replaceIf(holder.lockPath, seen.raw, JSON.stringify({ ...seen.record, threads: Object.fromEntries(others) }));
 }
 
 function sweep(lockPath: string, ttlMs: number): void {
@@ -265,10 +302,6 @@ function sweep(lockPath: string, ttlMs: number): void {
 
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function removeIfOwned(lockPath: string, instanceId: string): void {
-  if (ownedBy(lockPath, instanceId)) rmSync(lockPath, { force: true });
 }
 
 function ownedBy(lockPath: string, instanceId: string): boolean {
@@ -408,11 +441,16 @@ function parseRecord(raw: string): LockRecord | undefined {
     return undefined;
   }
   if (typeof value !== "object" || value === null) return undefined;
-  if (!("instanceId" in value && "pid" in value && "pidNamespace" in value && "host" in value && "startedAt" in value && "heartbeatAt" in value)) return undefined;
-  const { instanceId, pid, pidNamespace, host, startedAt, heartbeatAt } = value;
-  if (typeof instanceId !== "string" || typeof pidNamespace !== "string" || typeof host !== "string" || typeof startedAt !== "string" || typeof heartbeatAt !== "string") return undefined;
+  if (!("instanceId" in value && "pid" in value && "pidNamespace" in value && "host" in value && "startedAt" in value && "heartbeatAt" in value && "threads" in value)) return undefined;
+  const { instanceId, pid, pidNamespace, host, startedAt, heartbeatAt, threads } = value;
+  if (typeof instanceId !== "string" || typeof pidNamespace !== "string" || typeof host !== "string") return undefined;
+  if (typeof startedAt !== "string" || typeof heartbeatAt !== "string" || !isThreads(threads)) return undefined;
   if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0 || Number.isNaN(Date.parse(startedAt)) || Number.isNaN(Date.parse(heartbeatAt))) return undefined;
-  return { instanceId, pid, pidNamespace, host, startedAt, heartbeatAt };
+  return { instanceId, pid, pidNamespace, host, startedAt, heartbeatAt, threads };
+}
+
+function isThreads(value: unknown): value is Record<string, string> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) && Object.values(value).every((at) => typeof at === "string" && !Number.isNaN(Date.parse(at)));
 }
 
 function errorCode(err: unknown): unknown {
