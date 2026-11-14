@@ -350,7 +350,9 @@ logs a warning and answers `restored: true`. When one of these steps fails, or t
 the next check told the same value handles the restore again. Nothing else counts as a restore: an unclean stop, a
 crash during a re-render backlog, a restart, a second process on the same database and replication-sqlite's
 rebuild of a missing database file under `restoreOnStart` (on an ephemeral disk, every start) leave the stored build
-as it is. That rebuild brings back the replica as of its last shipped WAL frames; after a stop without teardown, the
+as it is. The one exception is a rebuild from a generation placed with `origin.json` (see "Replica layout" in the
+replication-sqlite README): replication-sqlite reports that one, and `delivery.checkBuild` renders every output again.
+Any other rebuild brings back the replica as of its last shipped WAL frames; after a stop without teardown, the
 pages saved since the last `replication.sync` keep files the rebuilt rows do not know. A database file copied into
 place by hand is not detected either. After such a copy or rebuild, run `delivery.markAll` for every delivered type,
 or restore through one of the two modules. After a restore every output the restored rows know is
