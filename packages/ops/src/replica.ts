@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 // eslint-disable-next-line no-restricted-imports -- kestrel-ops is a tool, not a module; it rebuilds databases with the replication package it depends on
-import { restoreFromBlobs } from "@michaelthielemann/kestrel-replication-sqlite/impl";
+import { markerKey, restoreFromBlobs, type Applied, type Origin, type Seal } from "@michaelthielemann/kestrel-replication-sqlite/impl";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, isErr, ok } from "@michaelthielemann/kestrel/result";
 import { OpsError } from "./errors.ts";
@@ -130,17 +130,7 @@ export async function buildDatabase(store: ObjectStore, prefix: string, generati
   return result.value;
 }
 
-/** `gen/<g>/sealed.json`: the teardown's proof that every frame up to `lastFrame` was shipped. */
-export interface Seal {
-  /** The WAL lineage of the last frames, the first number of a segment key. */
-  lineage: number;
-  /** How many frames of that lineage's WAL the replica holds. */
-  lastFrame: number;
-  /** How many WAL segments the generation holds; their sequence numbers, the second number of a segment key, run from 0 to `segments - 1`. */
-  segments: number;
-  /** When the seal was written, in epoch milliseconds. */
-  at: number;
-}
+export type { Applied, Origin, Seal };
 
 /** The seal check of a stopped replica. */
 export interface SealReport {
@@ -164,7 +154,13 @@ const majorOf = (version: string | null): number | null => {
 function isSeal(value: unknown): value is Seal {
   if (typeof value !== "object" || value === null) return false;
   const segments: unknown = Reflect.get(value, "segments");
-  return typeof Reflect.get(value, "lastFrame") === "number" && typeof Reflect.get(value, "at") === "number" && typeof segments === "number" && Number.isSafeInteger(segments) && segments >= 0;
+  return typeof Reflect.get(value, "lineage") === "number" && typeof Reflect.get(value, "lastFrame") === "number" && typeof Reflect.get(value, "at") === "number" && typeof segments === "number" && Number.isSafeInteger(segments) && segments >= 0;
+}
+
+function isApplied(value: unknown): value is Applied {
+  if (typeof value !== "object" || value === null) return false;
+  const nonce: unknown = Reflect.get(value, "nonce");
+  return typeof Reflect.get(value, "generation") === "string" && (nonce === null || typeof nonce === "string") && typeof Reflect.get(value, "restoredAt") === "number";
 }
 
 const segmentSeq = (info: ObjectInfo): number => Number(SEGMENT.exec(info.key.slice(info.key.lastIndexOf("/wal/") + 1))?.[1]);
@@ -209,8 +205,8 @@ export function completeGeneration(store: ObjectStore, prefix: string, generatio
  * major) or unknown (the target cannot tell the runtime version).
  */
 export async function sealOf(store: ObjectStore, prefix: string, generation: Generation, runtime: string | null, poll: PollOptions = {}): Promise<SealReport> {
-  const data = await store.get(`${prefix}gen/${generation.name}/sealed.json`);
-  const seal: unknown = data === null ? null : parseJson(data);
+  const data = await store.get(markerKey(prefix, generation.name, "sealed"));
+  const seal: unknown = data === null ? null : parseJsonOrNull(data);
   if (!isSeal(seal)) {
     const major = majorOf(runtime);
     const listed = await completeGeneration(store, prefix, generation, poll);
@@ -218,15 +214,6 @@ export async function sealOf(store: ObjectStore, prefix: string, generation: Gen
   }
   const listed = await listUntilComplete(store, prefix, generation, () => seal.segments, (missing, listings) => `generation ${generation.name} is sealed with ${seal.segments} segment(s), the listing shows ${seal.segments - missing.length} after ${listings} listings`, poll);
   return { generation: generation.name, lastFrameAt: listed.lastFrameAt, runtime, state: "sealed", seal, listed };
-}
-
-/** `gen/<g>/origin.json` next to a promoted snapshot, written after it as the last file of the placement: tells a runtime that understands it that its start is a restore. */
-export interface Origin {
-  kind: "restore" | "upgrade";
-  source: string;
-  /** When the placement was requested, as ISO 8601. */
-  requestedAt: string;
-  nonce: string;
 }
 
 /** What {@link promote} needs. */
@@ -298,7 +285,7 @@ export async function promote(input: PromoteInput): Promise<Promoted> {
     const origin: Origin = { ...input.origin, requestedAt: new Date(input.clock()).toISOString(), nonce: hex(16) };
     const base = `${input.prefix}gen/${generation}/`;
     await input.store.put(`${base}snapshot.db`, bytes, { contentType: "application/vnd.sqlite3" });
-    await input.store.put(`${base}origin.json`, jsonBytes(origin), { contentType: "application/json" });
+    await input.store.put(markerKey(input.prefix, generation, "origin"), jsonBytes(origin), { contentType: "application/json" });
     const sleep = input.poll?.sleep ?? defaultSleep;
     for (let i = 0; ; i++) {
       const gens = await stableGenerations(input.store, input.prefix, input.poll);
@@ -321,17 +308,26 @@ export async function promote(input: PromoteInput): Promise<Promoted> {
 /** Whether a runtime acknowledged a promoted generation: `applied` (an `applied.json` with its nonce), or `unconfirmed`. */
 export type Acknowledgement = "applied" | "unconfirmed";
 
-/** Looks for the `applied.json` a runtime writes after restoring a promoted generation, until `attempts` listings found none. */
+/**
+ * Reads the `applied.json` a runtime writes into a promoted generation once it reported the restore, until it names
+ * the generation and the nonce of its `origin.json`, or `attempts` reads found none.
+ */
 export async function acknowledgement(store: ObjectStore, prefix: string, promoted: Promoted, poll: PollOptions = {}): Promise<Acknowledgement> {
   const sleep = poll.sleep ?? defaultSleep;
+  const key = markerKey(prefix, promoted.generation, "applied");
   for (let i = 0; i < (poll.attempts ?? 30); i++) {
-    for (const info of await store.list(`${prefix}gen/`)) {
-      if (!info.key.endsWith("/applied.json")) continue;
-      const data = await store.get(info.key);
-      const value: unknown = data === null ? null : parseJson(data);
-      if (typeof value === "object" && value !== null && Reflect.get(value, "nonce") === promoted.nonce) return "applied";
-    }
+    const data = await store.get(key);
+    const value: unknown = data === null ? null : parseJsonOrNull(data);
+    if (isApplied(value) && value.generation === promoted.generation && value.nonce === promoted.nonce) return "applied";
     await sleep(poll.delayMs ?? 1000);
   }
   return "unconfirmed";
+}
+
+function parseJsonOrNull(data: Uint8Array): unknown {
+  try {
+    return parseJson(data);
+  } catch {
+    return null;
+  }
 }

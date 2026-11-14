@@ -11,7 +11,7 @@ export { acquireLock, breakLocks, heldLocks, LOCK_STALE_MS, type HeldLock, type 
 export { createOutput, type Output } from "./output.ts";
 export { confirm, QUESTIONS, type AnswerSource, type Prompt, type QuestionId } from "./questions.ts";
 export { Redactor } from "./redact.ts";
-export { acknowledgement, blobstoreOf, buildDatabase, checkPromotable, isUnfinishedPlacement, listGenerations, MAX_SKEW_MS, promote, promotionName, SEALING_MAJOR, sealOf, stableGenerations, type Acknowledgement, type Generation, type Origin, type PollOptions, type Promoted, type PromoteInput, type Seal, type SealReport } from "./replica.ts";
+export { acknowledgement, blobstoreOf, buildDatabase, checkPromotable, isUnfinishedPlacement, listGenerations, MAX_SKEW_MS, promote, promotionName, SEALING_MAJOR, sealOf, stableGenerations, type Acknowledgement, type Applied, type Generation, type Origin, type PollOptions, type Promoted, type PromoteInput, type Seal, type SealReport } from "./replica.ts";
 export { restoreBackup, restoreToLocal, type LocalRestoreOptions, type RestoreOptions, type RestoreResult } from "./restore.ts";
 export { runOps, terminalPrompt, USAGE, type RunOptions, type StoreFactory } from "./run.ts";
 export { s3Store, type S3Store, type S3StoreConfig } from "./s3Store.ts";
