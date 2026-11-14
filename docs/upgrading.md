@@ -868,9 +868,11 @@ migrations, because `dry` is a body flag. `content.create`, `content.set`, `cont
 is still ignored.
 
 The rule reads the steps of the project's own modules: a step run by an HTTP pipeline whose source reads a
-member of its `input` schema through `ctx.query` and does not declare it in `query` gets a warning. Fix it
-by declaring the key in `describe().query`, or by reading it from the body and sending it there. It only
-sees the explicit `ctx.query` reads; a step that reads `ctx.payload.<member>` is refused the same way
+member of its `input` schema through `ctx.query` and does not declare it in `query` gets a warning. A step
+built by `stepFactory` is checked with the description its `describe()` entry returns for the argument the
+pipeline gives it. Fix it by declaring the key in `describe().query`, or by reading it from the body and
+sending it there. It only sees the explicit reads `ctx.query.<key>`, `ctx.query["<key>"]` and a
+destructuring such as `const { <key> } = ctx.query`; a step that reads `ctx.payload.<member>` is refused the same way
 for a client that sends the member in the query. A second, informational finding names an HTTP pipeline
 that runs `migrations.apply`: send `dry` in the JSON body.
 

@@ -10,7 +10,10 @@ function printed(value: unknown): string {
   return typeof value === "string" ? JSON.stringify(value) : String(value);
 }
 
-/** `authz/anonymous-read-only`: `authz-roles` refuses boot when `anonymous` holds anything but `<name>.read` entries; a wildcard, a write, a manage or a listing permission belongs to a role. */
+const ANONYMOUS_ISSUE = 'anonymous\\.\\d+: anonymous may hold only read permissions such as "pages\\.read"; a wildcard or a permission that writes, manages or lists is for roles';
+const ANONYMOUS_ONLY_ISSUES = new RegExp(`^invalid config(?: \\(with defaults from "[^"]*"\\))?: ${ANONYMOUS_ISSUE}(?:; ${ANONYMOUS_ISSUE})*$`);
+
+/** `authz/anonymous-read-only`: `authz-roles` refuses boot when `anonymous` holds anything but `<name>.read` entries; a wildcard, a write, a manage or a listing permission belongs to a role. When the boot check's config error for the module names only such entries, the finding carries that module's name and stands in for the error. */
 export const anonymousReadOnlyRule: Rule = {
   id: "authz/anonymous-read-only",
   check(ctx) {
@@ -18,13 +21,14 @@ export const anonymousReadOnlyRule: Rule = {
     if (authz === undefined || !isRecord(authz.config) || !Array.isArray(authz.config.anonymous)) return [];
     const offending: unknown[] = authz.config.anonymous.filter((entry: unknown) => typeof entry !== "string" || !READ_PERMISSION.test(entry));
     if (offending.length === 0) return [];
+    const explained = ctx.bootCheck.errors.find((e) => e.code === "invalid-module-config" && e.module !== undefined && ANONYMOUS_ONLY_ISSUES.test(e.reason));
     return [
       finding(
         "authz/anonymous-read-only",
         "authz/anonymous-read-only",
         `authz-roles's anonymous list holds ${offending.map(printed).join(", ")}; from 6.0.0 it accepts only read permissions such as "pages.read", and boot fails on any other entry`,
         "grant a wildcard or a permission that writes, manages or lists to a role in roles, and keep only <name>.read entries in anonymous",
-        { module: authz.use, path: "anonymous" },
+        { module: explained?.module ?? authz.use, path: "anonymous" },
         undefined,
         upgradingDocs("authz-anonymous-read-only"),
       ),
@@ -36,14 +40,16 @@ const ESCAPE = /[.*+?^${}()|[\]\\]/g;
 
 function readsFromQuery(source: string, key: string): boolean {
   const name = key.replace(ESCAPE, "\\$&");
-  return new RegExp(`\\bquery\\??\\.${name}\\b|\\bquery\\??\\.?\\[\\s*["']${name}["']\\s*\\]`).test(source);
+  const member = new RegExp(`\\bquery\\??\\.${name}\\b|\\bquery\\??\\.?\\[\\s*["']${name}["']\\s*\\]`);
+  const destructured = new RegExp(`\\{(?:[^{}]*,)?\\s*["']?${name}["']?\\s*(?=[,:=}])[^{}]*\\}\\s*=\\s*(?:[\\w$]+\\??\\.)*query(?![\\w$.])`);
+  return member.test(source) || destructured.test(source);
 }
 
-interface BodyMemberStep {
-  step: string;
+interface LocalStep {
   module: string;
   file: string;
-  keys: string[];
+  source: string;
+  description: unknown;
 }
 
 function described(definition: { describe?: (instance: unknown) => unknown }): Record<string, unknown> | undefined {
@@ -56,9 +62,9 @@ function described(definition: { describe?: (instance: unknown) => unknown }): R
   }
 }
 
-function undeclaredQueryReads(ctx: RuleContext): BodyMemberStep[] {
+function localSteps(ctx: RuleContext): Map<string, LocalStep> {
   const files = new Map(localModuleFiles(ctx));
-  const out: BodyMemberStep[] = [];
+  const steps = new Map<string, LocalStep>();
   for (const mod of ctx.project.input.modules) {
     const file = files.get(mod.name);
     const source = file === undefined ? undefined : ctx.readFile(file);
@@ -66,14 +72,29 @@ function undeclaredQueryReads(ctx: RuleContext): BodyMemberStep[] {
     const descriptions = described(mod);
     if (descriptions === undefined) continue;
     const prefix = mod.name.split("/")[0] ?? mod.name;
-    for (const [key, description] of Object.entries(descriptions)) {
-      if (!isRecord(description) || !isRecord(description.input) || !isRecord(description.input.properties)) continue;
-      const declared = isRecord(description.query) ? description.query : {};
-      const keys = Object.keys(description.input.properties).filter((member) => !Object.hasOwn(declared, member) && readsFromQuery(source, member));
-      if (keys.length > 0) out.push({ step: `${prefix}.${key}`, module: mod.name, file, keys });
+    for (const [key, description] of Object.entries(descriptions)) steps.set(`${prefix}.${key}`, { module: mod.name, file, source, description });
+  }
+  return steps;
+}
+
+function resolveDescription(step: LocalStep, arg: string | undefined): Record<string, unknown> | undefined {
+  if (typeof step.description === "function") {
+    if (arg === undefined) return undefined;
+    try {
+      const result: unknown = Reflect.apply(step.description, undefined, [arg]);
+      return isRecord(result) ? result : undefined;
+    } catch {
+      return undefined;
     }
   }
-  return out;
+  return arg === undefined && isRecord(step.description) ? step.description : undefined;
+}
+
+function undeclaredQueryKeys(step: LocalStep, arg: string | undefined): string[] {
+  const description = resolveDescription(step, arg);
+  if (description === undefined || !isRecord(description.input) || !isRecord(description.input.properties)) return [];
+  const declared = isRecord(description.query) ? description.query : {};
+  return Object.keys(description.input.properties).filter((member) => !Object.hasOwn(declared, member) && readsFromQuery(step.source, member));
 }
 
 function bareNames(steps: readonly string[]): string[] {
@@ -98,19 +119,23 @@ export const queryBodyMemberRule: Rule = {
   check(ctx) {
     const findings: Finding[] = [];
     const pipelines = httpPipelines(ctx);
-    const reads = undeclaredQueryReads(ctx);
+    const steps = localSteps(ctx);
     for (const def of pipelines) {
-      const names = bareNames(pipelineSteps(def.steps));
-      for (const read of reads) {
-        if (!names.includes(read.step)) continue;
-        for (const key of read.keys) {
+      const specs = [...new Set(pipelineSteps(def.steps))];
+      const names = bareNames(specs);
+      for (const spec of specs) {
+        const colon = spec.indexOf(":");
+        const bare = colon === -1 ? spec : spec.slice(0, colon);
+        const step = steps.get(bare);
+        if (step === undefined) continue;
+        for (const key of undeclaredQueryKeys(step, colon === -1 ? undefined : spec.slice(colon + 1))) {
           findings.push({
-            id: `pipelines/query-body-member:${def.name}:${read.step}:${key}`,
+            id: `pipelines/query-body-member:${def.name}:${spec}:${key}`,
             rule: "pipelines/query-body-member",
             severity: "warning",
             tier: "source",
-            where: { ...locationOf(ctx, def.name), module: read.module },
-            message: `step "${read.step}" reads "${key}" from the query, but "${key}" is a member of its input schema and not declared in describe().query; a request that sends it in the query now answers 400 VALIDATION before the step runs`,
+            where: { ...locationOf(ctx, def.name), module: step.module },
+            message: `step "${spec}" reads "${key}" from the query, but "${key}" is a member of its input schema and not declared in describe().query; a request that sends it in the query now answers 400 VALIDATION before the step runs`,
             suggestion: `declare "${key}" in the query of the step's describe() entry, or read it from the body and have clients send it there`,
             fix: { kind: "manual" },
             docs: QUERY_BODY_DOCS,

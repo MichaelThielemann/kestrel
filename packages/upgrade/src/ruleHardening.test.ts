@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineModule, ok, type Context, type ModuleDefinition, type PipelineDefinition } from "@michaelthielemann/kestrel";
+import { defineModule, ok, stepFactory, type Context, type ModuleDefinition, type PipelineDefinition } from "@michaelthielemann/kestrel";
 import { configSchema as authzRolesConfigSchema } from "@michaelthielemann/kestrel-authz-roles";
 import type { LoadedProject, RuleContext } from "./plugin.ts";
 import { upgradingDocs } from "./ruleHelpers.ts";
@@ -93,6 +93,34 @@ describe("authz/anonymous-read-only", () => {
     expect(await anonymousReadOnlyRule.check(contextFor(withDefaults))).toHaveLength(1);
   });
 
+  describe("the boot error for the same entries", () => {
+    const issues = (anonymous: unknown[]) => {
+      const parsed = authzRolesConfigSchema.safeParse({ roles: {}, anonymous });
+      return parsed.error?.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") ?? "";
+    };
+    const withBootError = (anonymous: unknown[], reason: string) => ({
+      ...contextFor(authz(anonymous)),
+      bootCheck: { errors: [{ code: "invalid-module-config" as const, owner: "authz/roles", module: "authz/roles", reason }], warnings: [], notChecked: [] },
+    });
+
+    it("is claimed through the module name when it names only the anonymous entries", async () => {
+      for (const anonymous of [["pages.*"], ["pages.write", "pages.read", "*"]]) {
+        const ctx = withBootError(anonymous, `invalid config: ${issues(anonymous)}`);
+        expect((await anonymousReadOnlyRule.check(ctx))[0]?.where).toEqual({ module: "authz/roles", path: "anonymous" });
+      }
+    });
+
+    it("is claimed when the config came with host defaults", async () => {
+      const ctx = withBootError(["*"], `invalid config (with defaults from "host"): ${issues(["*"])}`);
+      expect((await anonymousReadOnlyRule.check(ctx))[0]?.where.module).toBe("authz/roles");
+    });
+
+    it("is left to the boot tier when it names another config issue too", async () => {
+      const ctx = withBootError(["*"], `invalid config: ${issues(["*"])}; roles: Invalid input`);
+      expect((await anonymousReadOnlyRule.check(ctx))[0]?.where.module).toBe(AUTHZ_ROLES);
+    });
+  });
+
   it("agrees with the authz-roles config schema on which entries are accepted", async () => {
     const entries = ["*", "pages.*", "pages.read", "pages.write", "pages.manage", "media.list", "media.read", "a.b.c.read", "Pages.read", "pages.read ", "pages", "read", ".read", "pages..read", "pages.READ", "my_type-1.read", ""];
     for (const entry of entries) {
@@ -125,6 +153,37 @@ function customModule(options: { query?: string[]; input?: string[]; name?: stri
           writes: [],
           input: { type: "object", properties: Object.fromEntries(input.map((k) => [k, { type: "string" }])) },
           ...(query === undefined ? {} : { query: Object.fromEntries(query.map((k) => [k, { type: "string" }])) }),
+        },
+      };
+    },
+  });
+}
+
+function factoryModule(options: { query?: string[]; input?: string[]; throwing?: boolean } = {}): ModuleDefinition {
+  const input = options.input ?? ["role"];
+  const query = options.query;
+  return defineModule({
+    name: "custom/module",
+    provides: [],
+    requires: [],
+    configSchema: z.object({}),
+    async setup() {
+      return {};
+    },
+    steps() {
+      return { assign: stepFactory(() => async (ctx: Context) => ok(ctx)) };
+    },
+    describe() {
+      return {
+        assign: (arg: string) => {
+          if (options.throwing === true) throw new Error(`no description for ${arg}`);
+          return {
+            summary: `assigns ${arg}`,
+            reads: [],
+            writes: [],
+            input: { type: "object", properties: Object.fromEntries(input.map((k) => [k, { type: "string" }])) },
+            ...(query === undefined ? {} : { query: Object.fromEntries(query.map((k) => [k, { type: "string" }])) }),
+          };
         },
       };
     },
@@ -179,9 +238,51 @@ describe("pipelines/query-body-member", () => {
     expect(await queryBodyMemberRule.check(contextFor(await scenario("const role = ctx.query.role;\n", { steps: ["content.list:pages"] })))).toEqual([]);
   });
 
-  it("recognises a step run with an argument", async () => {
-    const p = await scenario("const role = ctx.query.role;\n", { steps: ["custom.assign:x"] });
-    expect(await queryBodyMemberRule.check(contextFor(p))).toHaveLength(1);
+  it("recognises a destructuring read from the query", async () => {
+    for (const source of ["const { role } = ctx.query;\n", "const { page, role = 'x' } = ctx.query;\n", "const { role: r } = query;\n", 'const { "role": r } = ctx.query;\n', "const { role } = ctx?.query ?? {};\n"]) {
+      const findings = await queryBodyMemberRule.check(contextFor(await scenario(source)));
+      expect(findings, source).toHaveLength(1);
+    }
+  });
+
+  it("does not take a destructuring that only renames into the key for a read of it", async () => {
+    for (const source of ["const { page: role } = ctx.query;\n", "const { role } = ctx.body;\n", "const { role } = ctx.query.nested;\n", "const { roleName } = ctx.query;\n"]) {
+      expect(await queryBodyMemberRule.check(contextFor(await scenario(source))), source).toEqual([]);
+    }
+  });
+
+  describe("for a step factory", () => {
+    async function factoryScenario(options: { query?: string[]; input?: string[]; throwing?: boolean; steps?: string[]; source?: string } = {}) {
+      const file = join(dir, "custom.ts");
+      await writeFile(file, options.source ?? "const role = ctx.query.role;\n");
+      return project({
+        loaded: [factoryModule(options)],
+        moduleFiles: { "custom/module": file },
+        pipelines: [{ name: "assignRole", steps: options.steps ?? ["custom.assign:x"] }],
+        triggers: [{ http: "POST /assign", pipeline: "assignRole" }],
+      });
+    }
+
+    it("resolves the description with the argument the pipeline gives", async () => {
+      const findings = await queryBodyMemberRule.check(contextFor(await factoryScenario()));
+      expect(findings).toHaveLength(1);
+      expect(findings[0]?.message).toContain("custom.assign:x");
+      expect(findings[0]?.message).toContain('"role"');
+    });
+
+    it("reports once per distinct argument", async () => {
+      const findings = await queryBodyMemberRule.check(contextFor(await factoryScenario({ steps: ["custom.assign:x", "custom.assign:y", "custom.assign:x"] })));
+      expect(findings.map((f) => f.id).sort()).toEqual(["pipelines/query-body-member:assignRole:custom.assign:x:role", "pipelines/query-body-member:assignRole:custom.assign:y:role"]);
+    });
+
+    it("stays quiet when the step declares the key in describe().query", async () => {
+      expect(await queryBodyMemberRule.check(contextFor(await factoryScenario({ query: ["role"] })))).toEqual([]);
+    });
+
+    it("stays quiet without an argument, and when the description cannot be resolved for it", async () => {
+      expect(await queryBodyMemberRule.check(contextFor(await factoryScenario({ steps: ["custom.assign"] })))).toEqual([]);
+      expect(await queryBodyMemberRule.check(contextFor(await factoryScenario({ throwing: true })))).toEqual([]);
+    });
   });
 
   it("stays quiet for an installed package's file", async () => {

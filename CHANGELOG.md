@@ -906,7 +906,8 @@ Net changes since 5.8.2.
     `<name>.read` permission, the entries boot now refuses.
   - `pipelines/query-body-member` (warning, manual) names a step of the project's own modules that reads a
     member of its `input` schema through `ctx.query` without declaring it in `describe().query`, and an
-    info finding names an HTTP pipeline running `migrations.apply`, whose `dry` is a body flag.
+    info finding names an HTTP pipeline running `migrations.apply`, whose `dry` is a body flag. A step built
+    by `stepFactory` is checked per argument, and a read by destructuring from `ctx.query` counts.
   - `runtime/sort-field-grant` (info) names each HTTP pipeline running `content.list` or `media.list`, where
     `sort` is now restricted to the fields the caller's grant names, and a name that is no field answers 400.
   - `runtime/user-cleanup-guard` (warning, manual) names an HTTP route running `audit.anonymize` or
