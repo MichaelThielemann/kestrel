@@ -769,13 +769,16 @@ Net changes since 5.8.2.
   active or not, so they can no longer rewrite the revisions or erase the audit trail of an existing
   account. The guard is the new step `authn.requireAbsentUser`, which reads `params.id` and is
   `atomicSafe`, and refuses an id that is not a UUID with 400 `VALIDATION`, so the routes cannot be
-  aimed at a username, a step name or a page id; a project that exposes `revisions.reassignAuthor` or
+  aimed at a username or a step name. An id in UUID form that names no user passes, whatever else it
+  identifies; a project that exposes `revisions.reassignAuthor` or
   `audit.anonymize` on a route of its own should run it first. Each successful run raises `user.revisionsReassignRetried` or
   `user.auditAnonymizeRetried`, which `examples/minimal` records through an `auditUsers` pipeline, so
   the log shows who ran the repair without naming the deleted user. Both routes now end in `events.relay`, so their responses carry `_events`.
-- `audit.anonymize` clears the identity id and only those params that are id params (`id`, `userId`,
-  `author_id` and the like) and hold the user's id. A param of another name, such as the `username` of
-  a failed sign-in, keeps its value even when it equals the id.
+- `audit.anonymize` refuses an id that is not a UUID with 400 `VALIDATION` and leaves the entries
+  alone, so an id that is no user id, such as a username or a step name, can never match a param value
+  of another meaning. User ids of `authn-multi` are UUIDs; a project with another auth module whose
+  ids have a different form has to anonymise through its own step. It still clears the identity id and
+  every param that holds the user's id, whatever the param is called.
 
 ### Added
 

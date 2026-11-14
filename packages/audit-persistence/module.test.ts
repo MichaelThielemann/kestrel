@@ -32,6 +32,8 @@ async function boot(config: Record<string, unknown> = {}): Promise<{ instance: A
   return { instance, db };
 }
 
+const USER = "3f1c8a52-7d0e-4b6a-9c41-2e5f0a8b6d17";
+
 const recordPipeline = definePipeline({ name: "record", steps: ["audit.record"] });
 const recordActorPipeline = definePipeline({ name: "recordActor", steps: ["audit.recordActor"] });
 const anonymizePipeline = definePipeline({ name: "anonymize", steps: ["audit.anonymize"] });
@@ -54,14 +56,14 @@ describe("audit/persistence module steps via runPipeline", () => {
 
   it("anonymize strips the user the event payload names and is repeatable", async () => {
     const { instance, db } = await boot();
-    await runPipeline(recordPipeline, { body: { eventId: "e1", event: "auth.loggedIn", at: 1, identity: { id: "u1", claims: {} }, params: {} } }, { modules: [{ module, instance }] });
+    await runPipeline(recordPipeline, { body: { eventId: "e1", event: "auth.loggedIn", at: 1, identity: { id: USER, claims: {} }, params: {} } }, { modules: [{ module, instance }] });
 
-    const first = await runPipeline(anonymizePipeline, { payload: { id: "u1", event: "user.deleted", at: 2, identity: null, params: { id: "u1" } } }, { modules: [{ module, instance }] });
+    const first = await runPipeline(anonymizePipeline, { payload: { id: USER, event: "user.deleted", at: 2, identity: null, params: { id: USER } } }, { modules: [{ module, instance }] });
     expect(first.status).toBe(200);
     expect(first.result).toEqual({ entries: 1 });
-    expect(expectOk(await db.count(COLLECTION, { identityId: "u1" }))).toBe(0);
+    expect(expectOk(await db.count(COLLECTION, { identityId: USER }))).toBe(0);
 
-    const again = await runPipeline(anonymizePipeline, { params: { id: "u1" } }, { modules: [{ module, instance }] });
+    const again = await runPipeline(anonymizePipeline, { params: { id: USER } }, { modules: [{ module, instance }] });
     expect(again.result).toEqual({ entries: 0 });
   });
 
@@ -69,6 +71,19 @@ describe("audit/persistence module steps via runPipeline", () => {
     const { instance } = await boot();
     const res = await runPipeline(anonymizePipeline, {}, { modules: [{ module, instance }] });
     expect(res).toMatchObject({ status: 400, code: "VALIDATION" });
+  });
+
+  it("anonymize refuses an id that is not a UUID and leaves the entries alone", async () => {
+    const { instance, db } = await boot();
+    await runPipeline(recordPipeline, { body: { eventId: "e1", event: "auth.failed", at: 1, identity: null, params: { username: "login" } } }, { modules: [{ module, instance }] });
+    await runPipeline(recordPipeline, { body: { eventId: "e2", event: "auth.loggedIn", at: 2, identity: { id: "u1", claims: {} }, params: {} } }, { modules: [{ module, instance }] });
+
+    for (const id of ["login", "authn.login", "u1", ""]) {
+      const res = await runPipeline(anonymizePipeline, { params: { id } }, { modules: [{ module, instance }] });
+      expect(res).toMatchObject({ status: 400, code: "VALIDATION" });
+    }
+    expect(expectOk(await db.count(COLLECTION, { identityId: "u1" }))).toBe(1);
+    expect(expectOk(await db.findOne<{ id: string; params: Record<string, string> }>(COLLECTION, { eventId: "e1" }))?.params).toEqual({ username: "login" });
   });
 
   it("prune removes what retentionDays no longer covers and answers 400 when it is unset", async () => {

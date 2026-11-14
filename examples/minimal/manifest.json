@@ -8512,7 +8512,7 @@
       "module": "authn/multi",
       "factory": false,
       "description": {
-        "summary": "Require that params.id is the id of no user, active or not; the guard of the routes that clean up after a deleted user. An id that has the shape of no user id (a UUID) is refused",
+        "summary": "Require that params.id is the id of no user, active or not; the guard of the routes that clean up after a deleted user. An id that is not a UUID, the form of every user id, is refused",
         "reads": [
           "params.id"
         ],
@@ -12682,7 +12682,7 @@
       "module": "audit/persistence",
       "factory": false,
       "description": {
-        "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every id param holding it go, the event, its time and the other params stay",
+        "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param holding it go, the event, its time and the other params stay",
         "reads": [
           "params.id",
           "payload"
@@ -12706,7 +12706,7 @@
           ]
         },
         "errors": {
-          "400": "no user id"
+          "400": "no user id, or an id that is not a UUID"
         }
       }
     },
@@ -13719,7 +13719,7 @@
           "name": "audit.anonymize",
           "module": "audit/persistence",
           "description": {
-            "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every id param holding it go, the event, its time and the other params stay",
+            "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param holding it go, the event, its time and the other params stay",
             "reads": [
               "params.id",
               "payload"
@@ -13743,7 +13743,7 @@
               ]
             },
             "errors": {
-              "400": "no user id"
+              "400": "no user id, or an id that is not a UUID"
             }
           }
         }
@@ -28462,7 +28462,7 @@
           "name": "authn.requireAbsentUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require that params.id is the id of no user, active or not; the guard of the routes that clean up after a deleted user. An id that has the shape of no user id (a UUID) is refused",
+            "summary": "Require that params.id is the id of no user, active or not; the guard of the routes that clean up after a deleted user. An id that is not a UUID, the form of every user id, is refused",
             "reads": [
               "params.id"
             ],
@@ -28479,7 +28479,7 @@
           "name": "audit.anonymize",
           "module": "audit/persistence",
           "description": {
-            "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every id param holding it go, the event, its time and the other params stay",
+            "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param holding it go, the event, its time and the other params stay",
             "reads": [
               "params.id",
               "payload"
@@ -28503,7 +28503,7 @@
               ]
             },
             "errors": {
-              "400": "no user id"
+              "400": "no user id, or an id that is not a UUID"
             }
           }
         },
@@ -28821,7 +28821,7 @@
           "name": "authn.requireAbsentUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require that params.id is the id of no user, active or not; the guard of the routes that clean up after a deleted user. An id that has the shape of no user id (a UUID) is refused",
+            "summary": "Require that params.id is the id of no user, active or not; the guard of the routes that clean up after a deleted user. An id that is not a UUID, the form of every user id, is refused",
             "reads": [
               "params.id"
             ],

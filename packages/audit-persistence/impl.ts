@@ -30,20 +30,17 @@ interface EntryRow extends Document {
 export interface Audit {
   record(entry: AuditEntry): Promise<Result<void, PersistenceError>>;
   /**
-   * Clears the identity id and every id param (`id`, `userId`, `author_id` and the like) that
-   * holds that user's id, so only the event and its time remain; a param of another name keeps its
-   * value even when it equals the id, and an entry never takes on a different user. Returns how many entries changed; a second
-   * call for the same user changes nothing and returns 0.
+   * Clears the identity id and every param that holds that user's id, so only the event, its time and
+   * the other params remain; an entry never takes on a different user. Returns how many entries
+   * changed; a second call for the same user changes nothing and returns 0.
    */
   anonymize(identityId: string): Promise<Result<number, PersistenceError>>;
   /** Removes every entry older than `retentionDays` days and returns how many were removed. */
   prune(retentionDays: number): Promise<Result<number, PersistenceError>>;
 }
 
-const ID_PARAM = /^id$|Id$|_id$/;
-
 function withoutUser(params: Record<string, string>, identityId: string): Record<string, string> {
-  const kept = Object.entries(params).filter(([key, value]) => value !== identityId || !ID_PARAM.test(key));
+  const kept = Object.entries(params).filter(([, value]) => value !== identityId);
   return kept.length === Object.keys(params).length ? params : Object.fromEntries(kept);
 }
 

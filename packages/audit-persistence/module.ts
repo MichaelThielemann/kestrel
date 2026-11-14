@@ -16,6 +16,8 @@ export const configSchema = z
 
 type Instance = Audit & { retentionDays?: number; securityEvents: boolean; failedSteps: readonly string[]; logger: Logger };
 
+const USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function userIdOf(ctx: Context): string | null {
   if (ctx.params.id !== undefined) return ctx.params.id;
   return typeof ctx.payload.id === "string" ? ctx.payload.id : null;
@@ -60,6 +62,7 @@ export default defineModule({
     anonymize: async (ctx: Context) => {
       const id = userIdOf(ctx);
       if (id === null) return ctx.fail("VALIDATION", "audit.anonymize: no user id in params.id or the event payload");
+      if (!USER_ID.test(id)) return ctx.fail("VALIDATION", "audit.anonymize: the user id is not a UUID");
       const changed = await audit.anonymize(id);
       if (isErr(changed)) return ctx.fail(changed.error);
       return ok({ ...ctx, result: { entries: changed.value } });
@@ -76,12 +79,12 @@ export default defineModule({
     record: { summary: "Persist an audit log entry for an emitted event", reads: ["payload"], writes: [], input: { type: "object", additionalProperties: true } },
     recordActor: { summary: "Persist an audit log entry for an emitted event with its caller and address but without its params and id, so it names no one the event was about", reads: ["payload"], writes: [], input: { type: "object", additionalProperties: true } },
     anonymize: {
-      summary: "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every id param holding it go, the event, its time and the other params stay",
+      summary: "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param holding it go, the event, its time and the other params stay",
       reads: ["params.id", "payload"],
       writes: ["result"],
       input: { type: "object", additionalProperties: true },
       output: { type: "object", properties: { entries: { type: "number" } }, required: ["entries"] },
-      errors: { 400: "no user id" },
+      errors: { 400: "no user id, or an id that is not a UUID" },
     },
     prune: {
       summary: "Remove every audit entry older than the configured `retentionDays`",

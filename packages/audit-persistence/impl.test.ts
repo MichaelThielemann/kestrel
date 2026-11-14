@@ -57,15 +57,17 @@ describe("audit/persistence", () => {
     expect(expectOk(await db.count(COLLECTION, { identityId: "u2" }))).toBe(1);
   });
 
-  it("drops only the params that carry a user id and keeps other params whose value equals it", async () => {
+  it("drops every param that holds the user's id whatever its name, and keeps params with other values", async () => {
     const db = createFakePersistence();
     const audit = await createAuditPersistence(db);
-    expectOk(await audit.record({ eventId: null, event: "auth.failed", at: 1, identityId: null, params: { pipeline: "login", step: "authn.login", username: "mallory" } }));
-    expectOk(await audit.record({ eventId: null, event: "page.updated", at: 2, identityId: "admin", params: { id: "mallory", userId: "mallory", author_id: "mallory", slug: "mallory" } }));
+    const user = "3f1c8a52-7d0e-4b6a-9c41-2e5f0a8b6d17";
+    const other = "9b2e4d60-1a3c-4f87-8e55-6c0d7a1b3f29";
+    expectOk(await audit.record({ eventId: null, event: "member.updated", at: 1, identityId: "admin", params: { uid: user, user, userID: user, userId: user, id: user, author_id: user, slug: "team" } }));
+    expectOk(await audit.record({ eventId: null, event: "member.updated", at: 2, identityId: "admin", params: { uid: other, pipeline: "update" } }));
 
-    expect(expectOk(await audit.anonymize("mallory"))).toBe(1);
-    expect(expectOk(await db.findOne<{ id: string; params: Record<string, string> }>(COLLECTION, { at: 1 }))?.params).toEqual({ pipeline: "login", step: "authn.login", username: "mallory" });
-    expect(expectOk(await db.findOne<{ id: string; params: Record<string, string> }>(COLLECTION, { at: 2 }))?.params).toEqual({ slug: "mallory" });
+    expect(expectOk(await audit.anonymize(user))).toBe(1);
+    expect(expectOk(await db.findOne<{ id: string; params: Record<string, string> }>(COLLECTION, { at: 1 }))?.params).toEqual({ slug: "team" });
+    expect(expectOk(await db.findOne<{ id: string; params: Record<string, string> }>(COLLECTION, { at: 2 }))?.params).toEqual({ uid: other, pipeline: "update" });
   });
 
   it("changes nothing on a second anonymise of the same user", async () => {

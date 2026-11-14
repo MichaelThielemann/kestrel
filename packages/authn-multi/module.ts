@@ -270,7 +270,7 @@ export default defineModule({
       atomicSafe: true,
     }),
     requireAbsentUser: {
-      summary: "Require that params.id is the id of no user, active or not; the guard of the routes that clean up after a deleted user. An id that has the shape of no user id (a UUID) is refused",
+      summary: "Require that params.id is the id of no user, active or not; the guard of the routes that clean up after a deleted user. An id that is not a UUID, the form of every user id, is refused",
       reads: ["params.id"],
       writes: [],
       errors: { 400: "params.id is not a user id", 409: "the user still exists" },

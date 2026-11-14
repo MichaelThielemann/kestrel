@@ -234,7 +234,7 @@ describe("authn/multi module steps via runPipeline", () => {
     expect(unknown.status).toBe(200);
   });
 
-  it("requireAbsentUser refuses an id that has the shape of no user id with 400 VALIDATION", async () => {
+  it("requireAbsentUser refuses an id that is not a UUID with 400 VALIDATION", async () => {
     const { instance } = await boot();
     for (const id of ["never-existed", "mallory", "authn.login", "login", "", "1234"]) {
       const res = await runPipeline(requireAbsentUserPipeline, { params: { id } }, { modules: [{ module, instance }] });
