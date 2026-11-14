@@ -185,7 +185,7 @@ triggers: [{ event: "site.pathsMoved", pipeline: "pathsMovedDelivery" }],
 definePipeline({ name: "pathsMovedDelivery", steps: ["delivery.markMoved"] });
 ```
 
-**Rendering, never inside the request.** `dependencies.render` chooses who renders a marked output:
+**Re-rendering dependents, never inside the request.** `dependencies.render` chooses who renders an output marked because something it depends on changed (the saved document itself is published by `delivery.publish`, see "Publishing on save"):
 
 - `"background"` (default): the process that marked it, in a background loop of its own that starts with the first
   mark and renders one output at a time. The loop is detached from the request: the request never waits for it.
