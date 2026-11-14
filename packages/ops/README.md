@@ -126,7 +126,7 @@ is the directory that holds `kestrel.environments.json`; in a bundle that is `.k
 <location>backups/<id>/site.jsonl         per key of the delivery prefix: key, size, etag, object, objectEtag
 <location>backups/<id>/derived.jsonl      per key of a derived prefix: key, size, etag (not copied)
 <location>backups/<id>/verify/<time>.json each verification result
-<location>backups/<id>/pins/<run>.json    a run that keeps the backup from prune
+<location>backups/<id>/pins/<run>.json    a run that keeps the backup from prune until it ends
 <location>objects/<key>@<etag>            the bytes, shared by every backup that has this version
 <location>runs/<run>/…                    the journal, one object per step
 <location>locks/<run>/…                   the lock trace
@@ -285,8 +285,10 @@ without an answer, the run stops at the question with exit 1.
 `backup prune` keeps the newest verified backups of each kind (default `cutover` 5, `scheduled` 14, `manual`
 10, `pre-restore` 5); only verified backups count. A failed or unverified backup stays while it is newer than the
 oldest verified one kept, or, when its kind has no verified backup, while it is among the newest of the count.
-Prune also keeps every pinned backup and the newest verified backup of each Kestrel major, then removes the
-objects no kept backup refers to. Nothing younger than a day is removed. A backup reuses an object it finds
+Prune also keeps every backup pinned by a run that has not ended (a run without an end entry, active in the last
+two hours) and the newest verified backup of each Kestrel major, then removes the objects no kept backup refers to.
+The `pre-restore` backup of a failed restore stays pinned in `backup list`, but once that run ended it counts
+towards the retention of its kind like any other. Nothing younger than a day is removed. A backup reuses an object it finds
 under `objects/` without writing it again, so the object's age does not protect it; a backup the listing does
 not show yet still counts, since prune reads the backups of today and yesterday from `recent/`, which it finds
 by key, not by listing, and forgets older days there. It refuses while another run is open (a journal

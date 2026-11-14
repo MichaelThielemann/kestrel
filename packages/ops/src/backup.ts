@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { messageOf, REPLICATION_PACKAGE, runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
-import { openRuns, listRuns } from "./journal.ts";
+import { openRuns, listRuns, RUN_STALE_MS } from "./journal.ts";
 import { heldLocks } from "./lock.ts";
 import { BACKUP_KINDS, backupId, fromJsonl, jsonBytes, keys, parseBackupId, parseJson, parseJsonOrNull, stamp, toJsonl, type BackupKind, type BlobEntry, type DerivedEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { placedUnstarted, refuseUnfinishedPlacement } from "./placements.ts";
@@ -23,7 +23,7 @@ export type BackupMode = { kind: "live" } | { kind: "freeze" } | { kind: "stoppe
 export interface BackupOptions {
   kind: BackupKind;
   mode: BackupMode;
-  /** Pin the backup for this run, so prune keeps it while the run is open. */
+  /** Pin the backup for this run, so prune keeps it until the run has ended. */
   pinFor?: string;
 }
 
@@ -491,14 +491,17 @@ async function backupIdsAtLocation(ctx: Pick<OpsContext, "backups" | "location">
  * Removes backups beyond the retention count of their kind and the objects no remaining backup refers to. Only
  * verified backups count towards the retention; a failed or unverified one is kept while it is newer than the oldest
  * verified backup the count keeps (or, when its kind has no verified backup, while it is among the newest of the
- * count). It keeps pinned backups and the newest verified backup of every Kestrel major, never removes anything
+ * count). It keeps backups pinned by a run that has not ended (a run whose journal shows an end entry or no entry for
+ * {@link RUN_STALE_MS} has ended) and the newest verified backup of every Kestrel major, never removes anything
  * younger than a day, keeps every object a backup of any environment at the same location refers to, also a backup
  * of today or yesterday that the listing does not show yet (read from `recent/`), and refuses while a run is open or
  * another run holds the lock.
  */
 export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResult> {
   const now = ctx.clock();
-  const open = openRuns(await listRuns(ctx.backups, ctx.location), now).filter((r) => r.runId !== ctx.runId);
+  const runs = await listRuns(ctx.backups, ctx.location);
+  const ended = new Set(runs.filter((r) => r.finished || now - r.lastAt >= RUN_STALE_MS).map((r) => r.runId));
+  const open = openRuns(runs, now).filter((r) => r.runId !== ctx.runId);
   if (open.length > 0) throw new OpsError(`refusing to prune: run ${open.map((r) => r.runId).join(", ")} is still open`, 1, "runs");
   const locks = (await heldLocks(ctx.backups, ctx.location, now)).filter((l) => l.runId !== ctx.runId);
   if (locks.length > 0) throw new OpsError(`refusing to prune: run ${locks.map((l) => l.runId).join(", ")} holds the lock`, 1, "lock");
@@ -526,7 +529,7 @@ export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResu
   }
   newestPerMajor.forEach((id) => keep.add(id));
   for (const b of all) {
-    if (b.pinnedBy.length > 0 || now - b.newestWrite < PRUNE_MIN_AGE_MS) keep.add(b.id);
+    if (b.pinnedBy.some((runId) => !ended.has(runId)) || now - b.newestWrite < PRUNE_MIN_AGE_MS) keep.add(b.id);
     if (!keep.has(b.id)) remove.push(b.id);
   }
   const referenced = new Set<string>();

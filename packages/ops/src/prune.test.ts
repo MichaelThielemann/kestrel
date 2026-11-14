@@ -55,6 +55,45 @@ describe("backup prune", () => {
     }
   });
 
+  it("lets the pre-restore backup of a failed restore count towards the retention instead of keeping it pinned for good", async () => {
+    let offset = 0;
+    const clock = (): number => Date.now() + offset;
+    const bucket = new MemoryBucket("failed-restore-pin", { clock });
+    const h = createHarness({ store: memoryStore(bucket) });
+    const waitReady = h.app.waitReady.bind(h.app);
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const backup = await h.run(["backup", "create", "--freeze", "--json"]);
+      expect(backup.code).toBe(0);
+      h.app.run(`UPDATE pages SET "body" = 'changed after the backup' WHERE "id" = 'home'`);
+      await h.app.sync();
+      h.app.waitReady = async () => false;
+      const failed = await h.run(["restore", "--backup", String(backup.json.id), "--yes", "--answers", h.answers({ "access-changes": "accept" }), "--json"]);
+      h.app.waitReady = waitReady;
+      expect(failed.code).toBe(1);
+      const safety = String(failed.json.backupId);
+      const listed = await h.run(["backup", "list", "--json"]);
+      expect(listed.json.backups).toContainEqual(expect.objectContaining({ id: safety, pinnedBy: [expect.any(String)] }));
+
+      const newer: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const id = backupId("prod", clock() + (i + 1) * 60_000, "pre-restore", (i + 16).toString(16).padStart(4, "0"));
+        newer.push(id);
+        writeFakeBackup(bucket, id, "6.0.0");
+      }
+      offset = 3 * DAY;
+      const status = await h.run(["status", "--json"], { clock });
+      expect(status.json.openRuns).toEqual([]);
+      const pruned = await h.run(["backup", "prune", "--dry-run", "--json"], { clock });
+      expect(pruned.code).toBe(0);
+      expect(pruned.json.backups).toContain(safety);
+      for (const id of newer) expect(pruned.json.kept).toContain(id);
+    } finally {
+      await h.dispose();
+    }
+  });
+
   it("never removes objects or incomplete backups younger than a day", async () => {
     const now = Date.parse("2026-10-01T00:00:00Z");
     const bucket = new MemoryBucket("young", { clock: () => now - 60_000 });
