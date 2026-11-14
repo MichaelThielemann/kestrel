@@ -22,6 +22,7 @@ boot. The object is closed: an unknown top-level key aborts the boot.
 | `http` | object \| `null` | `{}` | The built-in HTTP server; `null` turns it off (embedded mode) |
 | `pipelinesDir` | string | `"./pipelines"` | Where the `kestrel` binary looks for pipeline files |
 | `shutdownTimeoutMs` | integer | `30000` | Deadline for draining in-flight runs on `stop()` |
+| `stepLog` | `"all"` \| `"errors"` \| `"off"` | `"all"` | Which steps write a `step` log line (see Logging) |
 
 ## `modules`
 
@@ -323,8 +324,20 @@ const result = await checkBoot(box.input, { setup: box.setup });
 ## Logging
 
 The `kestrel` binary logs JSON lines to stdout: one `step` line per step (`runId`, pipeline, step,
-duration, outcome) and one `info` line with the message `http` per request. There is no log level or
-format setting — an embedded host passes its own `Logger` to `boot({ logger })` instead.
+duration, outcome) and one `info` line with the message `http` per request. The top-level `stepLog`
+decides which steps write their line:
+
+| `stepLog` | `step` lines |
+|---|---|
+| `"all"` (default) | every step |
+| `"errors"` | every step whose outcome is not `ok`: `fail(<CODE>)` or `error` |
+| `"off"` | none |
+
+`stepLog` only filters the `step` lines. The `error` lines for a step that throws or fails with a
+cause, the `http` lines, run observers and everything built on them, such as insights and the audit
+trail, are the same in every mode. Under high load `"errors"` or `"off"` saves one synchronous log
+write per step; `"all"` is the setting for debugging. There is no other level or format setting: an
+embedded host passes its own `Logger` to `boot({ logger })`.
 
 The `http` line has the same fields in the core server and in `kestrel-h3`'s handler (given a
 `logger`):

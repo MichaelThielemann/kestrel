@@ -26,7 +26,7 @@ enough — `getting-started.md` § Your own module shows the smallest working on
 about `module.ts`, `describe()` and the checklist applies to both.
 
 ```
-module.ts        Shell: name, provides, requires, optional?, configSchema, setup, steps, optional emits/attach/teardown
+module.ts        Shell: name, provides, requires, optional?, configSchema, setup, steps, optional emits/attach/quiesce/teardown
 impl.ts          Entry point. Imports only kestrel-contracts, its own files, Node, package.json deps
 impl.test.ts     Calls the contract test, plus its own tests
 README.md        Required content: what, why, config, steps, what's not included
@@ -77,8 +77,14 @@ export default defineModule({
     return createAuthnMulti(config, deps.get(PERSISTENCE));
   },
 
-  // Optional: runs in reverse boot order on kestrel.stop(). Errors are logged but don't abort
-  // stop(). For resources the submodule itself holds (connections, watchers).
+  // Optional: runs once at the start of kestrel.stop(), synchronously, in reverse boot order,
+  // before the in-flight runs drain. For a submodule that starts work of its own (a worker
+  // claiming queued jobs, a poller): stop starting new work here, let started work finish.
+  // Errors are logged but don't abort stop().
+  // quiesce: (instance) => instance.stopPolling(),
+
+  // Optional: runs in reverse boot order on kestrel.stop(), after the drain. Errors are logged but
+  // don't abort stop(). For resources the submodule itself holds (connections, watchers).
   // teardown: (authn) => authn.close(),
 
   // Optional: runs once at the end of boot with the read-only view of the booted instance —
@@ -299,6 +305,8 @@ Not included: self-service registration, password reset (own pipelines).
 - [ ] Step names are verbs (`login`, `requireUser`, `createOne`), see the vocabulary in
       `pipelines.md`
 - [ ] If the submodule holds a connection, a watcher, etc.: `teardown` closes it
+- [ ] If the submodule starts work of its own (claims queued jobs, polls on a timer): `quiesce`
+      stops it synchronously, so nothing new starts while `stop()` drains
 - [ ] If the submodule contributes a trigger (`triggers.event`): the returned stop function
       unregisters all of it
 - [ ] Config fields that hold credentials carry `.describe("secret")`: the manifest

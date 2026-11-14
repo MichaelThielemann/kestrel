@@ -29,8 +29,15 @@ which may include a pipeline that was not subscribed when the event was original
 
 Requires exactly one delivery module per instance — this one or
 `@michaelthielemann/kestrel-events-direct` (inline), never both, never neither once a pipeline has
-an event trigger. The worker starts with the event triggers in `start()` and stops on `stop()`;
-without any event trigger in the whole manifest, `setup()` installs an empty delivery table right
+an event trigger. The worker starts with the event triggers in `start()`. `stop()` quiesces the
+module before anything else: from that moment the main loop, every lane and `events.relay` claim no
+further row, fan out nothing and scan for no lane, so no listener pipeline starts while the instance
+drains its in-flight runs. A row already running finishes and is marked as usual. Rows the main loop
+claimed in its batch but had not started go back to `pending`, unlocked, with their `attempts` and
+`coalesceKey` as before the claim; a relay reports the rows it did not reach as `pending`. Every row
+left pending is delivered after the next `start()`, or by another process on the same store, and
+`events.emit` keeps writing rows during the shutdown. The worker itself stops in the module's
+teardown, after the drain. Without any event trigger in the whole manifest, `setup()` installs an empty delivery table right
 away (`start()` never gets the chance to), so `events.emit` drops the event instead of writing a row
 nothing could ever fan out, and the worker never starts.
 Config (all optional): `pollMs` 500, `batch` 20, `maxAttempts` 5, `backoffSeconds`

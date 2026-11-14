@@ -138,8 +138,16 @@ If any step fails: abort with `KestrelBootError { module, reason }`.
 
 A module registers with `defineModule`, which accepts a fixed set of lifecycle hooks next to
 `setup`: `steps`/`describe` for pipeline steps, `triggers.event` for the event bus,
-`atomicScope` for the transaction boundary, `attach`/`teardown` around the instance's lifetime,
-and `health` for its own state.
+`atomicScope` for the transaction boundary, `attach`/`quiesce`/`teardown` around the instance's
+lifetime, and `health` for its own state.
+
+`quiesce(instance)` is synchronous and runs once, at the very start of `stop()`, before the
+in-flight runs drain, in reverse boot order. It is where a module stops starting work of its own:
+a queue worker claims no further job, a poller schedules no further poll. Work already started is
+left to finish, and what the module holds open stays open until `teardown`, which runs after the
+drain. A hook that throws is logged and the shutdown goes on. The order of `stop()` is therefore:
+`quiesce` of every module, close the HTTP listener, drain the in-flight runs and connections, stop
+the cron and event triggers and the functions `attach` returned, `teardown` of every module.
 
 `health(instance)` is synchronous and does no I/O: it reads state the module already tracks (a
 flag, a counter), never the result of a call it would have to make. It returns a `ModuleHealth`:

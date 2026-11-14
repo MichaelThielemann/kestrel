@@ -93,13 +93,21 @@ and `timeouts: { requestMs, headersMs, keepAliveMs }` (defaults 30000 / 10000 / 
 line and is echoed as the `x-request-id` response header next to `x-kestrel-run-id`.
 
 ## Logging
+The runner writes one `logger.step` entry per step. The top-level config `stepLog` (or the
+`stepLog` option of `runPipeline`) narrows that to the steps whose outcome is not `ok` (`"errors"`)
+or to none (`"off"`); the default `"all"` writes every one. Run observers and the `logger.error`
+lines for a thrown step or a failure with a cause do not depend on it.
+
 `consoleLogger` stamps every line with ISO 8601 and the local UTC offset rather than `Z`: it runs on
 one machine, and the offset keeps the line readable in local time without losing the absolute point.
 
 ## Shutdown
-`stop()` closes the listener, waits for the in-flight runs and for connections still sending a
-request or receiving a response, then drops the remaining connections, stops the cron and event
-triggers and tears the modules down in reverse boot order. The deadline is `stop({ timeoutMs })`
+`stop()` first calls every module's `quiesce()` hook, once, synchronously and in reverse boot
+order, so a module that starts work of its own (a queue worker claiming jobs) stops doing so before
+the shutdown waits for anything; a hook that throws is logged and the shutdown goes on. It then
+closes the listener, waits for the in-flight runs and for connections still sending a request or
+receiving a response, then drops the remaining connections, stops the cron and event triggers and
+tears the modules down in reverse boot order. The deadline is `stop({ timeoutMs })`
 or the top-level config `shutdownTimeoutMs` (default 30000); the returned `{ drained }` says whether
 everything finished inside it. The `kestrel` binary wires SIGINT/SIGTERM to `stop()` (exit 1 when the
 deadline is hit) and logs `unhandledRejection`/`uncaughtException` before stopping and exiting 1.
