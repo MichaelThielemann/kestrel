@@ -1,9 +1,9 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { ENVIRONMENTS_FILE } from "./environments.ts";
 import { OpsError } from "./errors.ts";
+import { packageDir } from "./packages.ts";
 import { sha256File } from "./sqlite.ts";
 
 /** The package a bundle runs. */
@@ -43,21 +43,6 @@ const info = JSON.parse(readFileSync(new URL("bundle.json", dir), "utf8"));
 const prompt = terminalPrompt();
 process.exitCode = await runOps(process.argv.slice(2), { cwd: dir.pathname, project: { versions: info.packages, lockfileSha256: info.lockfileSha256 }, ...(prompt ? { prompt } : {}) });
 `;
-
-function packageDir(name: string, from: string): string | null {
-  try {
-    return dirname(realpathSync(createRequire(join(from, "package.json")).resolve(`${name}/package.json`)));
-  } catch {
-    let dir = from;
-    for (;;) {
-      const candidate = join(dir, "node_modules", name, "package.json");
-      if (existsSync(candidate)) return dirname(realpathSync(candidate));
-      const parent = dirname(dir);
-      if (parent === dir) return null;
-      dir = parent;
-    }
-  }
-}
 
 /**
  * Writes a self-contained `.kestrel-ops/` into `outDir`: `run.mjs`, the installed kestrel-ops with every package it

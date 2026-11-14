@@ -87,8 +87,8 @@ export interface DerivedEntry {
   etag: string;
 }
 
-/** How a backup knows the source database was complete: `sealed` (teardown wrote a seal), `unsealed` (no seal, e.g. a kill), `unsupported` (the runtime writes no seal), `live` (taken while the app ran). */
-export type SealState = "sealed" | "unsealed" | "unsupported" | "live";
+/** How a backup knows the source database was complete: `sealed` (teardown wrote a seal), `unsealed` (no seal, e.g. a kill), `unsupported` (the runtime writes no seal), `unknown` (no seal, and the target cannot tell the runtime version), `live` (taken while the app ran). */
+export type SealState = "sealed" | "unsealed" | "unsupported" | "unknown" | "live";
 
 /** `manifest.json`, written once after every other file of the backup. */
 export interface Manifest {

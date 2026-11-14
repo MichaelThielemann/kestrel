@@ -142,16 +142,19 @@ function isSeal(value: unknown): value is Seal {
   return typeof value === "object" && value !== null && typeof Reflect.get(value, "lastFrame") === "number" && typeof Reflect.get(value, "at") === "number";
 }
 
-/** Classifies the newest generation of a stopped replica: sealed, unsealed (a stop without teardown), or unsupported (a runtime that writes no seal). */
+/**
+ * Classifies the newest generation of a stopped replica. A valid `sealed.json` makes it sealed whatever the runtime
+ * version; without one it is unsealed (a sealing runtime stopped without teardown), unsupported (a runtime before the
+ * sealing major) or unknown (the target cannot tell the runtime version).
+ */
 export async function sealOf(store: ObjectStore, prefix: string, generation: Generation, runtime: string | null): Promise<SealReport> {
   const base = { generation: generation.name, lastFrameAt: generation.lastFrameAt, runtime };
-  const major = majorOf(runtime);
-  if (major === null || major < SEALING_MAJOR) return { ...base, state: "unsupported", seal: null };
   const info = generation.files["sealed.json"];
-  if (!info) return { ...base, state: "unsealed", seal: null };
-  const data = await store.get(info.key);
+  const data = info ? await store.get(info.key) : null;
   const seal: unknown = data === null ? null : parseJson(data);
-  return isSeal(seal) ? { ...base, state: "sealed", seal } : { ...base, state: "unsealed", seal: null };
+  if (isSeal(seal)) return { ...base, state: "sealed", seal };
+  const major = majorOf(runtime);
+  return { ...base, state: major === null ? "unknown" : major < SEALING_MAJOR ? "unsupported" : "unsealed", seal: null };
 }
 
 /** `gen/<g>/origin.json` next to a promoted snapshot: tells a runtime that understands it that its start is a restore. */

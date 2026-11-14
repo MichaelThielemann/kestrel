@@ -7,7 +7,7 @@ import { openRuns, listRuns } from "./journal.ts";
 import { heldLocks } from "./lock.ts";
 import { BACKUP_KINDS, backupId, fromJsonl, jsonBytes, keys, parseBackupId, parseJson, toJsonl, type BackupKind, type BlobEntry, type DerivedEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
-import { buildDatabase, sealOf, stableGenerations, type SealReport } from "./replica.ts";
+import { buildDatabase, SEALING_MAJOR, sealOf, stableGenerations, type SealReport } from "./replica.ts";
 import { integrityCheck, referencedBlobs, sha256, sha256File, tableCounts, vacuumInto } from "./sqlite.ts";
 import { ObjectMissing, PreconditionFailed, listMap, stableList, transfer, type ObjectInfo, type ObjectStore } from "./store.ts";
 
@@ -37,7 +37,11 @@ export async function acceptSeal(ctx: OpsContext, seal: SealReport, stoppedAt: n
   const evidence = (await ctx.target.stopEvidence?.()) ?? [];
   const lastFrame = new Date(seal.lastFrameAt).toISOString();
   const lines = [
-    seal.state === "unsupported" ? `seal unsupported (runtime ${seal.runtime ?? "unknown"}): the replica cannot prove the stop shipped every frame` : `unsealed: generation ${seal.generation} has no seal; the stop went without teardown`,
+    seal.state === "unsupported"
+      ? `seal unsupported (runtime ${seal.runtime ?? "unknown"}): the replica cannot prove the stop shipped every frame`
+      : seal.state === "unknown"
+        ? `seal unknown: generation ${seal.generation} has no seal and the target does not report the replication runtime version; a runtime before ${SEALING_MAJOR} writes none, a later one stopped without teardown`
+        : `unsealed: generation ${seal.generation} has no seal; the stop went without teardown`,
     `last shipped segment ${lastFrame}, stopped ${new Date(stoppedAt).toISOString()}`,
     ...evidence,
   ];

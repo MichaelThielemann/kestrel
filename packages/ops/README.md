@@ -123,10 +123,12 @@ With `--freeze` the originals and the delivery prefix are copied once while the 
 difference after the stop.
 
 A frozen backup records how the replica proves the stop was complete. A runtime that seals its replica
-writes `gen/<generation>/sealed.json` at teardown: the backup reads `sealed`. Without it the backup reads
-`unsealed` (the process stopped without teardown, so frames written after its last sync may be missing) or,
-for a runtime before 6, `unsupported`. Both show the time of the last shipped segment and need the answer
-`unsealed-stop`. A backup of a running app reads `live`.
+writes `gen/<generation>/sealed.json` at teardown: the backup reads `sealed`, whatever version the target
+reports. Without it the backup reads `unsealed` (the process stopped without teardown, so frames written after
+its last sync may be missing), `unsupported` for a runtime before 6, or `unknown` when the target cannot tell
+the runtime version. All three show the time of the last shipped segment and need the answer
+`unsealed-stop`. A backup of a running app reads `live`. The `local` target reads the runtime version from
+the packages the app resolves, also when it gets `replication-sqlite` through another package.
 
 Verification works only from what the backup location holds: it downloads `db.sqlite`, compares its sha256
 with the manifest, runs a full `integrity_check`, counts the rows of every table, checks that every original

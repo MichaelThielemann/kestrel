@@ -2,7 +2,9 @@ import { spawn } from "node:child_process";
 import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { REPLICATION_PACKAGE } from "./context.ts";
 import { OpsError } from "./errors.ts";
+import { packageDir, packageVersion } from "./packages.ts";
 
 /** What a target reports about the app it runs. */
 export interface TargetStatus {
@@ -98,16 +100,27 @@ export function instanceLockSidecar(file: string): string {
   return `${file}.instance`;
 }
 
+const RUNTIME_PACKAGES = [REPLICATION_PACKAGE, "@michaelthielemann/kestrel"];
+
 function installedPackages(dir: string): Record<string, string> {
   const out: Record<string, string> = {};
   const manifestFile = join(dir, "package.json");
   if (!existsSync(manifestFile)) return out;
   const manifest = boundaryCast<{ dependencies?: Record<string, string> }>(JSON.parse(readFileSync(manifestFile, "utf8")), "json");
-  for (const name of Object.keys(manifest.dependencies ?? {})) {
-    const installed = join(dir, "node_modules", name, "package.json");
-    if (!existsSync(installed)) continue;
-    const version = boundaryCast<{ version?: unknown }>(JSON.parse(readFileSync(installed, "utf8")), "json").version;
-    if (typeof version === "string") out[name] = version;
+  const direct = Object.keys(manifest.dependencies ?? {});
+  for (const name of direct) {
+    const version = packageVersion(name, dir);
+    if (version !== null) out[name] = version;
+  }
+  const from = [dir, ...direct.map((name) => packageDir(name, dir)).filter((d): d is string => d !== null)];
+  for (const name of RUNTIME_PACKAGES) {
+    if (out[name] !== undefined) continue;
+    for (const base of from) {
+      const version = packageVersion(name, base);
+      if (version === null) continue;
+      out[name] = version;
+      break;
+    }
   }
   return out;
 }
