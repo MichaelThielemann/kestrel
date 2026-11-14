@@ -12,7 +12,7 @@ export async function recordPlacement(ctx: OpsContext, generation: string): Prom
 async function placedGenerations(ctx: OpsContext): Promise<Set<string>> {
   const base = `${ctx.location}placements/${ctx.envName}/`;
   const placed = new Set<string>();
-  for (const info of await ctx.backups.list(base)) {
+  for (const info of await stableList(ctx.backups, base, ctx.poll)) {
     const generation = info.key.slice(base.length).split("/")[0];
     if (generation !== undefined && generation !== "") placed.add(generation);
   }

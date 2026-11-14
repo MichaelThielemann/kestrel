@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createHarness, LOCATION, PREFIXES } from "./harness.fixture.ts";
 import { MemoryBucket, memoryStore } from "./memoryStore.ts";
-import { listGenerations } from "./replica.ts";
+import { listGenerations, stableGenerations } from "./replica.ts";
 import type { ObjectStore } from "./store.ts";
 
 function failingPuts(inner: ObjectStore): { store: ObjectStore; failNext: (match: (key: string) => boolean) => void } {
@@ -24,8 +24,8 @@ function failingPuts(inner: ObjectStore): { store: ObjectStore; failNext: (match
   };
 }
 
-async function seededWithChange(name: string) {
-  const failing = failingPuts(memoryStore(new MemoryBucket(name)));
+async function seededWithChange(name: string, listLag = 0) {
+  const failing = failingPuts(memoryStore(new MemoryBucket(name, { listLag })));
   const h = createHarness({ store: failing.store });
   await h.app.start();
   await h.app.seed();
@@ -38,14 +38,17 @@ async function seededWithChange(name: string) {
 }
 
 describe("a restore that failed while it placed its generation", () => {
-  it("places a complete generation on the next run instead of treating the half placement as the current state", async () => {
-    const { h, failNext, restoreArgs } = await seededWithChange("half-placement");
+  it.each([
+    ["a listing that shows every object at once", 0],
+    ["a listing that lags behind writes", 1],
+  ])("places a complete generation on the next run instead of treating the half placement as the current state, with %s", async (_store, listLag) => {
+    const { h, failNext, restoreArgs } = await seededWithChange(`half-placement-${listLag}`, listLag);
     try {
       failNext((key) => key.startsWith(PREFIXES.replica) && key.endsWith("/origin.json"));
       const first = await h.run(restoreArgs());
       expect(first.code).toBe(1);
       expect(first.stderr).toContain("the app stays stopped");
-      const half = (await listGenerations(h.store, PREFIXES.replica)).at(-1);
+      const half = (await stableGenerations(h.store, PREFIXES.replica, { delayMs: 5 })).at(-1);
       expect(half?.name).toMatch(/^\d{8}T\d{6}Z$/);
       expect(half?.files["origin.json"]).toBeUndefined();
 
@@ -56,7 +59,7 @@ describe("a restore that failed while it placed its generation", () => {
       expect(second.json).toMatchObject({ noop: false, acknowledgement: "applied" });
       const promoted = String(Reflect.get(Object(second.json.promoted), "generation"));
       expect(promoted > String(half?.name)).toBe(true);
-      expect((await listGenerations(h.store, PREFIXES.replica)).find((g) => g.name === promoted)?.files["origin.json"]).toBeDefined();
+      expect((await stableGenerations(h.store, PREFIXES.replica, { delayMs: 5 })).find((g) => g.name === promoted)?.files["origin.json"]).toBeDefined();
       expect(h.app.restoredFrom).toBe(promoted);
       expect(h.app.rows("pages")).toContainEqual({ id: "home", title: "Home", body: "Welcome" });
     } finally {
