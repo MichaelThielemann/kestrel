@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -211,7 +211,7 @@ describe("workspace", () => {
 
 describe("bundle", () => {
   it("runs from a directory whose path holds spaces and non-ASCII letters", () => {
-    const base = mkdtempSync(join(tmpdir(), "kestrel-ops-bundle-path-"));
+    const base = mkdtempSync(join(realpathSync(tmpdir()), "kestrel-ops-bundle-path-"));
     const project = join(base, "Sites and Übungen");
     try {
       const self = join(project, "node_modules", "@michaelthielemann");
@@ -232,7 +232,7 @@ describe("bundle", () => {
   }, 60_000);
 
   it("carries the target adapter package each environment names, with its dependencies, so the bundle resolves it without the project", () => {
-    const base = mkdtempSync(join(tmpdir(), "kestrel-ops-bundle-adapter-"));
+    const base = mkdtempSync(join(realpathSync(tmpdir()), "kestrel-ops-bundle-adapter-"));
     const project = join(base, "project");
     try {
       const modules = join(project, "node_modules");
