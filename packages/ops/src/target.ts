@@ -115,11 +115,6 @@ function signalGroup(pid: number, signal: NodeJS.Signals): void {
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
 
-/** The sidecar the instance lock keeps next to a database file. Backups never contain it and restores never write it. */
-export function instanceLockSidecar(file: string): string {
-  return `${file}.instance`;
-}
-
 const RUNTIME_PACKAGES = [REPLICATION_PACKAGE, "@michaelthielemann/kestrel"];
 
 function installedPackages(dir: string): Record<string, string> {

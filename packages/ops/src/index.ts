@@ -19,5 +19,5 @@ export { appClock, serverClock, type ServerClock } from "./serverTime.ts";
 export { deleteSessions, hasAccessChanges, integrityCheck, lossReport, SESSIONS_TABLE, type AccessChanges, type LossReport, type TableDiff } from "./sqlite.ts";
 export { probeProtection, status, type Protection, type StatusReport } from "./status.ts";
 export { ObjectMissing, PreconditionFailed, transfer, type CopyOptions, type ObjectInfo, type ObjectStore } from "./store.ts";
-export { instanceLockSidecar, localTarget, type LocalTargetConfig, type Target, type TargetDeps, type TargetFacts, type TargetFactory, type TargetStatus } from "./target.ts";
+export { localTarget, type LocalTargetConfig, type Target, type TargetDeps, type TargetFacts, type TargetFactory, type TargetStatus } from "./target.ts";
 export { createWorkspace, stateDir, type Workspace } from "./workspace.ts";

@@ -1,20 +1,33 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { tmpdir, uptime } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { instanceLockFile } from "@michaelthielemann/kestrel/instanceLock";
 import { writeBundle } from "./bundle.ts";
 import { OpsError } from "./errors.ts";
 import { createHarness, LOCATION } from "./harness.fixture.ts";
 import { MemoryBucket, memoryStore } from "./memoryStore.ts";
 import { probeProtection } from "./status.ts";
-import { instanceLockSidecar, localTarget } from "./target.ts";
+import { localTarget } from "./target.ts";
 import { stateDir } from "./workspace.ts";
 import type { ObjectStore } from "./store.ts";
+
+function lockFileOf(database: string): string {
+  const file = instanceLockFile(database);
+  if (file === undefined) throw new Error(`${database} takes no instance lock`);
+  return file;
+}
+
+function lockSiblings(database: string): string[] {
+  const lock = lockFileOf(database);
+  const dir = dirname(lock);
+  return existsSync(dir) ? readdirSync(dir).map((name) => join(dir, name)).filter((path) => path.startsWith(lock)) : [];
+}
 
 describe("local target", () => {
   let root: string;
@@ -46,24 +59,27 @@ describe("local target", () => {
     const target = await localTarget({ dir: "app", database: "data/kestrel.db", command: [process.execPath, "server.mjs"], disk: "persistent" }, { root, clock: Date.now });
     const database = join(root, "app", "data", "kestrel.db");
     mkdirSync(join(root, "app", "data"));
-    writeFileSync(instanceLockSidecar(database), "held by an earlier process");
+    const sidecar = lockFileOf(database);
+    writeFileSync(sidecar, "held by an earlier process");
     const restored = join(root, "restored.db");
     const db = new DatabaseSync(restored);
     db.exec(`CREATE TABLE pages ("id" TEXT PRIMARY KEY)`);
     db.close();
     await target.installDatabase?.(restored);
     expect(readFileSync(`${database}.restore`)).toEqual(readFileSync(restored));
-    expect(readFileSync(instanceLockSidecar(database), "utf8")).toBe("held by an earlier process");
-    expect(instanceLockSidecar(database)).toBe(`${database}.instance`);
+    expect(readFileSync(sidecar, "utf8")).toBe("held by an earlier process");
+    expect(lockSiblings(database)).toEqual([sidecar]);
   });
 
   it("removes the database but not the sidecar before each start on an ephemeral disk", async () => {
     const target = await localTarget({ dir: "app", database: "kestrel.db", command: [process.execPath, "server.mjs"], disk: "ephemeral" }, { root, clock: Date.now });
     const database = join(root, "app", "kestrel.db");
     for (const suffix of ["", "-wal", "-shm"]) writeFileSync(database + suffix, "x");
+    writeFileSync(lockFileOf(database), "held by an earlier process");
     await target.start();
     await target.stop();
     expect(["", "-wal", "-shm"].map((s) => existsSync(database + s))).toEqual([false, false, false]);
+    expect(readFileSync(lockFileOf(database), "utf8")).toBe("held by an earlier process");
     expect(target.transport).toBe("promote");
   });
 
@@ -155,7 +171,7 @@ describe("restore --to local", () => {
       expect(db.prepare(`SELECT count(*) AS n FROM pages`).get()).toEqual({ n: 3 });
       db.close();
       expect(readFileSync(join(out, "blobs", "media", "m1", "harbour.jpg"), "utf8")).toBe("harbour image bytes");
-      expect(existsSync(join(out, "kestrel.db.instance"))).toBe(false);
+      expect(lockSiblings(join(out, "kestrel.db"))).toEqual([]);
 
       const latest = await h.run(["restore", "--to", "local", join(h.root, "latest"), "--latest", "--keep-sessions", "--json"]);
       expect(latest.code).toBe(0);
