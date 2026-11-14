@@ -1654,10 +1654,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
           wrote = overwritten.value;
         }
       }
-      const droppedBlob = await blobs.remove(variant.key);
-      if (isErr(droppedBlob)) return droppedBlob;
       const dropped = await db.deleteOne(VARIANTS, variant.id);
       if (isErr(dropped)) return dropped;
+      const droppedBlob = await blobs.remove(variant.key);
+      if (isErr(droppedBlob)) return droppedBlob;
       return ok(variant);
     })();
     if (!wrote) return outcome;

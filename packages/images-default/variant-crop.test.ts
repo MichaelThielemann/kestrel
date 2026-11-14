@@ -515,6 +515,41 @@ describe("images/default variants[].crop in images.attach", () => {
     for (const open of [first, images]) await open.close();
   });
 
+  it("keeps serving the listed crop at a pruned size whose row delete failed, lets syncPublic write it to the public copy, and retires the path on a retry", async () => {
+    const w = await world();
+    const full = await w.open([THUMB, SQUARE]);
+    expectOk(await full.setFraming("m1", RIGHT_CROP));
+    expectOk(await full.generate("m1"));
+    const before = (await attached(full)).get("square")!;
+    const rendered = await renderedBytes(full, "m1", "square.webp");
+
+    const small = await w.open([THUMB]);
+    const deleteOne = w.db.deleteOne.bind(w.db);
+    let failDelete = true;
+    w.db.deleteOne = async (collection, id) => {
+      if (failDelete && collection === VARIANTS) {
+        failDelete = false;
+        return err(failure("TRANSIENT", "db unavailable"));
+      }
+      return deleteOne(collection, id);
+    };
+    const pruned = await small.prune(["square"]);
+    expect(pruned.ok).toBe(false);
+    expect((await attached(small)).get("square")).toEqual(before);
+    expect(await renderedBytes(small, "m1", "square.webp")).toEqual(rendered);
+
+    expectOk(await small.syncPublic());
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(rendered);
+
+    expectOk(await small.prune(["square"]));
+    expect((await attached(small)).has("square")).toBe(false);
+    const served = expectOk(await small.read("m1", "square.webp"))!;
+    expect(served.fallback).toBe(true);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(served.data);
+    expect(w.blobs.blobs.has("media-variants/m1/square.webp")).toBe(false);
+    for (const open of [full, small]) await open.close();
+  });
+
   it("writes the public copies of a shown item and a missing public copy without reading the copies they replace, and keeps the path", async () => {
     const w = await world();
     let copyReads = 0;
