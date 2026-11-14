@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createBlobstoreFilesystem } from "@michaelthielemann/kestrel-blobstore-filesystem/impl";
 import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
-import { err, failure } from "@michaelthielemann/kestrel-contracts/errors";
+import { err, failure, ok } from "@michaelthielemann/kestrel-contracts/errors";
 import { PERSISTENCE, type Document, type Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { guardStorage, runShapeMigrations, storageVersionOf } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
@@ -331,6 +331,27 @@ describe("media-default storage: converting 5.x items to the id key layout", () 
     expectOk(await blobs.put("media/d4/report.pdf", bytes("the copy an earlier run wrote")));
     expectOk(await migrate(db, blobs, { [MISSING_ORIGINAL.id]: "trash" }));
     expect((await rowsOf(db))[0]).toMatchObject({ id: "d4", status: "ready", key: "media/d4/report.pdf", location: "docs/report.pdf" });
+  });
+
+  it("fails on a copy whose bytes differ from the original, keeps the 5.x key, and converts on a run whose copies are right", async () => {
+    const { db, blobs } = await oldStore([{ id: "b2", folder: "events", filename: "photo.jpg", contentType: "image/jpeg", blob: "summer photo" }], false);
+    for (const written of [bytes("summer"), bytes("winter photo")]) {
+      const blobOps = {
+        copy: async (_from: string, to: string) => blobs.put(to, written),
+        head: async (key: string) => {
+          const data = expectOk(await blobs.get(key));
+          return ok(data === null ? null : { size: data.byteLength, sha256: sha(data) });
+        },
+      };
+      const failed = expectErr(await runShapeMigrations({ storages: [storage()], db, blobs, blobOps, apply: true, blobWrites: true }), "STORAGE_MIGRATION_FAILED");
+      expect(failed.message).toContain("the copy of media/events/photo.jpg at media/b2/photo.jpg does not match the original");
+      expect((await rowsOf(db))[0]!.key).toBe("media/events/photo.jpg");
+      expect(expectOk(await storageVersionOf(db, MODULE))).toBeNull();
+    }
+    expectOk(await migrate(db, blobs));
+    const row = (await rowsOf(db))[0]!;
+    expect(row.key).toBe("media/b2/photo.jpg");
+    expect(sha(expectOk(await blobs.get(row.key))!)).toBe(sha(bytes("summer photo")));
   });
 
   it("records the size and sha256 of the bytes it copied when they differ from the 5.x row, so syncPublic writes the public copy once", async () => {
