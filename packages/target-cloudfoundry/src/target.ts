@@ -198,19 +198,27 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     status,
 
     async stop() {
-      await status();
+      const before = await status();
+      const requestedAt = deps.clock();
       try {
         await api(`/v3/apps/${await appGuid()}/actions/stop`, appSchema, "POST");
       } catch (error) {
         throw new OpsError(`stopping ${app} failed: ${messageOf(error)}; cf app ${app} shows whether it stopped, and cf start ${app} in ${config.org}/${config.space} starts it again`, 1, "target");
       }
+      const graceMs = before.instances > 0 ? config.stopGraceSeconds * 1000 : 0;
+      let sawShutdown = false;
       const timeoutMs = options.stopTimeoutMs ?? 120_000;
       const deadline = deps.clock() + timeoutMs;
       for (;;) {
         let seen: string;
         try {
           const now = await status();
-          if (now.state === "stopped" && now.instances === 0) return { stoppedAt: deps.clock() };
+          if (now.state === "stopped" && now.instances === 0) {
+            const left = sawShutdown ? 0 : requestedAt + graceMs - deps.clock();
+            if (left > 0) await sleep(left);
+            return { stoppedAt: deps.clock() };
+          }
+          if (now.state === "stopped") sawShutdown = true;
           seen = `reports ${now.state} with ${now.instances} instance(s)`;
         } catch (error) {
           seen = `could not be read: ${messageOf(error)}`;

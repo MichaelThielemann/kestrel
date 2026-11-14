@@ -174,6 +174,49 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     expect(cf.colors.every((color) => color === "false")).toBe(true);
   });
 
+  it("waits while the stopped app's instance reports STOPPING until its shutdown ended, without the stop grace", async () => {
+    let shutDown = false;
+    cf.stopLag = 0;
+    cf.hooks.stop = async () => {
+      await new Promise((done) => setTimeout(done, 400));
+      shutDown = true;
+    };
+    const t = await target({ stopGraceSeconds: 60 });
+    const began = Date.now();
+    await t.stop();
+    expect(shutDown).toBe(true);
+    expect(Date.now() - began).toBeLessThan(30_000);
+    expect(await t.status()).toEqual({ state: "stopped", instances: 0 });
+  });
+
+  it("waits the stop grace after the stop request when the platform lists the shutting-down instance as DOWN", async () => {
+    let shutDown = false;
+    cf.stopLag = 0;
+    cf.stoppingState = "DOWN";
+    cf.hooks.stop = async () => {
+      await new Promise((done) => setTimeout(done, 2500));
+      shutDown = true;
+    };
+    const t = await target({ stopGraceSeconds: 4 });
+    const began = Date.now();
+    await t.stop();
+    expect(shutDown).toBe(true);
+    expect(Date.now() - began).toBeGreaterThanOrEqual(4000);
+  });
+
+  it("waits no stop grace for an app that had no running instance before the stop", async () => {
+    Object.assign(cf.app(API.name), { running: 0, ready: 0 });
+    cf.stoppingState = "DOWN";
+    const t = await target({ stopGraceSeconds: 60 });
+    const began = Date.now();
+    await t.stop();
+    expect(Date.now() - began).toBeLessThan(30_000);
+  });
+
+  it("rejects a stop grace below 0 or above 600 seconds with exit 2", async () => {
+    for (const stopGraceSeconds of [-1, 601, "15"]) expect((await failure(target({ stopGraceSeconds }))).exitCode).toBe(2);
+  });
+
   it("keeps waiting through failed status reads after the stop until the app reads stopped", async () => {
     cf.stopLag = 3;
     cf.hooks.stop = async () => {

@@ -17,6 +17,12 @@ export const configSchema = z
     dir: z.string().min(1).default("."),
     /** An http(s) URL that answers 200 once the app is ready, checked after an instance runs. */
     readyUrl: z.url({ protocol: /^https?$/ }).optional(),
+    /**
+     * How long a stop waits after the stop request when it sees no instance of the app shut down, in seconds. A Cloud
+     * Controller without its `STOPPING` instance state lists a shutting-down instance as `DOWN`, so the wait covers the
+     * instance's shutdown; it is at least the platform's graceful shutdown interval (10 s unless the operator changed it).
+     */
+    stopGraceSeconds: z.number().min(0).max(600).default(15),
     /** A manifest, relative to the environments file, holding the app's entry; `((name))` placeholders take their values from `vars`. */
     manifest: z.string().min(1).optional(),
     /** Where the value of each `((name))` placeholder of the manifest comes from: an environment variable or the output of a command. A name holds no dot, which cf reads as a field path. */

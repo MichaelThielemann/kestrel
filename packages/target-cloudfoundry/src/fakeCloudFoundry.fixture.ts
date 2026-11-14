@@ -17,7 +17,7 @@ export interface FakeCfApp {
   running: number;
   /** Instances that reached RUNNING; the rest of `running` are STARTING. */
   ready: number;
-  /** Stats reads after a stop during which the instances still run. */
+  /** Stats reads after a stop during which the instances still shut down, at least until the shutdown hook ends. */
   downAfter: number;
   droplet: string | null;
   revision: { guid: string; version: number } | null;
@@ -43,7 +43,10 @@ export interface FakeCfAction {
   action: "stop" | "start" | "set-droplet";
 }
 
-/** Hooks that run inside a start and a stop, before the call returns. */
+/**
+ * Hooks of the app's instance. `start` runs before cf answers the start call; `stop` is the instance's shutdown and
+ * runs after cf answered the stop call, as on Cloud Foundry, where the instance gets its stop signal only then.
+ */
 export interface FakeCfHooks {
   start?: (app: FakeCfApp) => Promise<void>;
   stop?: (app: FakeCfApp) => Promise<void>;
@@ -53,6 +56,9 @@ interface Answer {
   code: number;
   stdout: string;
   stderr: string;
+  signal?: NodeJS.Signals;
+  hangMs?: number;
+  after?: () => Promise<void>;
 }
 
 interface StubRequest {
@@ -61,9 +67,11 @@ interface StubRequest {
   trace: string | null;
 }
 
-const STUB = `import { argv, env, exit, stdout, stderr } from "node:process";
+const STUB = `import { argv, env, exit, kill, pid, stdout, stderr } from "node:process";
 const response = await fetch(env.CF_STUB_URL, { method: "POST", body: JSON.stringify({ argv: argv.slice(2), color: env.CF_COLOR ?? null, trace: env.CF_TRACE ?? null }) });
 const answer = await response.json();
+if (answer.hangMs) await new Promise((done) => setTimeout(done, answer.hangMs));
+if (answer.signal) kill(pid, answer.signal);
 if (env.CF_TRACE === "true") stdout.write("REQUEST: [2026-11-14T10:00:00Z]\\nGET /v3/apps HTTP/1.1\\n\\nRESPONSE: [2026-11-14T10:00:00Z]\\nHTTP/1.1 200 OK\\n\\n");
 stdout.write(answer.stdout);
 stderr.write(answer.stderr);
@@ -93,8 +101,13 @@ export class FakeCloudFoundry {
   loggedIn = true;
   /** `cf target` answers from the local configuration while every call that reaches the API fails. */
   sessionExpired: boolean = false;
-  /** Stats reads after a stop during which the stopped app's instances keep running. */
+  /** Stats reads after a stop during which the stopped app's instances still shut down, at least until the shutdown hook ends. */
   stopLag: number = 1;
+  /**
+   * The state the stats of a stopped app report for an instance that still shuts down: `STOPPING`, or `DOWN` as a
+   * Cloud Controller without its stopping state reports it.
+   */
+  stoppingState: "STOPPING" | "DOWN" = "STOPPING";
   activeDeployments = new Set<string>();
   /** The exit code a cf subcommand answers with instead of doing its work. */
   failures: Map<string, number> = new Map();
@@ -106,9 +119,15 @@ export class FakeCloudFoundry {
   lostAnswers: Set<string> = new Set();
   /** `cf curl` paths, without their query, that exit with 1. */
   failingPaths: Set<string> = new Set();
+  /** How many of the next `cf curl` calls of a path, without its query, end by SIGKILL. */
+  killedPaths: Map<string, number> = new Map();
+  /** How many of the next `cf curl` calls of a path, without its query, hang for a minute before they answer. */
+  hungPaths: Map<string, number> = new Map();
   hooks: FakeCfHooks = {};
   url = "";
   private server: Server | null = null;
+  private readonly shuttingDown = new Set<FakeCfApp>();
+  private readonly shutdowns = new Set<Promise<void>>();
 
   constructor() {
     writeFileSync(join(this.bin, "cf"), `#!${process.execPath}\n${STUB}`);
@@ -146,7 +165,10 @@ export class FakeCloudFoundry {
       };
       answer()
         .catch((cause: unknown): Answer => fail(cause instanceof Error ? cause.message : String(cause)))
-        .then((result) => response.end(JSON.stringify(result)), () => response.end(JSON.stringify(fail("stub failure"))));
+        .then(
+          (result) => response.end(JSON.stringify(result), () => this.track(result.after)),
+          () => response.end(JSON.stringify(fail("stub failure"))),
+        );
     });
     await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
     const address = server.address();
@@ -154,9 +176,33 @@ export class FakeCloudFoundry {
     this.server = server;
   }
 
+  /** Resolves once every shutdown hook that was started has ended. */
+  async idle(): Promise<void> {
+    while (this.shutdowns.size > 0) await Promise.all(this.shutdowns);
+  }
+
   async close(): Promise<void> {
+    await this.idle();
     await new Promise<void>((done) => (this.server ? this.server.close(() => done()) : done()));
     rmSync(this.bin, { recursive: true, force: true });
+  }
+
+  private track(after: (() => Promise<void>) | undefined): void {
+    if (after === undefined) return;
+    const running = after().catch(() => undefined);
+    this.shutdowns.add(running);
+    void running.then(() => this.shutdowns.delete(running));
+  }
+
+  private settle(app: FakeCfApp): void {
+    if (app.state === "STOPPED" && app.downAfter === 0 && !this.shuttingDown.has(app)) Object.assign(app, { running: 0, ready: 0 });
+  }
+
+  private takeOne(counts: Map<string, number>, key: string): boolean {
+    const left = counts.get(key) ?? 0;
+    if (left === 0) return false;
+    counts.set(key, left - 1);
+    return true;
   }
 
   private byGuid(guid: string): FakeCfApp | undefined {
@@ -227,6 +273,8 @@ export class FakeCloudFoundry {
     const data = args.includes("-d") ? (args[args.indexOf("-d") + 1] ?? "") : "";
     const url = new URL(path, "https://api.example.test");
     if (this.failingPaths.has(url.pathname)) return fail(`Request error: ${url.pathname}\n`);
+    if (this.takeOne(this.killedPaths, url.pathname)) return { ...fail(""), signal: "SIGKILL" };
+    if (this.takeOne(this.hungPaths, url.pathname)) return { ...fail(""), hangMs: 60_000 };
     const parts = url.pathname.split("/").filter((p) => p !== "");
     const notFound = json({ errors: [{ code: 10010, title: "CF-ResourceNotFound", detail: "not found" }] });
     if (parts[0] !== "v3") return notFound;
@@ -256,8 +304,9 @@ export class FakeCloudFoundry {
     if (tail === "processes/web") return json({ type: "web", instances: app.instances });
     if (tail === "processes/web/stats") {
       const total = Math.max(app.instances, app.running);
-      const answer = json({ resources: Array.from({ length: total }, (_, index) => ({ type: "web", index, state: index < app.ready ? "RUNNING" : index < app.running ? "STARTING" : "DOWN" })) });
-      if (app.downAfter > 0 && --app.downAfter === 0) Object.assign(app, { running: 0, ready: 0 });
+      const live = (index: number): string => (app.state === "STOPPED" ? this.stoppingState : index < app.ready ? "RUNNING" : "STARTING");
+      const answer = json({ resources: Array.from({ length: total }, (_, index) => ({ type: "web", index, state: index < app.running ? live(index) : "DOWN" })) });
+      if (app.downAfter > 0 && --app.downAfter === 0) this.settle(app);
       return answer;
     }
     if (tail === "droplets/current") return app.droplet === null ? notFound : json({ guid: app.droplet, state: "STAGED" });
@@ -269,18 +318,25 @@ export class FakeCloudFoundry {
   private async act(app: FakeCfApp, action: "stop" | "start"): Promise<Answer> {
     if (this.rejectedActions.has(action)) return apiError("CF-UnprocessableEntity");
     this.actions.push({ app: app.name, space: app.space, action });
-    if (action === "stop") {
-      await this.hooks.stop?.(app);
-      app.state = "STOPPED";
-      app.events.unshift({ type: "audit.app.stop", created_at: new Date().toISOString() });
-      if (this.stopLag > 0 && app.running > 0) app.downAfter = this.stopLag;
-      else Object.assign(app, { running: 0, ready: 0 });
-    } else {
+    if (action === "start") {
       await this.hooks.start?.(app);
       Object.assign(app, { state: "STARTED", running: app.instances, ready: app.instances, downAfter: 0 });
       app.events.unshift({ type: "audit.app.start", created_at: new Date().toISOString() });
+      return this.lostAnswers.has(action) ? fail("Request error: connection reset\n") : json({ guid: app.guid, name: app.name, state: app.state });
     }
-    if (this.lostAnswers.has(action)) return fail("Request error: connection reset\n");
-    return json({ guid: app.guid, name: app.name, state: app.state });
+    app.state = "STOPPED";
+    app.events.unshift({ type: "audit.app.stop", created_at: new Date().toISOString() });
+    app.downAfter = app.running > 0 ? this.stopLag : 0;
+    this.shuttingDown.add(app);
+    const answer = this.lostAnswers.has(action) ? fail("Request error: connection reset\n") : json({ guid: app.guid, name: app.name, state: app.state });
+    const shutdown = async (): Promise<void> => {
+      try {
+        await this.hooks.stop?.(app);
+      } finally {
+        this.shuttingDown.delete(app);
+        this.settle(app);
+      }
+    };
+    return { ...answer, after: shutdown };
   }
 }

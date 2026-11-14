@@ -69,6 +69,22 @@ describe.skipIf(!endpoint)("kestrel backup, restore and status on a Cloud Foundr
   const outputs: string[] = [];
   const generationsAtStart: string[][] = [];
   const generationsAtStop: string[][] = [];
+  let storagePrefix = "";
+
+  function configureTarget(extra: Record<string, unknown>): void {
+    const environments = {
+      environments: {
+        dev: {
+          production: true,
+          target: { adapter: "@michaelthielemann/kestrel-target-cloudfoundry", app: API.name, org: "example-org", space: "dev", ...extra },
+          storage: { bucket, prefix: storagePrefix, endpoint, region: "us-east-1", forcePathStyle: true },
+          app: { replicaPrefix: PREFIXES.replica, mediaPrefix: PREFIXES.media, deliveryPrefix: PREFIXES.delivery, derivedPrefixes: [PREFIXES.derived] },
+          backups: { prefix: LOCATION },
+        },
+      },
+    };
+    writeFileSync(join(root, "kestrel.environments.json"), JSON.stringify(environments, null, 2));
+  }
 
   beforeEach(async () => {
     const prefix = `cf-e2e/${Date.now()}-${randomBytes(4).toString("hex")}/`;
@@ -97,21 +113,12 @@ describe.skipIf(!endpoint)("kestrel backup, restore and status on a Cloud Foundr
     symlinkSync(join(REPO, "packages", "target-cloudfoundry"), join(scope, "kestrel-target-cloudfoundry"), "dir");
     writeFileSync(join(scope, "kestrel-replication-sqlite", "package.json"), JSON.stringify({ name: "@michaelthielemann/kestrel-replication-sqlite", version: "6.0.0" }));
     writeFileSync(join(root, "package.json"), JSON.stringify({ name: "example-site", private: true, dependencies: { "@michaelthielemann/kestrel-replication-sqlite": "^6.0.0" } }));
-    const environments = {
-      environments: {
-        dev: {
-          production: true,
-          target: { adapter: "@michaelthielemann/kestrel-target-cloudfoundry", app: API.name, org: "example-org", space: "dev" },
-          storage: { bucket, prefix, endpoint, region: "us-east-1", forcePathStyle: true },
-          app: { replicaPrefix: PREFIXES.replica, mediaPrefix: PREFIXES.media, deliveryPrefix: PREFIXES.delivery, derivedPrefixes: [PREFIXES.derived] },
-          backups: { prefix: LOCATION },
-        },
-      },
-    };
-    writeFileSync(join(root, "kestrel.environments.json"), JSON.stringify(environments, null, 2));
+    storagePrefix = prefix;
+    configureTarget({});
   });
 
   afterEach(async () => {
+    await cf.idle();
     await app.dispose();
     await cf.close();
     store.close();
@@ -217,6 +224,25 @@ describe.skipIf(!endpoint)("kestrel backup, restore and status on a Cloud Foundr
     expect(created.json.manifest).toMatchObject({ frozen: true, source: { seal: "sealed" } });
     expect(cf.actions.map((action) => action.action)).toEqual(["stop", "start"]);
     expect(api.state).toBe("STARTED");
+    expect(app.running).toBe(true);
+  }, 120_000);
+
+  it("backs up a sealed replica with --freeze when the platform lists the shutting-down instance as DOWN and the seal lands seconds after the stop request", async () => {
+    await app.start();
+    await app.seed();
+    cf.stoppingState = "DOWN";
+    cf.stopLag = 0;
+    configureTarget({ stopGraceSeconds: 12 });
+    const stop = cf.hooks.stop;
+    cf.hooks.stop = async (stopped) => {
+      await new Promise((done) => setTimeout(done, 8000));
+      await stop?.(stopped);
+    };
+    const created = await kestrel(["backup", "create", "--freeze", "--json"]);
+    expect(created.stderr).toBe("");
+    expect(created.code).toBe(0);
+    expect(created.json.manifest).toMatchObject({ frozen: true, source: { seal: "sealed" } });
+    expect(cf.actions.map((action) => action.action)).toEqual(["stop", "start"]);
     expect(app.running).toBe(true);
   }, 120_000);
 

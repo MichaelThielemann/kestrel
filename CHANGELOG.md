@@ -1785,7 +1785,10 @@ Net changes since 5.8.2.
   included, and while a started app is scaled to 0 instances. It acts only while cf targets the configured org and space and never names another app, so a
   static web server next to it in the same manifest is never touched; stop, start and the droplet change go
   to the app's guid through the v3 API, and `cf apply-manifest` and `cf logs` run only after `cf target` and
-  the app's guid were read again. A stop, a start and the readiness wait repeat failed status reads until
+  the app's guid were read again. A stop waits until no instance shuts down any more, as a Cloud Controller
+  with the `STOPPING` instance state reports it; when it sees no instance shut down, it waits
+  `stopGraceSeconds` (default 15) after the stop request, covering the shutdown in which the replica is
+  sealed. A stop, a start and the readiness wait repeat failed status reads until
   their timeout; a failed stop says that the app may stay stopped, and a start whose request failed counts
   as done once the app reads started. A backup records the app's guid, droplet (null only when the app has
   none), newest revision and the names, never the values, of its environment variables. `applyManifest()`

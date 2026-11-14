@@ -34,6 +34,7 @@ The `target` block of an environment in `kestrel.environments.json` names this p
 | `app` | The app's name in the space. Every `cf` call names this app or its guid and no other; an app that serves the public output next to it, such as a static web server, is never stopped, started or changed. |
 | `org`, `space` | Where the app lives. The target reads `cf target` and refuses with exit 2 while cf targets another org or space; it never switches the target itself. Stop, start and the droplet change go to the app's guid through the v3 API, so switching cf to another space during a run cannot redirect them; before `cf apply-manifest` and `cf logs`, which take the app's name, the target reads `cf target` and the app's guid again and refuses with exit 2 when either changed. |
 | `dir` | The directory of the deployed app's `package.json`, relative to the environments file (default `.`). The installed versions of its dependencies, and of `kestrel-replication-sqlite` and `kestrel` they bring along, are recorded in each backup and tell `kestrel-ops` whether the runtime seals its replica. Run the commands from a checkout of the deployed state. |
+| `stopGraceSeconds` | Optional, default 15, at most 600. How long a stop waits after the stop request when it sees no instance shut down; see Stop below. Set it to at least the platform's graceful shutdown interval (10 s unless the operator changed it). |
 | `readyUrl` | Optional. After an instance reports `RUNNING`, the target waits until this URL answers 200. |
 | `manifest` | Optional. A manifest that holds the app's entry, read by `applyManifest()`. |
 | `vars` | Where each `((name))` placeholder of the manifest gets its value: `{ "env": "NAME" }` or `{ "command": ["argv", "..."] }`, as for storage credentials. A name consists of letters, digits, `_` and `-`; cf reads a dot as a field path. |
@@ -47,7 +48,12 @@ The `target` block of an environment in `kestrel.environments.json` names this p
   replica. A started app scaled to 0 instances ends with exit 1 as well, naming `cf scale <app> -i 1` and
   `cf stop <app>`, and a stopped one scaled to 0 is not started: no instance would ever become ready.
 - **Stop** sends the stop action to the app and waits until it reads `stopped` with no instance; a status read
-  that fails during the wait is repeated until the stop timeout (120 s). When the stop request or the wait
+  that fails during the wait is repeated until the stop timeout (120 s). The Cloud Controller answers the stop
+  request before the instance receives its stop signal, so the instance's shutdown, in which the replica is
+  synced and sealed, runs after the answer. A Cloud Controller with the `STOPPING` instance state (property
+  `cc.app_instance_stopping_state`) lists the instance as `STOPPING` until its container is gone, and the target
+  waits for that. Without that state the instance reads `DOWN` at once; when the target sees no instance shut
+  down, it waits until `stopGraceSeconds` have passed since the stop request. When the stop request or the wait
   fails, the error says that the app may stay stopped and names `cf start` to start it again. **Start**
   repeats a failing status read for up to 30 s, then sends the start action; when cf answers that request
   with an error but the app reads `STARTED` afterwards, the start counts as done. Readiness is an instance in
