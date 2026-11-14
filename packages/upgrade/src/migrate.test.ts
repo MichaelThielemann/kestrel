@@ -616,6 +616,30 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
     expect(rows(copy.db, `SELECT key, svgSanitized FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([{ key: `media/${SVG_ITEM}/mark.svg`, svgSanitized: 1 }]);
   });
 
+  it("cleans the 5.x SVGs with sanitize-svg also when another sanitize module listed before it needs a contract to be set up, without parsing that module's config", async () => {
+    const copy = fixtureCopy();
+    const project = projectOf(copy, [{ use: "./sanitize-html.ts", config: { strict: "yes" } }, { use: "@michaelthielemann/kestrel-sanitize-svg" }]);
+    writeFileSync(
+      join(project, "sanitize-html.ts"),
+      [
+        'import { z } from "zod";',
+        'import { defineModule } from "@michaelthielemann/kestrel/defineModule";',
+        'import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";',
+        "export default defineModule({",
+        '  name: "sanitize/html", provides: [], requires: [PERSISTENCE], configSchema: z.object({ strict: z.boolean() }).strict(),',
+        "  async setup(_config, deps) { return deps.get(PERSISTENCE); },",
+        "  steps: () => ({ html: async (ctx) => ({ ok: true, value: ctx }) }),",
+        '  describe: () => ({ html: { summary: "cleans HTML", reads: ["files"], writes: ["files"] } }),',
+        "});",
+        "",
+      ].join("\n"),
+    );
+    const run = await cli(["migrate", "--root", project, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(run.code, run.errors).toBe(0);
+    expect(run.out).toContain("note: media/default cleans each 5.x SVG with the sanitize.svg step of @michaelthielemann/kestrel-sanitize-svg and keeps it an image");
+    expect(rows(copy.db, `SELECT key, svgSanitized FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([{ key: `media/${SVG_ITEM}/mark.svg`, svgSanitized: 1 }]);
+  });
+
   it("stops before converting anything when a module entry does not load and no other registers sanitize.svg", async () => {
     const copy = fixtureCopy();
     const project = projectOf(copy, [{ use: "./svg-cleaner.ts", config: {} }]);

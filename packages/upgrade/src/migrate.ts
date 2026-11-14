@@ -177,7 +177,7 @@ function svgCounts(modules: readonly ModuleRun[]): Record<string, number> | unde
 function unknownSanitizer(modules: readonly ModuleRun[], sanitizer: ProjectStorages["svgSanitizer"], configProblem: string | undefined): string | undefined {
   const demoted = svgCounts(modules)?.svgDemoted ?? 0;
   if (sanitizer?.from !== undefined || demoted === 0) return undefined;
-  const why = configProblem ?? (sanitizer?.unloaded === undefined ? undefined : `not every module entry loaded: ${sanitizer.unloaded}`);
+  const why = configProblem ?? (sanitizer?.unloaded === undefined ? undefined : `not every module entry could be loaded and checked offline: ${sanitizer.unloaded}`);
   if (why === undefined) return undefined;
   return `${demoted} 5.x SVG(s) would be kept as a .bin download, but ${why}, so migrate cannot tell whether a module of the project registers sanitize.svg and would clean them; make every module entry load (kestrel.config.ts with the environment it reads, and the project's dependencies installed) and run migrate again`;
 }

@@ -10,6 +10,26 @@ import { projectSvgSanitizer } from "./svgSanitizer.ts";
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 const FILE = { filename: "mark.svg", contentType: "image/svg+xml", data: encode('<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>') };
 
+function otherSanitizeModule(described: boolean): { module: ModuleDefinition; setups: string[] } {
+  const setups: string[] = [];
+  const module = boundaryCast<ModuleDefinition>(
+    {
+      name: "sanitize/html",
+      provides: [],
+      requires: [],
+      configSchema: z.object({ strict: z.boolean() }).strict(),
+      setup: () => {
+        setups.push("sanitize/html");
+        return Promise.reject(new Error("needs the contract persistence@1"));
+      },
+      steps: () => ({ html: (ctx: Context) => Promise.resolve(ok(ctx)) }),
+      ...(described ? { describe: () => ({ html: { summary: "cleans HTML", reads: ["files"], writes: ["files"] } }) } : {}),
+    },
+    "host",
+  );
+  return { module, setups };
+}
+
 function sanitizeModule(configSchema: unknown, answer: (data: Uint8Array) => Uint8Array = (data) => data): ModuleDefinition {
   return boundaryCast<ModuleDefinition>(
     {
@@ -19,6 +39,7 @@ function sanitizeModule(configSchema: unknown, answer: (data: Uint8Array) => Uin
       configSchema,
       setup: () => Promise.resolve({}),
       steps: () => ({ svg: (ctx: Context) => Promise.resolve(ok({ ...ctx, files: ctx.files.map((f) => ({ ...f, data: answer(f.data) })) })) }),
+      describe: () => ({ svg: { summary: "cleans SVG files", reads: ["files"], writes: ["files"] } }),
     },
     "host",
   );
@@ -57,5 +78,30 @@ describe("the project's sanitize.svg in kestrel upgrade migrate", () => {
       const cleaned = await sanitize!(FILE);
       expect(isErr(cleaned) ? cleaned.error : "kept", root).toContain("not in the SVG namespace");
     }
+  });
+  it("neither parses the config of nor sets up a sanitize module whose steps do not include svg, and takes the sanitize.svg module after it", async () => {
+    const other = otherSanitizeModule(true);
+    const found = await projectSvgSanitizer(tmpdir(), [
+      { use: "./sanitize-html.ts", config: { strict: "yes" }, definition: () => Promise.resolve(other.module) },
+      { use: "./svg-cleaner.ts", config: {}, definition: () => Promise.resolve(sanitizeModule(z.object({}).strict())) },
+    ]);
+    expect(found.broken).toBeUndefined();
+    expect(found.from).toBe("./svg-cleaner.ts");
+    expect(found.sanitize).toBeDefined();
+    expect(other.setups).toEqual([]);
+  });
+
+  it("counts a sanitize module whose steps it can only learn by setting it up, and which cannot be set up offline, as not loaded instead of as the sanitize.svg module", async () => {
+    const other = otherSanitizeModule(false);
+    const before = await projectSvgSanitizer(tmpdir(), [
+      { use: "./sanitize-html.ts", config: { strict: true }, definition: () => Promise.resolve(other.module) },
+      { use: "./svg-cleaner.ts", config: {}, definition: () => Promise.resolve(sanitizeModule(z.object({}).strict())) },
+    ]);
+    expect(before.broken).toBeUndefined();
+    expect(before.from).toBe("./svg-cleaner.ts");
+    const alone = await projectSvgSanitizer(tmpdir(), [{ use: "./sanitize-html.ts", config: { strict: true }, definition: () => Promise.resolve(other.module) }]);
+    expect(alone.broken).toBeUndefined();
+    expect(alone.sanitize).toBeUndefined();
+    expect(alone.unloaded).toContain("./sanitize-html.ts could not be set up offline");
   });
 });

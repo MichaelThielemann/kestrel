@@ -255,6 +255,10 @@ copy: the one `.svg` file in the item's `<id>/` folder that no other item uses a
   `sanitize.svg`, `migrate` does not know whether the project would clean its SVGs. If the store
   holds a 5.x SVG, it stops with exit code `2` before it converts anything, and `migrate --plan` says
   so in a note; make every module entry load and run it again. An entry without `config` is set up with `{}` and the defaults, as at start-up.
+- Only a module whose name starts with `sanitize/` and whose `describe()` lists an `svg` step is set
+  up. Another `sanitize/*` module, such as one with only an `html` step, is neither parsed nor set up.
+  A `sanitize/*` module whose `describe()` cannot be read without its instance is set up to find
+  out; when that fails, it counts as an entry that does not load.
 
 ### Leftovers
 
