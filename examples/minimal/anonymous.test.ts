@@ -426,12 +426,26 @@ describe("examples/minimal: sorting and query parameters over HTTP", () => {
   });
 
   it("answers 400 for a body member sent in the query and applies nothing", async () => {
-    const refused = await request(base(), "POST", "/users?roles=admin", { token, json: { username: "viewer", password: "a-long-enough-password" } });
-    expect(refused.status).toBe(400);
+    const credentials = { username: "viewer", password: "a-long-enough-password" };
+    const refused = await request(base(), "POST", "/users?roles=admin&roles=admin", { token, json: credentials });
+    expect(refused.status, refused.text).toBe(400);
+    expect(refused.text).toContain("authn.createUser");
+    expect(refused.text).toContain("$.roles");
     expect((await request(base(), "POST", "/admin/migrations/apply?dry=true", { token, json: {} })).status).toBe(400);
     const users = await request(base(), "GET", "/users", { token });
     expect(users.status).toBe(200);
     expect(users.text).not.toContain("viewer");
+  });
+
+  it("answers 400 for roles sent in the query of an update and leaves the roles of the user empty", async () => {
+    const created = await ok(base(), "POST", "/users", { token, json: { username: "plain", password: "a-long-enough-password" } });
+    const id = String(created.id);
+    const refused = await request(base(), "PATCH", `/users/${id}?roles=admin&roles=admin`, { token, json: {} });
+    expect(refused.status, refused.text).toBe(400);
+    expect(refused.text).toContain("authn.updateUser");
+    expect(refused.text).toContain("$.roles");
+    const after = await ok(base(), "GET", `/users/${id}`, { token });
+    expect(after.roles ?? []).toEqual([]);
   });
 
   it("accepts a locale in the query of a write, where the step declares it", async () => {
