@@ -240,7 +240,8 @@ the project registers `sanitize.svg`, which the report says in a note.
   `.bin` name; point every page, setting and document that uses the old item at the new one and
   publish them again, then delete the old item.
 - When the module that registers `sanitize.svg` cannot be set up on its own, without the contracts of
-  other modules, or its config does not parse, `migrate` stops with exit code `2` before it converts
+  other modules, its config does not parse, or start-up refuses its config schema (a 5.x
+  `sanitize-svg` next to 6.0.0 media packages), `migrate` stops with exit code `2` before it converts
   anything. An entry without `config` is set up with `{}` and the defaults, as at start-up.
 
 ### Leftovers

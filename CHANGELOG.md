@@ -84,6 +84,8 @@ Net changes since 5.8.2.
   field from a package that still depends on zod 3 or imports zod 3.25's `zod/v4`, fails boot with the
   new problem code `invalid-config-schema`, naming that module, the path of the first such node
   (`configSchema.servers[].endpoint`) and the zod version it reports, before its config is parsed.
+  `zodSchemaProblem(schema)` from the package root returns that reason, or `undefined` for a schema
+  boot reads.
 - An `invalid config: …` or `invalid kestrel.config: …` boot error carries zod 4's messages: a missing
   key reads `Invalid input: expected string, received undefined` (was `Required`), an unknown key
   `Unrecognized key: "name"` (was `Unrecognized key(s) in object: 'name'`). A secret path reports
@@ -952,7 +954,8 @@ Net changes since 5.8.2.
     step, set up offline with its module config, and keeps its id and stays an image; one the step
     refuses or whose original is missing, and every 5.x SVG of a project without that step, is kept as a
     `.bin` download and named. A module registering `sanitize.svg` that cannot be set up without other
-    modules, or whose config does not parse, stops the run with exit `2` before anything is converted. `kestrel upgrade data` warns with `data/media-layout:config` in
+    modules, whose config does not parse, or whose config schema boot refuses (an older `sanitize-svg`),
+    stops the run with exit `2` before anything is converted. `kestrel upgrade data` warns with `data/media-layout:config` in
     that case. It neither takes nor
     honours the instance lock, so a lock file left next to the copy does not stop it. Exit `0` when
     every module is in this release's shape, `1` when a migration is still pending or the stored data

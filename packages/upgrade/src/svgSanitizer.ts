@@ -1,3 +1,4 @@
+import { zodSchemaProblem } from "@michaelthielemann/kestrel";
 import { createContext, isStepFactory, type Step, type StepFactory } from "@michaelthielemann/kestrel/context";
 import { stepPrefix, type ModuleDefinition } from "@michaelthielemann/kestrel/defineModule";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
@@ -57,7 +58,7 @@ function offlineDeps(root: string) {
  * The `sanitize.svg` step of the project, set up offline with the module's own config, as the
  * function the media storage migration cleans each 5.x SVG with. The first module entry whose
  * module registers the step is used; its `setup()` gets no contract, so a module that needs one
- * is `broken`. Without such an entry there is no sanitizer.
+ * is `broken`, as is one whose config schema or config start-up would refuse. Without such an entry there is no sanitizer.
  */
 export async function projectSvgSanitizer(root: string, modules: readonly ConfiguredModule[]): Promise<ProjectSvgSanitizer> {
   const problems: string[] = [];
@@ -70,6 +71,8 @@ export async function projectSvgSanitizer(root: string, modules: readonly Config
       continue;
     }
     if (stepPrefix(definition.name) !== PREFIX || definition.steps === undefined) continue;
+    const schemaProblem = zodSchemaProblem(definition.configSchema);
+    if (schemaProblem !== undefined) return { from: entry.use, broken: `${schemaProblem}, so kestrel would not set the module up; install the project's 6.x dependencies first` };
     const parsed = definition.configSchema.safeParse(entry.config);
     if (!parsed.success) {
       const issues = parsed.error.issues.map((issue) => `${issue.path.length === 0 ? "the config" : issue.path.join(".")}: ${issue.message}`).join("; ");
