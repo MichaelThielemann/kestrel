@@ -298,7 +298,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
     const target = await loadTarget(environment, options, root, clock);
     const journal = new Journal(runId, backups, environment.backups.prefix, redactor, clock, workspace.path("journal.jsonl"));
     const ask = options.prompt ?? terminalPrompt(interrupt.signal);
-    const prompt: Prompt | undefined = ask && ((question) => interrupt.race(ask(question)));
+    const prompt: Prompt | undefined = ask && ((question) => interrupt.race(ask(redactor.apply(question))));
     ctx = {
       envName,
       env: environment,

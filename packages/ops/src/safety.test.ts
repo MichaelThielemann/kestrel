@@ -58,6 +58,28 @@ describe("secrets", () => {
     }
   });
 
+  it("masks a known credential in the text of a question asked at the terminal", async () => {
+    const h = createHarness({ store: memoryStore(new MemoryBucket("secret-prompt")) });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      h.app.kill();
+      h.app.stopEvidence = async () => [`platform log mentions ${SECRETS.accessKeyId}`];
+      const asked: string[] = [];
+      const frozen = await h.run(["backup", "create", "--freeze"], {
+        prompt: async (question) => {
+          asked.push(question);
+          return "no";
+        },
+      });
+      expect(frozen.code).toBe(1);
+      expect(asked.join("\n")).toContain("platform log mentions [redacted]");
+      expect(asked.join("\n")).not.toContain(SECRETS.accessKeyId);
+    } finally {
+      await h.dispose();
+    }
+  });
+
   it("masks a secret and its URL-encoded form, longest first, and ignores values too short to mask", () => {
     const redactor = new Redactor();
     redactor.add("a/b+c==secret");
