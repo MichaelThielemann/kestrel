@@ -1002,6 +1002,19 @@ Net changes since 5.8.2.
 - `audit-persistence` has the step `audit.recordActor`: like `audit.record` it persists an event, but
   only with the event, its time, the caller and the client address, leaving out the params and the id
   that name whom the event was about.
+- New package `@michaelthielemann/kestrel-ops`: verified backups and restore for an instance with
+  `replication-sqlite` and S3-compatible storage. A backup takes the database from the replica, copies
+  every original the media rows reference and the delivery prefix into write-once objects
+  (server-side, guarded by the listed ETag) and is verified from the backup location: hash, full
+  `integrity_check`, row counts, an entry and object for every referenced original, and a hashed
+  sample. A restore stops the app, reports what it discards, including access it would bring back
+  (which needs the explicit answer `access-changes`), takes a `pre-restore` backup, copies originals
+  back without deleting any, sets the delivery prefix to the backup's, ends every login session and
+  promotes the database as the newest replica generation under a plain time name from the store's
+  clock, with `origin.json` next to it. Also `status`, `backup list|verify|prune` with retention per
+  kind, `restore --to local`, a `local` target, credentials from environment variables or commands
+  that never reach any output, a journal and lock trace in the backup location, and `writeBundle()`
+  for a self-contained runner in a deploy artifact.
 - `kestrel-h3`'s `createKestrelHandler` takes a `logger` and writes one `http` line per request
   with the fields of the core server's line (`runId`, `requestId`, `method`, `path`, `pipeline`,
   `status`, `ms`, `ip`). A request refused before its pipeline (unknown route, dot segment, body too
