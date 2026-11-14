@@ -1,8 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { createHarness, LOCATION, PREFIXES } from "./harness.fixture.ts";
-import { keys, parseJson } from "./layout.ts";
+import { createHarness, LOCATION, PREFIXES, type Harness } from "./harness.fixture.ts";
+import { keys, parseJson, unstamp } from "./layout.ts";
 import { MemoryBucket, memoryStore } from "./memoryStore.ts";
 import { backupRestoreRoundTrip } from "./scenario.fixture.ts";
+
+const SEGMENT_KEY = /^gen\/(\d{8}T\d{6}Z(?:-[0-9a-f]+)?)\/wal\/\d+-\d+-(\d{8}T\d{6}Z)\.wal$/;
+
+async function shipSegmentInLaterSecond(h: Harness, bucket: MemoryBucket): Promise<number> {
+  const newest = (): { generation: string; segments: number[] } => {
+    const byGeneration = new Map<string, number[]>();
+    for (const key of bucket.objects.keys()) {
+      const m = SEGMENT_KEY.exec(key.slice(PREFIXES.replica.length));
+      if (m && key.startsWith(PREFIXES.replica)) byGeneration.set(m[1] ?? "", [...(byGeneration.get(m[1] ?? "") ?? []), unstamp(m[2] ?? "")]);
+    }
+    const generation = [...byGeneration.keys()].sort().at(-1) ?? "";
+    return { generation, segments: byGeneration.get(generation) ?? [] };
+  };
+  const before = newest();
+  const startedAt = unstamp(before.generation.slice(0, 16));
+  while (Date.now() < startedAt + 1000) await new Promise((done) => setTimeout(done, 50));
+  h.app.run(`INSERT INTO pages VALUES ('shipped-later', 'Shipped later', 'x')`);
+  await h.app.sync();
+  const after = newest();
+  expect(after.generation).toBe(before.generation);
+  const last = Math.max(...after.segments);
+  expect(last).toBeGreaterThan(startedAt);
+  return last;
+}
 
 describe("backup and restore against an in-memory store whose listings lag behind writes", () => {
   backupRestoreRoundTrip(async () => memoryStore(new MemoryBucket("lagging", { listLag: 1 })));
@@ -260,33 +284,38 @@ describe("backup and restore against an in-memory store", () => {
   });
 
   it("reports a stop without teardown as unsealed with the time of the last segment, and --yes alone does not accept it", async () => {
-    const h = createHarness({ store: memoryStore(new MemoryBucket("unsealed")) });
+    const bucket = new MemoryBucket("unsealed");
+    const h = createHarness({ store: memoryStore(bucket) });
     try {
       await h.app.start();
       await h.app.seed();
+      const lastSegmentAt = await shipSegmentInLaterSecond(h, bucket);
       h.app.kill();
       const refused = await h.run(["backup", "create", "--freeze", "--yes"]);
       expect(refused.code).toBe(1);
       expect(refused.stderr).toMatch(/unsealed: generation \S+ has no seal/);
+      expect(refused.stderr).toContain(`last shipped segment ${new Date(lastSegmentAt).toISOString()},`);
       expect(refused.stderr).toContain("unsealed-stop");
       const accepted = await h.run(["backup", "create", "--freeze", "--answers", h.answers({ "unsealed-stop": "accept" }), "--json"]);
       expect(accepted.code).toBe(0);
       const source: unknown = Reflect.get(Object(accepted.json.manifest), "source");
-      expect(source).toMatchObject({ seal: "unsealed" });
-      expect(Reflect.get(Object(source), "lastFrameAt")).toBeGreaterThan(0);
+      expect(source).toMatchObject({ seal: "unsealed", lastFrameAt: lastSegmentAt });
     } finally {
       await h.dispose();
     }
   });
 
   it("reports the seal of a runtime before the sealing major as unsupported and refuses --yes without the unsealed-stop answer", async () => {
-    const h = createHarness({ store: memoryStore(new MemoryBucket("unsupported")), runtime: "5.8.1" });
+    const bucket = new MemoryBucket("unsupported");
+    const h = createHarness({ store: memoryStore(bucket), runtime: "5.8.1" });
     try {
       await h.app.start();
       await h.app.seed();
+      const lastSegmentAt = await shipSegmentInLaterSecond(h, bucket);
       const refused = await h.run(["backup", "create", "--freeze", "--yes"]);
       expect(refused.code).toBe(1);
       expect(refused.stderr).toContain("seal unsupported (runtime 5.8.1)");
+      expect(refused.stderr).toContain(`last shipped segment ${new Date(lastSegmentAt).toISOString()},`);
       expect((await h.app.status()).state).toBe("started");
       const backup = await h.run(["backup", "create", "--freeze", "--answers", h.answers({ "unsealed-stop": "accept" }), "--json"]);
       expect(backup.code).toBe(0);
@@ -296,7 +325,7 @@ describe("backup and restore against an in-memory store", () => {
       const restored = await h.run(["restore", "--backup", String(backup.json.id), "--answers", h.answers({ confirm: "yes", "unsealed-stop": "accept", "access-changes": "accept" }), "--json"]);
       expect(restored.code).toBe(0);
       expect(restored.json).toMatchObject({ acknowledgement: "unconfirmed", loss: { tables: { pages: { added: 1 } } } });
-      expect(h.app.rows("pages")).toHaveLength(3);
+      expect(h.app.rows("pages")).toHaveLength(4);
     } finally {
       await h.dispose();
     }
