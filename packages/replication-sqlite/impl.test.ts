@@ -486,6 +486,26 @@ describe("replication/sqlite generation order, seal and other writers", () => {
     expect(await restoredCount({ generation })).toMatchObject({ n: 5, ok: "ok" });
   });
 
+  it("prunes the marker files of an expired generation with its snapshot and segments, and a generation of marker files alone", async () => {
+    const { repl, blobs, insert, clock } = setup({ snapshotSeconds: 3600, retentionSeconds: 7200 });
+    const placed = stampOf(clock.now() - 1000);
+    place(blobs, placed, image(1), true);
+    blobs.blobs.set(`replica/gen/${placed}/applied.json`, { data: new TextEncoder().encode("{}"), contentType: "application/json" });
+    blobs.blobs.set(`replica/gen/${placed}/sealed.json`, { data: new TextEncoder().encode("{}"), contentType: "application/json" });
+    const markersOnly = stampOf(clock.now() - 60_000);
+    blobs.blobs.set(`replica/gen/${markersOnly}/sealed.json`, { data: new TextEncoder().encode("{}"), contentType: "application/json" });
+    insert(1);
+    expectOk(await repl.sync());
+    clock.advance(3 * 3600_000);
+    insert(1);
+    const second = expectOk(await repl.sync()).generation;
+    clock.advance(3 * 3600_000);
+    insert(1);
+    const third = expectOk(await repl.sync());
+    expect(third.pruned).toBeGreaterThan(0);
+    expect([...new Set([...blobs.blobs.keys()].map((key) => key.split("/")[2]))].sort()).toEqual([second, third.generation].sort());
+  });
+
   it("seal before any sync takes the first snapshot when frames were committed, and seals it", async () => {
     const { repl, blobs, insert, restoredCount } = setup();
     insert(2);

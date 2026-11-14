@@ -551,16 +551,17 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     const list = await listReplica(blobs, config.prefix);
     if (isErr(list)) return list;
     observe(list.value);
-    const points = list.value.points;
-    const generations = [...new Set(points.map((p) => p.generation))].sort();
+    const { points, markers } = list.value;
+    const generations = [...new Set([...points.map((p) => p.generation), ...markers.keys()])].sort();
     const cutoff = now() - config.retentionSeconds * 1000;
     let removed = 0;
     for (const gen of generations.slice(0, -1)) {
-      const newest = Math.max(...points.filter((p) => p.generation === gen).map((p) => p.at));
+      const newest = Math.max(unstamp(gen.slice(0, 16)), ...points.filter((p) => p.generation === gen).map((p) => p.at));
       const successorSnapshot = generations[generations.indexOf(gen) + 1];
       if (newest >= cutoff || successorSnapshot === undefined || unstamp(successorSnapshot.slice(0, 16)) > cutoff) continue;
-      for (const p of points.filter((x) => x.generation === gen)) {
-        const removedOne = await blobs.remove(p.key);
+      const keys = [...points.filter((x) => x.generation === gen).map((p) => p.key), ...[...(markers.get(gen) ?? [])].map((marker) => markerKey(config.prefix, gen, marker))];
+      for (const key of keys) {
+        const removedOne = await blobs.remove(key);
         if (isErr(removedOne)) return removedOne;
         removed += 1;
       }
