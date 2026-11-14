@@ -167,7 +167,7 @@ describe("bundle", () => {
       writeFileSync(join(project, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
       const { dir, packages } = writeBundle(project, project, { readyPath: "/ready" }, () => 1);
       expect(Object.keys(packages)).toEqual(expect.arrayContaining(["@michaelthielemann/kestrel-ops", "@michaelthielemann/kestrel-replication-sqlite", "@michaelthielemann/kestrel-blobstore-s3", "@aws-sdk/client-s3", "zod"]));
-      expect(readFileSync(join(dir, "run.mjs"), "utf8")).toContain('import { runOps, terminalPrompt } from "@michaelthielemann/kestrel-ops/run";');
+      expect(readFileSync(join(dir, "run.mjs"), "utf8")).toContain('const { runOps, terminalPrompt } = await import("@michaelthielemann/kestrel-ops/run");');
       const info: unknown = JSON.parse(readFileSync(join(dir, "bundle.json"), "utf8"));
       expect(info).toMatchObject({ schema: "kestrel-ops/bundle@1", hostFacts: { readyPath: "/ready" } });
       expect(Reflect.get(Object(info), "lockfileSha256")).toMatch(/^[0-9a-f]{64}$/);

@@ -29,7 +29,14 @@ interface Manifest {
 }
 
 const RUNNER = `import { readFileSync } from "node:fs";
-import { runOps, terminalPrompt } from "${OPS_PACKAGE}/run";
+
+const emitWarning = process.emitWarning.bind(process);
+process.emitWarning = (warning, ...rest) => {
+  const type = typeof rest[0] === "string" ? rest[0] : rest[0]?.type;
+  if (type === "ExperimentalWarning" && String(warning).includes("SQLite")) return;
+  emitWarning(warning, ...rest);
+};
+const { runOps, terminalPrompt } = await import("${OPS_PACKAGE}/run");
 
 const dir = new URL(".", import.meta.url);
 const info = JSON.parse(readFileSync(new URL("bundle.json", dir), "utf8"));

@@ -194,6 +194,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
     const names = Object.keys(environments);
     const envName = value(parsed, "--env") ?? (names.length === 1 ? (names[0] ?? "") : "");
     const environment = environments[envName];
+    if (names.length === 0) throw new OpsError("kestrel.environments.json names no environment", 2, "kestrel.environments.json");
     if (environment === undefined) throw new OpsError(envName === "" ? `--env is required (${names.join(", ")})` : `unknown environment ${envName} (${names.join(", ")})`, 2, "--env");
     const stores = options.stores ?? defaultStores;
     const toolCredentials = await credentialsOf(environment.storage.credentials, `${envName}.storage.credentials`, redactor, env, options.runCommand);
@@ -297,7 +298,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
   } catch (error) {
     const opsError = error instanceof OpsError ? error : null;
     const message = error instanceof Error ? error.message : String(error);
-    out.error(opsError?.element !== undefined ? `${opsError.element}: ${message}` : message);
+    out.error(opsError?.element !== undefined && !message.includes(opsError.element) ? `${opsError.element}: ${message}` : message);
     emit("error", { ok: false, message, element: opsError?.element ?? null });
     if (ctx !== null && writes) await ctx.journal.finish(false, { message }).catch(() => undefined);
     return opsError?.exitCode ?? 1;
