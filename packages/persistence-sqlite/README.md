@@ -16,12 +16,23 @@ before the call answers `Err(TRANSIENT)`; `0` restores the SQLite default of giv
 process crash cannot corrupt the database, only the last transactions can be lost if the *machine*
 loses power – pair it with `backup/blobstore` or `replication/sqlite` rather than with `FULL`.
 
-**One process, one writer.** The module assumes it is the only process that opens `file`.
-`replication/sqlite` opens a second connection to the same file inside the same process (it holds a
-read transaction and runs its own checkpoints); that is supported. A second *process* on the same
-file – a standalone `kestrel` CLI next to a running server, a second dev server, two containers on
-a shared volume – is not: writes are only serialised inside one process, and restores swap the file
-before it is opened. Point each process at its own file, or route all writes through one of them.
+**One process, one writer.** The module assumes it is the only process that opens `file`, and
+makes sure of it: before it opens the file, `setup()` takes the instance lock on it, the sidecar
+`<file>.instance` next to the database. A second *process* on the same file – a standalone
+`kestrel` CLI next to a running server, a second dev server, two containers on a shared volume –
+fails to boot with `instance-locked`, naming the host and PID of the process that holds the file,
+and leaves the file as it is. Writes are only serialised inside one process, and restores swap the
+file before it is opened, so point each process at its own file, or route all writes through one
+of them. `replication/sqlite` and `backup/blobstore` on the same file in the same process share the
+lock; `replication/sqlite` also opens a second connection to the file (it holds a read transaction
+and runs its own checkpoints), which is supported. Teardown closes the connection and gives the
+lock up; the lock file goes with the last module of the process that holds it. `:memory:` takes no
+lock. `health()` reports `ok: false` with `restartRequired: true` once another instance took the
+lock over. To share the file between processes on purpose, set `allowConcurrentProcesses: true`
+here and on every other module that names the file; a module of the same file without it fails
+the boot with `invalid-module-config`. The lock never enters the database or a
+`persistence.snapshot`; see "One process per database file" in `docs/configuration.md` of the
+kestrel repository for the restart behaviour after an unclean stop.
 
 Every `persistence@1` method returns a `Result`. A `SQLITE_BUSY`/`SQLITE_LOCKED` after the busy
 timeout is `Err(TRANSIENT)` (503, `retryable`, `details.retryAfterSeconds: 1`), a
@@ -137,6 +148,7 @@ Not included: migrations beyond adding columns, savepoints or nested groups, ful
 | `busyTimeoutMs` | integer | no | – |
 | `acquireTimeoutMs` | integer | no | – |
 | `scopeTimeoutMs` | integer | no | `5000` |
+| `allowConcurrentProcesses` | boolean | no | `false` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|

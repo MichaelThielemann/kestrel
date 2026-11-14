@@ -5,6 +5,7 @@ import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import type { KestrelError } from "@michaelthielemann/kestrel/errors";
 import { isErr, ok, type Err } from "@michaelthielemann/kestrel/result";
 import { createPersistenceSqlite, persistenceFailure, type PersistenceSqlite } from "./impl.ts";
+import { lockDatabaseFile, withLockHealth, type ProcessLock } from "./processLock.ts";
 
 export const configSchema = z
   .object({
@@ -13,6 +14,7 @@ export const configSchema = z
     acquireTimeoutMs: z.number().int().min(100).optional().describe("How long a request may wait for its turn at the connection before it is answered 503; when unset, busyTimeoutMs + 10000"),
     /** How long an atomic group may hold the connection once it has it, measured from BEGIN IMMEDIATE. */
     scopeTimeoutMs: z.number().int().min(100).default(5000),
+    allowConcurrentProcesses: z.boolean().default(false).describe("Let other processes open the file while this one runs, instead of refusing to start beside them"),
   })
   .strict()
   .superRefine((config, ctx) => {
@@ -38,6 +40,8 @@ async function guard(ctx: Context, fn: () => Promise<void>): Promise<Err<Kestrel
   }
 }
 
+const locks = new WeakMap<PersistenceSqlite, ProcessLock>();
+
 export default defineModule({
   name: "persistence/sqlite",
   provides: [PERSISTENCE],
@@ -45,14 +49,31 @@ export default defineModule({
   configSchema,
 
   async setup(config, deps): Promise<PersistenceSqlite> {
-    return createPersistenceSqlite(config, { logger: deps.logger });
+    const lock = lockDatabaseFile(config.file, "persistence/sqlite", config.allowConcurrentProcesses);
+    try {
+      const db = createPersistenceSqlite(config, { logger: deps.logger });
+      locks.set(db, lock);
+      return db;
+    } catch (err) {
+      lock.release();
+      throw err;
+    }
   },
 
-  teardown: (db) => db.close(),
+  teardown(db) {
+    try {
+      db.close();
+    } finally {
+      locks.get(db)?.release();
+    }
+  },
 
   atomicScope: (db, info, body) => db.scope(info, body),
 
-  health: (db) => db.health(),
+  health: (db) => {
+    const lock = locks.get(db);
+    return lock === undefined ? db.health() : withLockHealth(lock, db.health());
+  },
 
   steps: (db) => ({
     checkpoint: async (ctx: Context) => (await guard(ctx, () => db.checkpoint())) ?? ok(ctx),
