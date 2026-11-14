@@ -270,6 +270,20 @@ async function databaseRestoredAt(instance: Replication): Promise<unknown> {
 
 const sixGeneration = (stamp: string, order: number): string => `${stamp}-${order.toString(16).padStart(12, "0")}${"5a".repeat(16)}`;
 
+function listingLate(blobs: ReturnType<typeof fakeBlobs>, hidden: readonly string[], listings: number): ReturnType<typeof fakeBlobs> & { lists: () => number } {
+  let lists = 0;
+  return {
+    ...blobs,
+    lists: () => lists,
+    async list(prefix) {
+      lists += 1;
+      const listed = await blobs.list(prefix);
+      if (!listed.ok || lists > listings) return listed;
+      return ok(listed.value.filter((info) => !hidden.includes(info.key)));
+    },
+  };
+}
+
 describe("replication/sqlite teardown seal", () => {
   it("ships the frames committed since the last sync and then seals the generation, with no prune or snapshot although both are due", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -354,6 +368,71 @@ describe("replication/sqlite restore from a placed generation", () => {
     open.push(unacknowledged.instance);
     expect(await databaseRestoredAt(unacknowledged.instance)).toBe(unacknowledged.bootStartedAt);
     expect(readJson(blobs, "replica/gen/20260102T000000Z/applied.json")).toEqual({ generation: "20260102T000000Z", nonce: "nonce-1", restoredAt: unacknowledged.bootStartedAt });
+  });
+
+  it("reports a restore from a placed generation whose origin.json the listing does not show yet", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260101T000000Z", 1, null);
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    const late = listingLate(blobs, ["replica/gen/20260102T000000Z/origin.json"], 1);
+    const { instance, bootStartedAt } = await startOn(file, late);
+    open.push(instance);
+    expect(rowsIn(file)).toBe(2);
+    expect(await databaseRestoredAt(instance)).toBe(bootStartedAt);
+  });
+
+  it("starts from a placed generation after one named with an order key while the listing does not show its origin.json yet", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, sixGeneration("20260101T000000Z", Date.UTC(2026, 0, 1)), 1, null);
+    place(blobs, "20260102T000000Z", 3, { nonce: "nonce-1" });
+    const late = listingLate(blobs, ["replica/gen/20260102T000000Z/origin.json"], 1);
+    const { instance, bootStartedAt } = await startOn(file, late);
+    open.push(instance);
+    expect(rowsIn(file)).toBe(3);
+    expect(await databaseRestoredAt(instance)).toBe(bootStartedAt);
+  });
+
+  it("does not report the restore again while the listing does not show the applied.json that acknowledges it", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    blobs.blobs.set("replica/gen/20260102T000000Z/applied.json", { data: new TextEncoder().encode(JSON.stringify({ generation: "20260102T000000Z", nonce: "nonce-1", restoredAt: 1 })), contentType: "application/json" });
+    const late = listingLate(blobs, ["replica/gen/20260102T000000Z/applied.json"], 1);
+    const { instance } = await startOn(file, late);
+    open.push(instance);
+    expect(await databaseRestoredAt(instance)).toBeNull();
+  });
+
+  it("lists again while a generation with origin.json after the newest snapshot shows no snapshot.db yet, then restores from it", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260101T000000Z", 1, null);
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    const late = listingLate(blobs, ["replica/gen/20260102T000000Z/snapshot.db"], 1);
+    const { instance, bootStartedAt } = await startOn(file, late);
+    open.push(instance);
+    expect(late.lists()).toBe(2);
+    expect(rowsIn(file)).toBe(2);
+    expect(await databaseRestoredAt(instance)).toBe(bootStartedAt);
+  });
+
+  it("refuses to start while repeated listings show origin.json of a generation after the newest snapshot but no snapshot.db in it", async () => {
+    const file = join(freshDir(), "live.db");
+    const blobs = fakeBlobs();
+    place(blobs, "20260101T000000Z", 1, null);
+    place(blobs, "20260102T000000Z", 2, { nonce: "nonce-1" });
+    const late = listingLate(blobs, ["replica/gen/20260102T000000Z/snapshot.db"], 100);
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      const started = module.setup(configSchema.parse({ file, restoreOnStart: true }), moduleDeps(late, freshDir(), Date.now())).then(() => null, (error: unknown) => error);
+      await vi.runAllTimersAsync();
+      expect(String(await started)).toMatch(/origin\.json in generation 20260102T000000Z [^]*no snapshot\.db/);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(existsSync(file)).toBe(false);
   });
 
   it("names a null nonce in applied.json when origin.json holds none", async () => {

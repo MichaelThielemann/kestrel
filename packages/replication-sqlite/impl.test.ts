@@ -684,6 +684,16 @@ describe("replication/sqlite listing against the seal", () => {
     expect(listed).toMatchObject({ generation, segments: 3, missing: 1 });
   });
 
+  it("lists again while a generation after the newest snapshot shows origin.json alone, and names it once the attempts are used up", async () => {
+    const { blobs } = sealedReplica();
+    blobs.blobs.set("replica/gen/20260102T000000Z/origin.json", { data: new TextEncoder().encode("{}"), contentType: "application/json" });
+    blobs.blobs.set("replica/gen/20251231T000000Z/origin.json", { data: new TextEncoder().encode("{}"), contentType: "application/json" });
+    const waits: number[] = [];
+    const listed = expectOk(await listSealedReplica(blobs, "replica/", { attempts: 3, delayMs: 50, sleep: async (ms) => { waits.push(ms); } }));
+    expect(waits).toEqual([50, 50]);
+    expect(listed).toMatchObject({ generation: "20260101T000000Z", missing: 0, withoutSnapshot: ["20260102T000000Z"] });
+  });
+
   it("lists once when the newest generation has no seal", async () => {
     const { blobs, generation } = sealedReplica();
     blobs.blobs.delete(`replica/gen/${generation}/sealed.json`);

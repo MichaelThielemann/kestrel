@@ -151,8 +151,13 @@ its first snapshot at teardown when it committed anything, and writes nothing wh
 generation it was restored from already holds its database.
 
 **Placed generations.** A tool that places a database into the replica while the process is stopped
-writes the snapshot and `origin.json` into a new generation. Name it by its time alone, after every
-generation the replica lists, so that 5.x releases list and restore it too. When `restoreOnStart`
+writes the snapshot into a new generation and then `origin.json`, last, which marks the placement as
+complete. Name it by its time alone, after every generation the replica lists, so that 5.x releases list
+and restore it too. Whether a generation carries `origin.json` or `applied.json`, the module reads from
+the blobstore, not from a listing, which can show a new key late. Before `setup()` rebuilds a missing
+file, it lists the replica again, as it does for a seal, while a generation that sorts after the newest
+snapshot shows `origin.json` but no `snapshot.db`, and refuses to start when the listing still shows
+none; the error names the generation. When `restoreOnStart`
 rebuilds the missing file from that generation, the restore is reported: `replication.checkRestored`
 answers the start of this boot, and the module writes `applied.json` with the generation, the `nonce`
 of `origin.json` (or `null` when it holds none) and that boot start, so the tool can tell that the

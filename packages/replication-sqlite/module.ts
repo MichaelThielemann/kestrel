@@ -6,7 +6,7 @@ import { first, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { applyPendingRestore, createReplicationSqlite, listSealedReplica, markerKey, readOriginNonce, restoreFromBlobs, unplacedNewerGenerations, type Applied, type Config, type Replication } from "./impl.ts";
+import { applyPendingRestore, createReplicationSqlite, listSealedReplica, markerKey, readOriginNonce, restoreFromBlobs, unplacedNewerGenerations, type Applied, type Config, type GenerationMarker, type Replication, type ReplicaListing } from "./impl.ts";
 import { checkSkippedRestore, markRestoredThisBoot, reportedRestoreAt } from "./restoreFreshness.ts";
 
 export const configSchema = z
@@ -46,13 +46,34 @@ interface StartListing {
   at: number;
 }
 
+function placedWithoutSnapshotError(file: string, prefix: string, generations: readonly string[]): string {
+  const generation = generations.at(-1) ?? "";
+  return `replication/sqlite: refusing to restore ${file} from the replica: repeated listings show origin.json in generation ${generation} under ${prefix}gen/, but no snapshot.db in it, and it sorts after the newest generation with a snapshot. The blobstore lists new keys late, or the placement wrote origin.json before its snapshot and did not finish. Start again once the listing shows ${prefix}gen/${generation}/snapshot.db; if the placement did not finish, move ${prefix}gen/${generation}/ out of ${prefix}gen/.`;
+}
+
+async function readsBack(blobs: Blobstore, key: string): Promise<boolean> {
+  const blob = await blobs.get(key);
+  if (isErr(blob)) throw new Error(blob.error.message, { cause: blob.error });
+  return blob.value !== null;
+}
+
+async function confirmedUnplaced(blobs: Blobstore, prefix: string, listing: ReplicaListing): Promise<ReturnType<typeof unplacedNewerGenerations>> {
+  const unplaced = unplacedNewerGenerations(listing);
+  if (unplaced.generations.length === 0) return unplaced;
+  for (const generation of unplaced.generations) {
+    if (await readsBack(blobs, markerKey(prefix, generation, "origin"))) listing.markers.set(generation, (listing.markers.get(generation) ?? new Set<GenerationMarker>()).add("origin"));
+  }
+  return unplacedNewerGenerations(listing);
+}
+
 async function restoreMissingFile(config: Config, blobs: Blobstore, logger: Logger, bootStartedAt: number): Promise<StartListing> {
   const at = Date.now();
   const listed = await listSealedReplica(blobs, config.prefix);
   if (isErr(listed)) throw new Error(listed.error.message, { cause: listed.error });
-  const { listing, generation: newest, segments, missing } = listed.value;
+  const { listing, generation: newest, segments, missing, withoutSnapshot } = listed.value;
   const startListing = { keys: listing.points.map((p) => p.key), at };
-  const unplaced = unplacedNewerGenerations(listing);
+  if (withoutSnapshot.length > 0) throw new Error(placedWithoutSnapshotError(config.file, config.prefix, withoutSnapshot));
+  const unplaced = await confirmedUnplaced(blobs, config.prefix, listing);
   if (unplaced.newest !== null && unplaced.generations.length > 0) throw new Error(unplacedGenerationsError(config.file, config.prefix, unplaced.newest, unplaced.generations));
   if (newest !== null && segments !== null && missing > 0) throw new Error(unlistedSegmentsError(config.file, config.prefix, newest, segments, missing));
   const restored = await restoreFromBlobs(blobs, config.prefix, {}, config.file, listing.points);
@@ -61,22 +82,23 @@ async function restoreMissingFile(config: Config, blobs: Blobstore, logger: Logg
     throw new Error(restored.error.message, { cause: restored.error });
   }
   const { generation } = restored.value;
-  const markers = listing.markers.get(generation);
-  if (markers === undefined || !markers.has("origin")) {
+  const nonce = await readOriginNonce(blobs, config.prefix, generation);
+  if (isErr(nonce) && nonce.error.code === "NOT_FOUND") {
     markRestoredThisBoot(config.file, bootStartedAt);
     return startListing;
   }
-  if (markers.has("applied")) {
+  if (isErr(nonce)) {
+    markRestoredThisBoot(config.file, bootStartedAt, true);
+    logWarn(logger, "replication/sqlite: restored from a generation that may carry origin.json but could not read that file, so the restore is reported and no applied.json acknowledges it", { file: config.file, generation, error: nonce.error.message });
+    return startListing;
+  }
+  const acknowledged = await blobs.get(markerKey(config.prefix, generation, "applied"));
+  if (!isErr(acknowledged) && acknowledged.value !== null) {
     markRestoredThisBoot(config.file, bootStartedAt);
     logger.info("replication/sqlite: restored from a generation placed with origin.json that an earlier start already reported", { file: config.file, generation });
     return startListing;
   }
   markRestoredThisBoot(config.file, bootStartedAt, true);
-  const nonce = await readOriginNonce(blobs, config.prefix, generation);
-  if (isErr(nonce)) {
-    logWarn(logger, "replication/sqlite: restored from a generation placed with origin.json but could not read that file, so no applied.json acknowledges the restore", { file: config.file, generation, error: nonce.error.message });
-    return startListing;
-  }
   const applied: Applied = { generation, nonce: nonce.value, restoredAt: bootStartedAt };
   const written = await blobs.put(markerKey(config.prefix, generation, "applied"), new TextEncoder().encode(JSON.stringify(applied)), { contentType: "application/json" });
   if (isErr(written)) logWarn(logger, "replication/sqlite: could not write applied.json; the next start that restores this generation reports the restore again", { file: config.file, generation, error: written.error.message });
