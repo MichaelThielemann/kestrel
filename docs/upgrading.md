@@ -221,7 +221,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`pipelines/images-plan`](#pipelines-images-plan) | source | manual (warning) | a pipeline calling `images.plan` directly |
 | [`data/translation-slug`](#data-translation-slug) | data | manual (error) | a stored translation of a routed type that is published without a slug of its own, or below a page without a slug in its locale |
 | [`data/media-layout`](#data-media-layout) | data | none (error) | a stored `media_items` key off-layout, or a pre-6.0 `images_variants`/`images_retired` row with no `slot` |
-| [`data/redirect-reserved-paths`](#data-redirect-reserved-paths) | data | manual (warning) | a stored `redirects-default` rule whose source can match a reserved path (`/admin`, `/api`, `/media` unless `reservedPaths` says otherwise) |
+| [`data/redirect-reserved-paths`](#data-redirect-reserved-paths) | data | manual (warning) | a stored `redirects-default` rule or automatic redirect whose source can match a reserved path (`/admin`, `/api`, `/media` unless `reservedPaths` says otherwise) |
 | [`data/site-media-leftovers`](#data-site-media-leftovers) | data | manual (warning) | a leftover 5.x static export copy `media.syncPublic` never touches |
 | [`data/blobstore-tmp-suffix`](#data-blobstore-tmp-suffix) | data | none (info) | a stored filesystem-blobstore key already ending in `.kestrel-tmp` |
 | [`steps/ctx-done-terminal-output`](#steps-ctx-done-terminal-output) | source | none (info) | a local module calling `ctx.done()` |
@@ -612,7 +612,9 @@ A rule stored by the redirect editor whose `from` equals, lies below or, through
 `/*`, `/*/login`), can match a path in `redirects-default`'s `reservedPaths` (default `/admin`, `/api`,
 `/media`). From 6.0.0 the editor refuses such a source, and publishing leaves a stored one out of `redirects.json` and the lookup, logging the row, so the redirect
 silently stops working. The `data` command reads the rules of the type and field the module is
-configured for and lists up to five of them. Manual: remove or move the rule before the upgrade, or
+configured for and lists up to five of them. An automatic redirect, the kind a renamed page leaves
+behind, whose source is at a reserved path is left out the same way; it is listed in a second finding
+for `redirects_auto_paths`. Manual: remove or move the rule before the upgrade, or
 change `reservedPaths` if the path is not one your application serves itself. A catch-all such as `/**` is
 left out for every path, not only for the reserved ones.
 

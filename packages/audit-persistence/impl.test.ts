@@ -64,8 +64,8 @@ describe("audit/persistence", () => {
     expectOk(await audit.record({ eventId: null, event: "page.updated", at: 2, identityId: "admin", params: { id: "mallory", userId: "mallory", author_id: "mallory", slug: "mallory" } }));
 
     expect(expectOk(await audit.anonymize("mallory"))).toBe(1);
-    expect(expectOk(await db.findOne<{ params: Record<string, string> }>(COLLECTION, { at: 1 }))?.params).toEqual({ pipeline: "login", step: "authn.login", username: "mallory" });
-    expect(expectOk(await db.findOne<{ params: Record<string, string> }>(COLLECTION, { at: 2 }))?.params).toEqual({ slug: "mallory" });
+    expect(expectOk(await db.findOne<{ id: string; params: Record<string, string> }>(COLLECTION, { at: 1 }))?.params).toEqual({ pipeline: "login", step: "authn.login", username: "mallory" });
+    expect(expectOk(await db.findOne<{ id: string; params: Record<string, string> }>(COLLECTION, { at: 2 }))?.params).toEqual({ slug: "mallory" });
   });
 
   it("changes nothing on a second anonymise of the same user", async () => {

@@ -84,6 +84,31 @@ describe("runDataStep: data/redirect-reserved-paths", () => {
     expect(found[0]?.message).not.toContain("/admin/x");
   });
 
+  it("names a stored automatic redirect whose source is at a reserved path", async () => {
+    const root = await projectWithRedirects({});
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("redirects_auto_paths", { kind: "string", type: "string", docId: "string", locale: "string", seq: "number" });
+    const row = { type: "page", docId: "d1", locale: "de", seq: 1 };
+    await db.createOne("redirects_auto_paths", { id: "/api/x", kind: "redirect", ...row });
+    await db.createOne("redirects_auto_paths", { id: "/media", kind: "redirect", ...row });
+    await db.createOne("redirects_auto_paths", { id: "/old-news", kind: "redirect", ...row });
+    await db.createOne("redirects_auto_paths", { id: "/admin/y", kind: "live", ...row });
+    await db.createOne("redirects_auto_paths", { id: "/api/gone", kind: "removed", ...row });
+    db.close();
+
+    const result = await runDataStep(file, root);
+    const found = result.report?.findings.filter((f) => f.rule === "data/redirect-reserved-paths") ?? [];
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ severity: "warning", tier: "data", where: { path: "redirects_auto_paths" } });
+    expect(found[0]?.message).toContain("2 stored automatic redirect(s)");
+    expect(found[0]?.message).toContain("/api/x");
+    expect(found[0]?.message).toContain("/media");
+    expect(found[0]?.message).not.toContain("/old-news");
+    expect(found[0]?.message).not.toContain("/admin/y");
+    expect(found[0]?.message).not.toContain("/api/gone");
+  });
+
   it("stays quiet without stored rules, without the module and for rules that are not a list", async () => {
     const withModule = await projectWithRedirects({});
     const file = join(dir, "kestrel.db");
