@@ -132,6 +132,17 @@ const cases: BootCase[] = [
     },
   },
   {
+    code: "instance-locked",
+    build: () => {
+      const mod = simpleModule("locking/one", {
+        async setup() {
+          throw new KestrelBootError("locking/one", "the database is in use by another process", "instance-locked");
+        },
+      });
+      return { config: { modules: [{ use: "./locking-one" }], triggers: [] }, modules: [mod], pipelines: [], logger: silentLogger };
+    },
+  },
+  {
     code: "missing-methods",
     build: () => {
       const mod = simpleModule("a/one", {
@@ -451,10 +462,10 @@ const cases: BootCase[] = [
 ];
 
 describe("bootCases: every sink-reachable BootErrorCode, pinned and checked for parity", () => {
-  it("covers exactly the 44 codes the sink can report", () => {
+  it("covers exactly the 45 codes the sink can report", () => {
     const seen = new Set(cases.map((c) => c.code));
     expect(seen.size).toBe(cases.length);
-    expect(cases.length).toBe(44);
+    expect(cases.length).toBe(45);
   });
 
   for (const { code, build } of cases) {
@@ -576,6 +587,37 @@ describe("module code that throws while boot registers or resolves steps is a ty
         "factory.go:bad",
       );
     await expectLoud(build, { code: "invalid-read-path", owner: "pipelines/uses", step: "factory.go:bad", mentions: ['"factory.go:bad"', '"factory/one"', "describe refuses this argument"] });
+  });
+
+  it("a module's setup() that throws its own KestrelBootError keeps its code, module and reason", async () => {
+    const build = (): BootInput => {
+      const mod = simpleModule("locking/one", {
+        async setup() {
+          throw new KestrelBootError("locking/one", "data/app.db is in use by pid 41 on host build-7", "instance-locked");
+        },
+      });
+      return { config: { modules: [{ use: "./locking-one" }], triggers: [] }, modules: [mod], pipelines: [], logger: silentLogger };
+    };
+    const check = await checkBoot(build(), { setup: "all" });
+    expect(check.errors).toEqual([{ code: "instance-locked", owner: "locking/one", module: "locking/one", reason: "data/app.db is in use by pid 41 on host build-7" }]);
+    await expect(boot(build())).rejects.toThrow(new KestrelBootError("locking/one", "data/app.db is in use by pid 41 on host build-7", "instance-locked"));
+    const thrown = await boot(build()).then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+    expect(thrown).toMatchObject({ code: "instance-locked", module: "locking/one", reason: "data/app.db is in use by pid 41 on host build-7" });
+  });
+
+  it("a module's setup() that throws a plain Error is still setup-failed, naming the module", async () => {
+    const build = (): BootInput => {
+      const mod = simpleModule("throwing/one", {
+        async setup() {
+          throw new Error("disk full");
+        },
+      });
+      return { config: { modules: [{ use: "./throwing-one" }], triggers: [] }, modules: [mod], pipelines: [], logger: silentLogger };
+    };
+    await expectLoud(build, { code: "setup-failed", owner: "throwing/one", mentions: ["setup() threw", "disk full"] });
   });
 
   it("a module's describe() that throws names the module, and its pipelines are left unchecked rather than reported as unknown steps", async () => {

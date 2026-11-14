@@ -492,7 +492,8 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
     try {
       instance = await mod.setup(cfg.data, deps);
     } catch (err) {
-      sink.fail("setup-failed", mod.name, `setup() threw: ${err instanceof Error ? err.message : String(err)}`);
+      if (err instanceof KestrelBootError) sink.fail(err.code, err.module, err.reason);
+      else sink.fail("setup-failed", mod.name, `setup() threw: ${err instanceof Error ? err.message : String(err)}`);
       markNotSetUp(notSetUp, mod, "setup() threw");
       continue;
     }

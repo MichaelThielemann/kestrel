@@ -1,7 +1,8 @@
 /**
  * One member per throw-site family in the boot engine (`boot.ts`, `sort.ts`, `dataflow.ts`,
- * `registry.ts`, `load.ts`). Covered by semver from 6.0.0: a minor release may add a code, so code
- * reading it must handle one it does not recognize instead of assuming today's set is complete.
+ * `registry.ts`, `load.ts`), plus `instance-locked`, which a module's `setup()` throws when
+ * another process holds its database file. Covered by semver from 6.0.0: a minor release may add a
+ * code, so code reading it must handle one it does not recognize instead of assuming today's set is complete.
  * `KestrelBootError.reason` and every message text stay uncovered and may change in any release.
  */
 export type BootErrorCode =
@@ -18,6 +19,7 @@ export type BootErrorCode =
   | "invalid-module-config"
   | "invalid-config-schema"
   | "setup-failed"
+  | "instance-locked"
   | "missing-methods"
   | "steps-threw"
   | "invalid-read-path"

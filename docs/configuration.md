@@ -278,7 +278,7 @@ code it does not recognize rather than assume this list is complete.
 |---|---|
 | Config | `invalid-config`, `module-count`, `module-listed-twice`, `module-entry-mismatch` |
 | Module order | `contract-provided-twice`, `before-and-requires`, `missing-provider`, `provides-itself`, `dependency-cycle`, `module-name-contract` |
-| Module setup | `invalid-config-schema`, `invalid-module-config`, `setup-failed`, `missing-methods` |
+| Module setup | `invalid-config-schema`, `invalid-module-config`, `setup-failed`, `instance-locked`, `missing-methods` |
 | Step registration | `steps-threw`, `invalid-read-path`, `invalid-write-path`, `step-not-function`, `step-registered-twice`, `step-undescribed`, `describe-shape`, `describe-threw`, `describe-unknown-step` |
 | Pipeline resolution | `pipeline-defined-twice`, `pipeline-empty`, `unknown-step`, `step-argument`, `describe-threw`, `atomic-unsafe-step` |
 | Triggers | `svg-without-sanitizer`, `invalid-allowlist`, `unknown-trigger-pipeline`, `invalid-trigger`, `duplicate-route` |
@@ -287,6 +287,9 @@ code it does not recognize rather than assume this list is complete.
 | Output declarations | `undeclared-output`, `undeclared-required`, `output-fold-contradiction`, `terminal-output-misplaced` |
 | Attach | `attach-failed` |
 | Loading (`loadConfig`/`loadModule`/`loadPipelineFile`) | `load-failed`, `no-default-export`, `not-a-module`, `not-a-pipeline`, `module-unresolved`, `config-not-object`, `pipelines-not-directory` |
+
+A module's `setup()` that throws is `setup-failed`, naming the module, unless it throws a
+`KestrelBootError` of its own: the problem then keeps that error's code, module and reason.
 
 Module code that throws while boot registers or resolves steps is reported like any other problem.
 A module's `steps()` that throws is `steps-threw`, its `describe()` `describe-threw`, both naming
