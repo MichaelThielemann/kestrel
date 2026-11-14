@@ -128,12 +128,13 @@ export interface S3Admin {
    * Copies one object inside the bucket on the server and checks the result: the destination must report the
    * source's size and the ETag the copy returned, read again while an overwritten destination still looks stale.
    * With `ifMatch` the copy is refused when the source changed, both by the store (`x-amz-copy-source-if-match`)
-   * and, for stores that ignore, reject or always refuse that header (see `CopyOptions.sourceCheck`), by comparing
-   * the source's ETag before and after the copy, and by the ETag the copy reports where that is a content hash.
-   * A destination written from a source that changed, or that fails
-   * verification, is removed again; an object that existed under `to` before is overwritten and removed too, so
-   * copy to keys that are free. A source that changed and returned to its earlier content during the copy cannot
-   * be told apart. Sources above 5 GiB are refused. Copying an object onto itself throws.
+   * and by comparing the source's ETag before and after the copy, and by the ETag the copy reports where that is a
+   * content hash. A store that ignores the header or answers 501 or 400 is covered by the comparison; a store that
+   * rejects every condition, the matching one too, needs `CopyOptions.sourceCheck` `"compare"`. A destination
+   * written from a source that changed, or that fails verification, is removed again; an object that existed under
+   * `to` before is overwritten and removed too, so copy to keys that are free. A source that changed and returned
+   * to its earlier content during the copy cannot be told apart. Sources above 5 GiB are refused. Copying an
+   * object onto itself throws.
    */
   copy(from: string, to: string, options?: CopyOptions): Promise<Result<CopyResult, S3CopyError>>;
   /**
