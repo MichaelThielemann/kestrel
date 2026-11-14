@@ -1792,7 +1792,8 @@ Net changes since 5.8.2.
   their timeout; a stop whose request failed goes on once the app reads stopped, a failed stop says that
   the app may stay stopped, and a start whose request failed counts
   as done once the app reads started. A backup records the app's guid, droplet (null only when the app has
-  none), newest revision and the names, never the values, of its environment variables. `applyManifest()`
+  none), newest revision and the names, never the values, of its environment variables, next to the
+  installed versions of the packages the `package.json` in `dir` declares; without one, none. `applyManifest()`
   reads the manifest as YAML 1.1 with merge keys, with dates and clock times kept as strings and integers
   kept digit for digit, as cf does,
   and applies only its version and the app's resolved entry through `cf apply-manifest --vars-file`, with

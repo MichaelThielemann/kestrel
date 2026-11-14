@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { OpsError } from "@michaelthielemann/kestrel-ops";
+import { OpsError, writeBundle } from "@michaelthielemann/kestrel-ops";
 import { cloudFoundryTarget, createTarget, type CloudFoundryOptions, type CloudFoundryTarget } from "./index.ts";
 import { FakeCloudFoundry } from "./fakeCloudFoundry.fixture.ts";
 
@@ -441,6 +441,26 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     expect(namesOtherApp()).toEqual([]);
     cf.app(API.name).revision = null;
     expect((await (await target()).describe()).revision).toBeNull();
+  });
+
+  it("records only the runtime versions the app's package.json brings, never those of kestrel-ops in a bundle built from the project", async () => {
+    const put = (dir: string, manifest: Record<string, unknown>): void => {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "package.json"), JSON.stringify(manifest));
+    };
+    const modules = join(root, "node_modules", "@michaelthielemann");
+    put(root, { name: "example-site", private: true, dependencies: { "@michaelthielemann/kestrel-replication-sqlite": "5.8.1" }, devDependencies: { "@michaelthielemann/kestrel-ops": "^6.0.0", "@michaelthielemann/kestrel-target-cloudfoundry": "^6.0.0" } });
+    put(join(modules, "kestrel-replication-sqlite"), { name: "@michaelthielemann/kestrel-replication-sqlite", version: "5.8.1" });
+    put(join(modules, "kestrel-target-cloudfoundry"), { name: "@michaelthielemann/kestrel-target-cloudfoundry", version: "6.0.0" });
+    put(join(modules, "kestrel-ops"), { name: "@michaelthielemann/kestrel-ops", version: "6.0.0", dependencies: { "@michaelthielemann/kestrel-replication-sqlite": "^6.0.0" } });
+    put(join(modules, "kestrel-ops", "node_modules", "@michaelthielemann", "kestrel-replication-sqlite"), { name: "@michaelthielemann/kestrel-replication-sqlite", version: "6.0.0" });
+    const block = { adapter: "@michaelthielemann/kestrel-target-cloudfoundry", app: API.name, org: "example-org", space: "dev" };
+    writeFileSync(join(root, "kestrel.environments.json"), JSON.stringify({ environments: { dev: { target: block, storage: { bucket: "example-bucket" }, app: { replicaPrefix: "database/", mediaPrefix: "media/", deliveryPrefix: "www/" }, backups: { prefix: "kestrel-backups/" } } } }));
+    expect((await (await target()).describe()).packages).toEqual({ "@michaelthielemann/kestrel-replication-sqlite": "5.8.1" });
+    const bundle = writeBundle(root, root);
+    expect(bundle.packages["@michaelthielemann/kestrel-replication-sqlite"]).toBe("6.0.0");
+    const inBundle = await cloudFoundryTarget({ app: API.name, org: "example-org", space: "dev" }, { root: bundle.dir, clock: Date.now }, { env: cf.env(), pollMs: 5 });
+    expect((await inBundle.describe()).packages).toEqual({});
   });
 
   it("records no droplet for an app without a current droplet, and fails the description when the droplet cannot be read", async () => {

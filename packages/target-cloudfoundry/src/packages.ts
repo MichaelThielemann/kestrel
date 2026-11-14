@@ -25,12 +25,16 @@ function versionIn(dir: string | null): string | null {
   return typeof version === "string" ? version : null;
 }
 
-/** The installed versions of the dependencies of the `package.json` in `dir`, and of the Kestrel runtime packages they bring along. */
+/**
+ * The installed versions of the dependencies of the `package.json` in `dir`, and of the Kestrel runtime packages they
+ * bring along. Without a `package.json` in `dir` it is empty: a `node_modules` there or above belongs to another
+ * package, such as the dependencies of kestrel-ops in its bundle.
+ */
 export function installedPackages(dir: string): Record<string, string> {
   const out: Record<string, string> = {};
   const dependencies: unknown = Reflect.get(Object(readJson(join(dir, "package.json"))), "dependencies");
   const direct = typeof dependencies === "object" && dependencies !== null ? Object.keys(dependencies) : [];
-  const dirs: string[] = [dir];
+  const dirs: string[] = [];
   for (const name of direct) {
     const found = packageDir(name, dir);
     const version = versionIn(found);
