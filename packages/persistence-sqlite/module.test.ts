@@ -267,9 +267,10 @@ describe("persistence/sqlite instance lock", () => {
   });
 
   it("takes no lock for an in-memory database", async () => {
-    const dir = tempDir();
+    const memoryEntries = () => readdirSync(process.cwd()).filter((name) => name.startsWith(":memory:"));
+    expect(memoryEntries()).toEqual([]);
     const db = await setUp({ file: ":memory:" });
-    expect(readdirSync(dir)).toEqual([]);
+    expect(memoryEntries()).toEqual([]);
     expect(module.health!(db)).toEqual({ ok: true });
     await module.teardown!(db);
   });
