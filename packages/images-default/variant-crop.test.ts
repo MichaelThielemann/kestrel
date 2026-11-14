@@ -101,12 +101,12 @@ function ctx(patch: Partial<Context>): Context {
   return { ...createContext({ trigger: { kind: "http", name: "t" } }), ...patch };
 }
 
-async function attached(images: Images): Promise<Map<string, AttachedVariant>> {
+async function attached(images: Images, id = "m1"): Promise<Map<string, AttachedVariant>> {
   const steps = boundaryCast<{ attach: Step }>(module.steps!(images), "host");
   const description = boundaryCast<{ extendsItems: Record<string, unknown> }>(module.describe!(images).attach, "host");
-  const single = expectOk(await steps.attach(ctx({ result: { id: "m1", contentType: "image/jpeg" } })));
+  const single = expectOk(await steps.attach(ctx({ result: { id, contentType: "image/jpeg" } })));
   expect(validateSchema(description.extendsItems, single.result)).toEqual([]);
-  const list = expectOk(await steps.attach(ctx({ result: { items: [{ id: "m1", contentType: "image/jpeg" }] } })));
+  const list = expectOk(await steps.attach(ctx({ result: { items: [{ id, contentType: "image/jpeg" }] } })));
   const fromList = boundaryCast<{ items: Array<{ variants: AttachedVariant[] }> }>(list.result, "host").items[0]!.variants;
   const variants = boundaryCast<{ variants: AttachedVariant[] }>(single.result, "host").variants;
   expect(fromList).toEqual(variants);
@@ -583,5 +583,85 @@ describe("images/default variants[].crop in images.attach", () => {
     expect((await attached(added)).get("square")).toMatchObject({ state: "done", crop: RIGHT, path: SQUARE_PATH });
     expect(await leftEdgeIsBlue(added, "square.webp")).toBe(true);
     for (const open of [inside, added]) await open.close();
+  });
+});
+
+const PHOTO: Size = { name: "photo", width: 300, height: 200, fit: "cover", format: "webp", quality: 82 };
+const TOP_FOCUS = { focus: { x: 0.5, y: 0, w: 0, h: 0 } };
+
+async function photo(width: number, height: number, orientation?: number): Promise<Uint8Array> {
+  const band = await sharp({ create: { width, height: 40, channels: 3, background: "#00ff00" } }).png().toBuffer();
+  const pipeline = sharp({ create: { width, height, channels: 3, background: "#ff00ff" } }).composite([{ input: band, left: 0, top: 0 }]).jpeg();
+  return new Uint8Array(await (orientation === undefined ? pipeline : pipeline.withMetadata({ orientation })).toBuffer());
+}
+
+function addPhotos(w: World, data: Uint8Array, ids: string[]): void {
+  for (const id of ids) w.media.add({ id, contentType: "image/jpeg", data, filename: `${id}.jpg`, createdAt: 1000 });
+}
+
+async function ratiosOf(images: Images, id: string): Promise<Array<{ key: string; manual: boolean; crop: PixelCrop | null }>> {
+  return expectOk(await images.framingsOf([id])).get(id)!.ratios.map(({ key, manual, crop }) => ({ key, manual, crop }));
+}
+
+async function renderedBytes(images: Images, id: string, file: string): Promise<Uint8Array> {
+  return expectOk(await images.read(id, file))!.data;
+}
+
+describe("images/default lists a cut within a pixel of the centre as the centre", () => {
+  it("lists the focus cut of a 1920 x 1281 original at its top or bottom edge as null for a 3:2 size and renders it as the centred cut", async () => {
+    const w = await world();
+    addPhotos(w, await photo(1920, 1281), ["top", "bottom", "plain"]);
+    const images = await w.open([THUMB, PHOTO]);
+    expectOk(await images.setFraming("top", TOP_FOCUS));
+    expectOk(await images.setFraming("bottom", { focus: { x: 0.5, y: 1, w: 0, h: 0 } }));
+    for (const id of ["top", "bottom", "plain"]) expectOk(await images.generate(id));
+    const centred = await renderedBytes(images, "plain", "photo.webp");
+    for (const id of ["top", "bottom"]) {
+      expect(await ratiosOf(images, id), id).toEqual([{ key: "3:2", manual: false, crop: null }]);
+      const variants = await attached(images, id);
+      expect(variants.get("photo"), id).toMatchObject({ state: "done", crop: null, path: `/media/${id}/variants/photo.webp` });
+      expect(variants.get("thumb"), id).toMatchObject({ state: "done", crop: null });
+      expect(await renderedBytes(images, id, "photo.webp"), id).toEqual(centred);
+    }
+    await images.close();
+  });
+
+  it("keeps a focus cut two pixels off the centre as a crop", async () => {
+    const w = await world();
+    addPhotos(w, await photo(1920, 1284), ["top", "plain"]);
+    const images = await w.open([PHOTO]);
+    expectOk(await images.setFraming("top", TOP_FOCUS));
+    for (const id of ["top", "plain"]) expectOk(await images.generate(id));
+    const cut = { left: 0, top: 0, width: 1920, height: 1280 };
+    expect(await ratiosOf(images, "top")).toEqual([{ key: "3:2", manual: false, crop: cut }]);
+    expect((await attached(images, "top")).get("photo")).toMatchObject({ state: "done", crop: cut });
+    expect(await renderedBytes(images, "top", "photo.webp")).not.toEqual(await renderedBytes(images, "plain", "photo.webp"));
+    await images.close();
+  });
+
+  it("lists a focus cut within a pixel of the centre of an original with EXIF orientation 6 as null", async () => {
+    const w = await world();
+    addPhotos(w, await photo(1281, 1920, 6), ["top", "plain"]);
+    const images = await w.open([PHOTO]);
+    expectOk(await images.setFraming("top", TOP_FOCUS));
+    for (const id of ["top", "plain"]) expectOk(await images.generate(id));
+    const framed = expectOk(await images.framingsOf(["top"])).get("top")!;
+    expect([framed.width, framed.height]).toEqual([1920, 1281]);
+    expect(await ratiosOf(images, "top")).toEqual([{ key: "3:2", manual: false, crop: null }]);
+    expect((await attached(images, "top")).get("photo")).toMatchObject({ state: "done", crop: null });
+    expect(await renderedBytes(images, "top", "photo.webp")).toEqual(await renderedBytes(images, "plain", "photo.webp"));
+    await images.close();
+  });
+
+  it("lists a manual crop within a pixel of the centre as null while the framing still names it manual", async () => {
+    const w = await world();
+    addPhotos(w, await photo(1920, 1281), ["manual", "plain"]);
+    const images = await w.open([PHOTO]);
+    expectOk(await images.setFraming("manual", { crops: { "3:2": { x: 0, y: 0, w: 1, h: 1280 / 1281 } } }));
+    for (const id of ["manual", "plain"]) expectOk(await images.generate(id));
+    expect(await ratiosOf(images, "manual")).toEqual([{ key: "3:2", manual: true, crop: null }]);
+    expect((await attached(images, "manual")).get("photo")).toMatchObject({ state: "done", crop: null, path: "/media/manual/variants/photo.webp" });
+    expect(await renderedBytes(images, "manual", "photo.webp")).toEqual(await renderedBytes(images, "plain", "photo.webp"));
+    await images.close();
   });
 });

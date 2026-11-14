@@ -110,23 +110,29 @@ function resolvedCrop(framing: Framing, key: string, ow: number, oh: number): Pi
   return place(width, height, (focus.x + focus.w / 2) * ow, (focus.y + focus.h / 2) * oh, ow, oh);
 }
 
-function sameCrop(a: PixelCrop, b: PixelCrop): boolean {
-  return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height;
+function withinAPixel(a: PixelCrop, b: PixelCrop): boolean {
+  return (
+    Math.abs(a.left - b.left) <= 1 &&
+    Math.abs(a.top - b.top) <= 1 &&
+    Math.abs(a.left + a.width - (b.left + b.width)) <= 1 &&
+    Math.abs(a.top + a.height - (b.top + b.height)) <= 1
+  );
 }
 
 /**
  * The crop of a ratio key in pixels of the oriented original (`ow` x `oh`): the manual crop of that ratio, brought to the exact ratio
  * around its centre; else the largest rectangle of the ratio centred on the focus and shifted back inside the image; else `null`.
- * A crop that equals `centredCrop` is `null` as well, so a variant without a framing and one framed to the centre render alike.
+ * A crop whose left, top, right and bottom edges each lie within one pixel of `centredCrop` is `null` as well: it renders as the
+ * centred cut, so a variant without a framing and one framed to the centre up to rounding render alike.
  */
 export function cropForRatio(framing: Framing, key: string, ow: number, oh: number): PixelCrop | null {
   const crop = resolvedCrop(framing, key, ow, oh);
   const centred = centredCrop(key, ow, oh);
-  if (crop === null || centred === null || sameCrop(crop, centred)) return null;
+  if (crop === null || centred === null || withinAPixel(crop, centred)) return null;
   return crop;
 }
 
-/** The crop a size renders with, by `cropForRatio` on its ratio key; always `null` for an `inside` size. */
+/** The crop a size renders with, by `cropForRatio` on its ratio key, so `null` for a cut within a pixel of the centred one; always `null` for an `inside` size. */
 export function effectiveCrop(framing: Framing, size: FramingSize, ow: number, oh: number): PixelCrop | null {
   const key = ratioKey(size);
   return key === null ? null : cropForRatio(framing, key, ow, oh);

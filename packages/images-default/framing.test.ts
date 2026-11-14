@@ -135,6 +135,25 @@ describe("cropForRatio and centredCrop", () => {
     expect(cropForRatio(set, "not-a-key", 4000, 3000)).toBeNull();
   });
 
+  it("cropForRatio is null for a cut within one pixel of the centred cut on every edge", () => {
+    expect(centredCrop("3:2", 1920, 1281)).toEqual({ left: 0, top: 1, width: 1920, height: 1280 });
+    expect(cropForRatio(framing({ focus: { x: 0.5, y: 0, w: 0, h: 0 } }), "3:2", 1920, 1281)).toBeNull();
+    expect(cropForRatio(framing({ focus: { x: 0.5, y: 1, w: 0, h: 0 } }), "3:2", 1920, 1281)).toBeNull();
+    expect(cropForRatio(framing({ crops: { "3:2": { x: 0, y: 0, w: 1, h: 1280 / 1281 } } }), "3:2", 1920, 1281)).toBeNull();
+    expect(effectiveCrop(framing({ focus: { x: 0.5, y: 0, w: 0, h: 0 } }), { width: 300, height: 200, fit: "cover" }, 1920, 1281)).toBeNull();
+  });
+
+  it("cropForRatio keeps a cut two pixels off the centred cut", () => {
+    expect(centredCrop("3:2", 1920, 1284)).toEqual({ left: 0, top: 2, width: 1920, height: 1280 });
+    expect(cropForRatio(framing({ focus: { x: 0.5, y: 0, w: 0, h: 0 } }), "3:2", 1920, 1284)).toEqual({ left: 0, top: 0, width: 1920, height: 1280 });
+  });
+
+  it("cropForRatio measures the pixel of tolerance on the oriented dimensions it is given", () => {
+    const top = framing({ focus: { x: 0.5, y: 0, w: 0, h: 0 } });
+    expect(cropForRatio(top, "3:2", 1920, 1281)).toBeNull();
+    expect(cropForRatio(top, "3:2", 1281, 1920)).toEqual({ left: 0, top: 0, width: 1281, height: 854 });
+  });
+
   it("centredCrop is the largest centred rectangle of the ratio", () => {
     expect(centredCrop("1:1", 4000, 2000)).toEqual({ left: 1000, top: 0, width: 2000, height: 2000 });
     expect(centredCrop("16:9", 1600, 900)).toEqual({ left: 0, top: 0, width: 1600, height: 900 });
