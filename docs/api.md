@@ -125,7 +125,9 @@ without Nuxt: [`../examples/h3`](../examples/h3).
   so the frontend can attach errors to fields without parsing text; a dangling reference
   (`DANGLING_REF`) additionally delivers `{ "refs": [{ "field", "to", "id" }] }`; a body rejected by
   `validate.check` delivers `{ "problems": [{ "path", "message" }] }` and also duplicates one
-  problem at the field root into `fields`.
+  problem at the field root into `fields`; an atomic group that ran past `scopeTimeoutMs` answers
+  `TRANSIENT` with `{ "reason": "scope-timeout", "pipeline": "<name>" }`, whereas a call that gave up
+  waiting for the database connection answers `TRANSIENT` without a `reason`.
 - **Every response** carries `X-Kestrel-Run-Id` (for support/logs), `X-Content-Type-Options:
   nosniff` and `Cache-Control: no-store`, except where a file response sets its own caching: the
   public media file at `/media/:id/:name` is `immutable`. If the caller sends `X-Request-Id` (short

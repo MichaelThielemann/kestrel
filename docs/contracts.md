@@ -41,7 +41,8 @@ may define its own contracts with the same `defineContract`; the core treats the
   widens its dependency range to that major.
 - The query vocabulary types (`Filter`, `Condition`, `FindOptions`, `Page`) live in
   `contracts/query.ts` and are shared by `persistence@1`, `content@1` and `site@1`, so no contract
-  file has to import another one for them.
+  file has to import another one for them. `FindManyOptions` (`FindOptions` plus `withTotal`) and
+  `PageWithoutTotal` sit beside them and belong to `persistence@1`'s `findMany` alone.
 - **Every async contract method returns `Promise<Result<T, E>>`**, never a rejection. Absence
   stays inside `Ok` (`Result<T | null, E>` — a `findOne`/`resolve`/`get` that finds nothing is
   not an error); only the *mutation* of something that must exist (`updateOne`, `move`)
@@ -59,9 +60,9 @@ may define its own contracts with the same `defineContract`; the core treats the
 ```ts
 import { defineContract } from "@michaelthielemann/kestrel/defineContract";
 import { type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
-import type { Filter, FindOptions, Page } from "@michaelthielemann/kestrel-contracts/query";
+import type { Filter, FindManyOptions, Page, PageWithoutTotal } from "@michaelthielemann/kestrel-contracts/query";
 
-export type { Condition, Filter, FindOptions, Page } from "@michaelthielemann/kestrel-contracts/query";
+export type { Condition, Filter, FindManyOptions, FindOptions, Page, PageWithoutTotal } from "@michaelthielemann/kestrel-contracts/query";
 
 export type FieldType = "string" | "number" | "boolean" | "json";
 export interface FieldDefinition { type: FieldType; unique?: boolean }   // unique: a second non-null value is CONFLICT with details.field
@@ -78,7 +79,9 @@ export interface Persistence {
   createOne<T extends Document>(collection: string, data: NewDocument<T>): Promise<Result<T, PersistenceError>>;   // CONFLICT: id or a unique value already exists
   createMany<T extends Document>(collection: string, data: NewDocument<T>[]): Promise<Result<T[], PersistenceError>>;   // all or nothing
   findOne<T extends Document>(collection: string, filter: Filter): Promise<Result<T | null, PersistenceError>>;   // nothing found is Ok(null), never an Err
-  findMany<T extends Document>(collection: string, filter: Filter, options?: FindOptions): Promise<Result<Page<T>, PersistenceError>>;
+  findMany<T extends Document>(collection: string, filter: Filter, options: FindManyOptions & { withTotal: false }): Promise<Result<PageWithoutTotal<T>, PersistenceError>>;   // no count over the matches, no `total`
+  findMany<T extends Document>(collection: string, filter: Filter, options?: FindManyOptions & { withTotal?: true | undefined }): Promise<Result<Page<T>, PersistenceError>>;   // `total` counts every match, not only those on the page
+  findMany<T extends Document>(collection: string, filter: Filter, options?: FindManyOptions): Promise<Result<PageWithoutTotal<T> & { total?: number }, PersistenceError>>;   // `withTotal` known only at run time
   count(collection: string, filter: Filter): Promise<Result<number, PersistenceError>>;
   updateOne<T extends Document>(collection: string, id: string, patch: Partial<Omit<T, "id">>): Promise<Result<T, PersistenceError>>;   // NOT_FOUND: id does not exist; CONFLICT: a unique value already exists
   updateMany<T extends Document>(collection: string, filter: Filter, patch: Partial<Omit<T, "id">>): Promise<Result<number, PersistenceError>>;
@@ -94,6 +97,10 @@ export const PERSISTENCE = defineContract<Persistence>()("persistence@1", [
 
 A raw value in a `Condition` means equality; every condition within a filter is AND-combined
 (`{ like: string }` follows SQL semantics: `%` any number of characters, `_` one character).
+
+`findMany` counts every match, not only those on the requested page and returns the count as `total`. A caller that
+only walks pages, such as a prefix scan over a large collection, passes `withTotal: false`: the page then
+has no `total` and the provider runs no count. Leaving `withTotal` out or passing `true` keeps `total`.
 
 `E = PersistenceError` is everywhere `CONFLICT | NOT_FOUND | TRANSIENT`; only `createOne`/
 `createMany` answer `CONFLICT`, only `updateOne` answers `NOT_FOUND`, every method can return

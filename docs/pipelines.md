@@ -112,7 +112,9 @@ Rules:
   made outside the group, reads included, waits in one queue until the group commits or rolls
   back. A call or another group still waiting for the connection after `acquireTimeoutMs` gives up
   with `TRANSIENT` (503) and never runs afterwards. A group still open `scopeTimeoutMs` after its
-  `BEGIN` rolls back and answers 503 `TRANSIENT`, which bounds how long a group holds the lock.
+  `BEGIN` rolls back and answers 503 `TRANSIENT` with `details: { reason: "scope-timeout", pipeline }`,
+  which bounds how long a group holds the lock and tells that answer apart from the one for a call
+  that waited for the connection (no `reason`).
   Both budgets are timers enforced when the event loop gets a turn: synchronous SQLite work blocks
   the loop, so a budget that runs out during a statement takes effect once it returns, and neither
   covers SQLite's own busy wait on a lock another connection holds, which `busyTimeoutMs` bounds.
