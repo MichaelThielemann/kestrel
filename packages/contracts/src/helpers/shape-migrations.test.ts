@@ -335,6 +335,17 @@ describe("shape-migrations: kinds", () => {
     expect(order).toEqual([]);
   });
 
+  it("applies no cleanup migration in a cleanup run while an unselected migration of the module is still pending", async () => {
+    const order: string[] = [];
+    const db = createFakePersistence();
+    const storages = [storage("m/x", [rowOnly(order, "m:convert", "6.0.0", 1), { ...rowOnly(order, "m:drop-old", "6.0.0", 1), kind: "cleanup" }])];
+    const report = expectOk(await runShapeMigrations({ storages, db, blobs: memoryBlobs(), apply: true, blobWrites: true, kinds: ["cleanup"] }));
+    expect(report.modules[0]).toMatchObject({ state: "pending", migrations: [{ id: "m:convert", state: "pending", blocked: "not-selected" }, { id: "m:drop-old", state: "pending", blocked: "earlier-pending" }] });
+    expect(order).not.toContain("apply m:convert");
+    expect(order).not.toContain("apply m:drop-old");
+    expect(expectOk(await storageVersionOf(db, "m/x"))).toBeNull();
+  });
+
   it("leaves an ask migration with an unanswered question pending and holds back the version row until it is answered", async () => {
     const order: string[] = [];
     const db = createFakePersistence();
