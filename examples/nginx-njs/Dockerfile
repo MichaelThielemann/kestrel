@@ -1,5 +1,6 @@
-FROM nginx:1.27-alpine
+FROM nginx:1.30-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a
 
+# The digest pins the 1.30 stable series; change the tag and the digest together.
 # nginx-module-njs: ships ngx_http_js_module.so, requires njs >= 0.8.1 for js_periodic.
 # gettext: provides envsubst, used at start to bake REDIRECTS_INTERVAL_MS into nginx.conf
 # (js_periodic's interval is read once at config load, not from process.env at runtime).
@@ -9,6 +10,7 @@ COPY nginx.conf.template /etc/nginx/templates/nginx.conf.template
 COPY redirects.js /etc/nginx/njs/redirects.js
 
 ENV REDIRECTS_INTERVAL_MS=60000
+ENV RESERVED_PATHS=/admin,/api,/media
 ENV ORIGIN_UPSTREAM=origin
 
 EXPOSE 8080

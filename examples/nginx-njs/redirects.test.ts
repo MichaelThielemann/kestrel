@@ -48,3 +48,54 @@ describe("the njs redirect handler", () => {
     expect(matchRule({ target: "/x", status: 301 }, "/blog/x")).toBeNull();
   });
 });
+
+interface Reply {
+  returned: [number, string][];
+  internal: string[];
+}
+
+function runRedirect(rules: unknown, uri: string, env: Record<string, string> = {}): Reply {
+  const source = readFileSync(new URL("./redirects.js", import.meta.url), "utf8").replace(/^export default .*$/m, "");
+  const store = new Map<string, string>([["rules", JSON.stringify(rules)], ["ready", "1"]]);
+  const dict = { get: (key: string) => store.get(key), set: (key: string, value: string) => store.set(key, value) };
+  const reply: Reply = { returned: [], internal: [] };
+  const request = {
+    uri,
+    return: (status: number, target: string) => reply.returned.push([status, target]),
+    internalRedirect: (location: string) => reply.internal.push(location),
+  };
+  runInNewContext(`${source}\nredirect(request);`, { request, ngx: { shared: { redirects: dict }, log: () => undefined, WARN: 0, ERR: 0 }, process: { env } });
+  return reply;
+}
+
+describe("the njs handler leaves the reserved paths to the origin", () => {
+  const rules = compileRedirects([{ from: "/**", to: "/elsewhere" }], {});
+
+  it("never redirects the admin, api and media paths, whatever the list says", () => {
+    for (const uri of ["/admin", "/admin/login", "/api/me", "/media/a/b.png"]) {
+      expect(runRedirect(rules, uri), uri).toEqual({ returned: [], internal: ["@origin"] });
+    }
+  });
+
+  it("still redirects a path that only shares the characters of a reserved prefix", () => {
+    for (const uri of ["/administration", "/api-docs", "/blog"]) {
+      expect(runRedirect(rules, uri), uri).toEqual({ returned: [[301, "/elsewhere"]], internal: [] });
+    }
+  });
+
+  it("takes the reserved paths from RESERVED_PATHS", () => {
+    const env = { RESERVED_PATHS: "/shop, /account" };
+    expect(runRedirect(rules, "/shop/cart", env).internal).toEqual(["@origin"]);
+    expect(runRedirect(rules, "/account", env).internal).toEqual(["@origin"]);
+    expect(runRedirect(rules, "/admin/login", env).returned).toEqual([[301, "/elsewhere"]]);
+  });
+});
+
+describe("the example container", () => {
+  it("pins its base image by digest", () => {
+    const dockerfile = readFileSync(new URL("./Dockerfile", import.meta.url), "utf8");
+    const from = dockerfile.split("\n").filter((line) => line.startsWith("FROM "));
+    expect(from).toHaveLength(1);
+    expect(from[0]).toMatch(/^FROM nginx:\d+\.\d+-alpine@sha256:[0-9a-f]{64}$/);
+  });
+});

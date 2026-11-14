@@ -3232,6 +3232,19 @@
               "type": "string",
               "minLength": 1,
               "default": "redirects.json"
+            },
+            "reservedPaths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^(\\/[A-Za-z0-9._-]+)+$"
+              },
+              "default": [
+                "/admin",
+                "/api",
+                "/media"
+              ],
+              "description": "Path prefixes no redirect source may match, each the path itself and everything below it; a rule already stored under one is left out of the published list with a log line"
             }
           },
           "additionalProperties": false
@@ -3280,6 +3293,25 @@
             "value": "redirects.json",
             "redacted": false,
             "default": "redirects.json"
+          },
+          {
+            "path": "reservedPaths",
+            "type": "array",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": [
+              "/admin",
+              "/api",
+              "/media"
+            ],
+            "redacted": false,
+            "default": [
+              "/admin",
+              "/api",
+              "/media"
+            ]
           }
         ]
       },

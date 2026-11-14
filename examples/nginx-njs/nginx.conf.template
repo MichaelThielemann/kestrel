@@ -1,9 +1,10 @@
 load_module modules/ngx_http_js_module.so;
 
 # `env` is a core (main-context) directive, not http-level: it must sit here,
-# before `events {}`, to pass REDIRECTS_URL through to process.env in the njs
+# before `events {}`, to pass REDIRECTS_URL and RESERVED_PATHS through to process.env in the njs
 # VM (nginx otherwise strips all inherited env vars except TZ).
 env REDIRECTS_URL;
+env RESERVED_PATHS;
 
 error_log /dev/stderr warn;
 

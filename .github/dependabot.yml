@@ -4,6 +4,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 3
     groups:
       codeql-action:
         patterns:
@@ -11,3 +13,9 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+  - package-ecosystem: docker
+    directory: /examples/nginx-njs
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3

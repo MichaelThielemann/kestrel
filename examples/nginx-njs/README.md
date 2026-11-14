@@ -37,6 +37,11 @@ NGINX reverse proxy in front of a static bucket periodically fetches `redirects.
   `nginx.conf.template` (Docker: `127.0.0.11`).
 - `REDIRECTS_INTERVAL_MS` (default `60000`): steady-state interval in ms, substituted via
   `envsubst`.
+- `RESERVED_PATHS` (default `/admin,/api,/media`): comma-separated path prefixes the handler never
+  redirects, the path itself and everything below it; they go to the origin whatever the list says, so
+  no rule can shadow the admin routes. Keep it equal to `reservedPaths` of `redirects-default`, which
+  refuses a rule that could match one of them. It reaches the handler through the `env` directive in
+  `nginx.conf.template`.
 - `ORIGIN_UPSTREAM` (default `origin`): host (and port, default 443) of the origin that `@origin`
   proxies to over `https://`, via an nginx variable rather than a literal – otherwise startup fails if
   the host isn't resolvable yet. The origin's certificate is verified against the system CAs

@@ -116,9 +116,20 @@ function matchRule(rule, path) {
   return m ? m.slice(1) : null;
 }
 
+const DEFAULT_RESERVED = "/admin,/api,/media";
+
+function isReserved(path) {
+  const list = (process.env.RESERVED_PATHS || DEFAULT_RESERVED).split(",");
+  for (let i = 0; i < list.length; i++) {
+    const reserved = list[i].trim();
+    if (reserved && (path === reserved || path.startsWith(reserved + "/"))) return true;
+  }
+  return false;
+}
+
 function redirect(r) {
   const raw = dict().get("rules");
-  if (!raw) {
+  if (!raw || isReserved(r.uri)) {
     r.internalRedirect("@origin");
     return;
   }
