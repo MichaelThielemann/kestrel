@@ -122,6 +122,23 @@ describe("stripImageMetadata: JPEG", () => {
     expect(exifOrientation(bytes(source.subarray(0, exif), [0x00], source.subarray(exif)))).toBe(8);
   });
 
+  it("reports a file with no marker left behind a segment as malformed", () => {
+    const jfif = jpegSegment(0xe0, bytes("JFIF\0", [1, 1, 0], u16(72), u16(72), [0, 0]));
+    const broken = bytes([0xff, 0xd8], jfif, new Uint8Array(2000).fill(0x41));
+    expect(stripImageMetadata(broken).kind).toBe("malformed");
+  });
+
+  it("finds the orientation behind a fill byte before a marker", () => {
+    const source = jpeg({ orientation: 6 });
+    const exif = source.findIndex((b, i) => b === 0xff && source[i + 1] === 0xe1);
+    const filled = bytes(source.subarray(0, exif), [0xff], source.subarray(exif));
+    expect(exifOrientation(filled)).toBe(6);
+    const result = stripImageMetadata(filled);
+    if (result.kind !== "stripped") throw new Error("expected stripped");
+    expect(exifOrientation(result.data)).toBe(6);
+    expect(includes(result.data, "GPS")).toBe(false);
+  });
+
   it("reports a segment that runs past the end of the file as malformed", () => {
     const broken = bytes([0xff, 0xd8, 0xff, 0xe1, 0x7f, 0xff], "Exif\0\0GPS");
     expect(stripImageMetadata(broken).kind).toBe("malformed");

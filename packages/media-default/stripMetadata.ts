@@ -55,7 +55,7 @@ function nextJpegMarker(d: Uint8Array, from: number): number {
   return d.length;
 }
 
-/** The EXIF orientation (2 to 8) of a JPEG, PNG or WebP file; stray bytes between JPEG segments are skipped like a decoder does; `null` for orientation 1, no EXIF, or a file that does not parse. */
+/** The EXIF orientation (2 to 8) of a JPEG, PNG or WebP file; stray and fill bytes between JPEG segments are skipped like a decoder does; `null` for orientation 1, no EXIF, or a file that does not parse. */
 export function exifOrientation(d: Uint8Array): number | null {
   if (d[0] === 0xff && d[1] === 0xd8) {
     let at = 2;
@@ -64,6 +64,7 @@ export function exifOrientation(d: Uint8Array): number | null {
         at = nextJpegMarker(d, at + 1);
         continue;
       }
+      while (d[at + 1] === 0xff) at += 1;
       const marker = d[at + 1] ?? 0;
       if (marker === 0xda || marker === 0xd9) return null;
       const length = u16be(d, at + 2);
@@ -131,6 +132,7 @@ function stripJpeg(d: Uint8Array): StripResult {
   while (at < d.length) {
     if (d[at] !== 0xff || d[at + 1] === 0) {
       at = nextJpegMarker(d, at + 1);
+      if (at >= d.length) return MALFORMED;
       continue;
     }
     while (d[at + 1] === 0xff) at += 1;

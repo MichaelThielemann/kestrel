@@ -153,6 +153,15 @@ describe("media.upload removes image metadata", () => {
     expect(warnings.some((w) => w.includes("could not remove the metadata"))).toBe(true);
   });
 
+  it("stores a JPEG with no marker left behind a segment as sent and warns", async () => {
+    const { media, blobs, warnings } = await setup();
+    const broken = bytes([0xff, 0xd8], segment(0xe0, bytes("JFIF\0", [1, 1, 0, 0, 72, 0, 72, 0, 0])), Array.from({ length: 2000 }, () => 0x41));
+    const { item } = expectOk(await media.upload({ filename: "broken.jpg", contentType: "image/jpeg", data: broken }));
+    expect(item.size).toBe(broken.byteLength);
+    expect(Array.from([...blobs.values()][0]!)).toEqual(Array.from(broken));
+    expect(warnings.some((w) => w.includes("could not remove the metadata"))).toBe(true);
+  });
+
   it("stores a JPEG with a stray byte between two segments without its GPS position", async () => {
     const { media, blobs, warnings } = await setup();
     const source = jpeg();
