@@ -1612,6 +1612,158 @@ describe("boot", () => {
     expect(order).toEqual(["run", "unsubscribe"]);
   });
 
+  it("quiesces every module at the very start of stop(), before the in-flight runs drain and the event triggers stop", async () => {
+    const order: string[] = [];
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const instance = { name: "quiet" };
+    let quiescedWith: unknown;
+    const mod = defineModule({
+      name: "quiet/step",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return instance;
+      },
+      steps: () => ({ wait: async (ctx: Context) => { await gate; order.push("run"); return ok(ctx); } }),
+      describe: () => ({ wait: { summary: "wait for the gate", reads: [], writes: [] } }),
+      triggers: {
+        event: () => () => {
+          order.push("unsubscribe");
+        },
+      },
+      quiesce(self) {
+        quiescedWith = self;
+        order.push("quiesce");
+      },
+    });
+    kestrel = await boot({
+      config: { modules: [{ use: "./quiet", config: {} }], triggers: [{ event: "page.created", pipeline: "quiet" }], http: null },
+      modules: [mod],
+      pipelines: [definePipeline({ name: "quiet", steps: ["quiet.wait"] })],
+      logger: silentLogger,
+    });
+    await kestrel.start();
+    const running = kestrel.run("quiet", { trigger: { kind: "event", name: "page.created" } });
+    const stopping = kestrel.stop({ timeoutMs: 5_000 });
+    expect(order).toEqual(["quiesce"]);
+    release();
+    await running;
+    expect(await stopping).toEqual({ drained: true });
+    expect(order).toEqual(["quiesce", "run", "unsubscribe"]);
+    expect(quiescedWith).toBe(instance);
+  });
+
+  it("quiesces the modules in reverse boot order, once, however often stop() is called", async () => {
+    const order: string[] = [];
+    const makeModule = (name: string) =>
+      defineModule({
+        name,
+        provides: [],
+        requires: [],
+        configSchema: z.object({}).strict(),
+        async setup() {
+          return {};
+        },
+        quiesce() {
+          order.push(name);
+        },
+      });
+    kestrel = await boot({
+      config: { modules: [{ use: "./first", config: {} }, { use: "./second", config: {} }], triggers: [], http: null },
+      modules: [makeModule("quiesce/first"), makeModule("quiesce/second")],
+      pipelines: [],
+      logger: silentLogger,
+    });
+    await Promise.all([kestrel.stop(), kestrel.stop()]);
+    await kestrel.stop();
+    expect(order).toEqual(["quiesce/second", "quiesce/first"]);
+  });
+
+  it("logs a throwing quiesce hook and still quiesces the others, drains and tears down", async () => {
+    const order: string[] = [];
+    const errors: Array<{ message: string; data?: Record<string, unknown> }> = [];
+    const logger = { ...silentLogger, error: (message: string, data?: Record<string, unknown>) => errors.push(data === undefined ? { message } : { message, data }) };
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const fine = defineModule({
+      name: "quiesce/fine",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({ wait: async (ctx: Context) => { await gate; order.push("run"); return ok(ctx); } }),
+      describe: () => ({ wait: { summary: "wait for the gate", reads: [], writes: [] } }),
+      quiesce() {
+        order.push("quiesce fine");
+      },
+      teardown() {
+        order.push("teardown fine");
+      },
+    });
+    const broken = defineModule({
+      name: "quiesce/broken",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      quiesce() {
+        throw new Error("boom");
+      },
+      teardown() {
+        order.push("teardown broken");
+      },
+    });
+    kestrel = await boot({
+      config: { modules: [{ use: "./fine", config: {} }, { use: "./broken", config: {} }], triggers: [], http: null },
+      modules: [fine, broken],
+      pipelines: [definePipeline({ name: "slow", steps: ["quiesce.wait"] })],
+      logger,
+    });
+    const running = kestrel.run("slow", { trigger: { kind: "cron", name: "* * * * *" } });
+    const stopping = kestrel.stop({ timeoutMs: 5_000 });
+    release();
+    await running;
+    expect(await stopping).toEqual({ drained: true });
+    expect(order).toEqual(["quiesce fine", "run", "teardown broken", "teardown fine"]);
+    expect(errors).toEqual([{ message: 'quiesce failed for module "quiesce/broken"', data: { module: "quiesce/broken", error: "boom" } }]);
+  });
+
+  it("passes the configured stepLog to every run", async () => {
+    const mod = defineModule({
+      name: "logged/step",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({ pass: async (ctx: Context) => ok(ctx), refuse: async (ctx: Context) => ctx.fail("NOT_FOUND", "gone") }),
+      describe: () => ({ pass: { summary: "pass", reads: [], writes: [] }, refuse: { summary: "refuse", reads: [], writes: [], errors: { 404: "gone" } } }),
+    });
+    const logged = async (stepLog?: "all" | "errors" | "off") => {
+      const outcomes: string[] = [];
+      const instance = await boot({
+        config: { modules: [{ use: "./logged", config: {} }], triggers: [], http: null, ...(stepLog === undefined ? {} : { stepLog }) },
+        modules: [mod],
+        pipelines: [definePipeline({ name: "passing", steps: ["logged.pass"] }), definePipeline({ name: "refused", steps: ["logged.pass", "logged.refuse"] })],
+        logger: { ...silentLogger, step: (entry) => outcomes.push(`${entry.step} ${entry.outcome}`) },
+      });
+      await instance.run("passing", { trigger: { kind: "cron", name: "* * * * *" } });
+      await instance.run("refused", { trigger: { kind: "cron", name: "* * * * *" } });
+      await instance.stop();
+      return outcomes;
+    };
+    expect(await logged()).toEqual(["logged.pass ok", "logged.pass ok", "logged.refuse fail(NOT_FOUND)"]);
+    expect(await logged("errors")).toEqual(["logged.refuse fail(NOT_FOUND)"]);
+    expect(await logged("off")).toEqual([]);
+  });
+
   it("serves a request that arrives just before stop() instead of cutting the connection", async () => {
     let release = () => {};
     const gate = new Promise<void>((resolve) => { release = resolve; });

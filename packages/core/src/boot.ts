@@ -327,6 +327,17 @@ async function teardownAll(ordered: readonly ModuleDefinition[], instances: Read
   }
 }
 
+function quiesceAll(ordered: readonly ModuleDefinition[], instances: ReadonlyMap<ModuleDefinition, unknown>, logger: Logger): void {
+  for (const mod of [...ordered].reverse()) {
+    if (!mod.quiesce || !instances.has(mod)) continue;
+    try {
+      mod.quiesce(instances.get(mod));
+    } catch (err) {
+      logger.error(`quiesce failed for module "${mod.name}"`, { module: mod.name, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+}
+
 type SetupSelector = "all" | "none" | ReadonlySet<string>;
 
 interface EngineState {
@@ -728,11 +739,12 @@ export async function boot(input: BootInput): Promise<Kestrel> {
   const run = (name: string, ctxInput: ContextInput): Promise<RunResult> => {
     const pipeline = pipelines.get(name);
     if (!pipeline) throw new Error(`unknown pipeline "${name}"`);
-    return runs.track(() => runPipeline(pipeline, ctxInput, logger, hub.observer, { validateOutput, ...(atomicScope === undefined ? {} : { atomicScope }) }));
+    return runs.track(() => runPipeline(pipeline, ctxInput, logger, hub.observer, { validateOutput, stepLog: config.stepLog, ...(atomicScope === undefined ? {} : { atomicScope }) }));
   };
   const triggers: Triggers = { http: routes, events, crons };
 
   let server: Server | undefined;
+  let quiesced = false;
   let torndown = false;
 
   const kestrel: Kestrel = {
@@ -772,6 +784,10 @@ export async function boot(input: BootInput): Promise<Kestrel> {
       return started;
     },
     async stop(options: StopOptions = {}) {
+      if (!quiesced) {
+        quiesced = true;
+        quiesceAll(ordered, instances, logger);
+      }
       const deadline = Date.now() + (options.timeoutMs ?? config.shutdownTimeoutMs);
       let httpError: Error | undefined;
       const s = server;

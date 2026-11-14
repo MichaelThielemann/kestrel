@@ -178,6 +178,13 @@ export interface ModuleDefinition<N extends string = string, T extends StepMap =
   triggers?: ModuleTriggers<unknown>;
   /** Runs once at the end of boot, after every module is set up and every pipeline resolved; a returned function runs on `stop()`. */
   attach?(instance: unknown, kestrel: Introspection): Detach | void;
+  /**
+   * Runs once at the start of `stop()`, synchronously, before the in-flight runs drain, in reverse
+   * boot order. A module stops starting new work of its own here (claiming queued jobs, polling) and
+   * lets work already started finish; what it holds open is closed later in `teardown`. A hook that
+   * throws is logged and does not hold up the shutdown.
+   */
+  quiesce?(instance: unknown): void;
   teardown?(instance: unknown): void | Promise<void>;
   /** Wraps an atomic group of a pipeline in one all-or-nothing scope of this module's store. At most one loaded module may declare it. */
   atomicScope?(instance: unknown, info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome>;
@@ -199,6 +206,7 @@ export type ModuleInput<N extends string, S extends ZodTypeAny, P, T extends Ste
   emits?: readonly string[];
   triggers?: ModuleTriggers<P>;
   attach?(instance: P, kestrel: Introspection): Detach | void;
+  quiesce?(instance: P): void;
   teardown?(instance: P): void | Promise<void>;
   atomicScope?(instance: P, info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome>;
   health?(instance: P): ModuleHealth;
