@@ -39,6 +39,8 @@ interface LockRecord {
   instanceId: string;
   pid: number;
   pidNamespace: string;
+  processStart: string;
+  bootId: string;
   host: string;
   startedAt: string;
   heartbeatAt: string;
@@ -70,6 +72,8 @@ const HOLDERS_KEY = Symbol.for("kestrel.instanceLocks");
 
 const holders = sharedHolders();
 const PID_NAMESPACE = pidNamespace();
+const PROCESS_START = processStart();
+const BOOT_ID = bootId();
 const PROCESS_STARTED_AT = Date.now() - process.uptime() * 1000;
 
 const UNLOCKED: InstanceLock = {
@@ -93,6 +97,23 @@ function pidNamespace(): string {
   }
 }
 
+function processStart(): string {
+  try {
+    const stat = readFileSync("/proc/self/stat", "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function bootId(): string {
+  try {
+    return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
 /**
  * The lock file for a database file: the file's real path with `.instance` appended, resolved
  * through symlinks, including ones whose target does not exist yet, so that every spelling of
@@ -110,16 +131,17 @@ export function instanceLockFile(file: string): string {
  * file next to the database (see {@link instanceLockFile}), never a row inside it, so it cannot
  * travel with a replica, snapshot or restore. `:memory:` takes no lock.
  *
- * A lock is taken over when its heartbeat is older than `ttlMs`. A lock written on this host in
- * this PID namespace is also taken over at once when its process no longer runs, or when it
- * carries this process's PID and a start time earlier than this process's own (an earlier process
- * under the same PID). A lock from another host or another PID namespace, such as another
- * container with the same hostname or the previous run of a restarted container, is judged by its
- * heartbeat alone. Any lock that is not taken over makes the call throw a `KestrelBootError` with
- * code `instance-locked` at once, without waiting; the reason names that process's host, PID and
- * start time and the `optOut` setting. A restarted container whose previous run left the lock
- * therefore fails to boot until `ttlMs` after that run's last heartbeat. `module` should be the
- * calling module's name so that boot reports that code.
+ * A lock is taken over when its heartbeat is older than `ttlMs`. A lock written on this machine
+ * (the same Linux boot id, or the same hostname where the system has none) in this PID namespace
+ * is also taken over at once when its process no longer runs, or when it carries this process's
+ * PID but another process start time (an earlier process under the same PID). A lock from
+ * another machine or another PID namespace, such as another container with the same hostname or
+ * the previous run of a restarted container, is judged by its heartbeat alone. Any lock that is
+ * not taken over makes the call throw a `KestrelBootError` with code `instance-locked` at once,
+ * without waiting; the reason names that process's host, PID and start time and the `optOut`
+ * setting. A restarted container whose previous run left the lock therefore fails to boot until
+ * `ttlMs` after that run's last heartbeat. `module` should be the calling module's name so that
+ * boot reports that code.
  *
  * Several holders in one process share one lock, also across copies of this module and across
  * worker threads; the last of them to call `release()` deletes the lock file. A thread that
@@ -174,6 +196,8 @@ function take(file: string, lockPath: string, opts: InstanceLockOptions): Holder
     instanceId: randomUUID(),
     pid: process.pid,
     pidNamespace: PID_NAMESPACE,
+    processStart: PROCESS_START,
+    bootId: BOOT_ID,
     host: hostname(),
     startedAt: now,
     heartbeatAt: now,
@@ -410,9 +434,19 @@ function judge(seen: Exclude<Seen, { kind: "absent" }>, ttlMs: number): "stale" 
   if (seen.kind === "unreadable") return Date.now() - seen.mtimeMs > ttlMs ? "stale" : "taken";
   const { record } = seen;
   if (!(Date.now() - Date.parse(record.heartbeatAt) <= ttlMs)) return "stale";
-  if (record.host !== hostname() || record.pidNamespace !== PID_NAMESPACE) return "taken";
-  if (record.pid === process.pid) return Date.parse(record.startedAt) < PROCESS_STARTED_AT - SAME_PROCESS_SLACK_MS ? "stale" : "this-process";
+  if (!sameKernel(record) || record.pidNamespace !== PID_NAMESPACE) return "taken";
+  if (record.pid === process.pid) return sameProcess(record) ? "this-process" : "stale";
   return isAlive(record.pid) ? "taken" : "stale";
+}
+
+function sameKernel(record: LockRecord): boolean {
+  if (BOOT_ID !== "" && record.bootId !== "") return record.bootId === BOOT_ID;
+  return record.host === hostname();
+}
+
+function sameProcess(record: LockRecord): boolean {
+  if (PROCESS_START !== "" && record.processStart !== "") return record.processStart === PROCESS_START;
+  return Date.parse(record.startedAt) >= PROCESS_STARTED_AT - SAME_PROCESS_SLACK_MS;
 }
 
 function refusal(file: string, lockPath: string, seen: Exclude<Seen, { kind: "absent" }>, ttlMs: number, optOut: string): string {
@@ -441,12 +475,12 @@ function parseRecord(raw: string): LockRecord | undefined {
     return undefined;
   }
   if (typeof value !== "object" || value === null) return undefined;
-  if (!("instanceId" in value && "pid" in value && "pidNamespace" in value && "host" in value && "startedAt" in value && "heartbeatAt" in value && "threads" in value)) return undefined;
-  const { instanceId, pid, pidNamespace, host, startedAt, heartbeatAt, threads } = value;
-  if (typeof instanceId !== "string" || typeof pidNamespace !== "string" || typeof host !== "string") return undefined;
+  if (!("instanceId" in value && "pid" in value && "pidNamespace" in value && "processStart" in value && "bootId" in value && "host" in value && "startedAt" in value && "heartbeatAt" in value && "threads" in value)) return undefined;
+  const { instanceId, pid, pidNamespace, processStart, bootId, host, startedAt, heartbeatAt, threads } = value;
+  if (typeof instanceId !== "string" || typeof pidNamespace !== "string" || typeof processStart !== "string" || typeof bootId !== "string" || typeof host !== "string") return undefined;
   if (typeof startedAt !== "string" || typeof heartbeatAt !== "string" || !isThreads(threads)) return undefined;
   if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0 || Number.isNaN(Date.parse(startedAt)) || Number.isNaN(Date.parse(heartbeatAt))) return undefined;
-  return { instanceId, pid, pidNamespace, host, startedAt, heartbeatAt, threads };
+  return { instanceId, pid, pidNamespace, processStart, bootId, host, startedAt, heartbeatAt, threads };
 }
 
 function isThreads(value: unknown): value is Record<string, string> {
