@@ -909,11 +909,19 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   async function writeRowCopy(lease: Lease, item: MediaFile, row: Variant, replacing = false): Promise<Result<CopyOutcome, KestrelError>> {
     const content = await contentFor(item, row);
     if (isErr(content) || content.value === null) return isErr(content) ? content : ok("missing");
+    let heldOther = false;
+    if (replacing) {
+      const key = copyKey(item.id, fileOf(row));
+      const held = await blobs.list(key);
+      if (isErr(held)) return held;
+      const copy = held.value.find((info) => info.key === key);
+      heldOther = copy !== undefined && copy.size !== content.value.data.byteLength;
+    }
     const put = await putCopyHeld(lease, fileOf(row), content.value.data, content.value.contentType);
     if (isErr(put) || put.value !== true) return isErr(put) ? put : ok("skipped");
     const kept = await keepCopyOwned(lease, fileOf(row), true);
     if (isErr(kept) || !kept.value) return isErr(kept) ? kept : ok("skipped");
-    if (!replacing) return ok("written");
+    if (!heldOther) return ok("written");
     const renewed = await updateAsRead(row, { renders: Math.max((row.renders ?? 0) + 1, 2) });
     if (isErr(renewed)) return renewed;
     if (renewed.value !== null) raiseVariantsChanged([item.id]);

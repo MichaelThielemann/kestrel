@@ -550,6 +550,60 @@ describe("images/default variants[].crop in images.attach", () => {
     for (const open of [full, small]) await open.close();
   });
 
+  it("keeps the path and raises no second images.variantsChanged when syncPublic meets a public copy another instance rewrote while it listed", async () => {
+    const w = await world();
+    let duringPrivateList: (() => Promise<void>) | null = null;
+    const racing: Blobstore = {
+      ...w.blobs,
+      list: async (prefix) => {
+        if (prefix === CONFIG.prefix && duringPrivateList !== null) {
+          const run = duringPrivateList;
+          duringPrivateList = null;
+          await run();
+        }
+        return w.blobs.list(prefix);
+      },
+    };
+    const syncing = await w.open([SQUARE], render, { blobs: racing });
+    const other = await w.open([SQUARE]);
+    expectOk(await syncing.setFraming("m1", RIGHT_CROP));
+    expectOk(await syncing.generate("m1"));
+    let afterOther: AttachedVariant | undefined;
+    duringPrivateList = async () => {
+      expectOk(await other.setFraming("m1", LEFT_CROP));
+      expectOk(await other.generate("m1"));
+      afterOther = (await attached(other)).get("square");
+    };
+    w.events.emitted.length = 0;
+    expectOk(await syncing.syncPublic());
+    expect(afterOther).toMatchObject({ state: "done", crop: LEFT });
+    expect((await attached(syncing)).get("square")).toEqual(afterOther);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(await renderedBytes(syncing, "m1", "square.webp"));
+    expect(w.events.emitted.filter(({ name }) => name === "images.variantsChanged")).toHaveLength(1);
+    for (const open of [syncing, other]) await open.close();
+  });
+
+  it("gives a size without a finished render a ?v= and raises images.variantsChanged when syncPublic rewrites its public copy of other bytes", async () => {
+    const w = await world();
+    const inside = await w.open([THUMB]);
+    expectOk(await inside.generate("m1"));
+    const added = await w.open([THUMB, SQUARE]);
+    expectOk(await added.plan(["m1"]));
+    expect((await attached(added)).get("square")).toMatchObject({ state: "pending", path: SQUARE_PATH });
+    w.blobs.blobs.set("site/media/m1/variants/square.webp", { data: new Uint8Array([1, 2, 3]), contentType: "image/webp" });
+
+    w.events.emitted.length = 0;
+    expectOk(await added.syncPublic());
+    const synced = (await attached(added)).get("square")!;
+    expect(synced).toMatchObject({ state: "pending", crop: null });
+    expect(synced.path).toMatch(VERSIONED_SQUARE);
+    const served = expectOk(await added.read("m1", "square.webp"))!;
+    expect(served.fallback).toBe(true);
+    expect(w.blobs.blobs.get("site/media/m1/variants/square.webp")!.data).toEqual(served.data);
+    expect(w.events.emitted).toEqual([{ name: "images.variantsChanged", ids: ["m1"] }]);
+    for (const open of [inside, added]) await open.close();
+  });
+
   it("writes the public copies of a shown item and a missing public copy without reading the copies they replace, and keeps the path", async () => {
     const w = await world();
     let copyReads = 0;
