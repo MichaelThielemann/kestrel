@@ -534,6 +534,17 @@ describe("acquireInstanceLock", () => {
     expect(existsSync(guard)).toBe(false);
   });
 
+  it("writes its heartbeat at the moment it takes the lock, not before waiting for another process's takeover marker", () => {
+    const stale = new Date(Date.now() - 120_000).toISOString();
+    writeRecord({ startedAt: stale, heartbeatAt: stale });
+    writeGuard({ pid: 4242, host: "web-2", bootId: randomUUID() }, 3_500);
+    take(file, { ttlMs: 2_000 });
+    const record = readRecord();
+    expect(record.pid).toBe(process.pid);
+    expect(Date.now() - Date.parse(record.heartbeatAt)).toBeLessThan(500);
+    expect(Object.values(record.threads).map((at) => Date.now() - Date.parse(at) < 500)).toEqual([true]);
+  }, 20_000);
+
   it("never clears the takeover marker of a live process on this host by its age, and refuses naming that process", () => {
     const stale = new Date(Date.now() - 120_000).toISOString();
     const foreign = writeRecord({ startedAt: stale, heartbeatAt: stale });

@@ -293,29 +293,32 @@ function linkTarget(path: string): string | undefined {
 function take(file: string, lockPath: string, opts: InstanceLockOptions, { ttlMs, heartbeatMs }: Timing): Holder {
   mkdirSync(dirname(lockPath), { recursive: true });
   const token = randomUUID();
-  const now = new Date().toISOString();
-  const record: LockRecord = {
-    instanceId: randomUUID(),
-    pid: process.pid,
-    pidNamespace: PID_NAMESPACE,
-    processStart: PROCESS_START,
-    bootId: BOOT_ID,
-    host: hostname(),
-    startedAt: now,
-    heartbeatAt: now,
-    ttlMs,
-    threads: { [token]: now },
+  const instanceId = randomUUID();
+  const fresh = (): LockRecord => {
+    const now = new Date().toISOString();
+    return {
+      instanceId,
+      pid: process.pid,
+      pidNamespace: PID_NAMESPACE,
+      processStart: PROCESS_START,
+      bootId: BOOT_ID,
+      host: hostname(),
+      startedAt: now,
+      heartbeatAt: now,
+      ttlMs,
+      threads: { [token]: now },
+    };
   };
-  const owned = claim(file, lockPath, record, token, ttlMs, opts);
+  const owned = claim(file, lockPath, fresh, token, ttlMs, opts);
   sweep(lockPath, ttlMs);
   return hold(lockPath, owned, token, ttlMs, heartbeatMs);
 }
 
-function claim(file: string, lockPath: string, record: LockRecord, token: string, ttlMs: number, opts: InstanceLockOptions): LockRecord {
-  const content = JSON.stringify(record);
+function claim(file: string, lockPath: string, fresh: () => LockRecord, token: string, ttlMs: number, opts: InstanceLockOptions): LockRecord {
   const deadline = performance.now() + GUARD_WAIT_MS;
   for (let changes = 0; changes < ATTEMPTS; ) {
-    if (createExclusive(lockPath, content)) return record;
+    const record = fresh();
+    if (createExclusive(lockPath, JSON.stringify(record))) return record;
     const seen = readLock(lockPath);
     if (seen.kind === "absent") {
       changes++;
