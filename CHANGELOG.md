@@ -918,9 +918,12 @@ Net changes since 5.8.2.
     `<prefix><folder>/<filename>` to `<prefix><id>/<name>`, checks size and sha256, switches the item
     and fills in a unique `location` (a name its folder already holds becomes `<stem>-<n>.<ext>`). The
     old blob stays and its key is recorded in `media_legacy_keys`; an item whose original is missing
-    is kept and reported, and its old key is recorded too. A 5.x SVG becomes `<stem>-svg.bin`, served
-    as `application/octet-stream`; the run lists each one (`svgDemoted`), and uploading it again
-    through `sanitize.svg` serves it as an image.
+    is kept and reported, and its old key is recorded too. `storage(config, { sanitizeSvg })` cleans each
+    5.x SVG with the given sanitizer and stores it as `<stem>.svg`, `image/svg+xml`, with `svgSanitized`
+    set and the same id (`svgSanitized`). A 5.x SVG the sanitizer refuses, one whose original is
+    missing, and every 5.x SVG without a sanitizer becomes `<stem>-svg.bin`, served as
+    `application/octet-stream`; the run lists each one with the reason (`svgDemoted`), and uploading it
+    again through `sanitize.svg` serves it as an image.
   - `images-default:variant-slots` fills in the `slot` of 5.x variant and retired rows, keeping the
     newest finished row of a slot and reporting the rows it drops.
   - Both modules take `storageMigrations: "check" | "apply"` (default `check`). `check` refuses to
@@ -945,7 +948,11 @@ Net changes since 5.8.2.
     it is named as such, apart from one that fails `quick_check`. The module
     configs come from `kestrel.config.ts`, or through the project's host plugin when that file does not
     load by itself; when neither loads, migrate stops with exit `2` before converting anything, unless
-    `--media-prefix` names the prefix. `kestrel upgrade data` warns with `data/media-layout:config` in
+    `--media-prefix` names the prefix. Each 5.x SVG is cleaned with the project's own `sanitize.svg`
+    step, set up offline with its module config, and keeps its id and stays an image; one the step
+    refuses or whose original is missing, and every 5.x SVG of a project without that step, is kept as a
+    `.bin` download and named. A module registering `sanitize.svg` that cannot be set up without other
+    modules stops the run with exit `2` before anything is converted. `kestrel upgrade data` warns with `data/media-layout:config` in
     that case. It neither takes nor
     honours the instance lock, so a lock file left next to the copy does not stop it. Exit `0` when
     every module is in this release's shape, `1` when a migration is still pending or the stored data

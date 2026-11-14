@@ -152,7 +152,8 @@ kestrel upgrade migrate --db <copy of the database> --blobs-dir <copy of the blo
    filesystem blob store with everything below it. Keep the originals as they are; they are the backup that 5.8 starts on again if the update is abandoned.
 3. With the 6.0.0 packages installed, run `migrate --plan` on the copy to see what it would
    convert, then `migrate` without `--plan` to convert it. When the plan names items whose original
-   is missing, decide for them with `--answers` (see below). Every SVG it names is served as a
+   is missing, decide for them with `--answers` (see below). Each 5.x SVG is cleaned with the
+   project's `sanitize.svg` and stays an image; one that cannot be cleaned is named and served as a
    download from then on (see [SVG files](#svg-files)).
 4. Run `kestrel upgrade data --db <copy> --root <project>`; `data/media-layout` no longer appears.
 5. Start 6.0.0 on the converted copy. Run `media.syncPublic` and `images.syncPublic` (with
@@ -215,18 +216,31 @@ so. Make sure no process uses the copy while it runs.
 
 ### SVG files
 
-A 5.x release kept no record of whether a stored SVG passed `sanitize.svg`, so the conversion
-cannot tell a sanitised SVG from one that never was. Every 5.x SVG becomes `<id>/<stem>-svg.bin`,
-and 6.0.0 serves it, and writes its public copy, as `application/octet-stream`: its URL answers
-`200`, but an `<img>` or a CSS background no longer shows it. Logos and icons are the usual case.
+6.0.0 serves an SVG as `image/svg+xml` only when its bytes passed `sanitize.svg`, and a 5.x release
+kept no record of that. `migrate` therefore runs each 5.x SVG through the `sanitize.svg` step of the
+project, the same step and module config a new upload goes through, set up offline from the module
+entry in `kestrel.config.ts` (or the host plugin) that registers it. The cleaned file becomes
+`<id>/<stem>.svg`, typed `image/svg+xml` and marked as sanitised like an upload; the item keeps its
+id, so every page, setting and document that uses it still does, and its size and sha256 are those of
+the cleaned file. The 5.x original stays under its old key. `migrate --plan` and the report count
+these items as `svgSanitized`, and a note names the module entry whose step cleaned them. Publish the
+site again after the update (step 5), so that the public copies and the exported pages use the new
+names.
 
-- `migrate --plan` names each such item ("is an SVG without a sanitize.svg record") and counts them
-  as `svgDemoted`; check that list before the update.
+An SVG that cannot be cleaned becomes `<id>/<stem>-svg.bin`, and 6.0.0 serves it, and writes its
+public copy, as `application/octet-stream`: its URL answers `200`, but an `<img>` or a CSS background
+no longer shows it. That happens when `sanitize.svg` refuses the file (markup without an `<svg>` root,
+a file above its `maxBytes`), when its original is missing, and for every 5.x SVG when no module of
+the project registers `sanitize.svg`, which the report says in a note.
+
+- `migrate --plan` names each such item with the reason, such as "is an SVG that sanitize.svg
+  refuses (invalid svg: …)", and counts them as `svgDemoted`; check that list before the update.
 - To show one as an image again, upload the file again through a pipeline that runs `sanitize.svg`
   before `media.upload`. The upload is a new item with a new id, because the converted item keeps its
   `.bin` name; point every page, setting and document that uses the old item at the new one and
   publish them again, then delete the old item.
-- There is no way to sanitise the converted item in place.
+- When the module that registers `sanitize.svg` cannot be set up on its own, without the contracts of
+  other modules, `migrate` stops with exit code `2` before it converts anything.
 
 ### Leftovers
 

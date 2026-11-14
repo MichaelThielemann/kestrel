@@ -448,19 +448,24 @@ names.
 
 ## Storage migrations
 
-`@michaelthielemann/kestrel-media-default/storage` exports `storage(config)`, the module's storage
-for `helpers/shape-migrations` of `kestrel-contracts`, and `migrations`. Its one migration,
+`@michaelthielemann/kestrel-media-default/storage` exports `storage(config, deps)`, the module's storage
+for `helpers/shape-migrations` of `kestrel-contracts`, and `migrations`. `deps.sanitizeSvg` (type
+`SvgSanitizer`) cleans the bytes of a stored SVG the way `sanitize.svg` cleans an upload;
+`kestrel upgrade migrate` passes the project's own step. Its one migration,
 `media-default:id-key-layout` (introduced in 6.0.0), converts the items a 5.x release stored under
 `<prefix><folder>/<filename>`:
 
 - the item's name is `nameFor(filename, contentType)`, the name an upload of the same file gets;
   a name only that item has in its folder stays, and of items whose names collide one keeps the name
   and the others get the first free `<stem>-<n>.<ext>`. A 5.x SVG has no
-  record of passing `sanitize.svg`, so it becomes `<stem>-svg.bin` and is served as
-  `application/octet-stream`; the run lists each one (`svgDemoted`), and uploading the file again
-  through `sanitize.svg` serves it as an image;
-- the original is copied to `<prefix><id>/<name>`, and the copy's size and sha256 are checked
-  against the original before the item switches to it; the item records the copy's size and sha256,
+  record of passing `sanitize.svg`: with `deps.sanitizeSvg`, its original is cleaned, and the cleaned
+  bytes are stored as `<stem>.svg` with `contentType` `image/svg+xml` and `svgSanitized` set, so it
+  is served as an image (`svgSanitized` counts them). One the sanitizer refuses, one whose original
+  is missing, and every 5.x SVG without `deps.sanitizeSvg` becomes `<stem>-svg.bin` and is served as
+  `application/octet-stream`; the run lists each one with the reason (`svgDemoted`), and uploading the
+  file again through `sanitize.svg` serves it as an image;
+- the original (for a cleaned SVG, its cleaned bytes) is written to `<prefix><id>/<name>`, and the
+  copy's size and sha256 are checked before the item switches to it; the item records the copy's size and sha256,
   and when they differ from what the 5.x row recorded the run reports the item; an item whose
   original is gone but whose copy already lies at its new key records the size and sha256 of that copy;
 - `location` is filled in, so each name is unique within its folder;

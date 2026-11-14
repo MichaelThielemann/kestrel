@@ -42,12 +42,16 @@ step of the storage migrations `media-default` and `images-default` export under
 storage migrations through the project's own `persistence-sqlite` and `blobstore-filesystem`
 (each package found from the project or one of its direct dependencies), writes each new blob
 before the row switches to it, leaves the old blobs where they are, and continues where an
-interrupted run stopped; a second run changes nothing. `--plan` only detects and counts. It neither
+interrupted run stopped; a second run changes nothing. Each 5.x SVG is cleaned with the project's
+own `sanitize.svg` step, set up offline with its module config, and stays an image; one the step
+refuses, one without its original, and every 5.x SVG of a project without that step is kept as a
+`.bin` download and named in the report. `--plan` only detects and counts. It neither
 takes nor honours the instance lock of the database, so a lock file left next to the copy does not
 stop it. `docs/upgrading.md` § "Converting the stored media" walks through it. Exit codes: `0` nothing at or above `--fail-on`
 (default `error`), `1` at least one finding, `2` the tool could not run (bad arguments, a dirty
 write target, a copy that fails `quick_check`, an `--answers` value outside its question's choices,
-a storage migration that failed, and for `migrate` also a database SQLite cannot open, an original
+a storage migration that failed, and for `migrate` also a database SQLite cannot open, a module
+registering `sanitize.svg` that cannot be set up without other modules, an original
 missing without an `--answers` value for `media-default:id-key-layout:missing-original`, or a
 `--blobs-dir` under which no original is found at all, whatever the answers say, unless
 `--originals-gone` confirms that it is the root of a store whose originals are all lost); for `migrate`,
