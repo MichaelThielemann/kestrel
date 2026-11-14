@@ -96,7 +96,6 @@ const CLOCK_SLACK_MS = 50;
 const CLOCK_SAMPLES = 5;
 const MAX_LINK_HOPS = 40;
 const MAX_TIMER_MS = 2 ** 31 - 1;
-const NO_HARD_LINKS = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"]);
 const HOLDERS_KEY = Symbol.for("kestrel.instanceLocks");
 const EXIT_KEY = Symbol.for("kestrel.instanceLocks.exit");
 
@@ -244,8 +243,8 @@ export function instanceLockFile(file: string): string | undefined {
  * Once another instance took the lock over, the next call does not join the lost share but takes
  * the lock anew or throws like a first call. A thread that ends without releasing stops counting
  * once its share is older than `ttlMs`. The heartbeat runs on a timer that does not keep the
- * process alive. The lock file and the takeover marker appear complete through a hard link; on a
- * file system without hard links, such as FAT or exFAT, they are written in place, and another
+ * process alive. The lock file and the takeover marker appear complete through a hard link; where
+ * the file system cannot create one, such as FAT or exFAT, they are written in place, and another
  * process that reads the lock file in that moment refuses as for an unreadable one.
  */
 export function acquireInstanceLock(file: string, opts: InstanceLockOptions): InstanceLock {
@@ -551,9 +550,7 @@ function linkExclusive(from: string, to: string, content: string): boolean {
     linkSync(from, to);
     return true;
   } catch (err) {
-    const code = errorCode(err);
-    if (code === "EEXIST") return false;
-    if (typeof code !== "string" || !NO_HARD_LINKS.has(code)) throw err;
+    if (errorCode(err) === "EEXIST") return false;
   }
   return writeExclusive(to, content);
 }

@@ -1312,6 +1312,21 @@ describe("acquireInstanceLock across processes", () => {
     expect(result).toEqual({ outcome: "won", fast: true });
   }, 30_000);
 
+  it("takes the lock when creating a hard link fails for another reason than an existing file, and removes it on release", () => {
+    for (const code of ["EISDIR", "EINVAL"]) {
+      const result = patchedRun(
+        [`fs.linkSync = () => { throw Object.assign(new Error(${JSON.stringify(`${code}: link`)}), { code: ${JSON.stringify(code)} }); };`],
+        [
+          "const { lock, outcome } = attempt();",
+          "const own = outcome === \"won\" && JSON.parse(fs.readFileSync(lockPath, \"utf8\")).pid === process.pid;",
+          "lock?.release();",
+          "process.stdout.write(JSON.stringify({ outcome, own, gone: !fs.existsSync(lockPath) }));",
+        ],
+      );
+      expect(result).toEqual({ outcome: "won", own: true, gone: true });
+    }
+  }, 30_000);
+
   it("shares a lock of this process after the hostname changed, whatever its heartbeat age, where the system offers no boot id", () => {
     const result = patchedRun(
       [...HIDE_PROC, "os.hostname = () => \"laptop.home.example\";"],
