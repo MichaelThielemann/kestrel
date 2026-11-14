@@ -157,11 +157,12 @@ export async function sealOf(store: ObjectStore, prefix: string, generation: Gen
   return { ...base, state: major === null ? "unknown" : major < SEALING_MAJOR ? "unsupported" : "unsealed", seal: null };
 }
 
-/** `gen/<g>/origin.json` next to a promoted snapshot: tells a runtime that understands it that its start is a restore. */
+/** `gen/<g>/origin.json` next to a promoted snapshot, written after it as the last file of the placement: tells a runtime that understands it that its start is a restore. */
 export interface Origin {
   kind: "restore" | "upgrade";
   source: string;
-  requestedAt: number;
+  /** When the placement was requested, as ISO 8601. */
+  requestedAt: string;
   nonce: string;
 }
 
@@ -231,10 +232,10 @@ export async function promote(input: PromoteInput): Promise<Promoted> {
     if (verdict !== "ok") throw new OpsError(`refusing to promote: the database fails integrity_check: ${verdict}`, 1, "db.sqlite");
     const digest = sha256File(copy);
     const bytes = new Uint8Array(readFileSync(copy));
-    const origin: Origin = { ...input.origin, requestedAt: input.clock(), nonce: hex(16) };
+    const origin: Origin = { ...input.origin, requestedAt: new Date(input.clock()).toISOString(), nonce: hex(16) };
     const base = `${input.prefix}gen/${generation}/`;
-    await input.store.put(`${base}origin.json`, jsonBytes(origin), { contentType: "application/json" });
     await input.store.put(`${base}snapshot.db`, bytes, { contentType: "application/vnd.sqlite3" });
+    await input.store.put(`${base}origin.json`, jsonBytes(origin), { contentType: "application/json" });
     const sleep = input.poll?.sleep ?? defaultSleep;
     for (let i = 0; ; i++) {
       const gens = await stableGenerations(input.store, input.prefix, input.poll);

@@ -68,6 +68,23 @@ describe("promote", () => {
     expect(promoted.nonce).toMatch(/^[0-9a-f]{32}$/);
   });
 
+  it("writes the snapshot first and origin.json last, with requestedAt as ISO 8601", async () => {
+    const bucket = new MemoryBucket("order");
+    const promoted = await promote(input(bucket));
+    const base = `database/gen/${promoted.generation}/`;
+    expect(bucket.writes.filter((w) => w.key.startsWith(base)).map((w) => w.key.slice(base.length))).toEqual(["snapshot.db", "origin.json"]);
+    const origin: unknown = JSON.parse(new TextDecoder().decode(bucket.objects.get(`${base}origin.json`)?.data));
+    expect(Reflect.get(Object(origin), "requestedAt")).toBe("2026-11-14T12:00:00.250Z");
+  });
+
+  it("leaves no origin.json behind when the snapshot upload fails", async () => {
+    const bucket = new MemoryBucket("failing-snapshot");
+    const store = memoryStore(bucket);
+    const failing = { ...store, put: async (key: string, data: Uint8Array, options?: { contentType?: string }) => (key.endsWith("/snapshot.db") ? Promise.reject(new Error("network down")) : store.put(key, data, options)) };
+    await expect(promote({ ...input(bucket), store: failing })).rejects.toThrow("network down");
+    expect([...bucket.objects.keys()].filter((k) => k.endsWith("/origin.json"))).toEqual([]);
+  });
+
   it("sorts after every existing generation, also one stamped up to 30 s after the store's time", async () => {
     const bucket = new MemoryBucket("f");
     const store = memoryStore(bucket);
