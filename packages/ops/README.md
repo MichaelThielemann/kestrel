@@ -146,7 +146,9 @@ restore writes or removes it: the `local` target places a restored database as `
 applies it at its next start. The originals are the keys the media rows reference, copied server-side into
 `objects/` through the admin client of `kestrel-blobstore-s3` (`createS3Admin().copy` with `ifMatch` set to the
 listed ETag): the store refuses the copy when the original changed in between, a store that ignores
-`x-amz-copy-source-if-match` is caught by reading the source's ETag again, and a copy whose size or ETag does not
+`x-amz-copy-source-if-match` is caught by reading the source's ETag again, a store that refuses the header even
+while the source has the listed ETag gets that and every later copy of the run without it, checked by comparing
+the source's ETag before and after, and a copy whose size or ETag does not
 match is removed. The key is then listed again and the new version is copied. A copy whose ETag differs while the
 source still has the listed one is kept (a multipart or KMS-encrypted source has no MD5 ETag). `objectEtag` in
 `blobs.jsonl` and `site.jsonl` records the ETag the copy got. When `backups.storage` names another bucket or

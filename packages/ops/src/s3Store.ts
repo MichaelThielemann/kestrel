@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 // eslint-disable-next-line no-restricted-imports -- kestrel-ops is a tool, not a module; it reaches S3 through the admin client of the blobstore package it depends on
-import { createS3Admin, type S3Admin } from "@michaelthielemann/kestrel-blobstore-s3/admin";
+import { createS3Admin, normalizeEtag, type S3Admin } from "@michaelthielemann/kestrel-blobstore-s3/admin";
 // eslint-disable-next-line no-restricted-imports -- kestrel-ops is a tool, not a module; it builds its S3 client with the options of the blobstore package it depends on
 import { clientOptions, type Config } from "@michaelthielemann/kestrel-blobstore-s3/impl";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -42,10 +42,14 @@ function unwrap<T>(what: string, result: Result<T, KestrelError>): T {
   throw new Error(`${what}: ${result.error.message}`, { cause: result.error });
 }
 
+const refusedMatchingCondition = (details: Record<string, unknown> | undefined, ifMatch: string): boolean => details?.reason === "store-refused" && details.destinationWritten === false && typeof details.foundEtag === "string" && details.foundEtag === normalizeEtag(ifMatch);
+
 /**
  * An {@link ObjectStore} on an S3-compatible bucket below `config.prefix`. Listings, HEADs, server-side copies to
  * free keys and the server clock go through the admin client of `kestrel-blobstore-s3`; such a copy is verified
- * against the source's size and ETag and refused when the source no longer has the listed ETag. A copy with
+ * against the source's size and ETag and refused when the source no longer has the listed ETag. A store that
+ * answers 412 to `x-amz-copy-source-if-match` although the source still has that ETag gets this and every later
+ * copy without the header, checked by comparing the source's ETag before and after. A copy with
  * `replace` is a single CopyObject request that never removes its target. Reads and writes of whole objects use the
  * same S3 client. Two stores copy server-side only within one bucket reached with the same credentials.
  */
@@ -59,6 +63,7 @@ export function s3Store(config: S3StoreConfig): S3Store {
   const admin = adminAt(config.prefix);
   const bucketAdmin = adminAt("");
   const id = `s3:${createHash("sha256").update(`${config.endpoint ?? "aws"}\n${config.region ?? ""}\n${config.bucket}\n${config.accessKeyId ?? ""}`).digest("hex").slice(0, 16)}`;
+  let sourceCheck: "header" | "compare" = "header";
   const toInfo = (info: { key: string; size: number; etag: string; lastModified: number | null }): ObjectInfo => ({ key: info.key, size: info.size, etag: info.etag, lastModified: info.lastModified ?? 0 });
   const getObject = async (key: string, ifMatch?: string): Promise<{ data: Uint8Array; contentType?: string } | null> => {
     try {
@@ -108,7 +113,17 @@ export function s3Store(config: S3StoreConfig): S3Store {
         }
         return;
       }
-      unwrap(`copy ${sourceKey}`, await bucketAdmin.copy(source.key, full(key), copyOptions.ifMatch === undefined ? {} : { ifMatch: copyOptions.ifMatch }));
+      const ifMatch = copyOptions.ifMatch;
+      if (ifMatch === undefined) {
+        unwrap(`copy ${sourceKey}`, await bucketAdmin.copy(source.key, full(key)));
+        return;
+      }
+      let copied = await bucketAdmin.copy(source.key, full(key), { ifMatch, sourceCheck });
+      if (!copied.ok && sourceCheck === "header" && refusedMatchingCondition(copied.error.details, ifMatch)) {
+        sourceCheck = "compare";
+        copied = await bucketAdmin.copy(source.key, full(key), { ifMatch, sourceCheck });
+      }
+      unwrap(`copy ${sourceKey}`, copied);
     },
     async delete(key) {
       await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: full(key) }));
