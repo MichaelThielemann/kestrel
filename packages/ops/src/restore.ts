@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { acceptSeal, createBackup, readManifest, verifyBackup, type BackupMode } from "./backup.ts";
 import { runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
@@ -271,7 +271,13 @@ export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptio
     blobs = await entries<BlobEntry>(ctx, ctx.location + keys.blobs(manifest.id));
   }
   const sessionsDeleted = options.keepSessions ? 0 : deleteSessions(source);
-  vacuumInto(source, file);
+  closeSync(openSync(file, "wx", 0o600));
+  try {
+    vacuumInto(source, file);
+  } catch (cause) {
+    rmSync(file, { force: true });
+    throw cause;
+  }
   let originals = 0;
   if (options.withMedia) {
     const bytes = blobs.reduce((n, b) => n + b.size, 0);
@@ -281,8 +287,8 @@ export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptio
       if (data === null) throw new OpsError(`backup object ${entry.object} is missing`, 1, entry.key);
       const out = join(dir, "blobs", entry.key);
       if (!resolve(out).startsWith(join(dir, "blobs") + "/")) throw new OpsError(`refusing to write ${entry.key} outside ${dir}/blobs`, 1, entry.key);
-      mkdirSync(dirname(out), { recursive: true });
-      writeFileSync(out, data);
+      mkdirSync(dirname(out), { recursive: true, mode: 0o700 });
+      writeFileSync(out, data, { mode: 0o600 });
       originals += 1;
     }
   }

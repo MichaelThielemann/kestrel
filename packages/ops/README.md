@@ -27,7 +27,7 @@ come as their own packages.
 | `backup verify <id>` | Verifies a backup again from what the backup location holds. Exit 1 names the failing part or key. |
 | `backup prune [--dry-run]` | Removes backups beyond the retention of their kind and the objects nothing refers to any more. |
 | `restore --backup <id> [--no-safety-backup]` | Restores a backup over the environment. |
-| `restore --to local <dir> (--backup <id> \| --latest) [--with-media] [--keep-sessions]` | Writes a backup's database, or the newest replica generation, to `<dir>/kestrel.db` without login sessions; `--with-media` adds the originals under `<dir>/blobs/`. |
+| `restore --to local <dir> (--backup <id> \| --latest) [--with-media] [--keep-sessions]` | Writes a backup's database, or the newest replica generation, to `<dir>/kestrel.db` without login sessions; `--with-media` adds the originals under `<dir>/blobs/`. Files are written with mode 0600, new directories with 0700. |
 
 Every command takes `--env <name>` (optional when the file names one environment), `--json` (one JSON
 document on stdout, with a `schema` field such as `kestrel-ops/restore@1`), `--yes`, `--answers <file>`,

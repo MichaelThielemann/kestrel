@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,6 +102,31 @@ describe("restore --to local", () => {
       expect(existsSync(join(media, "kestrel.db"))).toBe(false);
       expect((await h.run(["restore", "--to", "local", media, "--backup", String(backup.json.id), "--with-media", "--yes"])).code).toBe(0);
     } finally {
+      await h.dispose();
+    }
+  });
+});
+
+describe("restore --to local into an existing directory", () => {
+  it("writes the database and the originals readable by the owner only, whatever the umask and the directory's mode", async () => {
+    const h = createHarness({ store: memoryStore(new MemoryBucket("local-modes")) });
+    const umask = process.umask(0o022);
+    const mode = (path: string): string => (statSync(path).mode & 0o777).toString(8);
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const backup = await h.run(["backup", "create", "--json"]);
+      const out = join(h.root, "existing");
+      mkdirSync(out, { mode: 0o755 });
+      const result = await h.run(["restore", "--to", "local", out, "--backup", String(backup.json.id), "--with-media", "--yes"]);
+      expect(result.code).toBe(0);
+      expect(mode(join(out, "kestrel.db"))).toBe("600");
+      expect(mode(join(out, "blobs"))).toBe("700");
+      expect(mode(join(out, "blobs", "media"))).toBe("700");
+      expect(mode(join(out, "blobs", "media", "m1"))).toBe("700");
+      expect(mode(join(out, "blobs", "media", "m1", "harbour.jpg"))).toBe("600");
+    } finally {
+      process.umask(umask);
       await h.dispose();
     }
   });
