@@ -206,7 +206,8 @@ restores its newest generation as before.
 **One process per file.** The first thing `setup()` does is take the instance lock on `file`, the
 sidecar `<file>.instance` next to the database: before it applies a prepared restore, rebuilds a
 missing file or checks a skipped restore. While another process holds the file, `setup()` fails
-with `instance-locked`, naming that process's host and PID, and leaves the database, its `-wal`,
+with `instance-locked`, naming that process's host and PID for a readable lock (an unreadable lock
+file is named instead), and leaves the database, its `-wal`,
 `-shm`, `.restore` and `.restored-at` as they are; with `restoreOnStart` it creates no file. The
 lock is never part of a snapshot or segment, so a fresh disk that rebuilds the file from the replica
 takes a lock of its own. `persistence/sqlite` and `backup/blobstore` on the same file in the same

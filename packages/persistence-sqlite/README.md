@@ -20,8 +20,8 @@ loses power – pair it with `backup/blobstore` or `replication/sqlite` rather t
 makes sure of it: before it opens the file, `setup()` takes the instance lock on it, the sidecar
 `<file>.instance` next to the database. A second *process* on the same file – a standalone
 `kestrel` CLI next to a running server, a second dev server, two containers on a shared volume –
-fails to boot with `instance-locked`, naming the host and PID of the process that holds the file,
-and leaves the file as it is. Writes are only serialised inside one process, and restores swap the
+fails to boot with `instance-locked`, naming the host and PID of the process that holds the file
+for a readable lock (an unreadable lock file is named instead), and leaves the file as it is. Writes are only serialised inside one process, and restores swap the
 file before it is opened, so point each process at its own file, or route all writes through one
 of them. `replication/sqlite` and `backup/blobstore` on the same file in the same process share the
 lock; `replication/sqlite` also opens a second connection to the file (it holds a read transaction

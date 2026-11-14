@@ -52,7 +52,7 @@ effect. Preparing a restore twice keeps the newer one.
 **One process per file.** The first thing `setup()` does is take the instance lock on `file`, the
 sidecar `<file>.instance` next to it: before it applies a pending restore or restores a missing file.
 While another process holds the file, `setup()` fails with `instance-locked`, naming that process's
-host and PID, and leaves `file`, its `-wal` and `-shm`, `.restore-pending`, `.restore-marker` and
+host and PID for a readable lock (an unreadable lock file is named instead), and leaves `file`, its `-wal` and `-shm`, `.restore-pending`, `.restore-marker` and
 `.restored-at` as they are; with `restoreOnStart` it creates no file and reads no backup. The lock is
 never uploaded with a backup. `persistence/sqlite` and `replication/sqlite` on the same file in the
 same process share it, and teardown gives this module's share up; a `setup()` that fails gives it up

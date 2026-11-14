@@ -60,9 +60,10 @@ contract — is a contradiction and fails the boot as a dependency cycle, naming
 database file their `file` names. Each one takes the instance lock on that file as the first thing
 its `setup()` does: before it opens the file, applies a staged restore or rebuilds a missing file
 from the replica or the backup. A second process that boots on the same file while the first one
-runs therefore fails with `instance-locked` (see [Error codes](#error-codes)), naming the host and
-PID of the process that holds the file, and leaves the database, its `-wal` and `-shm`, a staged
-restore and the restore records next to it as they were.
+runs therefore fails with `instance-locked` and leaves the database, its `-wal` and `-shm`, a
+staged restore and the restore records next to it as they were. For a readable lock file the
+reason names the host and PID of the process that holds the file; for one that cannot be read it
+names the lock file instead (see [Error codes](#error-codes)).
 
 The lock is the file `<file>.instance` next to the database, never a row inside it. It is not part
 of a snapshot, a replica or a backup, and it is not restored with one: a fresh container that
