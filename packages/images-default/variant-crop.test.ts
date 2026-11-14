@@ -746,14 +746,16 @@ describe("images/default variants[].crop in images.attach", () => {
 
   it("leaves a row of a size no longer declared alone in syncPublic when its key holds other bytes", async () => {
     const w = await world();
-    const full = await w.open([THUMB, SQUARE]);
+    let clock = 1000;
+    const tick = (): number => (clock += 1);
+    const full = await w.open([THUMB, SQUARE], render, { now: tick });
     expectOk(await full.setFraming("m1", RIGHT_CROP));
     expectOk(await full.generate("m1"));
     const row = (expectOk(await full.variantsOf(["m1"])).get("m1") ?? []).find((variant) => variant.size === "square")!;
     await full.close();
 
     w.blobs.blobs.set("media-variants/m1/square.webp", { data: new Uint8Array([1, 2, 3]), contentType: "image/webp" });
-    const small = await w.open([THUMB]);
+    const small = await w.open([THUMB], render, { now: tick });
     expectOk(await small.syncPublic());
     await whenIdle(small);
     const after = (expectOk(await small.variantsOf(["m1"])).get("m1") ?? []).find((variant) => variant.size === "square")!;
