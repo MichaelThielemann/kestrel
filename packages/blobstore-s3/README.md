@@ -46,23 +46,34 @@ const copied = await admin.copy("media/a.png", "backup/a.png", { ifMatch: listed
 
 - `listDetailed(prefix)` lists every object with `key`, `size`, `etag` (without quotes) and `lastModified`
   in epoch milliseconds, ordered by key. `head(key)` reports the same for one key and `Ok(null)` for a
-  missing one; a `HEAD` reports whole seconds where a listing reports milliseconds.
-- `copy(from, to, { ifMatch? })` copies on the server. It then reads the destination until its size equals
-  the source's, since an overwritten key can still answer with its old size for a moment, and answers
-  `VERIFY_FAILED` with `details.expectedSize` and `details.actualSize` if it never does. With `ifMatch` (the
-  ETag from a listing) it answers `PRECONDITION_FAILED` and writes nothing when the source changed. The
-  store's own `x-amz-copy-source-if-match` does the check where it works; when a store ignores the header or
-  answers 501, the client compares the source's ETag before the copy and again after it. A source above 5 GiB
-  answers `PAYLOAD_TOO_LARGE`, since one copy request does not move more.
+  missing one; a `HEAD` reports whole seconds, and listings report at least whole seconds (some stores add
+  milliseconds). A `HEAD` cannot tell a missing key from a missing bucket, so the first miss runs one
+  `HeadBucket`; a bucket that does not exist throws.
+- `copy(from, to, { ifMatch? })` copies on the server. It then reads the destination until it reports the
+  source's size and the ETag the copy returned, since an overwritten key can still answer with its old
+  metadata for a moment, and answers `VERIFY_FAILED` with the expected and actual size and ETag if it never
+  does. With `ifMatch` (the ETag from a listing) it answers `PRECONDITION_FAILED` when the source changed.
+  The store's own `x-amz-copy-source-if-match` does the check where it works and writes nothing then
+  (`details.reason: "store-refused"`). When a store ignores the header or answers 501, the client compares
+  the source's ETag before the copy and again after it; a destination written from a changed source is
+  removed (`details.reason: "source-changed"` or `"source-missing"`, `details.destinationRemoved`). A
+  destination that fails verification is removed too, and an object that already existed under `to` is
+  overwritten and removed with it, so copy to keys that are free. A source that changes and returns to
+  identical content during the copy cannot be detected. A source above 5 GiB answers `PAYLOAD_TOO_LARGE`,
+  since one copy request does not move more.
 - `serverTime()` returns `{ serverMs, localMs, skewMs }`. It writes a probe object under `.kestrel-clock/`,
   lists until the object shows, reads its `LastModified` and removes it. Listings can lag behind a write, which
-  is why it lists again, up to `observeAttempts` times.
+  is why it lists again, up to `observeAttempts` times. `skewMs` is accurate to about a second, because a
+  store may report `LastModified` in whole seconds.
 - `probeCapabilities()` finds out which write conditions the store enforces: `conditionalCreate`
   (`If-None-Match: *`), `conditionalOverwrite` (`If-Match`) and `copySourceIfMatch`. Each probe sends a
-  condition that cannot hold, on a scratch key under `.kestrel-probe/` that is removed afterwards. Only a
-  refusal with 412 counts: `supported` is `true` for `outcome: "enforced"` and `false` for `"ignored"` (the
-  store accepted the stale write), `"not-implemented"` (501) and `"error"` (`detail` names it). A capability
-  nobody observed is not assumed.
+  condition that cannot hold and, after a 412, the matching condition, on scratch keys under
+  `.kestrel-probe/`. `supported` is `true` only for `outcome: "enforced"`: the stale condition was refused
+  and the matching one accepted. It is `false` for `"always-refused"` (the matching condition got a 412 too),
+  `"ignored"` (the store accepted the stale write), `"not-implemented"` (501) and `"error"` (`detail` names
+  it). A capability nobody observed is not assumed.
+- `serverTime()` and `probeCapabilities()` remove their scratch objects and need the `DeleteObject`
+  permission for that; a denied delete throws, while a transient failure to delete is ignored.
 
 `createS3Admin(config, client, options)` accepts a client for tests and `S3AdminOptions`: `verifyAttempts`,
 `retryDelayMs`, `observeAttempts`, `sleep` and `now`.

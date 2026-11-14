@@ -1423,19 +1423,23 @@ Net changes since 5.8.2.
   between syncs).
 - `blobstore-s3` has an `./admin` entry, `createS3Admin(config)`, for what `blobstore@1` does not
   offer. `listDetailed(prefix)` returns key, size, ETag (without quotes) and the server's
-  modification time in milliseconds. `head(key)` returns the same for one key, or `Ok(null)`.
-  `copy(from, to, { ifMatch? })` copies on the server with `MetadataDirective: "COPY"`, then reads the
-  destination until it reports the source's size (an overwritten destination can look stale for a
-  moment) and answers `VERIFY_FAILED` with both sizes otherwise. With `ifMatch` it answers
-  `PRECONDITION_FAILED` and writes nothing when the source no longer has that ETag, whether the store
-  enforces `x-amz-copy-source-if-match`, ignores it or answers 501: the ETag is also compared before
-  and after the copy. A source above 5 GiB answers `PAYLOAD_TOO_LARGE`. `serverTime()` writes a probe
-  object, lists until it shows and returns its `LastModified` with the skew against the local clock,
-  because not every store sends a usable `Date` header. `probeCapabilities()` tests on scratch keys
-  whether the store refuses a stale `If-None-Match: *` write, a stale `If-Match` write and a stale
-  copy-source ETag; a condition counts as supported only when a 412 was seen, an ignored or
-  rejected header reports `supported: false`. Every method answers `Result`: `TRANSIENT` after the
-  SDK's retries, anything else, such as `AccessDenied`, throws. `blobstore@1` is unchanged.
+  modification time in milliseconds. `head(key)` returns the same for one key, or `Ok(null)`; a bucket
+  that does not exist throws. `copy(from, to, { ifMatch? })` copies on the server with
+  `MetadataDirective: "COPY"`, then reads the destination until it reports the source's size and the
+  ETag the copy returned (an overwritten destination can look stale for a moment) and answers
+  `VERIFY_FAILED` otherwise. With `ifMatch` it answers `PRECONDITION_FAILED` when the source no longer
+  has that ETag. A store that enforces `x-amz-copy-source-if-match` writes nothing then; for a store that
+  ignores the header or answers 501 the ETag is also compared before and after the copy, and a
+  destination written from a changed source is removed again. `details.reason` and
+  `details.destinationRemoved` say what happened. A source above 5 GiB answers `PAYLOAD_TOO_LARGE`.
+  `serverTime()` writes a probe object, lists until it shows and returns its `LastModified` with the
+  skew against the local clock, because not every store sends a usable `Date` header.
+  `probeCapabilities()` tests on scratch keys whether the store refuses a stale `If-None-Match: *`
+  write, a stale `If-Match` write and a stale copy-source ETag and accepts the matching condition; a
+  condition counts as supported only when both were seen, an ignored or rejected header or a store that
+  refuses every conditional request reports `supported: false`. Every method answers `Result`:
+  `TRANSIENT` after the SDK's retries, anything else, such as `AccessDenied`, throws. `blobstore@1` is
+  unchanged.
 - `blobstore-s3` takes `requestChecksumCalculation` (`WHEN_SUPPORTED` or `WHEN_REQUIRED`) in its
   config and passes it to the SDK. `WHEN_REQUIRED` stops the SDK from adding a checksum trailer to
   uploads, which some S3-compatible stores reject or ignore without verifying. Unset keeps the SDK
