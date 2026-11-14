@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { effectiveModuleConfig } from "@michaelthielemann/kestrel";
-import { loadConfig } from "@michaelthielemann/kestrel/load";
+import { loadConfig, loadModule } from "@michaelthielemann/kestrel/load";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { ModuleStorage } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import { isRecord } from "./guards.ts";
@@ -10,6 +10,7 @@ import { importInstalled } from "./installed.ts";
 import type { UpgradePlugin } from "./plugin.ts";
 import { detectPlugin } from "./pluginRules.ts";
 import { createScratchCopy, removeScratchCopy } from "./scratch.ts";
+import { projectSvgSanitizer, type ConfiguredModule, type ProjectSvgSanitizer } from "./svgSanitizer.ts";
 import { useToken } from "./useToken.ts";
 
 /** A module package with storage migrations, and the collections whose presence shows that a database holds its data. */
@@ -35,7 +36,9 @@ export interface UnresolvedStorage {
  * `configProblem` is set when the module configs could be loaded neither from `kestrel.config.ts` nor
  * through the project's host plugin although at least one of the two is there, so the storages were
  * built with the defaults. `mediaPrefix` is the key prefix the
- * media storage converts to, when the database holds media.
+ * media storage converts to, when the database holds media. `svgSanitizer` is set when
+ * {@link ProjectStoragesOptions.sanitizeSvg} asked for it and the database holds media; the media
+ * storage then cleans the 5.x SVGs with it when it has no `broken`.
  */
 export interface ProjectStorages {
   storages: ModuleStorage[];
@@ -43,6 +46,7 @@ export interface ProjectStorages {
   configFrom: string;
   configProblem?: string;
   mediaPrefix?: string;
+  svgSanitizer?: Omit<ProjectSvgSanitizer, "sanitize">;
 }
 
 /** The inputs of {@link projectStorages} besides the project and the database. */
@@ -51,6 +55,8 @@ export interface ProjectStoragesOptions {
   plugins?: readonly UpgradePlugin[];
   /** A media key prefix that replaces the one of `media-default`'s config. */
   mediaPrefix?: string;
+  /** Gives the media storage the project's `sanitize.svg` step, set up offline, to clean the 5.x SVGs with. */
+  sanitizeSvg?: boolean;
 }
 
 const MEDIA_PACKAGE = "@michaelthielemann/kestrel-media-default";
@@ -67,6 +73,7 @@ function tablesOf(file: string): Set<string> {
 
 interface ModuleConfigs {
   configs: Map<string, unknown>;
+  modules: ConfiguredModule[];
   from: string;
   problem?: string;
 }
@@ -86,7 +93,17 @@ async function pluginConfigs(root: string, plugin: UpgradePlugin): Promise<Modul
   try {
     const loaded = await plugin.load(root, scratch.dir, new Map());
     if (loaded.project === undefined) return `the "${plugin.kind}" plugin could not load the project${loaded.issues.length === 0 ? "" : `: ${loaded.issues.map((i) => i.message).join("; ")}`}`;
-    return { configs: byToken(loaded.project.input.config.modules), from: `the "${plugin.kind}" plugin` };
+    const definitions = loaded.project.input.modules;
+    const modules = loaded.project.input.config.modules.map((entry, i): ConfiguredModule => ({
+      use: entry.use,
+      config: effectiveModuleConfig(entry),
+      definition: async () => {
+        const definition = definitions[i];
+        if (definition === undefined) throw new Error(`the "${plugin.kind}" plugin loaded no module for ${entry.use}`);
+        return definition;
+      },
+    }));
+    return { configs: byToken(loaded.project.input.config.modules), modules, from: `the "${plugin.kind}" plugin` };
   } catch (thrown) {
     return `the "${plugin.kind}" plugin's load() threw: ${messageOf(thrown)}`;
   } finally {
@@ -100,7 +117,8 @@ async function moduleConfigs(root: string, plugins: readonly UpgradePlugin[]): P
   if (existsSync(file)) {
     try {
       const config = await loadConfig(file);
-      return { configs: byToken(config.modules), from: "kestrel.config.ts" };
+      const modules = config.modules.map((entry): ConfiguredModule => ({ use: entry.use, config: effectiveModuleConfig(entry), definition: () => loadModule(root, entry) }));
+      return { configs: byToken(config.modules), modules, from: "kestrel.config.ts" };
     } catch (thrown) {
       problems.push(`kestrel.config.ts could not be loaded: ${messageOf(thrown)}`);
     }
@@ -111,12 +129,12 @@ async function moduleConfigs(root: string, plugins: readonly UpgradePlugin[]): P
     if (typeof fromPlugin !== "string") return fromPlugin;
     problems.push(fromPlugin);
   }
-  return problems.length === 0 ? { configs: new Map(), from: "the defaults, without a kestrel.config.ts" } : { configs: new Map(), from: "the defaults", problem: problems.join("; ") };
+  return problems.length === 0 ? { configs: new Map(), modules: [], from: "the defaults, without a kestrel.config.ts" } : { configs: new Map(), modules: [], from: "the defaults", problem: problems.join("; ") };
 }
 
-function storageFactory(mod: unknown): ((config: unknown) => ModuleStorage) | undefined {
+function storageFactory(mod: unknown): ((config: unknown, deps?: unknown) => ModuleStorage) | undefined {
   if (!isRecord(mod) || typeof mod.storage !== "function") return undefined;
-  return boundaryCast<(config: unknown) => ModuleStorage>(mod.storage, "host");
+  return boundaryCast<(config: unknown, deps?: unknown) => ModuleStorage>(mod.storage, "host");
 }
 
 /**
@@ -128,10 +146,11 @@ function storageFactory(mod: unknown): ((config: unknown) => ModuleStorage) | un
  */
 export async function projectStorages(root: string, dbFile: string, options: ProjectStoragesOptions = {}): Promise<ProjectStorages> {
   const tables = tablesOf(dbFile);
-  const { configs, from, problem } = await moduleConfigs(root, options.plugins ?? []);
+  const { configs, modules, from, problem } = await moduleConfigs(root, options.plugins ?? []);
   const storages: ModuleStorage[] = [];
   const unresolved: UnresolvedStorage[] = [];
   let mediaPrefix: string | undefined;
+  let svgSanitizer: ProjectStorages["svgSanitizer"];
   for (const candidate of STORAGE_PACKAGES) {
     const present = candidate.collections.filter((c) => tables.has(c));
     if (present.length === 0) continue;
@@ -145,8 +164,14 @@ export async function projectStorages(root: string, dbFile: string, options: Pro
     if (candidate.package === MEDIA_PACKAGE) {
       if (options.mediaPrefix !== undefined) config.prefix = options.mediaPrefix;
       mediaPrefix = typeof config.prefix === "string" ? config.prefix : "media/";
+      if (options.sanitizeSvg === true) {
+        const { sanitize, ...found } = await projectSvgSanitizer(root, modules);
+        svgSanitizer = found;
+        storages.push(factory(config, sanitize === undefined ? {} : { sanitizeSvg: sanitize }));
+        continue;
+      }
     }
     storages.push(factory(config));
   }
-  return { storages, unresolved, configFrom: options.mediaPrefix === undefined ? from : "--media-prefix", ...(problem === undefined ? {} : { configProblem: problem }), ...(mediaPrefix === undefined ? {} : { mediaPrefix }) };
+  return { storages, unresolved, configFrom: options.mediaPrefix === undefined ? from : "--media-prefix", ...(problem === undefined ? {} : { configProblem: problem }), ...(mediaPrefix === undefined ? {} : { mediaPrefix }), ...(svgSanitizer === undefined ? {} : { svgSanitizer }) };
 }

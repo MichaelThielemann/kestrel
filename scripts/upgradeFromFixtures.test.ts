@@ -12,6 +12,7 @@ import type { KestrelConfigInput } from "../packages/core/src/defineConfig.ts";
 import { runUpgradeCli } from "../packages/upgrade/src/plugin.ts";
 import type { UpgradeReport } from "../packages/upgrade/src/report.ts";
 import type { MigrateReport } from "../packages/upgrade/src/migrate.ts";
+import { sanitizeSvg } from "../packages/sanitize-svg/impl.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE = join(ROOT, "fixtures", "upgrade", "5.8.1");
@@ -97,6 +98,8 @@ let fixtureBefore: Record<string, string>;
 let originalsBefore: Record<string, string>;
 let migratedState: { database: Record<string, unknown>; blobs: Record<string, string> };
 let typesBefore: Map<string, string>;
+let referencesBefore: Array<Record<string, unknown>>;
+let svgsBefore: Map<string, string>;
 
 beforeAll(() => {
   fixtureBefore = files(FIXTURE);
@@ -104,6 +107,8 @@ beforeAll(() => {
   cpSync(join(FIXTURE, "blobs"), blobs, { recursive: true });
   originalsBefore = files(blobs);
   typesBefore = new Map(query("SELECT id, contentType FROM media_items").map((r) => [String(r.id), String(r.contentType)]));
+  referencesBefore = query("SELECT * FROM references_index ORDER BY id");
+  svgsBefore = new Map(query("SELECT id, key FROM media_items WHERE contentType = 'image/svg+xml'").map((r) => [String(r.id), readFileSync(join(blobs, String(r.key)), "utf8")]));
   writeFileSync(sidecar, leftoverLock);
 });
 
@@ -127,11 +132,18 @@ describe("upgrading the data of 5.8.1 to this release", () => {
       ["media/default", "migrated"],
       ["images/default", "migrated"],
     ]);
-    const svgIds = [...typesBefore].filter(([, type]) => type === "image/svg+xml").map(([id]) => id);
-    expect(svgIds.length).toBeGreaterThan(0);
+    expect(svgsBefore.size).toBeGreaterThan(0);
     const layout = report.modules.flatMap((m) => m.migrations).find((m) => m.id === "media-default:id-key-layout");
-    expect(layout?.outcome?.counts.svgDemoted).toBe(svgIds.length);
-    for (const id of svgIds) expect(layout?.outcome?.notes.find((n) => n.item === id)?.reason).toContain("application/octet-stream");
+    expect(layout?.outcome?.counts).toMatchObject({ svgSanitized: svgsBefore.size, svgDemoted: 0 });
+    for (const [id, original] of svgsBefore) {
+      expect(layout?.outcome?.notes.filter((n) => n.item === id)).toEqual([]);
+      const [row] = query(`SELECT key, contentType, svgSanitized FROM media_items WHERE id = '${id}'`);
+      expect(row).toMatchObject({ contentType: "image/svg+xml", svgSanitized: 1 });
+      expect(String(row?.key)).toMatch(/\.svg$/);
+      expect(readFileSync(join(blobs, String(row?.key)), "utf8"), `${id} holds the sanitized SVG`).toBe(sanitizeSvg(original));
+    }
+    expect(query("SELECT id FROM media_items ORDER BY id").map((r) => r.id)).toEqual([...typesBefore.keys()].sort());
+    expect(query("SELECT * FROM references_index ORDER BY id")).toEqual(referencesBefore);
     expect(run.errors).toContain(".instance exists");
     expect(readFileSync(sidecar, "utf8")).toBe(leftoverLock);
 
@@ -199,17 +211,19 @@ describe("upgrading the data of 5.8.1 to this release", () => {
       const urls = [...new Set(pages.flatMap((page) => mediaUrls(readFileSync(join(blobs, "site", page), "utf8"))))].sort();
       expect(urls.some((url) => url.includes("/variants/"))).toBe(true);
       expect(urls.some((url) => !url.includes("/variants/"))).toBe(true);
-      const svgIds = [...typesBefore].filter(([, type]) => type === "image/svg+xml").map(([id]) => id);
-      expect(urls.filter((url) => svgIds.some((id) => url.startsWith(`/media/${id}/`)) && !url.includes("/variants/")).length).toBeGreaterThan(0);
+      expect(urls.filter((url) => [...svgsBefore.keys()].some((id) => url.startsWith(`/media/${id}/`)) && !url.includes("/variants/")).length).toBeGreaterThan(0);
       for (const url of urls) {
         const response = await fetch(`${base}${url}`);
         expect(response.status, url).toBe(200);
-        await response.arrayBuffer();
+        const body = new TextDecoder().decode(await response.arrayBuffer());
         const type = response.headers.get("content-type") ?? "";
-        const original = typesBefore.get(url.split("/")[2] ?? "");
+        const id = url.split("/")[2] ?? "";
+        const svg = svgsBefore.get(id);
         if (url.includes("/variants/")) expect(type, url).toMatch(/^image\//);
-        else if (original === "image/svg+xml") expect(type, `${url} is a 5.x SVG and is served as a download`).toBe("application/octet-stream");
-        else expect(type.split(";")[0], url).toBe(original);
+        else if (svg !== undefined) {
+          expect(type.split(";")[0], `${url} is a 5.x SVG and stays an image`).toBe("image/svg+xml");
+          expect(body, url).toBe(sanitizeSvg(svg));
+        } else expect(type.split(";")[0], url).toBe(typesBefore.get(id));
       }
     } finally {
       await kestrel.stop();

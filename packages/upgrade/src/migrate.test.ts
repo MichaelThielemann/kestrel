@@ -15,6 +15,7 @@ import { err } from "@michaelthielemann/kestrel/result";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { runCli } from "./cli-run.ts";
+import { importInstalled } from "./installed.ts";
 import { runMigrateStep, type MigrateReport } from "./migrate.ts";
 import type { LoadedProject, UpgradePlugin } from "./plugin.ts";
 
@@ -24,6 +25,8 @@ const FIXTURE = join(REPO, "fixtures", "upgrade", "5.8.1");
 const PROJECT = join(REPO, "examples", "minimal");
 const NOW = 1_800_000_000_000;
 const MISSING = "8146a3f1-ee9b-4fbb-a394-290634519fd9";
+const SVG_ITEM = "0a73541a-1b50-4492-af2f-8dff9ccf216c";
+const { sanitizeSvg } = boundaryCast<{ sanitizeSvg: (svg: string) => string }>(await importInstalled(PROJECT, "@michaelthielemann/kestrel-sanitize-svg/impl"), "host");
 const MISSING_ORIGINAL = "media-default:id-key-layout:missing-original";
 const KEEP = { [MISSING_ORIGINAL]: "keep" };
 
@@ -94,6 +97,16 @@ async function cli(argv: string[], plugins: readonly UpgradePlugin[] = []): Prom
   const errors: string[] = [];
   const code = await runCli(argv, { stdout: (l) => out.push(l), stderr: (l) => errors.push(l), plugins });
   return { code, out: out.join("\n"), errors: errors.join("\n") };
+}
+
+function projectOf(copy: Copy, extra: ReadonlyArray<{ use: string; config: Record<string, unknown> }>): string {
+  const modules = [
+    { use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: copy.blobs } },
+    { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: copy.db } },
+    ...extra,
+    { use: "@michaelthielemann/kestrel-media-default", config: {} },
+  ];
+  return projectWith(`export default ${JSON.stringify({ modules, triggers: [] })};\n`);
 }
 
 function failingAfter(limit: number, calls: { n: number }): (method: string) => boolean {
@@ -491,6 +504,79 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
     expect(rows(copy.db, `SELECT status, location FROM media_items WHERE id = '${MISSING}'`)).toEqual([{ status: "trashed", location: null }]);
   });
 
+  it("keeps a 5.x SVG an image: the project's sanitize.svg cleans it, and its id and the references to it stay", async () => {
+    const copy = fixtureCopy();
+    const original = readFileSync(join(copy.blobs, "media", "mark.svg"), "utf8");
+    const references = rows(copy.db, "SELECT * FROM references_index ORDER BY id");
+    const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy), "--json"]);
+    expect(run.code, run.errors).toBe(0);
+    const report = boundaryCast<MigrateReport>(JSON.parse(run.out), "json");
+    const layout = report.modules.flatMap((m) => m.migrations).find((m) => m.id === "media-default:id-key-layout")!;
+    expect(layout.outcome?.counts).toMatchObject({ svgSanitized: 1, svgDemoted: 0 });
+    expect(layout.outcome?.notes.filter((n) => n.item === SVG_ITEM)).toEqual([]);
+    expect(rows(copy.db, `SELECT id, key, filename, contentType, svgSanitized, checksum FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([
+      { id: SVG_ITEM, key: `media/${SVG_ITEM}/mark.svg`, filename: "mark.svg", contentType: "image/svg+xml", svgSanitized: 1, checksum: createHash("sha256").update(sanitizeSvg(original)).digest("hex") },
+    ]);
+    expect(readFileSync(join(copy.blobs, "media", SVG_ITEM, "mark.svg"), "utf8")).toBe(sanitizeSvg(original));
+    expect(readFileSync(join(copy.blobs, "media", "mark.svg"), "utf8")).toBe(original);
+    expect(rows(copy.db, "SELECT * FROM references_index ORDER BY id")).toEqual(references);
+  });
+
+  it("serves a 5.x SVG that sanitize.svg refuses as a download and names it with the reason", async () => {
+    const copy = fixtureCopy();
+    writeFileSync(join(copy.blobs, "media", "mark.svg"), "<html>no svg in here</html>");
+    const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(run.code, run.errors).toBe(0);
+    expect(run.out).toMatch(/media\/mark\.svg is an SVG that sanitize\.svg refuses \(invalid svg: .*\): it is kept as mark-svg\.bin and served as application\/octet-stream/);
+    expect(rows(copy.db, `SELECT key, svgSanitized FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([{ key: `media/${SVG_ITEM}/mark-svg.bin`, svgSanitized: null }]);
+  });
+
+  it("serves every 5.x SVG as a download when no module of the project registers sanitize.svg, and says so", async () => {
+    const copy = fixtureCopy();
+    const project = projectOf(copy, []);
+    const run = await cli(["migrate", "--root", project, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(run.code, run.errors).toBe(0);
+    expect(run.out).toContain("note: no module of the project registers sanitize.svg, so every 5.x SVG is kept as a .bin download");
+    expect(run.out).toContain("media/mark.svg is an SVG without a sanitize.svg record: it is kept as mark-svg.bin");
+    expect(rows(copy.db, `SELECT key FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([{ key: `media/${SVG_ITEM}/mark-svg.bin` }]);
+  });
+
+  it("cleans the 5.x SVGs with the config of the project's sanitize module", async () => {
+    const copy = fixtureCopy();
+    const project = projectOf(copy, [{ use: "@michaelthielemann/kestrel-sanitize-svg", config: { maxBytes: 10 } }]);
+    const run = await cli(["migrate", "--root", project, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(run.code, run.errors).toBe(0);
+    expect(run.out).toContain("media/mark.svg is an SVG that sanitize.svg refuses (svg exceeds 10 bytes)");
+    expect(rows(copy.db, `SELECT key FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([{ key: `media/${SVG_ITEM}/mark-svg.bin` }]);
+  });
+
+  it("stops before converting anything when the module that registers sanitize.svg cannot be set up offline", async () => {
+    const copy = fixtureCopy();
+    const project = projectOf(copy, [{ use: "./needy-sanitizer.ts", config: {} }]);
+    writeFileSync(
+      join(project, "needy-sanitizer.ts"),
+      [
+        'import { z } from "zod";',
+        'import { defineModule } from "@michaelthielemann/kestrel/defineModule";',
+        'import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";',
+        "export default defineModule({",
+        '  name: "sanitize/needy", provides: [], requires: [PERSISTENCE], configSchema: z.object({}).strict(),',
+        "  async setup(_config, deps) { return deps.get(PERSISTENCE); },",
+        "  steps: () => ({ svg: async (ctx) => ({ ok: true, value: ctx }) }),",
+        '  describe: () => ({ svg: { summary: "cleans SVG files", reads: ["files"], writes: ["files"] } }),',
+        "});",
+        "",
+      ].join("\n"),
+    );
+    const before = files(copy.blobs);
+    const run = await cli(["migrate", "--root", project, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(run.code).toBe(2);
+    expect(run.errors).toContain("./needy-sanitizer.ts registers sanitize.svg, but it could not be set up offline");
+    expect(run.errors).toContain("nothing was converted");
+    expect(files(copy.blobs)).toEqual(before);
+    expect(tableRows(copy.db, "kestrel_storage_versions")).toEqual([]);
+  });
+
   it("opens no network connection", async () => {
     const attempts: string[] = [];
     const deny = (what: string) => (): never => {
@@ -506,6 +592,7 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
     const copy = fixtureCopy();
     expect((await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--plan"])).code).toBe(1);
     expect((await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)])).code).toBe(0);
+    expect(rows(copy.db, `SELECT key, svgSanitized FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([{ key: `media/${SVG_ITEM}/mark.svg`, svgSanitized: 1 }]);
     expect((await cli(["data", "--root", PROJECT, "--db", copy.db])).code).toBe(0);
     expect(attempts).toEqual([]);
     expect(existsSync(join(copy.dir, "kestrel.db"))).toBe(true);
