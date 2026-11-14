@@ -457,6 +457,23 @@ applications:
       expect(JSON.parse(applied.vars)).toEqual({ storage_secret: SECRET });
     });
 
+    it("keeps unquoted dates and clock times as strings and octal numbers as numbers, as cf reads them", async () => {
+      writeFileSync(join(root, "dated.yml"), `applications:
+- name: site-api
+  env:
+    RELEASE_DATE: 2026-11-14
+    RELEASED_AT: 2026-11-14 10:00:00
+    BACKUP_TIME: 03:00
+    WINDOW: 12:30
+    PRECISE: 1:30.5
+    UMASK: 0755
+`);
+      await (await target({ manifest: "dated.yml" })).applyManifest();
+      const [applied] = cf.applied;
+      if (applied === undefined) throw new Error("nothing applied");
+      expect(JSON.parse(applied.manifest)).toEqual({ applications: [{ name: API.name, env: { RELEASE_DATE: "2026-11-14", RELEASED_AT: "2026-11-14 10:00:00", BACKUP_TIME: "03:00", WINDOW: "12:30", PRECISE: "1:30.5", UMASK: 493 } }] });
+    });
+
     it("removes the variables file also when cf apply-manifest fails, and ends with exit 1", async () => {
       cf.failures.set("apply-manifest", 1);
       const before = readdirSync(tmpdir()).filter((name) => name.startsWith("kestrel-cf-vars-"));

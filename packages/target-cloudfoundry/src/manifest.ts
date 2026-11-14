@@ -2,20 +2,23 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parse } from "yaml";
+import { parse, type Tags } from "yaml";
 // eslint-disable-next-line no-restricted-imports -- a target adapter reports failures as the errors of the kestrel-ops run that loads it
 import { OpsError } from "@michaelthielemann/kestrel-ops";
+
+const asCfReads = (tags: Tags): Tags => tags.filter((tag) => typeof tag === "string" || (tag.tag !== "tag:yaml.org,2002:timestamp" && tag.format !== "TIME"));
 
 const PLACEHOLDER = /\(\(([A-Za-z0-9_.-]+)\)\)/g;
 
 /**
  * The manifest reduced to its `version` and the entry of `app`, as JSON (which every YAML reader takes), and the
- * placeholder names that entry uses. It is read as YAML 1.1 with merge keys, as cf reads it.
+ * placeholder names that entry uses. It is read as YAML 1.1 with merge keys, as cf reads it: dates and clock times
+ * such as `03:00` stay strings.
  */
 export function appManifest(file: string, app: string): { text: string; vars: string[] } {
   let doc: unknown;
   try {
-    doc = parse(readFileSync(file, "utf8"), { version: "1.1", merge: true });
+    doc = parse(readFileSync(file, "utf8"), { version: "1.1", merge: true, customTags: asCfReads });
   } catch (cause) {
     throw new OpsError(`${file}: cannot read the manifest: ${cause instanceof Error ? cause.message : String(cause)}`, 2, "target");
   }
