@@ -8,6 +8,7 @@ import { boundaryCast } from "../packages/core/src/cast.ts";
 import type { Contract } from "../packages/core/src/defineContract.ts";
 import type { Deps } from "../packages/core/src/defineModule.ts";
 import { failure } from "../packages/core/src/errors.ts";
+import { instanceLockFile } from "../packages/core/src/instanceLock.ts";
 import { silentLogger } from "../packages/core/src/logger.ts";
 import { err, ok } from "../packages/core/src/result.ts";
 import backupBlobstore, { configSchema as backupConfigSchema } from "../packages/backup-blobstore/module.ts";
@@ -109,6 +110,45 @@ describe("replication-sqlite and backup-blobstore configured on the same file", 
       if ("close" in first) first.close();
     });
   }
+
+  it("shares one instance lock on the file and gives it up with the last of the two teardowns", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-shared-"));
+    dirs.push(dir);
+    const file = join(dir, "kestrel.db");
+    const lockFile = instanceLockFile(file) ?? "";
+    const blobs = fakeBlobs();
+    const db = new DatabaseSync(file);
+    db.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    db.close();
+
+    const replication = await replicationSqlite.setup(replicationConfigSchema.parse({ file, restoreOnStart: false }), deps(blobs, dir, Date.now()));
+    const backup = await backupBlobstore.setup(backupConfigSchema.parse({ file, key: "backups/db", restoreOnStart: false }), deps(blobs, dir, Date.now()));
+    expect(existsSync(lockFile)).toBe(true);
+
+    await backupBlobstore.teardown!(backup);
+    expect(existsSync(lockFile)).toBe(true);
+    await replicationSqlite.teardown!(replication);
+    expect(existsSync(lockFile)).toBe(false);
+  });
+
+  it("refuses allowConcurrentProcesses on one of the two modules and not on the other as a configuration error", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-shared-"));
+    dirs.push(dir);
+    const file = join(dir, "kestrel.db");
+    const blobs = fakeBlobs();
+    const db = new DatabaseSync(file);
+    db.close();
+
+    const replication = await replicationSqlite.setup(replicationConfigSchema.parse({ file, restoreOnStart: false, allowConcurrentProcesses: true }), deps(blobs, dir, Date.now()));
+    const refused = backupBlobstore.setup(backupConfigSchema.parse({ file, key: "backups/db", restoreOnStart: false }), deps(blobs, dir, Date.now()));
+
+    await expect(refused).rejects.toMatchObject({ code: "invalid-module-config", module: "backup/blobstore" });
+    await expect(refused).rejects.toThrow(/backup\/blobstore is configured without allowConcurrentProcesses for .*, but replication\/sqlite names the same database file allowConcurrentProcesses: true/);
+    await replicationSqlite.teardown!(replication);
+    expect(existsSync(instanceLockFile(file) ?? "")).toBe(false);
+    const backup = await backupBlobstore.setup(backupConfigSchema.parse({ file, key: "backups/db", restoreOnStart: false }), deps(blobs, dir, Date.now()));
+    await backupBlobstore.teardown!(backup);
+  });
 
   it("still fails when the file turned up fresh this boot without either module having restored it", async () => {
     const bootStartedAt = Date.now();
