@@ -78,33 +78,40 @@ async function waitForVersion(ctx: OpsContext, entry: SiteEntry, before: string 
   return false;
 }
 
-async function restoreOriginals(ctx: OpsContext, blobs: readonly BlobEntry[], dryRun: boolean): Promise<string[]> {
+async function restoreOriginals(ctx: OpsContext, blobs: readonly BlobEntry[], dryRun: boolean, beforeWrite: () => void = () => undefined): Promise<string[]> {
   const live = await listMap(ctx.app, ctx.env.app.mediaPrefix);
   const restored: string[] = [];
   for (const entry of blobs) {
     const current = live.get(entry.key) ?? (await ctx.app.head(entry.key));
     if (await holdsVersion(ctx, current, entry)) continue;
     restored.push(entry.key);
-    if (!dryRun) await transfer(ctx.backups, ctx.location + entry.object, ctx.app, entry.key, undefined, { replace: true });
+    if (dryRun) continue;
+    beforeWrite();
+    await transfer(ctx.backups, ctx.location + entry.object, ctx.app, entry.key, undefined, { replace: true });
   }
   return restored;
 }
 
-async function restoreDelivery(ctx: OpsContext, site: readonly SiteEntry[], dryRun: boolean): Promise<{ written: string[]; removed: string[] }> {
+async function restoreDelivery(ctx: OpsContext, site: readonly SiteEntry[], dryRun: boolean, beforeWrite: () => void = () => undefined): Promise<{ written: string[]; removed: string[] }> {
   const live = new Map((await stableList(ctx.app, ctx.env.app.deliveryPrefix, ctx.poll)).map((info) => [info.key, info]));
   const wanted = new Map(site.map((s) => [s.key, s]));
   const written: string[] = [];
   for (const entry of site) {
     if (await holdsVersion(ctx, live.get(entry.key), entry)) continue;
     written.push(entry.key);
-    if (!dryRun) await transfer(ctx.backups, ctx.location + entry.object, ctx.app, entry.key, undefined, { replace: true });
+    if (dryRun) continue;
+    beforeWrite();
+    await transfer(ctx.backups, ctx.location + entry.object, ctx.app, entry.key, undefined, { replace: true });
   }
   if (!dryRun) for (const key of written) {
     const entry = wanted.get(key);
     if (entry && !(await waitForVersion(ctx, entry, live.get(key)?.etag ?? null))) ctx.out.warn(`${key} does not read back with the restored version yet`);
   }
   const removed = [...live.keys()].filter((key) => !wanted.has(key));
-  if (!dryRun) for (const key of removed) await ctx.app.delete(key);
+  if (!dryRun) for (const key of removed) {
+    beforeWrite();
+    await ctx.app.delete(key);
+  }
   return { written, removed };
 }
 
@@ -152,7 +159,10 @@ export async function restoreBackup(ctx: OpsContext, options: RestoreOptions): P
     const undo = state.safetyBackup === null ? "" : `, or restore the pre-restore backup ${state.safetyBackup}`;
     if (state.started) ctx.out.error(`the restore changed the store and started the app again; check it${undo}`);
     else if (state.changed) ctx.out.error(`the restore stopped after it changed the store; the app stays stopped. Run the restore again${undo}`);
-    else if (stop.wasRunning) await startTarget(ctx).catch((cause: unknown) => ctx.out.error(`starting the app again failed: ${messageOf(cause)}`));
+    else {
+      ctx.out.error(`the restore stopped before it changed the store${stop.wasRunning ? "; starting the app again" : ""}`);
+      if (stop.wasRunning) await startTarget(ctx).catch((cause: unknown) => ctx.out.error(`starting the app again failed: ${messageOf(cause)}`));
+    }
     throw error;
   }
 }
@@ -249,9 +259,11 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
     ctx.out.info(`pre-restore backup ${safetyBackup} written and verified`);
   }
 
-  state.changed = true;
-  await restoreOriginals(ctx, blobs, false);
-  await restoreDelivery(ctx, site, false);
+  const beforeWrite = (): void => {
+    state.changed = true;
+  };
+  await restoreOriginals(ctx, blobs, false, beforeWrite);
+  await restoreDelivery(ctx, site, false, beforeWrite);
   await ctx.journal.record("blobs", "done", { originals: originals.length, deliveryWritten: delivery.written.length, deliveryRemoved: delivery.removed.length });
 
   const sessionsDeleted = deleteSessions(restoredDb);
@@ -262,12 +274,16 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   let promoted: Promoted | null = null;
   let ack: Acknowledgement | null = null;
   if (clock !== null) {
-    promoted = await promote({ store: ctx.app, prefix: ctx.env.app.replicaPrefix, target: ctx.target, database: prepared, origin: { kind: "restore", source: manifest.id }, serverNow: clock.now, skewMs: clock.skewMs, clock: ctx.clock, poll: ctx.poll, beforePlace: (generation) => recordPlacement(ctx, generation) });
+    promoted = await promote({ store: ctx.app, prefix: ctx.env.app.replicaPrefix, target: ctx.target, database: prepared, origin: { kind: "restore", source: manifest.id }, serverNow: clock.now, skewMs: clock.skewMs, clock: ctx.clock, poll: ctx.poll, beforePlace: async (generation) => {
+        await recordPlacement(ctx, generation);
+        beforeWrite();
+      } });
     await ctx.journal.record("promote", "done", { generation: promoted.generation, sha256: promoted.sha256 });
     const sleep = ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
     while (clock.now() <= promoted.at) await sleep(Math.min(1000, promoted.at - clock.now() + 1));
   } else {
     if (!ctx.target.installDatabase) throw new OpsError("the target can take neither a promoted generation nor a database file", 2, "target");
+    beforeWrite();
     await ctx.target.installDatabase(prepared);
     await ctx.journal.record("install-database", "done", {});
   }

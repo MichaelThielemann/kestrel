@@ -130,3 +130,57 @@ await h.dispose();
     }
   }, 90_000);
 });
+
+function armedAfter(inner: ReturnType<typeof memoryStore>, trigger: RegExp, onTrigger: () => void): ReturnType<typeof memoryStore> {
+  return {
+    ...inner,
+    put: async (key, data, options) => {
+      await inner.put(key, data, options);
+      if (trigger.test(key)) onTrigger();
+    },
+  };
+}
+
+describe("a restore that stops after its pre-restore backup and before it wrote to the app's store", () => {
+  const scenario = async (name: string, arm: (h: Harness, signals: EventEmitter) => (() => void)) => {
+    const signals = new EventEmitter();
+    let fire = (): void => undefined;
+    const h = createHarness({ store: armedAfter(memoryStore(new MemoryBucket(name)), /-pre-restore-[0-9a-f]{4}\/manifest\.json$|-backup-done\.json$/, () => fire()) });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const backup = await h.run(["backup", "create", "--freeze", "--json"]);
+      expect(backup.code).toBe(0);
+      h.app.run(`UPDATE pages SET "body" = 'kept' WHERE "id" = 'home'`);
+      await h.app.sync();
+      let seen = 0;
+      const fireOnce = arm(h, signals);
+      fire = () => {
+        seen += 1;
+        if (seen === 2) fireOnce();
+      };
+      const restored = await h.run(["restore", "--backup", String(backup.json.id), "--yes", "--answers", h.answers({ "access-changes": "accept" })], { signals });
+      expect(restored.code).toBe(1);
+      expect(restored.stderr).not.toContain("stays stopped");
+      expect(restored.stderr).toContain("the restore stopped before it changed the store");
+      expect((await h.app.status()).state).toBe("started");
+      expect(h.app.rows("pages")).toContainEqual({ id: "home", title: "Home", body: "kept" });
+    } finally {
+      await h.dispose();
+    }
+  };
+
+  it("starts the app again on a signal and says the store is unchanged", async () => {
+    await scenario("interrupt-after-safety", (_h, signals) => () => signals.emit("SIGINT"));
+  });
+
+  it("starts the app again when listing the originals fails and says the store is unchanged", async () => {
+    await scenario("list-fails-after-safety", (h) => () => {
+      const list = h.store.list.bind(h.store);
+      h.store.list = async (prefix) => {
+        h.store.list = list;
+        throw new Error(`connection reset listing ${prefix}`);
+      };
+    });
+  });
+});
