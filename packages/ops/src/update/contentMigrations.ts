@@ -109,7 +109,7 @@ export async function runContentMigrations(ctx: UpdateContext, input: ContentMig
   let ended: string | null = null;
   let stderr = "";
   child.stderr?.setEncoding("utf8");
-  child.stderr?.on("data", (chunk: string) => {
+  child.stderr?.addListener("data", (chunk: string) => {
     stderr = (stderr + chunk).slice(-2000);
   });
   const exited = new Promise<void>((done) => {
