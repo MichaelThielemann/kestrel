@@ -9,6 +9,7 @@ import { BACKUP_KINDS, backupId, fromJsonl, jsonBytes, keys, parseBackupId, pars
 import { placedUnstarted, refuseUnfinishedPlacement } from "./placements.ts";
 import { confirm } from "./questions.ts";
 import { buildDatabase, completeGeneration, SEALING_MAJOR, sealOf, stableGenerations, type SealReport } from "./replica.ts";
+import { UPDATE_PIN_PREFIX } from "./update/layout.ts";
 import { integrityCheck, referencedBlobs, sha256, sha256File, tableCounts, vacuumInto } from "./sqlite.ts";
 import { ObjectMissing, PreconditionFailed, listMap, stableList, transfer, type ObjectInfo, type ObjectStore } from "./store.ts";
 
@@ -507,7 +508,8 @@ async function backupIdsAtLocation(ctx: Pick<OpsContext, "backups" | "location">
  * verified backups count towards the retention; a failed or unverified one is kept while it is newer than the oldest
  * verified backup the count keeps (or, when its kind has no verified backup, while it is among the newest of the
  * count). It keeps backups pinned by a run that has not ended (a run whose journal shows an end entry or no entry for
- * {@link RUN_STALE_MS} has ended) and the newest verified backup of every Kestrel major, never removes anything
+ * {@link RUN_STALE_MS} has ended), backups an update pinned (a pin whose run id starts with `UPDATE_PIN_PREFIX`),
+ * whether or not that run ended, until the pin's `released` key exists, and the newest verified backup of every Kestrel major, never removes anything
  * younger than a day, keeps every object a backup of any environment at the same location refers to, also a backup
  * of today or yesterday that the listing does not show yet (read from `recent/`), and refuses while a run is open or
  * another run holds the lock.
@@ -545,7 +547,7 @@ export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResu
   }
   newestPerMajor.forEach((id) => keep.add(id));
   for (const b of all) {
-    if (b.pinnedBy.some((runId) => !ended.has(runId)) || now - b.newestWrite < PRUNE_MIN_AGE_MS) keep.add(b.id);
+    if (b.pinnedBy.some((runId) => runId.startsWith(UPDATE_PIN_PREFIX) || !ended.has(runId)) || now - b.newestWrite < PRUNE_MIN_AGE_MS) keep.add(b.id);
     if (!keep.has(b.id)) remove.push(b.id);
   }
   const referenced = new Set<string>();
