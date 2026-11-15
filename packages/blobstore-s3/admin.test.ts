@@ -942,10 +942,19 @@ describe("blobstore/s3 admin: cleanup of scratch objects", () => {
     };
   };
 
-  it("lets a denied delete of the clock probe throw, since the probe object would stay in the bucket", async () => {
+  it("answers the clock when the delete of its probe is denied, naming the probe that stays in the bucket", async () => {
     const s3 = fakeS3();
     denyDeletes(s3, httpError("AccessDenied", 403));
-    await expect(createS3Admin({ bucket: "b", prefix: "media/" }, s3.client, fastOptions).serverTime()).rejects.toThrow(/AccessDenied/);
+    const clock = expectOk(await createS3Admin({ bucket: "b", prefix: "media/" }, s3.client, fastOptions).serverTime());
+    expect(clock.leftover).toMatch(/^\.kestrel-clock\//);
+    expect([...s3.objects.keys()]).toEqual([`media/${clock.leftover ?? ""}`]);
+  });
+
+  it("names no left-over probe when the probe was removed", async () => {
+    const s3 = fakeS3();
+    const clock = expectOk(await createS3Admin({ bucket: "b", prefix: "media/" }, s3.client, fastOptions).serverTime());
+    expect(clock.leftover).toBeUndefined();
+    expect(s3.objects.size).toBe(0);
   });
 
   it("lets a denied delete of the capability probe objects throw", async () => {
@@ -954,11 +963,11 @@ describe("blobstore/s3 admin: cleanup of scratch objects", () => {
     await expect(createS3Admin({ bucket: "b", prefix: "media/" }, s3.client, fastOptions).probeCapabilities()).rejects.toThrow(/AccessDenied/);
   });
 
-  it("ignores a transient failure to delete a probe object", async () => {
+  it("ignores a transient failure to delete a probe object, naming the clock probe it leaves", async () => {
     const s3 = fakeS3();
     denyDeletes(s3, httpError("ServiceUnavailable", 503));
     const admin = createS3Admin({ bucket: "b", prefix: "" }, s3.client, fastOptions);
-    expectOk(await admin.serverTime());
+    expect(expectOk(await admin.serverTime()).leftover).toMatch(/^\.kestrel-clock\//);
     expectOk(await admin.probeCapabilities());
   });
 

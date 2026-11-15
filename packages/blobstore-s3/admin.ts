@@ -85,6 +85,8 @@ export interface ServerClock {
   serverMs: number;
   localMs: number;
   skewMs: number;
+  /** The key of the probe object, relative to the prefix, when removing it failed; the object stays in the bucket. */
+  leftover?: string;
 }
 
 /**
@@ -140,8 +142,9 @@ export interface S3Admin {
   /**
    * Reads the store's clock: writes a probe object, lists until it appears and returns its `LastModified`, which
    * listings report with at least whole-second precision (some stores report milliseconds), so `skewMs` is accurate
-   * to about a second. The probe object is removed again, also after a write that failed; a denied delete throws
-   * unless the probe failed anyway, in which case the original error is returned.
+   * to about a second. The probe object is removed again, also after a write that failed. A delete that fails, such
+   * as one the credentials may not make, does not fail the measurement: it names the probe in `leftover`. When the
+   * probe itself failed, its own error is returned.
    */
   serverTime(): Promise<Result<ServerClock, S3AdminError>>;
   /**
@@ -364,22 +367,37 @@ export function createS3Admin(config: Config, client: S3AdminLike = createClient
     return read.ok ? ok(read.value.info) : read;
   }
 
+  async function measureClock(key: string): Promise<Result<ServerClock, S3AdminError>> {
+    const before = now();
+    const written = await guarded("clock probe write", () => write(key, new Uint8Array(0)));
+    if (!written.ok) return written;
+    const localMs = Math.round((before + now()) / 2);
+    for (let attempt = 0; attempt < observeAttempts; attempt += 1) {
+      if (attempt > 0) await sleep(retryDelayMs);
+      const listed = await listDetailed(key);
+      if (!listed.ok) return listed;
+      const modified = listed.value.find((item) => item.key === key)?.lastModified;
+      if (modified !== null && modified !== undefined) return ok({ serverMs: modified, localMs, skewMs: modified - localMs });
+    }
+    return err(failure("TRANSIENT", `blobstore/s3 admin: the clock probe object did not appear in ${observeAttempts} listings`));
+  }
+
   async function serverTime(): Promise<Result<ServerClock, S3AdminError>> {
     const key = `${CLOCK_PREFIX}${randomUUID()}`;
-    return withScratch([key], async () => {
-      const before = now();
-      const written = await guarded("clock probe write", () => write(key, new Uint8Array(0)));
-      if (!written.ok) return written;
-      const localMs = Math.round((before + now()) / 2);
-      for (let attempt = 0; attempt < observeAttempts; attempt += 1) {
-        if (attempt > 0) await sleep(retryDelayMs);
-        const listed = await listDetailed(key);
-        if (!listed.ok) return listed;
-        const modified = listed.value.find((item) => item.key === key)?.lastModified;
-        if (modified !== null && modified !== undefined) return ok({ serverMs: modified, localMs, skewMs: modified - localMs });
-      }
-      return err(failure("TRANSIENT", `blobstore/s3 admin: the clock probe object did not appear in ${observeAttempts} listings`));
-    });
+    let measured: Result<ServerClock, S3AdminError>;
+    try {
+      measured = await measureClock(key);
+    } catch (cause) {
+      await tryRemove(key);
+      throw cause;
+    }
+    let removed = true;
+    try {
+      await remove(key);
+    } catch (cause) {
+      removed = isNotFound(cause);
+    }
+    return measured.ok && !removed ? ok({ ...measured.value, leftover: key }) : measured;
   }
 
   async function probeCapabilities(): Promise<Result<Capabilities, S3AdminError>> {

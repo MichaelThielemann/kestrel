@@ -131,7 +131,7 @@ export function s3Store(config: S3StoreConfig): S3Store {
     async serverTime(prefix, clock, poll = {}) {
       const probe = adminAt(full(prefix), { now: clock, observeAttempts: poll.attempts ?? 30, retryDelayMs: poll.delayMs ?? 1000, ...(poll.sleep === undefined ? {} : { sleep: poll.sleep }) });
       const measured = unwrap(`clock probe below ${prefix}`, await probe.serverTime());
-      return { skewMs: measured.localMs - measured.serverMs };
+      return { skewMs: measured.localMs - measured.serverMs, ...(measured.leftover === undefined ? {} : { leftover: prefix + measured.leftover }) };
     },
   };
   return store;

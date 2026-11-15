@@ -1035,7 +1035,9 @@ Net changes since 5.8.2.
   that never reach any output (lines for a person are masked; the documents the tool stores and its `--json`
   output hold no credential value and mask only the free text of error messages, so a credential that is part
   of a fixed text, such as the access key `kestrel`, leaves every schema, key and name in them intact), a
-  journal and lock trace in the backup location, and `writeBundle()`
+  journal and lock trace in the backup location, a clock measurement whose probe object a key without delete
+  rights leaves behind with a warning instead of failing (`backup prune` removes probes older than an hour;
+  `docs/operations.md` lists the permissions per prefix), and `writeBundle()`
   for a self-contained runner in a deploy artifact that carries the target adapters it needs.
 - `kestrel-h3`'s `createKestrelHandler` takes a `logger` and writes one `http` line per request
   with the fields of the core server's line (`runId`, `requestId`, `method`, `path`, `pipeline`,
@@ -1735,7 +1737,8 @@ Net changes since 5.8.2.
   itself throws. A source above 5 GiB answers `PAYLOAD_TOO_LARGE`. `listDetailed` throws when a store
   reports a truncated page without a continuation token or repeats a token.
   `serverTime()` writes a probe object, lists until it shows and returns its `LastModified` with the
-  skew against the local clock, because not every store sends a usable `Date` header.
+  skew against the local clock, because not every store sends a usable `Date` header; a probe it cannot
+  delete afterwards does not fail the measurement, `leftover` names it.
   `probeCapabilities()` tests on scratch keys whether the store refuses a stale `If-None-Match: *`
   write, a stale `If-Match` write and a stale copy-source ETag and accepts the matching condition; a
   condition counts as supported only when both were seen, an ignored or rejected header or a store that

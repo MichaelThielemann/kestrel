@@ -47,9 +47,10 @@ export interface ObjectStore {
   locate(key: string): { bucket: string; key: string };
   /**
    * Measures the store's clock with a probe object below `prefix` that is removed again; `skewMs` is the local
-   * clock minus the store's. A store without it is measured by `serverClock` through `put`, `list` and `delete`.
+   * clock minus the store's, and `leftover` the key of the probe when removing it failed, which does not fail the
+   * measurement. A store without it is measured by `serverClock` through `put`, `list` and `delete`.
    */
-  serverTime?(prefix: string, clock: () => number, poll?: PollOptions): Promise<{ skewMs: number }>;
+  serverTime?(prefix: string, clock: () => number, poll?: PollOptions): Promise<{ skewMs: number; leftover?: string }>;
 }
 
 /** The source of a copy no longer has the ETag the copy was asked to match. */

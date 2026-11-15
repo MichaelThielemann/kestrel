@@ -468,6 +468,19 @@ export interface PruneResult {
 /** Objects and incomplete backups younger than this are never removed. */
 export const PRUNE_MIN_AGE_MS = 24 * 60 * 60 * 1000;
 
+/** A clock or protection probe older than this was left behind by a delete that failed; `prune` removes it. */
+export const PROBE_MAX_AGE_MS = 60 * 60 * 1000;
+
+const PROBE_DIRS = ["probes/", ".kestrel-clock/"];
+
+async function removeStaleProbes(ctx: OpsContext, now: number): Promise<void> {
+  const places: Array<[ObjectStore, string]> = [[ctx.backups, ctx.location]];
+  if (ctx.env.backups.storage !== undefined) places.push([ctx.app, ctx.env.app.replicaPrefix]);
+  for (const [store, base] of places) {
+    for (const dir of PROBE_DIRS) for (const info of await store.list(base + dir)) if (now - info.lastModified >= PROBE_MAX_AGE_MS) await store.delete(info.key);
+  }
+}
+
 const majorOfKestrel = (manifest: Manifest | null): string | null => {
   const version = manifest?.versions["@michaelthielemann/kestrel"] ?? manifest?.versions[REPLICATION_PACKAGE];
   if (version !== undefined) return version.split(".")[0] ?? null;
@@ -518,7 +531,9 @@ async function backupIdsAtLocation(ctx: Pick<OpsContext, "backups" | "location">
  * whether or not that run ended, until the pin's `released` key exists, and the newest verified backup of every Kestrel major, never removes anything
  * younger than a day, keeps every object a backup of any environment at the same location refers to, also a backup
  * of today or yesterday that the listing does not show yet (read from `recent/`), and refuses while a run is open or
- * another run holds the lock.
+ * another run holds the lock. Unless `dryRun` is set, it also removes the clock and protection probes older than
+ * {@link PROBE_MAX_AGE_MS} that a refused delete left in the backup location, and below the replica prefix when the
+ * backups live in a store of their own.
  */
 export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResult> {
   const now = ctx.clock();
@@ -578,6 +593,7 @@ export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResu
       const day = /^recent\/(\d{8})\//.exec(info.key.slice(ctx.location.length))?.[1];
       if (day !== undefined && day < oldest) await ctx.backups.delete(info.key);
     }
+    await removeStaleProbes(ctx, now);
   }
   if (dryRun || (remove.length === 0 && objects.length === 0)) return result;
   await confirm(ctx.answers, "prune-delete", `prune removes ${remove.length} backup(s) and ${objects.length} object(s)`);

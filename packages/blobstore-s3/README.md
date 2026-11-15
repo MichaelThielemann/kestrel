@@ -76,7 +76,7 @@ if (first !== undefined) {
   could not be read back) removes the destination and reports `details.destinationWritten: true` and
   `details.destinationRemoved`; when the removal failed too, the destination is unverified. A `TRANSIENT` from
   the copy request itself carries no details, and the destination may exist.
-- `serverTime()` returns `{ serverMs, localMs, skewMs }`. It writes a probe object under `.kestrel-clock/`,
+- `serverTime()` returns `{ serverMs, localMs, skewMs, leftover? }`. It writes a probe object under `.kestrel-clock/`,
   lists until the object shows, reads its `LastModified` and removes it. Listings can lag behind a write, which
   is why it lists again, up to `observeAttempts` times. `skewMs` is accurate to about a second, because a
   store may report `LastModified` in whole seconds.
@@ -88,9 +88,11 @@ if (first !== undefined) {
   `"ignored"` (the store accepted the stale write), `"not-implemented"` (501) and `"error"` (`detail` names
   it). A capability nobody observed is not assumed.
 - `serverTime()` and `probeCapabilities()` remove their scratch objects, also after a write that failed, and
-  need the `DeleteObject` permission for that. A denied delete throws when the probe itself succeeded; when
-  the probe failed, its own error is returned and the scratch object may stay. A transient failure to delete,
-  and a 404 for a scratch key that was never written, are ignored.
+  need the `DeleteObject` permission for that. When `serverTime()` measured the clock but could not remove its
+  probe, denied or after a transient failure, it still answers the clock and names the probe that stays in
+  `leftover` (relative to the prefix). A denied delete in `probeCapabilities()` throws when the probe itself
+  succeeded. When a probe failed, its own error is returned and the scratch object may stay. A transient failure
+  to delete a capability probe, and a 404 for a scratch key that was never written, are ignored.
 
 `createS3Admin(config, client, options)` accepts a client for tests and `S3AdminOptions`: `verifyAttempts`,
 `retryDelayMs`, `observeAttempts`, `sleep` and `now`.

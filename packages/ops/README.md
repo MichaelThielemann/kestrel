@@ -276,7 +276,8 @@ than 30 s off the store's, and when the newest generation is stamped more than 3
 since the app could only start once the store's time passed the new name; the restore checks all three before it writes the `pre-restore` backup, so a
 refusal leaves the store as it was and starts the app again. The store's time comes from the `LastModified` of
 a probe object found by listing (`createS3Admin().serverTime`, the probe lies under `.kestrel-clock/` and is
-removed again), since some stores send no usable `Date` header. It is measured at the store
+removed again; credentials that may not remove it get the measurement all the same and a warning, once per
+command), since some stores send no usable `Date` header. It is measured at the store
 the replica lives in: in the backup location when that shares the app's store, otherwise below the replica
 prefix, outside the keys a runtime reads. `status` shows the same measurement. The generation is listed until it is the newest in
 consecutive listings, then read back, hashed and integrity-checked; the app starts once both the store's time
@@ -349,7 +350,9 @@ of a backup it keeps cannot be parsed or holds another number of entries than it
 objects that backup refers to are then unknown. A backup's
 verification state is the result of its newest verification; a `manifest.json`, `blobs.jsonl` or `site.jsonl`
 that cannot be parsed fails it. Interactive runs ask before deleting;
-`--dry-run` only lists.
+`--dry-run` only lists. A run that deletes also removes the clock and protection probes older than an hour that
+a refused delete left under `.kestrel-clock/` or `probes/` of the backup location, and below the replica prefix
+when the backup location lies in a store of its own.
 
 ## Lock and journal
 A writing command takes the lock: a start entry under `locks/<run>/`, a heartbeat every ten minutes and a
