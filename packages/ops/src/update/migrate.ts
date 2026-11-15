@@ -3,25 +3,20 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { failure } from "@michaelthielemann/kestrel/errors";
-import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import type { Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
-import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { runShapeMigrations, STORAGE_VERSIONS, type BlobOps, type ModuleRun, type ModuleStorage } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import { readManifest } from "../backup.ts";
-import { PERSISTENCE_PACKAGE, SANITIZE_SVG_PACKAGE } from "../bundle.ts";
+import { SANITIZE_SVG_PACKAGE } from "../bundle.ts";
 import { messageOf } from "../context.ts";
 import { OpsError } from "../errors.ts";
 import { keys } from "../layout.ts";
 import { sha256, sha256File, tables } from "../sqlite.ts";
 import type { ObjectStore } from "../store.ts";
 import { CONTENT_LEDGER, runContentMigrations } from "./contentMigrations.ts";
-import { importReleasePackage, releaseStorages, releaseSvgSanitizer } from "./storages.ts";
+import { openDatabase } from "./plan.ts";
+import { releaseStorages, releaseSvgSanitizer } from "./storages.ts";
 import type { MigrateInput, MigrateResult, UpdateContext } from "./types.ts";
-
-interface ClosablePersistence extends Persistence {
-  close(): void;
-}
 
 const PHASE = "contentMigrations";
 const FINISHED = new Set<ModuleRun["state"]>(["current", "recorded", "unrecorded", "migrated"]);
@@ -74,13 +69,6 @@ export function expandOnlyStore(store: ObjectStore): { blobs: Blobstore; blobOps
     },
   };
   return { blobs, blobOps };
-}
-
-async function openCopy(ctx: UpdateContext, file: string): Promise<ClosablePersistence> {
-  const mod = await importReleasePackage(ctx, PERSISTENCE_PACKAGE, "./impl");
-  const create: unknown = typeof mod === "object" && mod !== null ? Reflect.get(mod, "createPersistenceSqlite") : undefined;
-  if (typeof create !== "function") throw new OpsError(`the release has no ${PERSISTENCE_PACKAGE} to open the database copy with`, 2, PERSISTENCE_PACKAGE);
-  return boundaryCast<(config: { file: string }, deps: { logger: unknown }) => ClosablePersistence>(create, "host")({ file }, { logger: silentLogger });
 }
 
 function settle(file: string): void {
@@ -138,7 +126,7 @@ export function changedTables(before: string, after: string): string[] {
 
 async function shapeRun(ctx: UpdateContext, storages: readonly ModuleStorage[], file: string, apply: boolean): Promise<ModuleRun[]> {
   if (storages.length === 0) return [];
-  const db = await openCopy(ctx, file);
+  const db = await openDatabase(ctx, file);
   try {
     const { blobs, blobOps } = expandOnlyStore(ctx.app);
     const answers = ctx.answers.answers;

@@ -185,7 +185,8 @@ export interface ReleaseFacts {
 /**
  * Facts the host project contributes through its upgrade plugin, written into `bundle.json`: the readiness path,
  * environment names whose values are secrets, the names of the start-up migration switches, paths the export must
- * hold after a render, and environment values (no secrets) of a local start.
+ * hold after a render, environment values (no secrets) of a local start and the ids of the release's content
+ * migrations.
  */
 export interface HostFacts {
   readyPath?: string;
@@ -193,6 +194,8 @@ export interface HostFacts {
   migrationSwitches?: { content?: string; storage?: string };
   exportChecks?: readonly string[];
   localBootEnv?: Readonly<Record<string, string>>;
+  /** Ids of the content migrations the release brings; a deploy applies those the database's ledger does not hold. */
+  contentMigrations?: readonly string[];
 }
 
 /** Why a rollback runs. `automatic`: a hard failure after the stop. `requested`: `update rollback`. `abort`: `update abort` after the promotion. */

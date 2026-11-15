@@ -14,9 +14,10 @@ import { readUpdateRun } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
 import { planHash, versionSet } from "./plan.ts";
 import type { MigrateInput, MigrateResult, RollbackReason, RollbackResult, UpdateContext, UpdatePlan, UpdateReceipt, UpdateRun, UpdateSteps } from "./types.ts";
+import type * as Storages from "./storages.ts";
 
 const storages = vi.hoisted(() => ({ list: [] as ModuleStorage[] }));
-vi.mock("./storages.ts", () => ({ releaseStorages: async () => storages.list }));
+vi.mock("./storages.ts", async (importOriginal) => ({ ...(await importOriginal<typeof Storages>()), releaseStorages: async () => storages.list }));
 
 const harnesses: UpdateHarness[] = [];
 afterEach(async () => {

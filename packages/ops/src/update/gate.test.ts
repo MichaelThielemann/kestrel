@@ -9,8 +9,9 @@ import { readUpdateRun } from "./journal.ts";
 import { UPDATE_PIN_PREFIX, updateKeys } from "./layout.ts";
 import { planHash } from "./plan.ts";
 import type { UpdateContext, UpdatePlan, UpdateReceipt, UpdateRun, UpdateRunState } from "./types.ts";
+import type * as Storages from "./storages.ts";
 
-vi.mock("./storages.ts", () => ({ releaseStorages: async () => [] }));
+vi.mock("./storages.ts", async (importOriginal) => ({ ...(await importOriginal<typeof Storages>()), releaseStorages: async () => [] }));
 
 const harnesses: UpdateHarness[] = [];
 afterEach(async () => {

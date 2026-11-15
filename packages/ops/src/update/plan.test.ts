@@ -7,9 +7,10 @@ import type { ModuleStorage } from "@michaelthielemann/kestrel-contracts/helpers
 import { createUpdateHarness, type UpdateHarness } from "./harness.fixture.ts";
 import { computePlan, planHash, versionSet } from "./plan.ts";
 import type { UpdatePlan } from "./types.ts";
+import type * as Storages from "./storages.ts";
 
 const storages = vi.hoisted(() => ({ list: [] as ModuleStorage[] }));
-vi.mock("./storages.ts", () => ({ releaseStorages: async () => storages.list }));
+vi.mock("./storages.ts", async (importOriginal) => ({ ...(await importOriginal<typeof Storages>()), releaseStorages: async () => storages.list }));
 
 const harnesses: UpdateHarness[] = [];
 afterEach(async () => {
