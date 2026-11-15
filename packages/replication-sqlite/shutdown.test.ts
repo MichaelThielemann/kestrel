@@ -129,7 +129,24 @@ async function started(config: Record<string, unknown> = {}) {
       while (reads === 0) await sleep(1);
     };
   };
-  return { k, file, app, write, sync, live: () => fingerprint(app), restored, keys, slowDatabaseReads };
+  const slowListings = (ms: number) => {
+    const list = blobs.list.bind(blobs);
+    let listings = 0;
+    blobs.list = async (prefix) => {
+      listings += 1;
+      await sleep(ms);
+      return list(prefix);
+    };
+    return {
+      started: async () => {
+        while (listings === 0) await sleep(1);
+      },
+      restore: () => {
+        blobs.list = list;
+      },
+    };
+  };
+  return { k, file, app, write, sync, live: () => fingerprint(app), restored, keys, slowDatabaseReads, slowListings };
 }
 
 describe("replication/sqlite stop during a snapshot", () => {
@@ -152,6 +169,50 @@ describe("replication/sqlite stop during a snapshot", () => {
     kestrel = null;
     expect(keys("/snapshot.db")).toEqual([first]);
     expect(keys("/sealed.json")).toEqual([first?.replace("/snapshot.db", "/sealed.json")]);
+    expect(await restored()).toMatchObject({ ...live(), check: "ok" });
+  }, 30_000);
+
+  it("gives up the replica listing of a periodic snapshot once the stop begins, so stop() ends within its timeout, and teardown seals the generation before it", async () => {
+    const { k, write, sync, live, restored, keys, slowListings } = await started({ snapshotSeconds: 1 });
+    write(200);
+    expect((await sync()).status).toBe(200);
+    const [first] = keys("/snapshot.db");
+    write(20);
+    await sleep(1_100);
+    const listings = slowListings(6_000);
+    const running = sync();
+    await listings.started();
+    const asked = performance.now();
+    const stopping = k.stop({ timeoutMs: 1_000 });
+    write(5);
+    expect(await stopping).toEqual({ drained: true });
+    expect(performance.now() - asked).toBeLessThan(1_000);
+    expect((await running).status).toBe(200);
+    kestrel = null;
+    listings.restore();
+    expect(keys("/snapshot.db")).toEqual([first]);
+    expect(keys("/sealed.json")).toEqual([first?.replace("/snapshot.db", "/sealed.json")]);
+    expect(await restored()).toMatchObject({ ...live(), check: "ok" });
+  }, 30_000);
+
+  it("gives up the replica listing of the prune once the stop begins, so stop() ends within its timeout, and teardown seals the generation", async () => {
+    const { k, write, sync, live, restored, keys, slowListings } = await started();
+    write(200);
+    expect((await sync()).status).toBe(200);
+    write(20);
+    const listings = slowListings(6_000);
+    const running = sync();
+    await listings.started();
+    const asked = performance.now();
+    const stopping = k.stop({ timeoutMs: 1_000 });
+    write(5);
+    expect(await stopping).toEqual({ drained: true });
+    expect(performance.now() - asked).toBeLessThan(1_000);
+    expect((await running).status).toBe(200);
+    kestrel = null;
+    listings.restore();
+    expect(keys("/snapshot.db")).toHaveLength(1);
+    expect(keys("/sealed.json")).toEqual(keys("/snapshot.db").map((key) => key.replace("/snapshot.db", "/sealed.json")));
     expect(await restored()).toMatchObject({ ...live(), check: "ok" });
   }, 30_000);
 

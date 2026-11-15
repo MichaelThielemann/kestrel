@@ -135,9 +135,10 @@ export interface Replication {
   restoreHandled(): void;
   /**
    * Says that the process is stopping: the WAL is no longer checked between syncs, a snapshot that would start a
-   * generation after the current one ends before it uploads anything, and a sync ships the new frames and skips
-   * the checkpoint, the periodic snapshot and the prune. A first snapshot, without a generation yet, still completes,
-   * since teardown would have to take it anyway.
+   * generation after the current one ends before it uploads anything, also while it still lists the replica, a
+   * prune that is listing the replica or removing a generation ends there, and a sync ships the new frames and
+   * skips the checkpoint, the periodic snapshot and the prune. A first snapshot, without a generation yet, still
+   * completes, since teardown would have to take it anyway.
    */
   quiesce(): void;
 }
@@ -407,6 +408,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   let copiedBeforeGeneration = false;
   let pending: Array<{ key: string; data: Uint8Array }> = [];
   let orphan: { snapshot: string; origin: string | null } | null = null;
+  const onStop = new Set<() => void>();
   const logger = options.logger ?? silentLogger;
   const startedAt = now();
   const own = new Set<string>();
@@ -492,11 +494,34 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     logWarn(logger, "replication/sqlite: another process writes to this replica; only one process may replicate a database to a prefix", { key: found.key, generation: found.generation });
   };
 
+  const unlessStopped = <T>(task: Promise<T>): Promise<T | "stopped"> => {
+    if (stopping || closed) return Promise.resolve("stopped");
+    return new Promise<T | "stopped">((resolve, reject) => {
+      const stop = (): void => resolve("stopped");
+      onStop.add(stop);
+      task.then(
+        (value) => {
+          onStop.delete(stop);
+          resolve(value);
+        },
+        (cause: unknown) => {
+          onStop.delete(stop);
+          reject(cause instanceof Error ? cause : new Error(String(cause)));
+        },
+      );
+    });
+  };
+  const signalStop = (): void => {
+    for (const stop of onStop) stop();
+    onStop.clear();
+  };
+
   let snapshotOrder = 0;
   const takeSnapshot = async (listed?: ReplicaListing): Promise<Result<{ generation: string; bytes: number } | null, BlobstoreError>> => {
     if (listed) observe(listed);
     else {
-      const listing = await listReplica(blobs, config.prefix);
+      const listing = generation === null ? await listReplica(blobs, config.prefix) : await unlessStopped(listReplica(blobs, config.prefix));
+      if (listing === "stopped") return ok(null);
       if (isErr(listing)) return listing;
       observe(listing.value);
     }
@@ -662,7 +687,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   timer.unref();
 
   const prune = async (): Promise<Result<number, BlobstoreError>> => {
-    const list = await listReplica(blobs, config.prefix);
+    const list = await unlessStopped(listReplica(blobs, config.prefix));
+    if (list === "stopped") return ok(0);
     if (isErr(list)) return list;
     observe(list.value);
     const { points, markers } = list.value;
@@ -675,6 +701,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       if (newest >= cutoff || successorSnapshot === undefined || unstamp(successorSnapshot.slice(0, 16)) > cutoff) continue;
       const keys = [...points.filter((x) => x.generation === gen).map((p) => p.key), ...[...(markers.get(gen) ?? [])].map((marker) => markerKey(config.prefix, gen, marker))];
       for (const key of keys) {
+        if (stopping) return ok(removed);
         const removedOne = await blobs.remove(key);
         if (isErr(removedOne)) return removedOne;
         removed += 1;
@@ -836,10 +863,12 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     },
     quiesce() {
       stopping = true;
+      signalStop();
     },
     close() {
       closed = true;
       clearInterval(timer);
+      signalStop();
       try {
         release();
         // eslint-disable-next-line no-empty -- release() on an already released lock throws; nothing is left to do

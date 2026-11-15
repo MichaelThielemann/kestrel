@@ -2123,11 +2123,12 @@ Net changes since 5.8.2.
   the WAL holds `checkpointBytes` of frames, also while the first `replication.sync` lists the replica.
 - `replication-sqlite`: `stop()` no longer waits for a periodic snapshot, a checkpoint or a prune that a
   running sync has still to do. The module now declares `quiesce`: from the start of `stop()` a sync ships
-  its frames but skips the checkpoint, the periodic snapshot and the prune, and a periodic snapshot or
-  `replication.snapshot` that is still reading ends without uploading anything (the latter answers
-  `TRANSIENT`), so teardown ships the last frames into the generation before it and seals it. The first
-  snapshot of a process without a generation completes before teardown seals it. The `Replication`
-  interface of `./impl` gains `quiesce()`.
+  its frames but skips the checkpoint, the periodic snapshot and the prune, a periodic snapshot or
+  `replication.snapshot` that is still listing the replica or reading ends without uploading anything (the
+  latter answers `TRANSIENT`), so teardown ships the last frames into the generation before it and seals
+  it, and a prune that is still listing the replica or removing a generation ends there. The first snapshot
+  of a process without a generation completes before teardown seals it. The `Replication` interface of
+  `./impl` gains `quiesce()`.
 - `site-default`: the `maxCascade` limit counts every language row of the page being saved, so a save is refused or accepted
   the same way whatever the clock reads. Before, a row of the saved page whose only change was its timestamp counted only
   when the clock had advanced since the page was last saved.
