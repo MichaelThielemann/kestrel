@@ -799,6 +799,27 @@ describe("the configuration a deploy records", { timeout: 30_000 }, () => {
     expect(h.target.configuration.env).toMatchObject({ S3_BUCKET: "kestrel-media", STORAGE_KEY_ID: "kestrel" });
     expect(h.output.warn.join("\n")).not.toContain("S3_BUCKET");
   });
+
+  it("keeps a plain value in which a short credential of the tool stands as a token of its own only as a fingerprint", async () => {
+    const h = createUpdateHarness({ to: { ready: "not-ready" } });
+    harnesses.push(h);
+    const plain = { DB_DSN: "kestrel:Sh0rtPass!@db.example.net:5432/app", S3_JSON: `{"accessKeyId":"kestrel","secretAccessKey":"Sh0rtPass!"}`, AUTH_HEADER: "Bearer Sh0rtPass!", S3_CREDENTIALS: "minio:minioadmin", S3_ARGS: "--password minioadmin" };
+    Object.assign(h.target.configuration.env, plain, { S3_BUCKET: "kestrel-media" });
+    await h.target.start();
+    await h.target.app?.seed();
+    const steps = fakes();
+    const ctx = await h.context({ answers: ANSWERS, steps: { retire: steps.retire, migrateCopy: steps.migrateCopy } });
+    for (const secret of ["kestrel", "Sh0rtPass!", "minioadmin"]) ctx.redactor.add(secret);
+    await receiptFor(ctx);
+    await deploy(ctx);
+    const text = new TextDecoder().decode((await h.store.get(LOCATION + updateKeys.configuration("prod", ctx.run.id))) ?? new Uint8Array());
+    expect(text).not.toContain("Sh0rtPass!");
+    expect(text).not.toContain("minioadmin");
+    const recorded: unknown = JSON.parse(text);
+    const env: unknown = typeof recorded === "object" && recorded !== null ? Reflect.get(recorded, "env") : null;
+    for (const name of Object.keys(plain)) expect(JSON.stringify(env)).toMatch(new RegExp(`"${name}":\\{"fingerprint":"[0-9a-f]{64}"\\}`));
+    expect(env).toMatchObject({ S3_BUCKET: { value: "kestrel-media" } });
+  });
 });
 
 describe("a verified deploy whose retire of the previous releases does not finish", { timeout: 30_000 }, () => {

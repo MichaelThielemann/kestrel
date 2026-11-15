@@ -100,7 +100,9 @@ from.
   memory. Every line the tool writes to the terminal, questions included, passes a redactor that masks them,
   also where one is part of other text. The documents it stores (journal, manifests, verifications, receipts,
   the recorded configuration) and the `--json` output hold names, ids, keys and hashes, never a credential's
-  value. Their schema, keys, names and every other field are written as they are; only the free-text fields
+  value; only a plain value of the recorded configuration in which a credential shorter than 16 characters is part
+  of a name, a host or a path, such as `kestrel-media` for the access key `kestrel`, is kept verbatim, while one in
+  which it stands as a token of its own, such as `minio:minioadmin`, is kept as a fingerprint. Their schema, keys, names and every other field are written as they are; only the free-text fields
   `message`, `error`, `failure`, `detail` and `problems` are masked, since a failed call may quote what it was
   sent. A credential that is part of a fixed text, such as an access key `kestrel`, therefore never changes a
   schema, key or name. In terminal lines and messages, what the tool writes itself (command names, flags,

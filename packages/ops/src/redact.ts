@@ -81,30 +81,36 @@ export function fixedText(literals: TemplateStringsArray, ...values: ReadonlyArr
   return text;
 }
 
-function credentialPositions(text: string): string[] {
-  const values = [text];
-  for (const match of text.matchAll(/\/\/([^/?#\s@]+)@/g)) {
+const NAME_CHARACTER = "[\\p{L}\\p{N}_./-]";
+
+function token(secret: string): RegExp {
+  return new RegExp(`(?<!${NAME_CHARACTER})${secret.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&")}(?!${NAME_CHARACTER})`, "u");
+}
+
+function userinfos(text: string): string[] {
+  const values: string[] = [];
+  for (const match of text.matchAll(/\/\/([^/?#\s]+)@/g)) {
     const userinfo = match[1] ?? "";
     const colon = userinfo.indexOf(":");
     if (colon < 0) values.push(userinfo);
     else values.push(userinfo.slice(0, colon), userinfo.slice(colon + 1));
   }
-  for (const match of text.matchAll(/=\s*(["']?)([^\s"'&;,]*)\1/g)) values.push(match[2] ?? "");
   return values;
 }
 
 /** Replaces every registered secret, and its URL-encoded and JSON-escaped forms, in text before it leaves the process. */
 export class Redactor {
   readonly #secrets = new Set<string>();
+  readonly #tokens = new Map<string, RegExp>();
 
   /** Registers a secret; values shorter than four characters are ignored, since masking them would garble ordinary text. */
   add(value: string): void {
     if (value.length < 4) return;
-    this.#secrets.add(value);
-    const encoded = encodeURIComponent(value);
-    if (encoded !== value) this.#secrets.add(encoded);
-    const escaped = JSON.stringify(value).slice(1, -1);
-    if (escaped !== value) this.#secrets.add(escaped);
+    const forms = [value, encodeURIComponent(value), JSON.stringify(value).slice(1, -1)];
+    for (const form of forms) {
+      this.#secrets.add(form);
+      if (form.length < EMBEDDED_SECRET_LENGTH && !this.#tokens.has(form)) this.#tokens.set(form, token(form));
+    }
   }
 
   /**
@@ -135,14 +141,18 @@ export class Redactor {
   }
 
   /**
-   * Whether the value `text` carries a registered secret, in any form {@link Redactor.apply} masks: as the whole value,
-   * as the user or password of a URL, as the value of a `key=value` pair, or, for a secret of at least
-   * {@link EMBEDDED_SECRET_LENGTH} characters, anywhere in it. A shorter secret that is only part of other text, such
-   * as an access key `kestrel` in `kestrel-media`, does not count.
+   * Whether the value `text` carries a registered secret, in any form {@link Redactor.apply} masks. A secret of at least
+   * {@link EMBEDDED_SECRET_LENGTH} characters counts anywhere in it; a shorter one where it stands as a token of its own,
+   * neither preceded nor followed by a letter, a digit, `_`, `-`, `.` or `/`, and as the user or password of a URL. A
+   * shorter secret that is only part of a name, a host or a path, such as an access key `kestrel` in `kestrel-media` or
+   * `https://kestrel.example.net`, does not count.
    */
   holds(text: string): boolean {
-    const positions = credentialPositions(text);
-    for (const secret of this.#secrets) if (secret.length >= EMBEDDED_SECRET_LENGTH ? text.includes(secret) : positions.includes(secret)) return true;
+    const users = userinfos(text);
+    for (const secret of this.#secrets) {
+      const found = secret.length >= EMBEDDED_SECRET_LENGTH ? text.includes(secret) : this.#tokens.get(secret)?.test(text) === true || users.includes(secret);
+      if (found) return true;
+    }
     return false;
   }
 

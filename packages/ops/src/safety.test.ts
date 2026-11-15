@@ -112,13 +112,37 @@ describe("secrets", () => {
     });
   });
 
-  it("finds a short credential in a value only as the whole value, the user or password of a URL or the value of a key=value pair, and a long one anywhere", () => {
+  it("finds a short credential in a value wherever it stands as a token of its own, and a long one anywhere", () => {
     const redactor = new Redactor();
     redactor.add("kestrel");
     redactor.add("p@ss-word");
+    redactor.add("Sh0rtPass!");
+    redactor.add("pw/with+sl");
+    redactor.add("minioadmin");
     redactor.add("long-secret-0123456789abcdef");
-    for (const value of ["kestrel", "https://kestrel@store.example.net", "https://user:kestrel@store.example.net/bucket", "https://user:p%40ss-word@store.example.net", "AccountName=site;AccountKey=kestrel;", "key='kestrel'", "prefix-long-secret-0123456789abcdef-suffix"]) expect(redactor.holds(value), value).toBe(true);
-    for (const value of ["kestrel-media", "kestrel-ops/backup@1", "https://kestrel.example.net/kestrel", "bucket=kestrel-media", "site-media"]) expect(redactor.holds(value), value).toBe(false);
+    const held = [
+      "kestrel",
+      "https://kestrel@store.example.net",
+      "https://user:kestrel@store.example.net/bucket",
+      "https://user:p%40ss-word@store.example.net",
+      "https://user:p@ss-word@store.example.net",
+      "https://user:pw/with+sl@store.example.net",
+      "AccountName=site;AccountKey=kestrel;",
+      "key='kestrel'",
+      "kestrel:Sh0rtPass!@db.example.net:5432/app",
+      `{"accessKeyId":"kestrel","secretAccessKey":"Sh0rtPass!"}`,
+      "Bearer Sh0rtPass!",
+      "X-Api-Key: Sh0rtPass!",
+      "--password Sh0rtPass!",
+      "kestrel Sh0rtPass!",
+      "minio:minioadmin",
+      "secret: minioadmin",
+      "Basic kestrel minioadmin",
+      "pw=minioadmin!",
+      "prefix-long-secret-0123456789abcdef-suffix",
+    ];
+    for (const value of held) expect(redactor.holds(value), value).toBe(true);
+    for (const value of ["kestrel-media", "kestrel_media", "kestrels", "kestrel-ops/backup@1", "https://kestrel.example.net/kestrel", "bucket=kestrel-media", "site-media", "xminioadmin", "Sh0rtPass!2"]) expect(redactor.holds(value), value).toBe(false);
   });
 
   it("masks a known credential in the text of a question asked at the terminal", async () => {
