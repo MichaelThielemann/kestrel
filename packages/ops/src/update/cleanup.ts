@@ -1,5 +1,14 @@
-import type { UpdateContext, UpdateOutcome, UpdateRun } from "./types.ts";
-import { notImplemented } from "./pending.ts";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { readManifest } from "../backup.ts";
+import { messageOf, recordQuietly } from "../context.ts";
+import { fromJsonl, jsonBytes, keys, type BlobEntry } from "../layout.ts";
+import { confirm } from "../questions.ts";
+import { buildDatabase, completeGeneration, stableGenerations } from "../replica.ts";
+import { referencedBlobs } from "../sqlite.ts";
+import { stableList } from "../store.ts";
+import { readUpdateRun, reportOf } from "./journal.ts";
+import { updateKeys } from "./layout.ts";
+import { UPDATE_EXIT, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
 
 /** Options of {@link cleanup}. */
 export interface CleanupOptions {
@@ -7,12 +16,68 @@ export interface CleanupOptions {
   dryRun: boolean;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+async function outcome(ctx: UpdateContext, runId: string, exitCode: UpdateExitCode, message: string, fallback: UpdateRunState): Promise<UpdateOutcome> {
+  const run = await readUpdateRun(ctx, runId).catch(() => null);
+  return { exitCode, runId, state: run?.state ?? fallback, message, report: run === null ? { runId, steps: [], downtimeMs: null } : reportOf(run) };
+}
+
+async function orphans(ctx: UpdateContext, cutover: string): Promise<BlobEntry[]> {
+  const prefix = ctx.env.app.replicaPrefix;
+  const newest = (await stableGenerations(ctx.app, prefix, ctx.poll)).at(-1);
+  if (newest === undefined) throw new Error(`the replica under ${prefix} has no generation`);
+  const file = ctx.workspace.path("cleanup-current.db");
+  await buildDatabase(ctx.app, prefix, await completeGeneration(ctx.app, prefix, newest, ctx.poll), file);
+  const referenced = new Set(referencedBlobs(file, ctx.env.app.media).map((ref) => ref.key));
+  const data = await ctx.backups.get(ctx.location + keys.blobs(cutover));
+  if (data === null) throw new Error(`blobs.jsonl of the cutover backup ${cutover} is missing`);
+  const held = boundaryCast<BlobEntry[]>(fromJsonl(data), "json");
+  const live = new Map((await stableList(ctx.app, ctx.env.app.mediaPrefix, ctx.poll)).map((info) => [info.key, info]));
+  const objects = new Map((await stableList(ctx.backups, `${ctx.location}objects/`, ctx.poll)).map((info) => [info.key, info]));
+  return held.filter((entry) => {
+    const info = live.get(entry.key);
+    const copy = objects.get(ctx.location + entry.object);
+    return !referenced.has(entry.key) && info !== undefined && info.etag === entry.etag && copy !== undefined && copy.size === entry.size;
+  });
+}
+
 /**
  * `update cleanup`: ends an accepted deploy run at least `update.cleanupAfterDays` after its `accept`. Steps
  * `cleanup-check` (refuses before that, or for a run that is not accepted), `cleanup-delete` (originals under the media
  * prefix that no row of the current replica references and that the cutover backup holds, after the `cleanup-delete`
- * answer) and `unpin` (releases the update pin of the cutover backup, so prune treats it like any other).
+ * answer) and `unpin` (releases the update pin of the cutover backup, so prune treats it like any other). An original
+ * whose live bytes differ from the cutover backup's copy, or whose copy is gone, stays.
  */
 export async function cleanup(ctx: UpdateContext, run: UpdateRun, options: CleanupOptions): Promise<UpdateOutcome> {
-  return notImplemented(`cleanup(${run.runId}, ${String(options.dryRun)})`);
+  const accept = run.records.filter((r) => r.step === "accept" && r.state === "done").at(-1);
+  if (run.state !== "accepted" || accept === undefined) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is ${run.state}; cleanup needs an accepted run`, run.state);
+  const earliest = accept.at + ctx.update.cleanupAfterDays * DAY_MS;
+  if (ctx.clock() < earliest) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} was accepted ${new Date(accept.at).toISOString()}; cleanup runs ${ctx.update.cleanupAfterDays} day(s) after that, from ${new Date(earliest).toISOString()}`, run.state);
+  const cutover = run.cutoverBackup;
+  if (cutover === null || (await readManifest(ctx, cutover)) === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the cutover backup ${cutover ?? "(none)"} of run ${run.runId} does not exist or is incomplete; cleanup deletes nothing it cannot bring back`, run.state);
+  let candidates: BlobEntry[];
+  try {
+    candidates = await orphans(ctx, cutover);
+  } catch (error) {
+    return outcome(ctx, run.runId, UPDATE_EXIT.refused, `cleanup cannot tell which originals are unreferenced: ${messageOf(error)}`, run.state);
+  }
+  const bytes = candidates.reduce((n, entry) => n + entry.size, 0);
+  const summary = `${candidates.length} original(s), ${(bytes / 1024 / 1024).toFixed(1)} MiB, that no row references and the cutover backup ${cutover} holds`;
+  ctx.out.info(`cleanup ${options.dryRun ? "would delete" : "deletes"} ${summary}`);
+  for (const entry of candidates.slice(0, 20)) ctx.out.info(`  ${entry.key}`);
+  if (options.dryRun) return outcome(ctx, run.runId, UPDATE_EXIT.done, `dry run: ${summary}`, run.state);
+  await ctx.journal.record("cleanup-check", "done", { phase: "cleanup", acceptedAt: accept.at, earliest, candidates: candidates.length, bytes });
+  try {
+    if (candidates.length > 0) await confirm(ctx.answers, "cleanup-delete", `delete ${summary}`);
+    for (const entry of candidates) await ctx.app.delete(entry.key);
+    await ctx.journal.record("cleanup-delete", "done", { deleted: candidates.map((entry) => entry.key) });
+  } catch (error) {
+    await recordQuietly(ctx, "cleanup-delete", "failed", { message: messageOf(error) });
+    return outcome(ctx, run.runId, UPDATE_EXIT.refused, messageOf(error), run.state);
+  }
+  const released = ctx.location + updateKeys.unpin(cutover, run.runId);
+  if ((await ctx.backups.head(released)) === null) await ctx.backups.put(released, jsonBytes({ runId: run.runId, at: ctx.clock() }), { contentType: "application/json" });
+  await ctx.journal.record("unpin", "done", { backupId: cutover });
+  return outcome(ctx, run.runId, UPDATE_EXIT.done, `cleaned: deleted ${candidates.length} original(s); the cutover backup ${cutover} is no longer pinned`, "cleaned");
 }
