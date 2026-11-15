@@ -16,12 +16,12 @@ import { accept } from "./accept.ts";
 import { continueDeploy, deploy } from "./deploy.ts";
 import { fakeRelease } from "./fakeUpdateTarget.fixture.ts";
 import { createUpdateHarness, type UpdateHarness, type UpdateHarnessOptions } from "./harness.fixture.ts";
-import { readUpdateRun } from "./journal.ts";
+import { latestDeployRun, readUpdateRun } from "./journal.ts";
 import { resume } from "./resume.ts";
 import { rollback } from "./rollback.ts";
 import { updateKeys } from "./layout.ts";
 import { planHash, versionSet } from "./plan.ts";
-import { updateStatus } from "./status.ts";
+import { renderStatus, updateStatus } from "./status.ts";
 import type { MigrateInput, MigrateResult, RollbackReason, RollbackResult, UpdateContext, UpdatePlan, UpdateReceipt, UpdateRun, UpdateSteps } from "./types.ts";
 import type * as Storages from "./storages.ts";
 
@@ -768,5 +768,23 @@ describe("a verified deploy whose retire of the previous releases does not finis
     expect(accepted.exitCode, accepted.message).toBe(0);
     expect(accepted.state).toBe("accepted");
     expect(s.steps.retire).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("the deploy run a command without --run picks", { timeout: 30_000 }, () => {
+  it("skips a later deploy the gate refused, so status, accept and rollback find the verified run", async () => {
+    const s = await scenario();
+    const verified = await deploy(s.ctx);
+    expect(verified.exitCode).toBe(0);
+    const refusedCtx = await s.h.context({ answers: ANSWERS, steps: { rollback: s.steps.rollback, retire: s.steps.retire, migrateCopy: s.steps.migrateCopy } });
+    refusedCtx.release = { ...refusedCtx.release, versions: { "@michaelthielemann/kestrel": "6.0.2", "@michaelthielemann/kestrel-replication-sqlite": "6.0.2" } };
+    const refused = await deploy(refusedCtx);
+    expect(refused.exitCode).toBe(1);
+    expect((await readUpdateRun(s.ctx, refusedCtx.run.id)).state).toBe("untouched");
+    expect((await latestDeployRun(s.ctx, "prod"))?.runId).toBe(s.ctx.run.id);
+    const status = await updateStatus(s.ctx, null);
+    expect(status.run).toMatchObject({ runId: s.ctx.run.id, state: "verified", next: `kestrel update accept --env prod --run ${s.ctx.run.id}` });
+    expect(status.latestAttempt).toMatchObject({ runId: refusedCtx.run.id, state: "untouched" });
+    expect(renderStatus(status).join("\n")).toContain(`newest attempt ${refusedCtx.run.id}`);
   });
 });

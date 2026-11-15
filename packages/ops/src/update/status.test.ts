@@ -108,7 +108,7 @@ describe("update status", () => {
     harnesses.push(h);
     const ctx = await h.context({ run: { runId: "other", lastSeq: 0 } });
     const report = await updateStatus(ctx, null);
-    expect(report).toEqual({ env: "prod", run: null, open: [] });
+    expect(report).toEqual({ env: "prod", run: null, latestAttempt: null, open: [] });
     expect(renderStatus(report)).toEqual(["prod: no deploy run"]);
   });
 });

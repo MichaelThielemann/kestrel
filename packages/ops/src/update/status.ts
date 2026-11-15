@@ -22,8 +22,10 @@ export interface UpdateRunStatus {
 /** What `update status` reports. */
 export interface UpdateStatusReport {
   env: string;
-  /** The run asked for with `--run`, or the newest deploy run. */
+  /** The run asked for with `--run`, or the newest deploy run that is not `untouched` (see `latestDeployRun`). */
   run: UpdateRunStatus | null;
+  /** Without `--run`, the newest deploy run when it is an `untouched` one other than {@link UpdateStatusReport.run}, such as a deploy the gate refused; otherwise null. */
+  latestAttempt: UpdateRunStatus | null;
   /** Every update run of the environment that is in an open state. */
   open: UpdateRunStatus[];
 }
@@ -128,9 +130,16 @@ export async function updateStatus(ctx: UpdateContext, runId: string | null): Pr
     const status = await read(entry.runId);
     if (OPEN_STATES.has(status.state)) open.push(status);
   }
-  const newestDeploy = listed.filter((entry) => entry.command === "update deploy").at(-1);
-  const chosen = runId ?? newestDeploy?.runId ?? null;
-  return { env: ctx.envName, run: chosen === null ? null : await read(chosen), open };
+  const deploys = listed.filter((entry) => entry.command === "update deploy");
+  let chosen = runId;
+  for (const entry of [...deploys].reverse()) {
+    if (chosen !== null) break;
+    if ((await read(entry.runId)).state !== "untouched") chosen = entry.runId;
+  }
+  const newest = deploys.at(-1)?.runId ?? null;
+  chosen ??= newest;
+  const latestAttempt = runId === null && newest !== null && newest !== chosen ? await read(newest) : null;
+  return { env: ctx.envName, run: chosen === null ? null : await read(chosen), latestAttempt, open };
 }
 
 function duration(ms: number | null): string {
@@ -166,6 +175,7 @@ export function renderStatus(report: UpdateStatusReport): string[] {
   const lines: string[] = [];
   if (report.run === null) lines.push(`${report.env}: no deploy run`);
   else lines.push(`${report.env}:`, ...runLines(report.run));
+  if (report.latestAttempt !== null) lines.push(`newest attempt ${report.latestAttempt.runId} is ${report.latestAttempt.state}: it changed nothing`);
   const others = report.open.filter((status) => status.runId !== report.run?.runId);
   if (others.length > 0) lines.push(`open runs besides it: ${others.length}`, ...others.flatMap(runLines));
   return lines;

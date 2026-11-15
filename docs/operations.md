@@ -242,8 +242,8 @@ A process that was killed leaves its lock behind. The command that continues its
 kestrel update resume --env prod --run <id> --break-lock --answers break-lock.json
 ```
 
-`kestrel update status` reads the runs of the environment from the backup location: the newest deploy run, or
-the one `--run` names, with its state, the hosts its processes ran on, the version change, the cutover backup,
+`kestrel update status` reads the runs of the environment from the backup location: the newest deploy run that
+changed something, or the one `--run` names (a newer deploy the gate refused is named beside it), with its state, the hosts its processes ran on, the version change, the cutover backup,
 the time of every step with the ones the app was down for, the total downtime (until a start that became ready, a
 verification that passed or a verified rollback), the derived keys of a rollback, the command to run next, and
 every other run in an open state. It takes no lock and writes nothing.

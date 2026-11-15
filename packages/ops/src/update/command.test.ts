@@ -57,9 +57,10 @@ async function run(h: UpdateHarness, args: string[], extra: Partial<RunOptions> 
 
 const outcome = (ctx: UpdateContext, exitCode: UpdateExitCode, message = "finished"): UpdateOutcome => ({ exitCode, runId: ctx.run.id, state: "verified", message, report: { runId: ctx.run.id, steps: [], downtimeMs: 372_000 } });
 
-async function deployRun(h: UpdateHarness): Promise<string> {
+async function deployRun(h: UpdateHarness, stopped = false): Promise<string> {
   const ctx = await h.context({ command: "update deploy" });
   await ctx.journal.record("gate", "done", {});
+  if (stopped) await ctx.journal.record("stop", "done", { phase: "deploy", stoppedAt: Date.now() });
   return ctx.run.id;
 }
 
@@ -149,9 +150,9 @@ describe("kestrel update on the command line", () => {
 
   it("continues the newest deploy run, or the one --run names, for every later command and takes the lock", async () => {
     const h = harness();
-    const older = await deployRun(h);
+    const older = await deployRun(h, true);
     await new Promise((done) => setTimeout(done, 5));
-    const newest = await deployRun(h);
+    const newest = await deployRun(h, true);
     const received: Array<{ command: string; run: UpdateRun; ctx: UpdateContext }> = [];
     const record = (command: string, code: UpdateExitCode) => async (ctx: UpdateContext, r: UpdateRun) => {
       received.push({ command, run: r, ctx });

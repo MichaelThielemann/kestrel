@@ -1822,7 +1822,8 @@ Net changes since 5.8.2.
   `localBootEnv`, never a variable of the tool's own environment, and a build identity of its own. `update
   status` reads every update run of the environment from the backup location, so a deploy job's run shows on any
   machine, with the hosts it ran on, its state, the next command and the time and downtime of each step;
-  `accept`, `rollback`, `resume`, `abort` and `cleanup` work on the newest deploy run or the one `--run` names;
+  `accept`, `rollback`, `resume`, `abort` and `cleanup` work on the newest deploy run that changed something (a
+  later deploy the gate refused does not hide it) or the one `--run` names;
   `resume` refuses with exit 2 to continue a deploy from a process with another release than the run's (its
   versions or the content migrations of its host facts) and refuses a cutover plan that differs from the gate's.
   Every command but `status` takes the lock; `--json` prints `kestrel-ops/update-<command>@1`.

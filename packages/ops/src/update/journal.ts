@@ -183,10 +183,20 @@ export function retirePending(run: Pick<UpdateRun, "state" | "records">): boolea
   return last === undefined || (last.state !== "done" && last.state !== "skipped");
 }
 
-/** The newest deploy run of `env`, or null when there is none. */
+/**
+ * The newest deploy run of `env` that is not `untouched`, so a deploy the gate refused or that failed before it changed
+ * anything does not hide the run before it; the newest untouched one when every deploy run is untouched, or null when
+ * there is none.
+ */
 export async function latestDeployRun(ctx: Pick<OpsContext, "backups" | "location" | "poll">, env: string): Promise<UpdateRun | null> {
-  const newest = (await listUpdateRuns(ctx, env)).filter((r) => r.command === "update deploy").at(-1);
-  return newest === undefined ? null : readUpdateRun(ctx, newest.runId);
+  const deploys = (await listUpdateRuns(ctx, env)).filter((r) => r.command === "update deploy");
+  let newest: UpdateRun | null = null;
+  for (const entry of [...deploys].reverse()) {
+    const run = await readUpdateRun(ctx, entry.runId);
+    newest ??= run;
+    if (run.state !== "untouched") return run;
+  }
+  return newest;
 }
 
 /**
