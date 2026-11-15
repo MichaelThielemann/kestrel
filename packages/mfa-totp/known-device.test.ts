@@ -25,7 +25,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function bootSite(accountLimit: number, enforce: "all" | "none" = "all") {
+async function bootOnce(accountLimit: number, enforce: "all" | "none") {
   const kestrel = await bootKestrel({
     config: {
       modules: [
@@ -59,6 +59,11 @@ async function bootSite(accountLimit: number, enforce: "all" | "none" = "all") {
   const started = await post("setup", { username: "owner", password: PASSWORD });
   const { secret } = boundaryCast<{ secret: string }>(started.result, "json");
   const code = (offset: number) => totp(base32Decode(secret), Math.floor(Date.now() / 30_000) + offset);
+  const spread = [-2, -1, 0, 1, 2, 3, 4, 5, 6].map(code);
+  if (new Set(spread).size !== spread.length) {
+    await kestrel.stop();
+    return undefined;
+  }
   const wrong = () => {
     const valid = [-1, 0, 1].map(code);
     return ["000000", "111111"].find((candidate) => !valid.includes(candidate)) ?? "";
@@ -69,6 +74,14 @@ async function bootSite(accountLimit: number, enforce: "all" | "none" = "all") {
   const deviceCookie = enrolled.cookies?.[0] ?? "";
   expect(deviceCookie).toMatch(/^__Host-kestrel_device=[^;]+; Path=\/; Max-Age=\d+; HttpOnly; Secure; SameSite=Strict$/);
   return { kestrel, post, code, wrong, device: { cookie: deviceCookie.split(";")[0] ?? "" } };
+}
+
+async function bootSite(accountLimit: number, enforce: "all" | "none" = "all") {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const site = await bootOnce(accountLimit, enforce);
+    if (site !== undefined) return site;
+  }
+  throw new Error("could not set up a factor whose neighbouring codes are all distinct");
 }
 
 async function lookalikeCookies(post: Awaited<ReturnType<typeof bootSite>>["post"], names: string[], perName: number): Promise<{ cookie: string }[]> {
@@ -143,20 +156,20 @@ describe("sign-in from a known device", () => {
     await kestrel.stop();
   });
 
-  it("accepts the code of the next time step and refuses the codes two steps away on either side", async () => {
+  it("accepts the code of the next time step, refuses two steps ahead, and accepts each code only once", async () => {
     const { kestrel, post, code, device } = await bootSite(10, "none");
-    expect((await post("login", { username: "owner", password: PASSWORD, code: code(-2) }, device)).status).toBe(401);
     expect((await post("login", { username: "owner", password: PASSWORD, code: code(2) }, device)).status).toBe(401);
     expect((await post("login", { username: "owner", password: PASSWORD, code: code(1) }, device)).status).toBe(200);
+    expect((await post("login", { username: "owner", password: PASSWORD, code: code(1) }, device)).status).toBe(401);
     expect((await post("login", { username: "owner", password: PASSWORD, code: code(0) }, device)).status).toBe(401);
     await kestrel.stop();
   });
 
-  it("refuses the enrollment code of a step that the clock has moved two steps past", async () => {
+  it("refuses an unused code once the clock has moved two time steps past it and accepts the one a step later", async () => {
     const { kestrel, post, code, device } = await bootSite(10, "none");
-    const stale = code(0);
     vi.setSystemTime(MID_STEP + 2 * STEP_MS);
-    expect((await post("login", { username: "owner", password: PASSWORD, code: stale }, device)).status).toBe(401);
+    expect((await post("login", { username: "owner", password: PASSWORD, code: code(-2) }, device)).status).toBe(401);
+    expect((await post("login", { username: "owner", password: PASSWORD, code: code(-1) }, device)).status).toBe(200);
     await kestrel.stop();
   });
 });
