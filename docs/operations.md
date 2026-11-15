@@ -39,21 +39,24 @@ prefix its credentials need:
 
 | Prefix | List and read | Write | Delete |
 |---|---|---|---|
-| `app.replicaPrefix` | yes | a promotion writes `gen/<generation>/snapshot.db` and `origin.json` (deploy, rollback, restore) | no; with a backup location in a store of its own, the clock probes under `.kestrel-clock/` and `probes/` (see below) |
+| `app.replicaPrefix` | yes | a promotion writes `gen/<generation>/snapshot.db` and `origin.json` (deploy, rollback, restore); with a backup location in a store of its own, `status`, deploy, rollback and restore write short-lived clock probes under `.kestrel-clock/` and `probes/` | no; with a backup location in a store of its own, the clock probes under `.kestrel-clock/` and `probes/` (see below) |
 | `app.mediaPrefix` | yes | storage migrations write new keys, also as server-side copies (deploy); changed originals are copied back (rollback, restore) | no; only `update cleanup` removes originals |
 | `app.deliveryPrefix` | yes | the backup's keys are written back (rollback, restore) | yes: a rollback or restore removes the keys the backup does not hold |
 | `app.derivedPrefixes` | yes | no | no |
 | `backups.prefix` | yes | every command but `backup list`; `status` writes only short-lived probes under `probes/` and `.kestrel-clock/` | yes: the `retire` step of a verified deploy removes the code an earlier, closed run saved (`updates/<env>/runs/<run>/droplet-*`), and a copy into `objects/` that failed is removed again; `backup prune` and `update cleanup` remove backups, objects and saved code; the clock and protection probes under `.kestrel-clock/` and `probes/` are deleted again |
 
-The store's clock is measured with a probe object that is written, listed and deleted again: below the backup
-location under `.kestrel-clock/` on an S3-compatible store and `probes/` on any other, or below
-`app.replicaPrefix` when the backup location lies in a store of its own. `status` and `update prepare` measure it
-once, a deploy before its promotion, its swap and its start, a rollback and a restore before their promotion. Credentials that may not delete the probe still get the
-measurement: the command warns once and goes on, and the probe stays. `backup prune` removes probes older than an
-hour from both places where its credentials may delete them; a probe they may not list or delete there stays, and
-prune warns once and still removes the backups and objects that are due, so only credentials with delete rights
-under `.kestrel-clock/` and `probes/` clear such probes. `status` writes a probe into `probes/` to find out whether the app's credentials can delete in the backup
-location, and deletes it with the tool's; when they may not, `status` reports all the same and warns once, like
+The store's clock is measured with a probe object that is written, listed and deleted again, under
+`.kestrel-clock/` on an S3-compatible store and `probes/` on any other. `update prepare` measures the clock of the
+backup location's store once, always below the backup location and with `backups.storage.credentials` when the
+backup location lies in a store of its own. `status` once, a deploy before its promotion, its swap and its start,
+and a rollback and a restore before their promotion measure the clock of the app's store: below the backup location
+when it shares the app's store, otherwise below `app.replicaPrefix` with `storage.credentials`. Credentials that
+may not delete the probe still get the measurement: the command warns once and goes on, and the probe stays.
+`backup prune` removes probes older than an hour from both places where its credentials may delete them; a probe
+they may not list or delete there stays, and prune warns once and still removes the backups and objects that are
+due, so only credentials with delete rights under `.kestrel-clock/` and `probes/` clear such probes. `status`
+writes a probe into `probes/` to find out whether the app's credentials can delete in the backup location, and
+deletes it with the tool's; when those may not delete it either, `status` reports all the same and warns once, as
 for the clock probe.
 
 ## Updating a deployed environment

@@ -350,9 +350,10 @@ of a backup it keeps cannot be parsed or holds another number of entries than it
 objects that backup refers to are then unknown. A backup's
 verification state is the result of its newest verification; a `manifest.json`, `blobs.jsonl` or `site.jsonl`
 that cannot be parsed fails it. Interactive runs ask before deleting;
-`--dry-run` only lists. A run that deletes also removes the clock and protection probes older than an hour that
-a refused delete left under `.kestrel-clock/` or `probes/` of the backup location, and below the replica prefix
-when the backup location lies in a store of its own.
+`--dry-run` only lists. A run that deletes also removes, after the backups and objects that are due, the clock and
+protection probes older than an hour that a refused delete left under `.kestrel-clock/` or `probes/` of the backup
+location, and below the replica prefix when the backup location lies in a store of its own; a probe its credentials
+may not list or delete there stays, and the prune warns once and ends as it would without it.
 
 ## Lock and journal
 A writing command takes the lock: a start entry under `locks/<run>/`, a heartbeat every ten minutes and a
