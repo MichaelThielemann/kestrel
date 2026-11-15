@@ -757,4 +757,80 @@ describe("replication/sqlite failed snapshot upload", () => {
     expect(keys("/snapshot.db")).toEqual([`replica/gen/${first}/snapshot.db`]);
     expect(await restored(l.blobs, l.dir)).toMatchObject({ generation: first, ...fingerprint(l.app), check: "ok" });
   });
+
+  function failingFirstUpload(l: ReturnType<typeof live>, failedRemovals: number) {
+    const put = l.blobs.put.bind(l.blobs);
+    const remove = l.blobs.remove.bind(l.blobs);
+    let snapshots = 0;
+    let removals = 0;
+    l.blobs.put = async (key, data, options) => {
+      const stored = await put(key, data, options);
+      if (!key.endsWith("/snapshot.db")) return stored;
+      snapshots += 1;
+      return snapshots === 1 ? err(failure("TRANSIENT", "the store kept the object but answered an error")) : stored;
+    };
+    l.blobs.remove = async (key) => {
+      removals += 1;
+      return removals <= failedRemovals ? err(failure("TRANSIENT", "the store is unreachable")) : remove(key);
+    };
+    return {
+      keys: (suffix: string) => [...l.blobs.blobs.keys()].filter((key) => key.endsWith(suffix)).sort(),
+      removals: () => removals,
+      reachable: () => {
+        failedRemovals = 0;
+      },
+    };
+  }
+
+  it("removes the key of a failed first snapshot upload at the next sync before it uploads the first generation", async () => {
+    const l = live();
+    l.insert(50, 900);
+    const repl = l.start();
+    const store = failingFirstUpload(l, 1);
+    expect((await repl.sync()).ok).toBe(false);
+    const [orphan] = store.keys("/snapshot.db");
+    expect(orphan).toBeDefined();
+    l.insert(5, 900);
+    const generation = expectOk(await repl.sync()).generation;
+    expect(store.removals()).toBeGreaterThanOrEqual(2);
+    expect(store.keys("/snapshot.db")).toEqual([`replica/gen/${generation}/snapshot.db`]);
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation, ...fingerprint(l.app), check: "ok" });
+  });
+
+  it("uploads no first generation and writes no seal while the key of a failed first snapshot upload cannot be removed", async () => {
+    const l = live();
+    l.insert(50, 900);
+    const repl = l.start();
+    const store = failingFirstUpload(l, Number.POSITIVE_INFINITY);
+    expect((await repl.sync()).ok).toBe(false);
+    const orphans = store.keys("/snapshot.db");
+    expect(orphans).toHaveLength(1);
+    for (let round = 0; round < 2; round++) {
+      l.insert(3, 900);
+      const synced = await repl.sync();
+      expect(synced.ok).toBe(false);
+      if (!synced.ok) expect(synced.error.code).toBe("TRANSIENT");
+    }
+    const sealed = await repl.seal();
+    expect(sealed.ok).toBe(false);
+    if (!sealed.ok) expect(sealed.error.code).toBe("TRANSIENT");
+    expect(store.keys("/snapshot.db")).toEqual(orphans);
+    expect(store.keys("/sealed.json")).toEqual([]);
+    store.reachable();
+    const generation = expectOk(await repl.sync()).generation;
+    expect(store.keys("/snapshot.db")).toEqual([`replica/gen/${generation}/snapshot.db`]);
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation, ...fingerprint(l.app), check: "ok" });
+  });
+
+  it("removes the key of a failed first snapshot upload at a seal that has nothing to write", async () => {
+    const l = live();
+    l.insert(50, 900);
+    l.app.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    const repl = l.start();
+    const store = failingFirstUpload(l, 1);
+    expect((await repl.sync()).ok).toBe(false);
+    expect(store.keys("/snapshot.db")).toHaveLength(1);
+    expect(expectOk(await repl.seal())).toBeNull();
+    expect(store.keys("/snapshot.db")).toEqual([]);
+  });
 });

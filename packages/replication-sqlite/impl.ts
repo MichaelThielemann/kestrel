@@ -554,6 +554,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
 
   let snapshotOrder = 0;
   const takeSnapshot = async (listed?: ReplicaListing): Promise<Result<{ generation: string; bytes: number } | null, BlobstoreError>> => {
+    const cleared = await removeOrphan();
+    if (isErr(cleared)) return cleared;
     if (listed) observe(listed);
     else {
       const listing = generation === null ? await listReplica(blobs, config.prefix) : await unlessStopped(listReplica(blobs, config.prefix));
@@ -591,7 +593,6 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       seq = 0;
       cursor = position === null ? null : { ...position };
       pending = [];
-      orphan = null;
       lastSnapshotAt = at;
       return ok({ generation: gen, bytes: image.byteLength });
     } finally {
@@ -856,6 +857,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
         if (sealedAs !== null) return ok(sealedAs);
         const acknowledging = placedRestore !== null && handled;
         if (generation === null) {
+          const cleared = await removeOrphan();
+          if (isErr(cleared)) return cleared;
           if (settling) await settling;
           if (walState().log === 0 && dataVersion() === openedVersion) return ok(null);
           const snap = await takeSnapshot();
