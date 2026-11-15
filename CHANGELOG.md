@@ -1777,7 +1777,7 @@ Net changes since 5.8.2.
   depend on kestrel-ops and loads it only when one of them runs, from the project first, then from next to
   the CLI; without it they print how to install it and exit 2, and the other commands, `upgrade` included,
   never load kestrel-ops. `update` answers 2 while the installed kestrel-ops brings no update assistant,
-  and 3 for an update that was rolled back. `kestrel --help` lists the four commands; `kestrel update --help`
+  and 3 when a hard failure after the stop was rolled back automatically. `kestrel --help` lists the four commands; `kestrel update --help`
   lists `prepare`, `accept`, `rollback`, `status`, `resume`, `abort` and `cleanup`; `update prepare`, `bundle`,
   `deploy`, `verify` and `resume` pass the facts the project's host plugin returns from `ops()` to kestrel-ops, and
   the other `update` commands load no host plugin.

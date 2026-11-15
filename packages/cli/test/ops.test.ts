@@ -114,6 +114,7 @@ describe("kestrel status, backup, restore and update", () => {
       expect(help.code, args.join(" ")).toBe(0);
       expect([...help.stdout.matchAll(/kestrel update (\S+)/g)].map((m) => m[1]), args.join(" ")).toEqual(seven);
       expect(help.stdout, args.join(" ")).not.toMatch(/\b(deploy|verify|bundle)\b/);
+      expect(help.stdout.replace(/\s+/g, " "), args.join(" ")).toContain("3 a hard failure after the stop was rolled back automatically");
     }
   });
 

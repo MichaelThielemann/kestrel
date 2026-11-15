@@ -81,6 +81,7 @@ describe("kestrel update on the command line", () => {
     expect(help.stdout).toBe(`${UPDATE_USAGE}\n`);
     expect([...UPDATE_USAGE.matchAll(/^ {2}update (\S+)/gm)].map((m) => m[1])).toEqual(["prepare", "accept", "rollback", "status", "resume", "abort", "cleanup"]);
     expect(UPDATE_USAGE).not.toMatch(/\b(deploy|verify|bundle)\b/);
+    expect(UPDATE_USAGE.replace(/\s+/g, " ")).toContain("3 a hard failure after the stop was rolled back automatically");
   });
 
   it("answers a usage error with exit 2, the usage on stderr and an error document", async () => {

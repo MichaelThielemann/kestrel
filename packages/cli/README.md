@@ -63,10 +63,11 @@ kestrel help [<command>] | kestrel --help | kestrel --version
   describes, through `@michaelthielemann/kestrel-ops`: the state of the app, its replica and its
   backups; verified backups of the database, the originals and the public output; a restore of one
   of them, or of the database into a local directory; and the update assistant of the installed
-  kestrel-ops (exit `2` when it brings none, `3` when an update was rolled back). `update --help`
-  lists the seven commands an operator runs; `update prepare` and `update bundle` (which writes the
-  `.kestrel-ops/` directory a deploy job runs) pass the facts the project's host plugin contributes,
-  such as its readiness path, to kestrel-ops. The repository's `docs/operations.md` describes an
+  kestrel-ops (exit `2` when it brings none, `3` when a hard failure after the stop was rolled back
+  automatically). `update --help` lists the seven commands an operator runs; `update prepare`,
+  `update bundle` (which writes the `.kestrel-ops/` directory a deploy job runs), `update resume` and
+  `update verify` pass the facts the project's host plugin contributes, such as its readiness path, to
+  kestrel-ops; the other `update` commands load no host plugin. The repository's `docs/operations.md` describes an
   update from `prepare` to `cleanup`. The CLI does not
   depend on kestrel-ops, so installing the CLI brings no S3 client, and loads it only when one of
   these commands runs. Add it, and the target package for where the app runs, to the project:

@@ -33,7 +33,7 @@ export const UPDATE_USAGE = `usage:
   update cleanup [--run <id>] [--dry-run]
 common options: --env <name>, --json, --yes, --answers <file>, --keep, --break-lock
 exit codes: 0 done, 1 a check failed, a step was refused or the run halted, 2 usage or configuration error,
-  3 the update was rolled back`;
+  3 a hard failure after the stop was rolled back automatically`;
 
 /** The commands {@link runUpdate} hands a parsed command line to; `RunOptions.updateCommands` replaces them in tests. */
 export interface UpdateCommands {
