@@ -6,6 +6,7 @@ import { messageOf, recordQuietly, startTarget, stopTarget } from "../context.ts
 import { OpsError } from "../errors.ts";
 import { fromJsonl, hex, keys, parseJsonOrNull, type BlobEntry, type DerivedEntry, type Manifest, type SealState, type SiteEntry } from "../layout.ts";
 import { acknowledgement, buildDatabase, completeGeneration, listGenerations, markerKey, promote, stableGenerations, type Promoted } from "../replica.ts";
+import { MASK } from "../redact.ts";
 import { downloadDb, restoreDelivery, restoreOriginals } from "../restore.ts";
 import { appClock, type ServerClock } from "../serverTime.ts";
 import { deleteSessions, hasAccessChanges, lossReport, sha256, type LossReport } from "../sqlite.ts";
@@ -38,6 +39,12 @@ async function recordedConfiguration(ctx: UpdateContext, runId: string): Promise
   const value: unknown = data === null ? null : parseJsonOrNull(data);
   if (data !== null && !isRecordedConfiguration(value)) throw new OpsError(`the recorded configuration of run ${runId} cannot be read`, 1, "configuration.json");
   return isRecordedConfiguration(value) ? value : null;
+}
+
+function withoutMasks(recorded: RecordedConfiguration): RecordedConfiguration {
+  const env: RecordedConfiguration["env"] = {};
+  for (const [name, value] of Object.entries(recorded.env)) env[name] = "value" in value && value.value.includes(MASK) ? { fingerprint: "" } : value;
+  return { ...recorded, env };
 }
 
 function writeMarker(file: string, nonce: string, runId: string, at: number): void {
@@ -222,7 +229,7 @@ async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Man
     ctx.out.warn(`run ${run.runId} recorded no configuration; the app keeps its current one`);
     await ctx.journal.record("restore-configuration", "skipped", { reason: "no recorded configuration" });
   } else {
-    configuration = await ctx.target.restoreConfiguration(recorded);
+    configuration = await ctx.target.restoreConfiguration(withoutMasks(recorded));
     await ctx.journal.record("restore-configuration", "done", { ...configuration });
     for (const name of configuration.unrestorable) ctx.out.warn(`${name} holds another value than when the update began; its old value is not known and was not restored`);
   }
@@ -254,7 +261,8 @@ async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Man
  * promotes the cutover backup's database again (before any old droplet can start); copies back originals whose
  * key holds other bytes; sets the delivery prefix to the backup's and lists it again until no key is newer than the
  * start of the replacement; checks the derived prefixes against the backup's ETag listing; restores the recorded
- * configuration verbatim, without a question; makes the previous droplet current (uploading its saved bits when it
+ * configuration verbatim, without a question (a recorded value that holds the redaction mask counts as unknown and
+ * stays as it is); makes the previous droplet current (uploading its saved bits when it
  * was deleted); starts it and verifies it: readiness, and provenance through `applied.json` for a sealing runtime or
  * through the marker row in the first snapshot of an older one. Without a previous droplet or its bits the rollback
  * ends with the app stopped on the cutover state (`ended: "stopped"`); once the previous release runs verified, the

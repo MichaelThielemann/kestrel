@@ -535,3 +535,29 @@ describe("a deploy whose journal write fails once after the promotion", { timeou
     expect(again.exitCode, again.message).toBe(0);
   });
 });
+
+describe("the configuration a deploy records", { timeout: 30_000 }, () => {
+  const SHARED = "shared-bucket-secret-7f2a";
+
+  it("keeps a plain variable whose value holds a secret of the tool only as a fingerprint, so the rollback leaves its value as it is", async () => {
+    const h = createUpdateHarness({ to: { ready: "not-ready" } });
+    harnesses.push(h);
+    Object.assign(h.target.configuration.env, { STORAGE_SECRET: SHARED, STORAGE_URL: `https://user:${SHARED}@store.example.net`, SITE_NAME: "Studio" });
+    await h.target.start();
+    await h.target.app?.seed();
+    const steps = fakes();
+    const ctx = await h.context({ answers: ANSWERS, steps: { retire: steps.retire, migrateCopy: steps.migrateCopy } });
+    ctx.redactor.add(SHARED);
+    await receiptFor(ctx);
+    const outcome = await deploy(ctx);
+    expect(outcome.exitCode, outcome.message).toBe(3);
+    const text = new TextDecoder().decode((await h.store.get(LOCATION + updateKeys.configuration("prod", ctx.run.id))) ?? new Uint8Array());
+    expect(text).not.toContain("[redacted]");
+    expect(text).not.toContain(SHARED);
+    const recorded: unknown = JSON.parse(text);
+    const env: unknown = typeof recorded === "object" && recorded !== null ? Reflect.get(recorded, "env") : null;
+    for (const name of ["STORAGE_SECRET", "STORAGE_URL"]) expect(JSON.stringify(env)).toMatch(new RegExp(`"${name}":\\{"fingerprint":"[0-9a-f]{64}"\\}`));
+    expect(env).toMatchObject({ SITE_NAME: { value: "Studio" } });
+    expect(h.target.configuration.env).toMatchObject({ STORAGE_SECRET: SHARED, STORAGE_URL: `https://user:${SHARED}@store.example.net`, SITE_NAME: "Studio" });
+  });
+});

@@ -113,7 +113,7 @@ that start in the same moment.
 |---|---|---|
 | `gate` | serving | Receipt, one instance, no active deployment, no earlier deploy run of this environment in an open state, also behind later runs the gate refused; the refusal names the command that finishes that run. The newest earlier run that got past its gate is accepted on the way when it is verified. A refusal ends with exit 1 before anything changed. |
 | `stage` | serving | The release is uploaded and staged while the app keeps running. A staging failure ends the run with exit 1; the app was never stopped. |
-| `configuration` | serving | The app's configuration is recorded once: plain values verbatim, secret values only as salted fingerprints, the health check, memory, disk, start command and instance count. |
+| `configuration` | serving | The app's configuration is recorded once: plain values verbatim, secret values only as salted fingerprints (also a plain value that contains one of the tool's own credentials), the health check, memory, disk, start command and instance count. |
 | `precopy` | serving | Originals and the delivery prefix are copied into the backup location, so only the difference is copied after the stop. |
 | `stop` | **down** | After the `update-stop` answer. From here on the run is never cancelled, only resumed or aborted. When the stop itself fails after it stopped the app, the app is started again; if that fails too, the run stays open with exit 1 and `update abort` starts the previous release. A hard failure before the cutover backup is written makes the previous release current again and starts it on the unchanged replica; exit 3. A signal (SIGINT, SIGTERM) after the stop ends the process with exit 1 and a message that says what state the app is in and which command continues or ends the run; never start the app by hand while the run is open. |
 | `seal` | down | Waits until the stopped replica's newest generation shows its seal, at most `update.sealTimeoutSeconds`; a runtime before 6 writes none, which needs the `unsealed-stop` answer. Without it the previous release starts again; exit 3. |
@@ -145,7 +145,8 @@ A delivery prefix without any key only warns. No page or medium is fetched over 
 A rollback stops the app if it runs and waits for the seal, promotes the cutover backup's database again before
 any old release can start, copies back originals whose key holds other bytes, sets the delivery prefix to the
 backup's and lists it again until no key is newer than the start of the replacement, compares the derived
-prefixes with the backup's listing, restores the recorded configuration verbatim without a question, makes the
+prefixes with the backup's listing, restores the recorded configuration verbatim without a question (a fingerprinted
+value stays as it is and is reported when it changed), makes the
 previous release current again (uploading its saved code when it was deleted), starts it and verifies it. Without
 a previous release or its saved code it ends with the app stopped on the cutover state. The derived keys it finds
 added, changed or missing against the backup's listing are printed as a warning and kept in the run's report;

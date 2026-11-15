@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { acceptSeal, createBackup, precopy, readManifest } from "../backup.ts";
 import { messageOf, stopTarget } from "../context.ts";
@@ -5,6 +6,7 @@ import { OpsError } from "../errors.ts";
 import { Interrupted } from "../interrupt.ts";
 import { keys, unstamp } from "../layout.ts";
 import { recordPlacement } from "../placements.ts";
+import type { Redactor } from "../redact.ts";
 import { confirm } from "../questions.ts";
 import { promote, stableGenerations } from "../replica.ts";
 import { appClock, type ServerClock } from "../serverTime.ts";
@@ -14,6 +16,7 @@ import { continueJournal, listUpdateRuns, readUpdateRun } from "./journal.ts";
 import { UPDATE_PIN_PREFIX, updateKeys } from "./layout.ts";
 import { computePlan, pinsCutover, planHash, replicaCopy } from "./plan.ts";
 import { releaseStorages } from "./storages.ts";
+import type { RecordedConfiguration } from "./target.ts";
 import { UPDATE_EXIT, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateRun, type VerifyResult, type VersionSet } from "./types.ts";
 import { concludeVerify, outcomeOf } from "./verify.ts";
 
@@ -63,6 +66,12 @@ async function acceptImplicitly(ctx: UpdateContext, runId: string): Promise<void
   ctx.out.info(`update run ${runId} is accepted by this deploy`);
 }
 
+function fingerprintSecrets(redactor: Redactor, recorded: RecordedConfiguration): RecordedConfiguration {
+  const env: RecordedConfiguration["env"] = {};
+  for (const [name, value] of Object.entries(recorded.env)) env[name] = "value" in value && redactor.apply(value.value) !== value.value ? { fingerprint: createHash("sha256").update(recorded.salt + value.value).digest("hex") } : value;
+  return { ...recorded, env };
+}
+
 async function putOnce(ctx: UpdateContext, key: string, text: string): Promise<void> {
   if ((await ctx.backups.head(key)) !== null) throw new OpsError(`refusing to overwrite ${key}`, 1, key);
   await ctx.backups.put(key, new TextEncoder().encode(text), { contentType: "application/json" });
@@ -82,7 +91,7 @@ function stopQuestion(ctx: UpdateContext, plan: UpdatePlan): string {
 /**
  * Deploys the release in the order of `DEPLOY_STEPS`. While the old release serves: `gate`, `stage` (a staging
  * failure ends the run with exit 1 and the app was never stopped), `configuration` (recorded once into the backup
- * location), `precopy`. Then `stop` (after the `update-stop` answer), `seal` (waits for the seal after STOPPED),
+ * location; a plain variable whose value holds a secret of the tool is kept only as a fingerprint), `precopy`. Then `stop` (after the `update-stop` answer), `seal` (waits for the seal after STOPPED),
  * `cutover-backup` (verified; it records the running versions, or without them the major the pending storage
  * migrations convert from; pinned for this run until `update cleanup` when {@link pinsCutover} says so), `migrate` (on a copy of the cutover
  * database), and `promote`, `swap` and `start` as one step without a question between them. `verify` decides: passed
@@ -108,7 +117,7 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
 
     step = "configuration";
     const droplet = await ctx.target.currentDroplet();
-    const recorded = await ctx.target.readConfiguration(new Set(ctx.host.secretEnvNames ?? []));
+    const recorded = fingerprintSecrets(ctx.redactor, await ctx.target.readConfiguration(new Set(ctx.host.secretEnvNames ?? [])));
     const key = updateKeys.configuration(ctx.envName, ctx.run.id);
     await putOnce(ctx, ctx.location + key, ctx.redactor.json(recorded, 2) + "\n");
     await record(ctx, "configuration", "done", { droplet, key });

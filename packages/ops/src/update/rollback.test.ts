@@ -223,6 +223,25 @@ describe("rolling an update back", () => {
 });
 
 describe("update rollback", () => {
+  it("reports a recorded value that holds the redaction mask as not restored and leaves the variable as it is", async () => {
+    const s = await scenario();
+    const deployed = await deployUntil(s, "verify");
+    const key = LOCATION + updateKeys.configuration("prod", deployed.runId);
+    const recorded: unknown = JSON.parse(new TextDecoder().decode((await s.h.store.get(key)) ?? encode("{}")));
+    const env: unknown = typeof recorded === "object" && recorded !== null ? Reflect.get(recorded, "env") : null;
+    if (typeof env !== "object" || env === null) throw new Error("the recorded configuration holds no variables");
+    Reflect.set(env, "SITE_NAME", { value: "Studio [redacted]" });
+    await s.h.store.put(key, encode(JSON.stringify(recorded)));
+    s.h.target.configuration.env.SITE_NAME = "Studio, renamed";
+    const run = await runOf(s, deployed.runId);
+    const { ctx } = await continueRun(s, deployed.runId, "update rollback");
+    const result = await rollback(ctx, run, { kind: "requested" });
+    expect(result.configuration.unrestorable).toContain("SITE_NAME");
+    expect(result.configuration.set).not.toContain("SITE_NAME");
+    expect(s.h.target.configuration.env.SITE_NAME).toBe("Studio, renamed");
+    expect(s.h.output.warn.join("\n")).toContain("SITE_NAME holds another value than when the update began");
+  });
+
   it("rolls back before accept without a question and exits 0", async () => {
     const s = await scenario();
     const deployed = await deployUntil(s, "verify");

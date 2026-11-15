@@ -1,4 +1,5 @@
-const MASK = "[redacted]";
+/** What {@link Redactor} puts in place of a secret. */
+export const MASK = "[redacted]";
 
 /** Replaces every registered secret, and its URL-encoded and JSON-escaped forms, in text before it leaves the process. */
 export class Redactor {
