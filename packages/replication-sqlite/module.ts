@@ -183,6 +183,8 @@ export default defineModule({
 
   health: (r) => withLockHealth(r.lock, r.health()),
 
+  quiesce: (r) => r.quiesce(),
+
   async teardown(r) {
     try {
       const result = await r.seal();

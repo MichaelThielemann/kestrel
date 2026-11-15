@@ -465,6 +465,50 @@ describe("replication/sqlite WAL before the first generation", () => {
   });
 });
 
+describe("replication/sqlite after quiesce", () => {
+  const keys = (blobs: ReturnType<typeof memoryBlobs>, suffix: string) => [...blobs.blobs.keys()].filter((key) => key.endsWith(suffix)).sort();
+
+  it("ships the new frames at a sync and skips the checkpoint, the periodic snapshot and the prune although all three are due", async () => {
+    const l = live();
+    l.insert(50, 900);
+    const repl = l.start({ checkpointSeconds: 1, snapshotSeconds: 1, retentionSeconds: 1 });
+    expectOk(await repl.sync());
+    l.clock.advance(2_000);
+    const second = expectOk(await repl.sync()).generation;
+    expect(keys(l.blobs, "/snapshot.db")).toHaveLength(2);
+    l.clock.advance(5_000);
+    l.insert(20, 900);
+    repl.quiesce();
+    const synced = expectOk(await repl.sync());
+    expect(synced).toMatchObject({ generation: second, checkpointed: false, pruned: 0 });
+    expect(synced.frames).toBeGreaterThan(0);
+    expect(keys(l.blobs, "/snapshot.db")).toHaveLength(2);
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation: second, ...fingerprint(l.app), check: "ok" });
+  });
+
+  it("answers TRANSIENT to a snapshot asked for while a generation exists, and writes nothing", async () => {
+    const l = live();
+    l.insert(50, 900);
+    const repl = l.start();
+    expectOk(await repl.sync());
+    const before = [...l.blobs.blobs.keys()].sort();
+    repl.quiesce();
+    const refused = await repl.snapshot();
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error.code).toBe("TRANSIENT");
+    expect([...l.blobs.blobs.keys()].sort()).toEqual(before);
+  });
+
+  it("still takes the first snapshot of a process without a generation", async () => {
+    const l = live();
+    l.insert(50, 900);
+    const repl = l.start();
+    repl.quiesce();
+    const generation = expectOk(await repl.sync()).generation;
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation, ...fingerprint(l.app), check: "ok" });
+  });
+});
+
 describe("replication/sqlite failed snapshot upload", () => {
   it("removes the snapshot key again when its upload fails after the store kept it, so a restore keeps to the generation before it", async () => {
     const l = live();

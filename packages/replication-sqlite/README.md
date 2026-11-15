@@ -77,6 +77,15 @@ for each other. Teardown ships the frames committed since the last sync and then
 (see [Replica layout](#replica-layout)); it takes no checkpoint and no periodic snapshot and prunes
 nothing, so the time between a stop signal and the kill goes to the frames.
 
+The stop begins earlier, in the module's `quiesce`, at the start of `stop()`: the WAL is no longer
+checked between syncs, and a `replication.sync` that runs or starts from then on ships its frames but
+skips the checkpoint, the periodic snapshot and the prune. A periodic snapshot or a
+`replication.snapshot` that is still reading when the stop begins ends at the next chunk and uploads
+nothing, so the generation before it stays the newest and teardown ships the last frames into it and
+seals it; `replication.snapshot` then answers `TRANSIENT`. The first snapshot of a process that has no
+generation yet completes, since teardown would otherwise have to take it, and so does a snapshot whose
+upload has begun.
+
 Config: `file`, `prefix`, `checkpointBytes`/`checkpointSeconds`,
 `snapshotSeconds` (24 h), `retentionSeconds` (48 h; the newest generation is always kept),
 `restoreOnStart` (rebuild the file from the replica when missing). This module declares

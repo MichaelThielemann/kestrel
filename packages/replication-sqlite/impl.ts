@@ -133,6 +133,13 @@ export interface Replication {
    * generation this process started meanwhile. Does nothing without a placed restore.
    */
   restoreHandled(): void;
+  /**
+   * Says that the process is stopping: the WAL is no longer checked between syncs, a snapshot that would start a
+   * generation after the current one ends before it uploads anything, and a sync ships the new frames and skips
+   * the checkpoint, the periodic snapshot and the prune. A first snapshot, without a generation yet, still completes,
+   * since teardown would have to take it anyway.
+   */
+  quiesce(): void;
 }
 
 const pad = (n: number, w: number): string => String(n).padStart(w, "0");
@@ -365,6 +372,7 @@ function readHead(bytes: Uint8Array, length: number): WalHead | null {
 const isBusy = (e: unknown): boolean => typeof e === "object" && e !== null && "errcode" in e && typeof e.errcode === "number" && (e.errcode & 0xff) === 5;
 
 const CLOSED = failure("TRANSIENT", "replication/sqlite: the replication was closed while it read the snapshot");
+const STOPPING = failure("TRANSIENT", "replication/sqlite: the process is stopping, so the snapshot was not taken; the generation before it stays current");
 
 const chunkBytes = (header: WalHeader): number => Math.max(1, Math.floor(READ_CHUNK_BYTES / frameSize(header.pageSize))) * frameSize(header.pageSize);
 
@@ -394,6 +402,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   let lastCheckpointAt: number | null = null;
   let restorePrepared = false;
   let closed = false;
+  let stopping = false;
   let reading = false;
   let copiedBeforeGeneration = false;
   let pending: Array<{ key: string; data: Uint8Array }> = [];
@@ -480,7 +489,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     }
     reading = true;
     try {
-      const read = await readSnapshot({ file, walFile, probe: walState, now, stopped: () => closed });
+      const read = await readSnapshot({ file, walFile, probe: walState, now, stopped: () => closed || (stopping && generation !== null) });
       if (read === "stopped") return ok(null);
       if (read === "unsettled") return err(failure("TRANSIENT", "replication/sqlite: the WAL kept starting over while the snapshot read it; the next run tries again"));
       const { image, position, at } = read;
@@ -626,7 +635,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     if (row !== undefined && row.busy === 0 && row.log === row.checkpointed) lastCheckpointAt = now();
   };
   const timer = setInterval(() => {
-    if (closed || sealedAs !== null) return;
+    if (closed || stopping || sealedAs !== null) return;
     if (generation === null) {
       if (!reading) checkpointBeforeGeneration();
       return;
@@ -717,18 +726,18 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     let frames = shipped.value.frames;
     let checkpointed = false;
     const due = lastCheckpointAt === null ? t : t - lastCheckpointAt;
-    if (walContentBytes() >= config.checkpointBytes || due >= config.checkpointSeconds * 1000) {
+    if (!stopping && (walContentBytes() >= config.checkpointBytes || due >= config.checkpointSeconds * 1000)) {
       const result = await checkpoint();
       if (isErr(result)) return result;
       checkpointed = result.value.done;
       shippedBytes += result.value.bytes;
       frames += result.value.frames;
     }
-    if (lastSnapshotAt !== null && t - lastSnapshotAt >= config.snapshotSeconds * 1000) {
+    if (!stopping && lastSnapshotAt !== null && t - lastSnapshotAt >= config.snapshotSeconds * 1000) {
       const snap = await takeSnapshot();
       if (isErr(snap)) return snap;
     }
-    const pruned = await prune();
+    const pruned = stopping ? ok(0) : await prune();
     if (isErr(pruned)) return pruned;
     if (acknowledging) await acknowledge();
     lastSyncAt = t;
@@ -764,7 +773,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
         if (isErr(shipped)) return shipped;
         const snap = await takeSnapshot();
         if (isErr(snap)) return snap;
-        return snap.value === null ? err(CLOSED) : ok(snap.value);
+        return snap.value === null ? err(closed ? CLOSED : STOPPING) : ok(snap.value);
       }),
     seal: () =>
       exclusive(async (): Promise<Result<(Seal & { generation: string }) | null, BlobstoreError>> => {
@@ -809,6 +818,9 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     },
     restoreHandled() {
       handled = true;
+    },
+    quiesce() {
+      stopping = true;
     },
     close() {
       closed = true;

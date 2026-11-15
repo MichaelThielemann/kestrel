@@ -2119,6 +2119,13 @@ Net changes since 5.8.2.
   the module's read transaction kept every checkpoint from copying frames back, and the first snapshot then
   had to read it whole. Before the first generation, the once-per-second check now checkpoints as soon as
   the WAL holds `checkpointBytes` of frames, also while the first `replication.sync` lists the replica.
+- `replication-sqlite`: `stop()` no longer waits for a periodic snapshot, a checkpoint or a prune that a
+  running sync has still to do. The module now declares `quiesce`: from the start of `stop()` a sync ships
+  its frames but skips the checkpoint, the periodic snapshot and the prune, and a periodic snapshot or
+  `replication.snapshot` that is still reading ends without uploading anything (the latter answers
+  `TRANSIENT`), so teardown ships the last frames into the generation before it and seals it. The first
+  snapshot of a process without a generation completes before teardown seals it. The `Replication`
+  interface of `./impl` gains `quiesce()`.
 - `site-default`: the `maxCascade` limit counts every language row of the page being saved, so a save is refused or accepted
   the same way whatever the clock reads. Before, a row of the saved page whose only change was its timestamp counted only
   when the clock had advanced since the page was last saved.
