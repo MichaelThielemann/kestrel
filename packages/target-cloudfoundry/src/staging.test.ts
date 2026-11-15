@@ -91,7 +91,11 @@ describe("the preflight of the Cloud Foundry target", () => {
 
   it("reports one stopped instance and the platform's default health check", async () => {
     Object.assign(cf.app(API.name), { state: "STOPPED", running: 0, ready: 0 });
-    expect(await (await target()).preflight()).toEqual({ instances: 1, running: 0, activeDeployment: null, healthCheck: "port" });
+    expect(await (await target({ readyUrl: "https://site.example.net/ready" })).preflight()).toEqual({ instances: 1, running: 0, activeDeployment: null, healthCheck: "port", readinessChecked: true });
+  });
+
+  it("reports that readiness is not checked without a readiness URL", async () => {
+    expect((await (await target()).preflight()).readinessChecked).toBe(false);
   });
 });
 

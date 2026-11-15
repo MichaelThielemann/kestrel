@@ -24,7 +24,10 @@ const eventsSchema = z.object({ resources: z.array(z.object({ type: z.string(), 
 
 const CRASH_EVENT = /crash/;
 
-/** The desired and running instances of the app's web process, an active deployment and the health check type, read without refusing. */
+/**
+ * The desired and running instances of the app's web process, an active deployment, the health check type and whether
+ * a `readyUrl` lets {@link probeReady} check readiness, read without refusing.
+ */
 export async function preflight(session: CfSession): Promise<TargetPreflight> {
   const guid = await session.appGuid();
   const deployments = await session.api(`/v3/deployments?app_guids=${guid}&status_values=ACTIVE`, deploymentsSchema);
@@ -36,6 +39,7 @@ export async function preflight(session: CfSession): Promise<TargetPreflight> {
     running: stats.resources.filter((r) => r.state !== "DOWN").length,
     activeDeployment: active === undefined ? null : `${active.strategy ?? "deployment"} ${active.guid}`,
     healthCheck: process.health_check?.type ?? "port",
+    readinessChecked: session.config.readyUrl !== undefined,
   };
 }
 

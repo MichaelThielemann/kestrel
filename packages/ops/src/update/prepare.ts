@@ -11,6 +11,7 @@ import { integrityCheck, referencedBlobs, sha256 } from "../sqlite.ts";
 import { listMap, type ObjectInfo, type ObjectStore } from "../store.ts";
 import { runContentMigrations } from "./contentMigrations.ts";
 import { updateKeys } from "./layout.ts";
+import { UNCHECKED_READINESS } from "./gate.ts";
 import { computePlan, openDatabase, pendingStorage, planHash, replicaCopy } from "./plan.ts";
 import { releaseStorages } from "./storages.ts";
 import { UPDATE_EXIT, type Rehearsal, type RehearsalCheck, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateReceipt } from "./types.ts";
@@ -202,7 +203,7 @@ async function preflightProblems(ctx: UpdateContext): Promise<{ problems: string
   if (pre.healthCheck !== "http") ctx.out.warn(`the app's health check is ${pre.healthCheck}; an http check on the readiness path lets the platform see a release that does not become ready`);
   const clock = await serverClock(ctx.backups, ctx.location, ctx.runId, ctx.clock, ctx.poll);
   if (Math.abs(clock.skewMs) > MAX_SKEW_MS) problems.push(`this machine's clock is ${Math.round(clock.skewMs / 1000)} s off the store's (limit ${MAX_SKEW_MS / 1000} s)`);
-  return { problems, data: { instances: pre.instances, running: pre.running, activeDeployment: pre.activeDeployment, healthCheck: pre.healthCheck, skewMs: clock.skewMs } };
+  return { problems, data: { instances: pre.instances, running: pre.running, activeDeployment: pre.activeDeployment, healthCheck: pre.healthCheck, readinessChecked: pre.readinessChecked !== false, skewMs: clock.skewMs } };
 }
 
 async function failed(ctx: UpdateContext, step: string, message: string, exitCode: 1 | 2 = 1): Promise<never> {
@@ -212,7 +213,7 @@ async function failed(ctx: UpdateContext, step: string, message: string, exitCod
 
 /**
  * Prepares an update from this machine without changing production: preflight (one instance, no active deployment,
- * the health check's type, and the clock skew against the store, measured with a probe written into the backup
+ * a readiness check the target can make, with exit 2 otherwise, the health check's type, and the clock skew against the store, measured with a probe written into the backup
  * location), plan on a copy of the newest replica generation, rehearsal of the migrations on that copy (with a local
  * start of the release when content migrations are pending), and the receipt with the version change
  * and the plan hash, written once into the backup location. Journal steps: `preflight`, `plan`, `rehearsal`,
@@ -223,6 +224,7 @@ export async function prepare(ctx: UpdateContext, options: PrepareOptions): Prom
   try {
     await record(ctx, "preflight", "started");
     const pre = await preflightProblems(ctx);
+    if (pre.data.readinessChecked === false) return await failed(ctx, "preflight", `preflight: ${UNCHECKED_READINESS}`, 2);
     if (pre.problems.length > 0) return await failed(ctx, "preflight", `preflight: ${pre.problems.join("; ")}`);
     await record(ctx, "preflight", "done", pre.data);
 

@@ -94,6 +94,15 @@ describe("the deploy gate", () => {
     expect((await refusal(checkGate(ctx, ordinary, []))).message).toContain("rolling");
   });
 
+  it("refuses with exit 2 a target whose readiness check answers ready for any running instance", async () => {
+    const h = harness();
+    const ctx = await h.context();
+    h.target.preflight = async () => ({ instances: 1, running: 1, activeDeployment: null, healthCheck: "port", readinessChecked: false });
+    const error = await refusal(checkGate(ctx, plan({ versions: { from: NEW, to: NEW } }), []));
+    expect(error.exitCode).toBe(2);
+    expect(error.message).toContain("readiness");
+  });
+
   it("refuses while an earlier run is open and accepts a verified one implicitly", async () => {
     const ctx = await harness().context();
     const ordinary = plan({ versions: { from: NEW, to: NEW } });

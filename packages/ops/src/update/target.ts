@@ -97,6 +97,12 @@ export interface TargetPreflight {
   activeDeployment: string | null;
   /** The configured health check type, such as `http` or `process`. */
   healthCheck: string;
+  /**
+   * False when {@link UpdateTarget.probeReady} cannot check the release's readiness and answers `ready` for any running
+   * instance, such as a target without a readiness URL; prepare and the gate of a deploy refuse it with exit 2. Absent
+   * counts as checked.
+   */
+  readinessChecked?: boolean;
 }
 
 /**

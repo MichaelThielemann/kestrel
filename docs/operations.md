@@ -55,8 +55,10 @@ reports, and when it reports none, the deploy counts as a version change.
 
 `update prepare [--full-media]` runs from the project, with the new release installed:
 
-- **Preflight**: one instance, no active deployment of the platform, the type of the health check (anything but
-  an http check on the readiness path warns), and the clock skew against the store, measured with a probe object
+- **Preflight**: one instance, no active deployment of the platform, a target that can check the release's
+  readiness (one that would count any running instance as ready, such as the Cloud Foundry target without
+  `readyUrl`, is refused with exit 2), the type of the health check (anything but an http check warns; its path
+  is not compared with the readiness path), and the clock skew against the store, measured with a probe object
   written into the backup location and deleted again. The plan step then needs a complete newest replica
   generation; how recent it is, is not checked.
 - **Plan** on a copy of the newest replica generation: the storage migrations of the release's module packages
@@ -113,7 +115,7 @@ that start in the same moment.
 
 | Step | App | What happens |
 |---|---|---|
-| `gate` | serving | Receipt, one instance, no active deployment, no earlier deploy run of this environment in an open state, also behind later runs the gate refused; the refusal names the command that finishes that run. The newest earlier run that got past its gate is accepted on the way when it is verified. A refusal ends with exit 1 before anything changed. |
+| `gate` | serving | A target that can check readiness (exit 2 otherwise), receipt, one instance, no active deployment, no earlier deploy run of this environment in an open state, also behind later runs the gate refused; the refusal names the command that finishes that run. The newest earlier run that got past its gate is accepted on the way when it is verified. A refusal ends with exit 1 before anything changed. |
 | `stage` | serving | The release is uploaded and staged while the app keeps running. A staging failure ends the run with exit 1; the app was never stopped. |
 | `configuration` | serving | The app's configuration is recorded once: plain values verbatim, secret values only as salted fingerprints (also a plain value that contains one of the tool's own credentials), the health check, memory, disk, start command and instance count. |
 | `precopy` | serving | Originals and the delivery prefix are copied into the backup location, so only the difference is copied after the stop. |

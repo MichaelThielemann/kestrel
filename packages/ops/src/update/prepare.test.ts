@@ -93,6 +93,21 @@ describe("preparing an update", { timeout: 30_000 }, () => {
     expect(h.target.actions).toEqual(["start"]);
   });
 
+  it("writes no receipt and ends with exit 2 when the target does not check the readiness of the release", async () => {
+    const { h } = await seeded();
+    const preflight = h.target.preflight.bind(h.target);
+    h.target.preflight = async () => ({ ...(await preflight()), readinessChecked: false });
+    const ctx = await h.context({ command: "update prepare" });
+    const error = await prepare(ctx, { fullMedia: false }).then(
+      () => null,
+      (cause: unknown) => cause,
+    );
+    expect(error).toBeInstanceOf(OpsError);
+    expect(error instanceof OpsError ? error.exitCode : null).toBe(2);
+    expect(error instanceof Error ? error.message : "").toContain("readiness");
+    expect(await h.store.list(`${LOCATION}updates/prod/receipts/`)).toEqual([]);
+  });
+
   it("writes no receipt and ends with exit 1 when the rehearsal fails", async () => {
     const { h, mark } = await seeded();
     storages.list = [movingOriginals(true)];

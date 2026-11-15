@@ -18,6 +18,9 @@ export interface GateResult {
   accepts: string | null;
 }
 
+/** Why prepare and the gate refuse a target whose readiness probe cannot tell a ready release from a broken one. */
+export const UNCHECKED_READINESS = "the target cannot check the readiness of the release and would count any running instance as ready; configure its readiness URL (readyUrl of the target) so verification can tell 200 from 503 and 403";
+
 function isReceipt(value: unknown): value is UpdateReceipt {
   if (typeof value !== "object" || value === null) return false;
   const versions: unknown = Reflect.get(value, "versions");
@@ -38,7 +41,8 @@ export async function findReceipt(ctx: UpdateContext, planHash: string, to: Read
 }
 
 /**
- * Lets a deploy through or refuses it with exit 1 before anything changes: a version change or a pending storage
+ * Lets a deploy through or refuses it before anything changes, with exit 2 for a target that cannot check readiness
+ * ({@link TargetPreflight.readinessChecked} false) and otherwise with exit 1: a version change or a pending storage
  * migration without a matching receipt, more than one instance (desired or running), an active deployment of the
  * platform, or any of the `earlier` deploy runs of this environment (oldest first) in an open state (`deploying`,
  * `down`, `verifying`, `halted`, `rolling-back`). The newest earlier run that got past its gate, when it is `verified`,
@@ -48,6 +52,7 @@ export async function checkGate(ctx: UpdateContext, plan: UpdatePlan, earlier: r
   const preflight = await ctx.target.preflight();
   if (preflight.instances > 1 || preflight.running > 1) throw new OpsError(`the app is scaled to ${Math.max(preflight.instances, preflight.running)} instances; an update needs exactly one`, 1, "gate");
   if (preflight.activeDeployment !== null) throw new OpsError(`a deployment of the platform is in progress (${preflight.activeDeployment}), such as a rolling push; wait until it ends`, 1, "gate");
+  if (preflight.readinessChecked === false) throw new OpsError(UNCHECKED_READINESS, 2, "gate");
   const open = earlier.find((run) => OPEN_STATES.has(run.state));
   if (open !== undefined) throw new OpsError(`update run ${open.runId} is ${open.state}; finish it first with ${nextCommand(open, "update deploy") ?? `kestrel update abort --env ${ctx.envName} --run ${open.runId}`}`, 1, "gate");
   const previous = earlier.filter((run) => run.state !== "untouched").at(-1) ?? null;
