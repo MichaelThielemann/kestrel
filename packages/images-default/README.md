@@ -438,7 +438,9 @@ is dropped and reported too. Variant keys did not change, so no blob is written:
 data, and the next sync renders whatever is missing.
 
 `storageMigrations` (default `check`) decides what setup does with such rows: `check` refuses to
-start, naming the migration, the count and how to run it; `apply` runs the migration at start-up.
+start, naming the migration, the count and how to run it; to read the rows it first adds this
+release's columns of `images_variants`, the `images_retired` table and the `kestrel_storage_versions`
+table to the database, so a refused start has written to it. `apply` runs the migration at start-up.
 Offline it runs with `kestrel upgrade migrate --db <file> --blobs-dir <dir>` or as part of
 `kestrel update`. A second run changes nothing; a run that stops halfway is finished by running it
 again.

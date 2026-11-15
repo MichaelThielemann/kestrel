@@ -488,7 +488,9 @@ finished by running it again, and a second run changes nothing. Afterwards the m
 `kestrel_storage_versions` says `6.0.0`.
 
 `storageMigrations` (default `check`) decides what setup does with data in an older storage shape:
-`check` refuses to start and names the migration and the command that runs it; `apply` runs the
+`check` refuses to start and names the migration and the command that runs it; to read the items it
+first adds this release's columns of `media_items` and the `kestrel_storage_versions` table to the
+database, so a refused start has written to it. `apply` runs the
 migrations that write no blobs and still refuses one that does, which for this module is every
 migration. Data whose version row names a newer release, or one older than the module converts, is
 refused either way.

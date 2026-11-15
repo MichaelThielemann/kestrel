@@ -138,8 +138,12 @@ after `start()` (see [delivery-restore-check](#delivery-restore-check)). With `r
 6.0.0 stores an original under `<prefix><id>/<name>`, where 5.x stored it under
 `<prefix><folder>/<filename>`, and gives every variant row a `slot`. `media-default` and
 `images-default` refuse to start on 5.x data and name the storage migration that converts it
-(`storageMigrations: "check"`, the default). The media conversion copies blobs, so it never runs at
-start-up. Run it once, offline, on a copy of the data:
+(`storageMigrations: "check"`, the default). The check is no dry run: before a module refuses, it
+adds its 6.0.0 columns and tables (the new columns of `media_items` for `media-default`, those of
+`images_variants` and the table `images_retired` for `images-default`) and the table
+`kestrel_storage_versions` to the database, which a 5.8 instance would not mind. A
+`replication-sqlite` set up before them has by then shipped and sealed a replica generation of that
+database. The media conversion copies blobs, so it never runs at start-up. Run it once, offline, on a copy of the data:
 
 ```
 kestrel upgrade migrate --db <copy of the database> --blobs-dir <copy of the blob store> --root <project>

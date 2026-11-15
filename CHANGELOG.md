@@ -500,7 +500,9 @@ Net changes since 5.8.2.
     `slot`, naming the storage migration and the command that runs it. `media-default:id-key-layout`
     converts the media offline (`kestrel upgrade migrate --db <file> --blobs-dir <dir>`, or
     `kestrel update`); `images-default:variant-slots` fills in the slots, also at start-up with
-    `storageMigrations: "apply"` (see Added).
+    `storageMigrations: "apply"` (see Added). The refusal is no dry run: before it, setup adds this
+    release's columns and tables of the module and the table `kestrel_storage_versions` to the
+    database.
   - New step `media.serve` answers a file at its public URL (`params.id`, `params.name`), cacheable
     for a year as `immutable`; any other name is 404. `media.download` answers with the same type as
     `media.serve` (see above), so an unlisted type is a download there too.
