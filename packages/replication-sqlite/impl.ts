@@ -10,6 +10,7 @@ import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import { logWarn, silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import { applySegment, FRAME_HEADER_SIZE, FrameScanner, frameSize, parseWalHeader, WAL_HEADER_SIZE, walHeaderChecksum, type WalChecksum, type WalHeader } from "./wal.ts";
+import { emptyWalHeader } from "./walHeader.ts";
 
 export interface Config {
   file: string;
@@ -647,9 +648,30 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     options.onAcknowledged?.();
   };
 
+  let firstSync: "ahead" | "after-snapshot" | "done" = "ahead";
+  const markFirstSync = async (snapshotTaken: boolean, frames: number): Promise<Result<void, BlobstoreError>> => {
+    const current = generation;
+    if (firstSync === "done" || current === null) return ok();
+    if (frames > 0) {
+      firstSync = "done";
+      return ok();
+    }
+    if (snapshotTaken) {
+      firstSync = "after-snapshot";
+      return ok();
+    }
+    const header = cursor === null ? emptyWalHeader(pageSize) : cursor.headerBytes.slice(0, WAL_HEADER_SIZE);
+    const put = await blobs.put(segmentKey(current, now()), header, { contentType: "application/octet-stream" });
+    if (isErr(put)) return put;
+    seq += 1;
+    firstSync = "done";
+    return ok();
+  };
+
   const runSync = async (run: { started: boolean }): Promise<Result<{ generation: string; shippedBytes: number; frames: number; checkpointed: boolean; pruned: number }, BlobstoreError>> => {
     run.started = true;
     const acknowledging = placedRestore !== null && handled;
+    const snapshotTaken = generation === null;
     if (generation === null) {
       const listing = await listReplica(blobs, config.prefix);
       if (isErr(listing)) return listing;
@@ -659,6 +681,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     const t = now();
     const shipped = await shipNewFrames();
     if (isErr(shipped)) return shipped;
+    const marked = await markFirstSync(snapshotTaken, shipped.value.frames);
+    if (isErr(marked)) return marked;
     let shippedBytes = shipped.value.bytes;
     let frames = shipped.value.frames;
     let checkpointed = false;

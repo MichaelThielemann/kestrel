@@ -128,7 +128,7 @@ version; it is not a contract. Every key belongs to one generation and lives und
 | Key | Written by | Content |
 |---|---|---|
 | `snapshot.db` | the snapshot that starts the generation | the database file with the committed WAL frames applied, in the live file's page layout |
-| `wal/<lineage>-<seq>-<time>.wal` | every sync and checkpoint | a WAL header and the committed frames after the previous segment; `lineage` (6 digits) counts the WAL resets seen by the process, `seq` (6 digits) numbers the generation's segments from `000000`, `time` is when the segment was shipped |
+| `wal/<lineage>-<seq>-<time>.wal` | every sync and checkpoint that ships frames, and the first sync after the first snapshot of a process when it ships none | a WAL header and the committed frames after the previous segment; `lineage` (6 digits) counts the WAL resets seen by the process, `seq` (6 digits) numbers the generation's segments from `000000`, `time` is when the segment was shipped. The segment a process writes without frames holds the WAL header alone, so a reader sees that its sync runs although nothing was committed since the snapshot; applying it changes nothing |
 | `sealed.json` | teardown, once | `{ "lineage", "lastFrame", "segments", "at" }` |
 | `origin.json` | whoever placed the generation; a copy, by a process that restored from it, in every generation it starts before writing `applied.json`, ahead of that generation's `snapshot.db` | `{ "kind": "restore" \| "upgrade", "source", "requestedAt", "nonce" }`; this module reads only `nonce` |
 | `applied.json` | the process that restored from a generation with `origin.json`, once the restore was acted on | `{ "generation", "nonce", "restoredAt" }` |

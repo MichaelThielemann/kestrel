@@ -1984,6 +1984,13 @@ Net changes since 5.8.2.
   later where its own clock is behind, so a generation placed by a process whose clock runs ahead never
   sorts after this process's data. The snapshot's restore point keeps the time it was taken, so a restore
   to a point in time still finds it.
+- `replication-sqlite`: the first sync after the first snapshot of a process writes a WAL segment even when
+  nothing was committed since that snapshot, one holding the WAL header alone (one write per start), so the
+  replica shows that the sync runs on an idle site. The segment counts towards `segments` of `sealed.json`
+  like any other; applying it changes nothing, so a restore, also through `kestrel-ops` or by an earlier
+  release, rebuilds the same database byte for byte. The verification of a `kestrel-ops` deploy, which needs a
+  segment or a later snapshot of the release's own generation, therefore passes for a release on which nothing
+  is written.
 - A `reassignTo` value in `authn.verifyUser`'s request body or event hand-over no longer requires a
   `name` alongside `id`, and also accepts a bare user id string.
 - `authn-single` and `authn-multi` share one behavioural test suite for the five steps both
