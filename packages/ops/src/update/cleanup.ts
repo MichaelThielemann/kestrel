@@ -9,6 +9,7 @@ import { stableList } from "../store.ts";
 import { listUpdateRuns, readUpdateRun, reportOf } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
 import { UPDATE_EXIT, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
+import { fixedText, literal } from "../redact.ts";
 
 /** Options of {@link cleanup}. */
 export interface CleanupOptions {
@@ -69,7 +70,7 @@ async function pinnedElsewhere(ctx: UpdateContext, runId: string): Promise<strin
   for (const entry of await listUpdateRuns(ctx, ctx.envName)) {
     if (entry.command !== "update deploy" || entry.runId === runId) continue;
     const other = await readUpdateRun(ctx, entry.runId);
-    if (other.state === "accepted" && (await holdsUpdatePin(ctx, other))) held.push(`kestrel update cleanup --env ${ctx.envName} --run ${other.runId}`);
+    if (other.state === "accepted" && (await holdsUpdatePin(ctx, other))) held.push(fixedText`kestrel update cleanup --env ${literal(ctx.envName)} --run ${literal(other.runId)}`);
   }
   return held.length === 0 ? "" : `; accepted runs that still pin their cutover backup: ${held.join(", ")}`;
 }
@@ -85,11 +86,11 @@ async function pinnedElsewhere(ctx: UpdateContext, runId: string): Promise<strin
  */
 export async function cleanup(ctx: UpdateContext, run: UpdateRun, options: CleanupOptions): Promise<UpdateOutcome> {
   const accept = run.records.filter((r) => r.step === "accept" && r.state === "done").at(-1);
-  if (run.state !== "accepted" || accept === undefined) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is ${run.state}; cleanup needs an accepted run${await pinnedElsewhere(ctx, run.runId)}`, run.state);
+  if (run.state !== "accepted" || accept === undefined) return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`run ${literal(run.runId)} is ${literal(run.state)}; cleanup needs an accepted run${await pinnedElsewhere(ctx, run.runId)}`, run.state);
   const earliest = accept.at + ctx.update.cleanupAfterDays * DAY_MS;
-  if (ctx.clock() < earliest) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} was accepted ${new Date(accept.at).toISOString()}; cleanup runs ${ctx.update.cleanupAfterDays} day(s) after that, from ${new Date(earliest).toISOString()}`, run.state);
+  if (ctx.clock() < earliest) return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`run ${literal(run.runId)} was accepted ${new Date(accept.at).toISOString()}; cleanup runs ${ctx.update.cleanupAfterDays} day(s) after that, from ${new Date(earliest).toISOString()}`, run.state);
   const cutover = run.cutoverBackup;
-  if (cutover === null || (await readManifest(ctx, cutover)) === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the cutover backup ${cutover ?? "(none)"} of run ${run.runId} does not exist or is incomplete; cleanup deletes nothing it cannot bring back`, run.state);
+  if (cutover === null || (await readManifest(ctx, cutover)) === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`the cutover backup ${literal(cutover ?? "(none)")} of run ${literal(run.runId)} does not exist or is incomplete; cleanup deletes nothing it cannot bring back`, run.state);
   let candidates: BlobEntry[];
   try {
     candidates = await orphans(ctx, cutover);
@@ -97,7 +98,7 @@ export async function cleanup(ctx: UpdateContext, run: UpdateRun, options: Clean
     return outcome(ctx, run.runId, UPDATE_EXIT.refused, `cleanup cannot tell which originals are unreferenced: ${messageOf(error)}`, run.state);
   }
   const bytes = candidates.reduce((n, entry) => n + entry.size, 0);
-  const summary = `${candidates.length} original(s), ${(bytes / 1024 / 1024).toFixed(1)} MiB, that no row references and the cutover backup ${cutover} holds`;
+  const summary = fixedText`${candidates.length} original(s), ${(bytes / 1024 / 1024).toFixed(1)} MiB, that no row references and the cutover backup ${literal(cutover)} holds`;
   ctx.out.info(`cleanup ${options.dryRun ? "would delete" : "deletes"} ${summary}`);
   for (const entry of candidates.slice(0, 20)) ctx.out.info(`  ${entry.key}`);
   if (options.dryRun) return outcome(ctx, run.runId, UPDATE_EXIT.done, `dry run: ${summary}`, run.state);
@@ -113,5 +114,5 @@ export async function cleanup(ctx: UpdateContext, run: UpdateRun, options: Clean
   await releaseUpdatePin(ctx, cutover, run.runId);
   const bits = await removeSavedDroplets(ctx, run.runId);
   await ctx.journal.record("unpin", "done", { backupId: cutover, droplets: bits.length });
-  return outcome(ctx, run.runId, UPDATE_EXIT.done, `cleaned: deleted ${candidates.length} original(s); the cutover backup ${cutover} is no longer pinned`, "cleaned");
+  return outcome(ctx, run.runId, UPDATE_EXIT.done, fixedText`cleaned: deleted ${candidates.length} original(s); the cutover backup ${literal(cutover)} is no longer pinned`, "cleaned");
 }

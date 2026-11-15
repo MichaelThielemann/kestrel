@@ -16,7 +16,7 @@ import { acquireLock, breakLocks, type Lock } from "./lock.ts";
 import { createOutput, type Output } from "./output.ts";
 import { packageDir, packageEntry } from "./packages.ts";
 import type { Prompt } from "./questions.ts";
-import { Redactor } from "./redact.ts";
+import { fixedText, Redactor } from "./redact.ts";
 import type { PollOptions } from "./replica.ts";
 import { restoreBackup, restoreToLocal } from "./restore.ts";
 import { s3Store } from "./s3Store.ts";
@@ -472,7 +472,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
   } catch (error) {
     const opsError = error instanceof OpsError ? error : null;
     const message = messageOf(error);
-    out.error(opsError?.element !== undefined && !message.includes(opsError.element) ? `${opsError.element}: ${message}` : message);
+    out.error(opsError?.element !== undefined && !message.includes(opsError.element) ? fixedText`${opsError.element}: ${message}` : message);
     if (ctx !== null && writes) await ctx.journal.finish(false, { message }).catch(() => undefined);
     emit("error", { ok: false, message, element: opsError?.element ?? null, ...(opsError?.backupId === undefined ? {} : { backupId: opsError.backupId }) });
     return opsError?.exitCode ?? 1;

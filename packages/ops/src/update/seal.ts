@@ -2,6 +2,7 @@ import { readSeal } from "../backup.ts";
 import { listGenerations, SEALING_MAJOR, type SealReport } from "../replica.ts";
 import { reportedVersions, runtimeOf } from "./plan.ts";
 import type { UpdateContext } from "./types.ts";
+import { fixedText } from "../redact.ts";
 
 /**
  * Waits after a stop until the newest replica generation's `sealed.json` shows in a listing, at most
@@ -19,7 +20,7 @@ export async function waitForSeal(ctx: UpdateContext, stoppedAt: number, running
   const major = runtime === null ? convertsFrom : Number(/^(\d+)\./.exec(runtime)?.[1] ?? Number.NaN);
   const before = major !== null && !Number.isNaN(major) && major < SEALING_MAJOR;
   if (!before) {
-    if (runtime === null) ctx.out.warn(`the running replication runtime version is unknown: the run names none, and the target reports none outside the release's own installation; the stop waits up to ${ctx.update.sealTimeoutSeconds} s for a seal, which a runtime before ${SEALING_MAJOR} never writes; to name it, point the target's dir at an installation of the running release before update prepare, or lower update.sealTimeoutSeconds for this one deploy`);
+    if (runtime === null) ctx.out.warn(fixedText`the running replication runtime version is unknown: the run names none, and the target reports none outside the release's own installation; the stop waits up to ${ctx.update.sealTimeoutSeconds} s for a seal, which a runtime before ${SEALING_MAJOR} never writes; to name it, point the target's dir at an installation of the running release before update prepare, or lower update.sealTimeoutSeconds for this one deploy`);
     const sleep = ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
     const deadline = stoppedAt + ctx.update.sealTimeoutSeconds * 1000;
     const delay = ctx.poll.delayMs ?? 1000;

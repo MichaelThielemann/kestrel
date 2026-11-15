@@ -15,6 +15,7 @@ import { computePlan, openDatabase, pendingStorage, planHash, replicaCopy } from
 import { releaseStorages } from "./storages.ts";
 import { UPDATE_EXIT, type Rehearsal, type RehearsalCheck, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateReceipt } from "./types.ts";
 import { outcomeOf } from "./verify.ts";
+import { fixedText, literal } from "../redact.ts";
 
 /** Options of {@link prepare}. */
 export interface PrepareOptions {
@@ -240,7 +241,7 @@ export async function prepare(ctx: UpdateContext, options: PrepareOptions): Prom
     const plan = await computePlan(ctx, ctx.workspace.path("plan.db"));
     const hash = planHash(plan);
     await record(ctx, "plan", "done", { planHash: hash, storage: plan.storage.map((m) => m.id), content: plan.content, questions: plan.questions });
-    ctx.out.info(`plan ${hash.slice(0, 12)}: ${plan.storage.length} storage migration(s), ${plan.content.length} content migration(s)`);
+    ctx.out.info(fixedText`plan ${literal(hash.slice(0, 12))}: ${plan.storage.length} storage migration(s), ${plan.content.length} content migration(s)`);
 
     step = "rehearsal";
     await record(ctx, "rehearsal", "started", { fullMedia: options.fullMedia });
@@ -258,7 +259,7 @@ export async function prepare(ctx: UpdateContext, options: PrepareOptions): Prom
     if ((await ctx.backups.head(ctx.location + key)) !== null) return await failed(ctx, "receipt", `refusing to overwrite ${key}`);
     await ctx.backups.put(ctx.location + key, new TextEncoder().encode(ctx.redactor.document(receipt, 2) + "\n"), { contentType: "application/json" });
     await record(ctx, "receipt", "done", { planHash: hash, key });
-    const outcome = await outcomeOf(ctx, UPDATE_EXIT.done, `receipt written (versions and plan ${hash.slice(0, 12)}). Next: commit the update and run the deploy pipeline`);
+    const outcome = await outcomeOf(ctx, UPDATE_EXIT.done, fixedText`receipt written (versions and plan ${literal(hash.slice(0, 12))}). Next: commit the update and run the deploy pipeline`);
     return { receipt, outcome };
   } catch (error) {
     if (error instanceof OpsError && error.element === step) throw error;

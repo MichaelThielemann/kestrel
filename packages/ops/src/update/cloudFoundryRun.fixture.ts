@@ -90,6 +90,8 @@ export interface CommandOptions {
   target?: Record<string, unknown>;
   /** Credentials of the tool, read from environment variables of the command, so its redactor knows them. */
   credentials?: { accessKeyId: string; secretAccessKey: string };
+  /** False runs the command without `--json`, so stdout holds the lines an operator reads. */
+  json?: boolean;
 }
 
 /** A store that throws on every call once {@link KilledStore.kill} ran, as the store looks from a process that was killed. */
@@ -315,7 +317,7 @@ export class CloudFoundryRun {
     writeFileSync(join(this.root, "kestrel.environments.json"), JSON.stringify({ environments: { prod: environment } }, null, 2));
   }
 
-  /** Runs `kestrel update <args> --env prod --json --yes` in process, as a new process on the operator's or the pipeline's machine would. */
+  /** Runs `kestrel update <args> --env prod --json --yes` (without `--json` when {@link CommandOptions.json} is false) in process, as a new process on the operator's or the pipeline's machine would. */
   async update(args: string[], options: CommandOptions = {}): Promise<CommandRun> {
     const version = options.release ?? this.newest;
     const release = this.releases.get(`release ${version}`);
@@ -326,7 +328,7 @@ export class CloudFoundryRun {
     const store = options.store?.(this.store) ?? this.store;
     let stdout = "";
     let stderr = "";
-    const code = await runUpdate([...args, "--env", "prod", "--json", "--yes", "--answers", answers], {
+    const code = await runUpdate([...args, "--env", "prod", ...(options.json === false ? [] : ["--json"]), "--yes", "--answers", answers], {
       cwd: this.root,
       env: options.credentials === undefined ? {} : { RUN_ACCESS_KEY: options.credentials.accessKeyId, RUN_SECRET_KEY: options.credentials.secretAccessKey },
       stdout: (text) => {

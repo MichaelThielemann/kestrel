@@ -5,6 +5,7 @@ import { guardRollback } from "./rollback.ts";
 import { stoppedAfterRollback } from "./status.ts";
 import { retireStep, verifyCommand } from "./verify.ts";
 import { UPDATE_EXIT, type RollbackReason, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRecord, type UpdateRun, type UpdateRunState } from "./types.ts";
+import { fixedText, literal } from "../redact.ts";
 
 async function outcome(ctx: UpdateContext, runId: string, exitCode: UpdateExitCode, message: string, fallback: UpdateRunState): Promise<UpdateOutcome> {
   const run = await readUpdateRun(ctx, runId).catch(() => null);
@@ -27,10 +28,10 @@ async function rollBackAgain(ctx: UpdateContext, run: UpdateRun, reason: Rollbac
   try {
     const result = await ctx.steps.rollback(ctx, run, reason);
     if (reason.kind === "abort") await ctx.journal.record("abort", "done", { phase: "abort", promoted: true, ended: result.ended });
-    if (result.ended === "stopped") return outcome(ctx, run.runId, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, `the rollback of run ${run.runId} ran again`, run.versions?.from ?? null), "rolled-back");
-    return outcome(ctx, run.runId, reason.kind === "automatic" ? UPDATE_EXIT.rolledBack : UPDATE_EXIT.done, `rolled back: the previous release runs on generation ${result.generation}`, "rolled-back");
+    if (result.ended === "stopped") return outcome(ctx, run.runId, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, fixedText`the rollback of run ${literal(run.runId)} ran again`, run.versions?.from ?? null), "rolled-back");
+    return outcome(ctx, run.runId, reason.kind === "automatic" ? UPDATE_EXIT.rolledBack : UPDATE_EXIT.done, fixedText`rolled back: the previous release runs on generation ${literal(result.generation)}`, "rolled-back");
   } catch (error) {
-    return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the rollback did not finish: ${messageOf(error)}; run update resume again`, "rolling-back");
+    return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`the rollback did not finish: ${messageOf(error)}; run update resume again`, "rolling-back");
   }
 }
 
@@ -44,7 +45,7 @@ function failedAfterStop(run: UpdateRun): string | null {
 async function guardAgain(ctx: UpdateContext, run: UpdateRun): Promise<string | null> {
   if (run.cutoverBackup === null) return null;
   const manifest = await readManifest(ctx, run.cutoverBackup);
-  if (manifest === null) return `the cutover backup ${run.cutoverBackup} does not exist or is incomplete`;
+  if (manifest === null) return fixedText`the cutover backup ${literal(run.cutoverBackup)} does not exist or is incomplete`;
   const guarded = await guardRollback(ctx, run, manifest, "ask");
   return guarded.ok ? null : guarded.message;
 }
@@ -67,7 +68,7 @@ export async function resume(ctx: UpdateContext, run: UpdateRun): Promise<Update
   const accepted = since.length < run.records.length;
   const failedStep = failedAfterStop(run);
   const action = retirePending(run) ? "retire" : run.state === "rolling-back" ? (begun !== undefined ? "rollback" : verifyFailed && !accepted ? "rollback-failed-verify" : null) : run.state === "halted" ? "verify" : failedStep !== null ? "rollback-failed-step" : run.state === "deploying" || run.state === "down" || run.state === "verifying" ? "deploy" : null;
-  if (action === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is ${run.state}; there is nothing to resume${run.state === "rolling-back" ? " (no rollback began; update rollback starts one)" : ""}`, run.state);
+  if (action === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`run ${literal(run.runId)} is ${literal(run.state)}; there is nothing to resume${run.state === "rolling-back" ? literal(" (no rollback began; update rollback starts one)") : literal("")}`, run.state);
   await ctx.journal.record("resume", "started", { phase: "resume", state: run.state, lastDone: run.lastDone });
   switch (action) {
     case "rollback":
@@ -75,18 +76,18 @@ export async function resume(ctx: UpdateContext, run: UpdateRun): Promise<Update
     case "rollback-failed-verify":
     case "rollback-failed-step": {
       const refused = await guardAgain(ctx, run);
-      if (refused !== null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `not rolled back: ${refused}; run update resume --env ${ctx.envName} --run ${run.runId} again with the answer`, run.state);
+      if (refused !== null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`not rolled back: ${refused}; run update resume --env ${literal(ctx.envName)} --run ${literal(run.runId)} again with the answer`, run.state);
       return rollBackAgain(ctx, run, { kind: "automatic", failure: failedStep ?? "verification failed" });
     }
     case "verify":
-      if (run.promoted === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is halted without a recorded promotion; run update rollback or update abort`, run.state);
+      if (run.promoted === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`run ${literal(run.runId)} is halted without a recorded promotion; run update rollback or update abort`, run.state);
       return verifyCommand(ctx, run);
     case "deploy":
       return ctx.steps.continueDeploy(ctx, run);
     case "retire": {
       const retired = await retireStep(ctx, run, true);
-      if (!retired.ok) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `retiring the previous releases failed again: ${retired.error}; their droplets can still be started by the platform; run update resume once the target answers`, run.state);
-      return outcome(ctx, run.runId, UPDATE_EXIT.done, `the previous releases of run ${run.runId} are retired`, run.state);
+      if (!retired.ok) return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`retiring the previous releases failed again: ${retired.error}; their droplets can still be started by the platform; run update resume once the target answers`, run.state);
+      return outcome(ctx, run.runId, UPDATE_EXIT.done, fixedText`the previous releases of run ${literal(run.runId)} are retired`, run.state);
     }
   }
 }

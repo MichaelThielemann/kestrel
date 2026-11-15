@@ -1,4 +1,5 @@
 import type { ObjectStore } from "./store.ts";
+import { fixedText, literal } from "./redact.ts";
 
 /** Where a run listens for SIGINT and SIGTERM; `process` unless a test hands in another emitter. */
 export interface SignalSource {
@@ -17,7 +18,7 @@ export class Interrupted extends Error {
     readonly signal: "SIGINT" | "SIGTERM",
     detail?: string,
   ) {
-    super(detail === undefined ? `interrupted by ${signal}` : `interrupted by ${signal}; ${detail}`);
+    super(detail === undefined ? fixedText`interrupted by ${literal(signal)}` : fixedText`interrupted by ${literal(signal)}; ${detail}`);
   }
 }
 

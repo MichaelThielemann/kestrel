@@ -6,7 +6,7 @@ import { OpsError } from "../errors.ts";
 import { Interrupted } from "../interrupt.ts";
 import { keys, unstamp } from "../layout.ts";
 import { recordPlacement } from "../placements.ts";
-import type { Redactor } from "../redact.ts";
+import { fixedText, literal, type Redactor } from "../redact.ts";
 import { confirm } from "../questions.ts";
 import { promote, stableGenerations } from "../replica.ts";
 import { appClock, type ServerClock } from "../serverTime.ts";
@@ -67,7 +67,7 @@ async function acceptImplicitly(ctx: UpdateContext, runId: string): Promise<void
   const earlier = await readUpdateRun(ctx, runId);
   await continueJournal(ctx, earlier).record("accept", "done", { phase: "accept", implicit: true, by: ctx.run.id });
   const pinned = earlier.records.find((r) => r.step === "cutover-backup" && r.state === "done")?.data.pinned !== false;
-  ctx.out.info(`update run ${runId} is accepted by this deploy${pinned && earlier.cutoverBackup !== null ? `; its cutover backup ${earlier.cutoverBackup} stays pinned until kestrel update cleanup --env ${ctx.envName} --run ${runId}` : ""}`);
+  ctx.out.info(fixedText`update run ${literal(runId)} is accepted by this deploy${pinned && earlier.cutoverBackup !== null ? fixedText`; its cutover backup ${literal(earlier.cutoverBackup)} stays pinned until kestrel update cleanup --env ${literal(ctx.envName)} --run ${literal(runId)}` : literal("")}`);
 }
 
 function fingerprintSecrets(redactor: Redactor, recorded: RecordedConfiguration): RecordedConfiguration {
@@ -94,7 +94,7 @@ function withReceiptVersions(plan: UpdatePlan, receipt: UpdateReceipt | null): U
 
 function stopQuestion(ctx: UpdateContext, plan: UpdatePlan): string {
   const migrations = plan.storage.length + plan.content.length;
-  return `stop ${ctx.envName} now for the cutover backup${migrations > 0 ? `, ${migrations} migration(s)` : ""} and the start of the new release; the app stays down until the new release is verified`;
+  return fixedText`stop ${literal(ctx.envName)} now for the cutover backup${migrations > 0 ? fixedText`, ${migrations} migration(s)` : literal("")} and the start of the new release; the app stays down until the new release is verified`;
 }
 
 /**
@@ -126,7 +126,7 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
     await record(ctx, "stage", "started");
     const staged = await ctx.target.stage({ dir: ctx.release.dir });
     await record(ctx, "stage", "done", { droplet: staged.droplet, package: staged.package });
-    ctx.out.info(`staged droplet ${staged.droplet} while the app keeps running`);
+    ctx.out.info(fixedText`staged droplet ${literal(staged.droplet)} while the app keeps running`);
 
     step = "configuration";
     const droplet = await ctx.target.currentDroplet();
@@ -147,11 +147,11 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
     const { stoppedAt } = await stopTarget(ctx);
     flow = { plan, from: plan.versions.from, pin: pinsCutover(plan), staged: staged.droplet, stoppedAt, cutoverBackup: null, promoted: null, startedAt: null, startedBefore: false };
   } catch (error) {
-    if (error instanceof Interrupted) throw stopBegun ? new Interrupted(error.signal, `the stop began, so the app may be stopped; do not start it by hand; run update abort --env ${ctx.envName} --run ${ctx.run.id}`) : error;
+    if (error instanceof Interrupted) throw stopBegun ? new Interrupted(error.signal, fixedText`the stop began, so the app may be stopped; do not start it by hand; run update abort --env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}`) : error;
     if (stopBegun) return failedStop(ctx, error);
     await record(ctx, step, "failed", { error: messageOf(error) }).catch(() => undefined);
     const exitCode = error instanceof OpsError && error.exitCode === 2 ? UPDATE_EXIT.usage : UPDATE_EXIT.refused;
-    return outcomeOf(ctx, exitCode, `the deploy stopped at ${step} before the app was stopped; production is unchanged: ${messageOf(error)}`);
+    return outcomeOf(ctx, exitCode, fixedText`the deploy stopped at ${literal(step)} before the app was stopped; production is unchanged: ${messageOf(error)}`);
   }
   return afterStop(ctx, flow, "seal");
 }
@@ -161,13 +161,13 @@ async function failedStop(ctx: UpdateContext, error: unknown): Promise<UpdateOut
   const runs = now?.state === "started";
   await record(ctx, "stop", "failed", { error: messageOf(error), appStopped: !runs }).catch(() => undefined);
   if (runs) return outcomeOf(ctx, UPDATE_EXIT.refused, `the deploy stopped at stop: ${messageOf(error)}; the previous release runs, nothing else changed`);
-  return outcomeOf(ctx, UPDATE_EXIT.refused, `the deploy failed at stop: ${messageOf(error)}; the app ${now === null ? "may be stopped (its state cannot be read)" : "is stopped"} and did not start again; do not start it by hand while the run is open; run update abort --env ${ctx.envName} --run ${ctx.run.id}`);
+  return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`the deploy failed at stop: ${messageOf(error)}; the app ${now === null ? literal("may be stopped (its state cannot be read)") : literal("is stopped")} and did not start again; do not start it by hand while the run is open; run update abort --env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}`);
 }
 
 function interruptedAfterStop(ctx: UpdateContext, step: string): string {
-  const scope = `--env ${ctx.envName} --run ${ctx.run.id}`;
+  const scope = fixedText`--env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}`;
   const state = step === "verify" ? "the new release runs and is not verified" : step === "start" ? "the new release may be starting and is not verified" : "the app is stopped; do not start it by hand";
-  return `${state}; run update resume ${scope} to continue the run, or update abort ${scope} to end it`;
+  return fixedText`${state}; run update resume ${scope} to continue the run, or update abort ${scope} to end it`;
 }
 
 function known(run: UpdateRun, flow: Pick<Flow, "staged" | "cutoverBackup" | "promoted">): UpdateRun {
@@ -196,7 +196,7 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
       const backup = await createBackup(running, { kind: "cutover", mode: { kind: "stopped", seal, stoppedAt: flow.stoppedAt }, versions: flow.from ?? {}, ...(major === null ? {} : { major }), ...(flow.pin ? { pinFor: UPDATE_PIN_PREFIX + ctx.run.id } : {}) });
       flow.cutoverBackup = backup.id;
       await record(ctx, "cutover-backup", "done", { backupId: backup.id, pinned: flow.pin });
-      ctx.out.info(`cutover backup ${backup.id} written and verified${flow.pin ? ", pinned until update cleanup" : ""}`);
+      ctx.out.info(fixedText`cutover backup ${literal(backup.id)} written and verified${flow.pin ? literal(", pinned until update cleanup") : literal("")}`);
     }
     if (at("migrate")) {
       step = "migrate";
@@ -245,19 +245,19 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     result = await ctx.steps.verify(ctx, { promoted: { generation: promoted.generation, nonce: promoted.nonce }, startedAt: flow.startedAt ?? ctx.clock() });
   } catch (error) {
     if (error instanceof Interrupted) throw new Interrupted(error.signal, interruptedAfterStop(ctx, step));
-    const failure = `${step}: ${messageOf(error)}`;
+    const failure = fixedText`${literal(step)}: ${messageOf(error)}`;
     await record(ctx, step, "failed", { error: messageOf(error) }).catch(() => undefined);
     if (step === "cutover-backup" && flow.cutoverBackup === null) await readUpdateRun(ctx, ctx.run.id).then((run) => releaseUnfinishedBackups(ctx, run)).catch(() => undefined);
     if (flow.startedBefore) return concludeVerify(ctx, "deploy", failedStart(failure), (run) => known(run, flow), true);
-    ctx.out.error(`the deploy failed after the stop at ${failure}; rolling back`);
+    ctx.out.error(fixedText`the deploy failed after the stop at ${failure}; rolling back`);
     let ended: RollbackResult["ended"];
     try {
       ended = (await ctx.steps.rollback(ctx, known(await readUpdateRun(ctx, ctx.run.id), flow), { kind: "automatic", failure })).ended;
     } catch (cause) {
-      return outcomeOf(ctx, UPDATE_EXIT.refused, `the deploy failed at ${failure}, and the automatic rollback did not finish: ${messageOf(cause)}; the app stays stopped; do not start it by hand; run update resume --env ${ctx.envName} --run ${ctx.run.id}, which runs the rollback again`);
+      return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`the deploy failed at ${failure}, and the automatic rollback did not finish: ${messageOf(cause)}; the app stays stopped; do not start it by hand; run update resume --env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}, which runs the rollback again`);
     }
-    if (ended === "stopped") return outcomeOf(ctx, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, `the deploy failed at ${failure}`, flow.from));
-    return outcomeOf(ctx, UPDATE_EXIT.rolledBack, flow.cutoverBackup === null ? `the deploy failed at ${failure} before its cutover backup; nothing was promoted, and the previous release runs again on the unchanged replica` : `the deploy failed at ${failure}; rolled back to the cutover state`);
+    if (ended === "stopped") return outcomeOf(ctx, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, fixedText`the deploy failed at ${failure}`, flow.from));
+    return outcomeOf(ctx, UPDATE_EXIT.rolledBack, flow.cutoverBackup === null ? fixedText`the deploy failed at ${failure} before its cutover backup; nothing was promoted, and the previous release runs again on the unchanged replica` : fixedText`the deploy failed at ${failure}; rolled back to the cutover state`);
   }
   return concludeVerify(ctx, "deploy", result, (run) => known(run, flow), flow.startedBefore);
 }
@@ -307,21 +307,21 @@ const startedStep = (run: UpdateRun, step: string): boolean => run.records.some(
  * backup.
  */
 export async function continueDeploy(ctx: UpdateContext, run: UpdateRun): Promise<UpdateOutcome> {
-  if (run.state !== "down" && run.state !== "verifying") return outcomeOf(ctx, UPDATE_EXIT.refused, `update run ${run.runId} is ${run.state}; only a deploy that stopped the app and has not concluded can be continued${run.state === "deploying" ? `; ${startedStep(run, "stop") ? "its stop began, so the app may be stopped" : "nothing changed yet"}: run update abort --env ${ctx.envName} --run ${run.runId} and deploy again` : ""}`);
+  if (run.state !== "down" && run.state !== "verifying") return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`update run ${literal(run.runId)} is ${literal(run.state)}; only a deploy that stopped the app and has not concluded can be continued${run.state === "deploying" ? fixedText`; ${startedStep(run, "stop") ? literal("its stop began, so the app may be stopped") : literal("nothing changed yet")}: run update abort --env ${literal(ctx.envName)} --run ${literal(run.runId)} and deploy again` : literal("")}`);
   const stop = run.records.find((r) => r.phase === "deploy" && r.step === "stop" && r.state === "done");
   const stoppedAt = stop?.data.stoppedAt;
-  if (run.stagedDroplet === null || typeof stoppedAt !== "number") return outcomeOf(ctx, UPDATE_EXIT.refused, `update run ${run.runId} records no staged droplet or no completed stop; run update ${run.cutoverBackup === null ? "abort" : "rollback"} --env ${ctx.envName} --run ${run.runId}`);
+  if (run.stagedDroplet === null || typeof stoppedAt !== "number") return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`update run ${literal(run.runId)} records no staged droplet or no completed stop; run update ${run.cutoverBackup === null ? literal("abort") : literal("rollback")} --env ${literal(ctx.envName)} --run ${literal(run.runId)}`);
   const startRecord = [...run.records].reverse().find((r) => r.phase === "deploy" && r.step === "start");
   const recordedStart = startRecord?.data.startedAt;
   const gate = run.records.find((r) => r.phase === "deploy" && r.step === "gate" && r.state === "done");
   const mismatch = releaseMismatch(ctx, run, gate) ?? (doneStep(run, "swap") ? null : await configurationMismatch(ctx, gate));
-  if (mismatch !== null) return outcomeOf(ctx, UPDATE_EXIT.usage, `refusing to continue update run ${run.runId}: ${mismatch}; continue it with the bundle or checkout that started it (node .kestrel-ops/run.mjs update resume --env ${ctx.envName} --run ${run.runId}), or roll it back`);
+  if (mismatch !== null) return outcomeOf(ctx, UPDATE_EXIT.usage, fixedText`refusing to continue update run ${literal(run.runId)}: ${mismatch}; continue it with the bundle or checkout that started it (node .kestrel-ops/run.mjs update resume --env ${literal(ctx.envName)} --run ${literal(run.runId)}), or roll it back`);
   const pin = gate?.data.pin;
   const flow: Flow = { plan: null, from: run.versions?.from ?? null, pin: pin !== false, staged: run.stagedDroplet, stoppedAt, cutoverBackup: run.cutoverBackup, promoted: run.promoted === null ? null : { ...run.promoted, at: unstamp(run.promoted.generation) }, startedAt: typeof recordedStart === "number" ? recordedStart : null, startedBefore: startedStep(run, "start") };
   if (flow.promoted !== null) {
     if (!startedStep(run, "start")) {
       const newest = (await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).at(-1);
-      if (newest?.name !== flow.promoted.generation) return outcomeOf(ctx, UPDATE_EXIT.refused, `the promoted generation ${flow.promoted.generation} is not the newest any more (${newest?.name ?? "none"} is); starting the release now would restore other data; run update rollback --env ${ctx.envName} --run ${run.runId}`);
+      if (newest?.name !== flow.promoted.generation) return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`the promoted generation ${literal(flow.promoted.generation)} is not the newest any more (${newest?.name ?? literal("none")} is); starting the release now would restore other data; run update rollback --env ${literal(ctx.envName)} --run ${literal(run.runId)}`);
       return afterStop(ctx, flow, doneStep(run, "swap") ? "start" : "swap");
     }
     return afterStop(ctx, flow, doneStep(run, "start") ? "verify" : "start");
@@ -332,7 +332,7 @@ export async function continueDeploy(ctx: UpdateContext, run: UpdateRun): Promis
     if (expected !== null) {
       const plan = await computePlan(ctx, await cutoverDatabase(ctx, flow.cutoverBackup, ctx.workspace.path("cutover-plan.db")));
       const hash = planHash(plan);
-      if (hash !== expected) return outcomeOf(ctx, UPDATE_EXIT.refused, `the plan of the cutover database (${hash.slice(0, 12)}) differs from the ${run.receipt === null ? "plan" : "receipt"} the gate ${run.receipt === null ? "recorded" : "matched"} (${expected.slice(0, 12)}); run update rollback --env ${ctx.envName} --run ${run.runId}`);
+      if (hash !== expected) return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`the plan of the cutover database (${hash.slice(0, 12)}) differs from the ${run.receipt === null ? literal("plan") : literal("receipt")} the gate ${run.receipt === null ? literal("recorded") : literal("matched")} (${expected.slice(0, 12)}); run update rollback --env ${literal(ctx.envName)} --run ${literal(run.runId)}`);
       flow.plan = plan;
     }
     return afterStop(ctx, flow, "migrate");

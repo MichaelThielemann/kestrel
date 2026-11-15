@@ -6,7 +6,7 @@ import { OpsError } from "../errors.ts";
 import { hex } from "../layout.ts";
 import { acquireLock, breakLocks, type Lock } from "../lock.ts";
 import { createOutput } from "../output.ts";
-import { Redactor } from "../redact.ts";
+import { fixedText, literal, Redactor } from "../redact.ts";
 import { flagValue, openContext, parseArgs, selectEnvironment, type OpenedContext, type ParsedArgs, type RunOptions } from "../run.ts";
 import { abort } from "./abort.ts";
 import { accept } from "./accept.ts";
@@ -107,7 +107,7 @@ function formatMs(ms: number): string {
 
 async function openRun(ctx: UpdateContext, requested: string | null): Promise<UpdateRun> {
   const run = requested === null ? await latestDeployRun(ctx, ctx.envName) : await readUpdateRun(ctx, requested);
-  if (run === null) throw new OpsError(`environment ${ctx.envName} has no update run to continue; a deploy starts one`, 1, "--run");
+  if (run === null) throw new OpsError(fixedText`environment ${literal(ctx.envName)} has no update run to continue; a deploy starts one`, 1, "--run");
   if (run.env !== ctx.envName) throw usage(`update run ${run.runId} belongs to environment ${run.env}, not ${ctx.envName}`, "--run");
   return run;
 }
@@ -164,7 +164,7 @@ export async function runUpdate(argv: readonly string[], options: RunOptions = {
     opened = await openContext(options, { envName, environment, root, runId, writing: sub !== "status", answersFile: flagValue(parsed, "--answers"), yes: parsed.flags.has("--yes"), keep: parsed.flags.has("--keep"), project, redactor, out });
     const base = opened.ctx;
     const target = base.target;
-    if (!isUpdateTarget(target)) throw new OpsError(`the target adapter ${environment.target.adapter} of ${envName} cannot run an update: it does not stage, swap and verify a release`, 2, "target");
+    if (!isUpdateTarget(target)) throw new OpsError(fixedText`the target adapter ${environment.target.adapter} of ${literal(envName)} cannot run an update: it does not stage, swap and verify a release`, 2, "target");
     const update = updateSettings(environment);
     ctx = {
       ...base,
@@ -215,15 +215,15 @@ export async function runUpdate(argv: readonly string[], options: RunOptions = {
         outcome = await commands[sub](ctx, continued ?? (await openRun(ctx, null)));
     }
     if (outcome.message !== "") out.info(outcome.message);
-    if (outcome.report.downtimeMs !== null && outcome.report.downtimeMs > 0) out.info(`downtime ${formatMs(outcome.report.downtimeMs)}`);
+    if (outcome.report.downtimeMs !== null && outcome.report.downtimeMs > 0) out.info(fixedText`downtime ${literal(formatMs(outcome.report.downtimeMs))}`);
     const done = outcome.exitCode === 0 || outcome.exitCode === 3;
-    await ctx.journal.finish(done, { exitCode: outcome.exitCode, state: outcome.state }).catch((cause: unknown) => out.warn(`the end entry of the journal could not be written: ${messageOf(cause)}`));
+    await ctx.journal.finish(done, { exitCode: outcome.exitCode, state: outcome.state }).catch((cause: unknown) => out.warn(fixedText`the end entry of the journal could not be written: ${messageOf(cause)}`));
     emit(schema, { ok: outcome.exitCode === 0, ...outcome, ...(receipt === null ? {} : { receipt }) });
     return outcome.exitCode;
   } catch (error) {
     const opsError = error instanceof OpsError ? error : null;
     const message = messageOf(error);
-    out.error(opsError?.element !== undefined && !message.includes(opsError.element) ? `${opsError.element}: ${message}` : message);
+    out.error(opsError?.element !== undefined && !message.includes(opsError.element) ? fixedText`${opsError.element}: ${message}` : message);
     if (ctx !== null && journaled) await ctx.journal.finish(false, { message }).catch(() => undefined);
     const exitCode = opsError?.exitCode ?? 1;
     const report = ctx !== null && journaled ? await readUpdateRun(ctx, ctx.run.id).then(reportOf).catch(() => null) : null;

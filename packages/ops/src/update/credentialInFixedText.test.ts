@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
+// eslint-disable-next-line no-restricted-imports -- an error answer of the stub platform
+import { fakeJson } from "../../../target-cloudfoundry/src/fakeCloudFoundry.fixture.ts";
 import { createHarness, LOCATION } from "../harness.fixture.ts";
 import { keys, parseJson } from "../layout.ts";
 import { MemoryBucket, memoryStore } from "../memoryStore.ts";
+import { MASK } from "../redact.ts";
 import { CloudFoundryRun, RUN_LOCATION } from "./cloudFoundryRun.fixture.ts";
 import { updateKeys } from "./layout.ts";
+import type { ObjectStore } from "../store.ts";
 import { UPDATE_EXIT } from "./types.ts";
 
 const field = (value: unknown, name: string): unknown => (typeof value === "object" && value !== null ? Reflect.get(value, name) : undefined);
@@ -78,6 +82,84 @@ describe("credentials that are part of the tool's fixed text", { timeout: 60_000
       expect((await s.run(runId)).state).toBe("rolled-back");
       expect(s.api.env).toEqual(envBefore);
       expect(s.current().version).toBe("6.0.0");
+    } finally {
+      await s.dispose();
+    }
+  });
+});
+
+describe("command hints when a credential equals a word of them", { timeout: 60_000 }, () => {
+  const SECRET = "Wq7n3Lx9Rt2Vb8Kc4Hd6Jf1Mp5Zs0Ya";
+
+  it.each(["kestrel", "update", "prod"])("print the next command of a deploy, its status and its accept as written (access key %s)", async (accessKeyId) => {
+    const credentials = { accessKeyId, secretAccessKey: SECRET };
+    const s = await CloudFoundryRun.create(memoryStore(new MemoryBucket("hints")), { version: "6.0.0" });
+    try {
+      s.addRelease({ version: "6.0.1" });
+      const prepared = await s.update(["prepare"], { credentials, json: false });
+      expect(prepared.code, prepared.stderr).toBe(UPDATE_EXIT.done);
+      expect(prepared.stdout).toContain("Next: commit the update and run the deploy pipeline");
+      expect(prepared.stdout + prepared.stderr).not.toContain(MASK);
+      const deployed = await s.update(["deploy"], { credentials });
+      expect(deployed.code, deployed.stderr).toBe(UPDATE_EXIT.done);
+      expect(String(deployed.json.message)).not.toContain(MASK);
+      const runId = String(deployed.json.runId);
+
+      const status = await s.update(["status"], { credentials, json: false });
+      expect(status.code, status.stderr).toBe(UPDATE_EXIT.done);
+      expect(status.stdout).toContain(`  next: kestrel update accept --env prod --run ${runId}\n`);
+      expect(status.stdout).toContain(`run ${runId}  update deploy  verified`);
+      expect(status.stdout + status.stderr).not.toContain(MASK);
+
+      const accepted = await s.update(["accept"], { credentials, json: false });
+      expect(accepted.code, accepted.stderr).toBe(UPDATE_EXIT.done);
+      expect(accepted.stdout).toContain(`update run ${runId} accepted; the cutover backup prod-`);
+      expect(accepted.stdout).toContain("stays pinned until update cleanup");
+      expect(accepted.stdout + accepted.stderr).not.toContain(MASK);
+
+      const after = await s.update(["status"], { credentials, json: false });
+      expect(after.stdout).toContain(`  next: kestrel update cleanup --env prod --run ${runId}\n`);
+      expect(after.stdout + after.stderr).not.toContain(MASK);
+    } finally {
+      await s.dispose();
+    }
+  });
+
+  it("mask a credential that an answer of the platform quotes, inside a message whose hint stays as written", async () => {
+    const credentials = { accessKeyId: "kestrel", secretAccessKey: "update" };
+    const s = await CloudFoundryRun.create(memoryStore(new MemoryBucket("hints")), { version: "6.0.0" });
+    try {
+      s.addRelease({ version: "6.0.1" });
+      expect((await s.update(["prepare"], { credentials })).code).toBe(UPDATE_EXIT.done);
+      s.cf.routes.unshift(({ method, url }) => (method === "DELETE" && url.pathname.startsWith("/v3/droplets/") ? fakeJson({ errors: [{ title: "CF-NotAuthorized: token of kestrel with secret update expired" }] }) : undefined));
+      const deployed = await s.update(["deploy"], { credentials, json: false });
+      expect(deployed.code, deployed.stderr).toBe(UPDATE_EXIT.refused);
+      const runId = (await s.update(["status"], { credentials })).json;
+      const id = String(Reflect.get(Object(runId.run), "runId"));
+      expect(deployed.stdout).toContain(`answered CF-NotAuthorized: token of ${MASK} with secret ${MASK} expired; `);
+      expect(deployed.stdout).toContain(`; run update resume --env prod --run ${id} to retire them`);
+      expect(deployed.stdout).not.toContain("token of kestrel");
+      expect(deployed.stdout).not.toContain("secret update");
+    } finally {
+      await s.dispose();
+    }
+  });
+
+  it("mask a credential that an error of the store quotes, also in the JSON message", async () => {
+    const credentials = { accessKeyId: "prod", secretAccessKey: SECRET };
+    const s = await CloudFoundryRun.create(memoryStore(new MemoryBucket("hints")), { version: "6.0.0" });
+    try {
+      const denied = (store: ObjectStore): ObjectStore => ({
+        ...store,
+        list: () => Promise.reject(new Error(`AccessDenied: access key prod with secret ${SECRET} may not list this bucket`)),
+      });
+      const text = await s.update(["status"], { credentials, json: false, store: denied });
+      expect(text.code).toBe(1);
+      expect(text.stderr).toContain(`error: AccessDenied: access key ${MASK} with secret ${MASK} may not list this bucket`);
+      expect(text.stderr).not.toContain(SECRET);
+      const json = await s.update(["status"], { credentials, store: denied });
+      expect(String(json.json.message)).toContain(`access key ${MASK} with secret ${MASK} may not list`);
+      expect(json.stdout).not.toContain(SECRET);
     } finally {
       await s.dispose();
     }

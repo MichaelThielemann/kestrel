@@ -5,6 +5,7 @@ import { holdsUpdatePin, removeSavedDroplets } from "./cleanup.ts";
 import { listUpdateRuns, readUpdateRun } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
 import { OPEN_STATES, type RetireResult, type UpdateContext, type UpdateRun } from "./types.ts";
+import { fixedText, literal } from "../redact.ts";
 
 const verifiedPassed = (run: UpdateRun): boolean => (run.state === "verified" || run.state === "accepted") && run.records.some((r) => r.step === "verify" && r.state === "done" && (r.phase === "deploy" || r.phase === "verify") && r.data.verdict === "passed");
 
@@ -15,7 +16,7 @@ async function saveBits(ctx: UpdateContext, run: UpdateRun, guid: string): Promi
   const file = ctx.workspace.path(`droplet-${guid}`);
   if (!(await ctx.target.saveDroplet(guid, file))) return null;
   await ctx.backups.put(ctx.location + key, new Uint8Array(readFileSync(file)), { contentType: "application/octet-stream" });
-  if ((await ctx.backups.head(ctx.location + key)) === null) throw new OpsError(`the bits of droplet ${guid} do not read back from ${key}`, 1, key);
+  if ((await ctx.backups.head(ctx.location + key)) === null) throw new OpsError(fixedText`the bits of droplet ${literal(guid)} do not read back from ${key}`, 1, key);
   return key;
 }
 
@@ -46,19 +47,19 @@ async function otherDeploys(ctx: UpdateContext, run: UpdateRun): Promise<{ neede
  * so its rollback can start the release before it.
  */
 export async function retire(ctx: UpdateContext, run: UpdateRun): Promise<RetireResult> {
-  if (!verifiedPassed(run)) throw new OpsError(`refusing to retire the previous releases of run ${run.runId}: its verification has not passed (the run is ${run.state}); a rollback still needs them`, 1, "retire");
+  if (!verifiedPassed(run)) throw new OpsError(fixedText`refusing to retire the previous releases of run ${literal(run.runId)}: its verification has not passed (the run is ${literal(run.state)}); a rollback still needs them`, 1, "retire");
   const droplets = await ctx.target.listDroplets();
   const current = droplets.find((d) => d.current)?.guid ?? (await ctx.target.currentDroplet());
-  if (current === null || (run.stagedDroplet !== null && current !== run.stagedDroplet)) throw new OpsError(`refusing to retire the previous releases: the app runs droplet ${current ?? "(none)"}, not the droplet run ${run.runId} deployed (${run.stagedDroplet ?? "unknown"})`, 1, "retire");
+  if (current === null || (run.stagedDroplet !== null && current !== run.stagedDroplet)) throw new OpsError(fixedText`refusing to retire the previous releases: the app runs droplet ${literal(current ?? "(none)")}, not the droplet run ${literal(run.runId)} deployed (${literal(run.stagedDroplet ?? "unknown")})`, 1, "retire");
   const previous = run.previousDroplet;
   let savedDroplet: string | null = null;
   const kept: string[] = [];
   if (previous !== null && previous !== current && droplets.some((d) => d.guid === previous)) {
     try {
       savedDroplet = await saveBits(ctx, run, previous);
-      if (savedDroplet === null) ctx.out.warn(`the target hands out no bits of droplet ${previous}; once it is deleted, a rollback of run ${run.runId} brings back the cutover state but leaves the app stopped`);
+      if (savedDroplet === null) ctx.out.warn(fixedText`the target hands out no bits of droplet ${literal(previous)}; once it is deleted, a rollback of run ${literal(run.runId)} brings back the cutover state but leaves the app stopped`);
     } catch (error) {
-      ctx.out.warn(`saving the bits of droplet ${previous} failed (${messageOf(error)}); it is deleted all the same, so no old release starts on the converted data, and a rollback of run ${run.runId} brings back the cutover state but leaves the app stopped`);
+      ctx.out.warn(fixedText`saving the bits of droplet ${literal(previous)} failed (${messageOf(error)}); it is deleted all the same, so no old release starts on the converted data, and a rollback of run ${literal(run.runId)} brings back the cutover state but leaves the app stopped`);
     }
   }
   const revisions = await ctx.target.listRevisions();
@@ -69,7 +70,7 @@ export async function retire(ctx: UpdateContext, run: UpdateRun): Promise<Retire
     const other = needed.get(droplet.guid);
     if (other !== undefined) {
       kept.push(droplet.guid);
-      ctx.out.warn(`droplet ${droplet.guid} stays: update run ${other.runId} is ${other.state} and needs it to roll back`);
+      ctx.out.warn(fixedText`droplet ${literal(droplet.guid)} stays: update run ${literal(other.runId)} is ${literal(other.state)} and needs it to roll back`);
       continue;
     }
     await ctx.target.deleteDroplet(droplet.guid);

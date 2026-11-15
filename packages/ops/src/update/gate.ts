@@ -7,6 +7,7 @@ import { needsReceipt, planHash as hashOf, sameVersions } from "./plan.ts";
 import { nextCommand } from "./status.ts";
 import type { TargetPreflight } from "./target.ts";
 import { OPEN_STATES, type UpdateContext, type UpdatePlan, type UpdateReceipt, type UpdateRun } from "./types.ts";
+import { fixedText, literal } from "../redact.ts";
 
 /** What the gate let through. */
 export interface GateResult {
@@ -62,16 +63,16 @@ export async function checkGate(ctx: UpdateContext, plan: UpdatePlan, earlier: r
   if (plan.content.length > 0 && ctx.update.localBoot === undefined) throw new OpsError(`${plan.content.length} content migration(s) are pending (${plan.content.join(", ")}), but update.localBoot is not set, so the deploy could not apply them after the stop`, 2, "gate");
   const configuration = (await ctx.target.checkReleaseConfiguration?.({ dir: ctx.release.dir }, { resolveSources: true }))?.fingerprint ?? null;
   const open = earlier.find((run) => OPEN_STATES.has(run.state));
-  if (open !== undefined) throw new OpsError(`update run ${open.runId} is ${open.state}; finish it first with ${nextCommand(open, "update deploy") ?? `kestrel update abort --env ${ctx.envName} --run ${open.runId}`}`, 1, "gate");
+  if (open !== undefined) throw new OpsError(fixedText`update run ${literal(open.runId)} is ${literal(open.state)}; finish it first with ${nextCommand(open, "update deploy") ?? fixedText`kestrel update abort --env ${literal(ctx.envName)} --run ${literal(open.runId)}`}`, 1, "gate");
   const retiring = earlier.find(retirePending);
-  if (retiring !== undefined) throw new OpsError(`update run ${retiring.runId} is ${retiring.state}, but its previous releases are not retired, so they can still start on its data; retire them first with kestrel update resume --env ${ctx.envName} --run ${retiring.runId}`, 1, "gate");
+  if (retiring !== undefined) throw new OpsError(fixedText`update run ${literal(retiring.runId)} is ${literal(retiring.state)}, but its previous releases are not retired, so they can still start on its data; retire them first with kestrel update resume --env ${literal(ctx.envName)} --run ${literal(retiring.runId)}`, 1, "gate");
   const previous = earlier.filter((run) => run.state !== "untouched").at(-1) ?? null;
   const planHash = hashOf(plan);
   const ordinary = !needsReceipt(plan);
   const receipt = ordinary ? null : await findReceipt(ctx, planHash, plan.versions.to);
   if (!ordinary && receipt === null) {
     const why = plan.storage.length > 0 ? `${plan.storage.length} storage migration(s) pending` : "the versions change";
-    throw new OpsError(`no receipt of update prepare matches this deploy (${why}, plan ${planHash.slice(0, 12)}); run update prepare --env ${ctx.envName} for this release and commit it`, 1, "gate");
+    throw new OpsError(fixedText`no receipt of update prepare matches this deploy (${why}, plan ${planHash.slice(0, 12)}); run update prepare --env ${literal(ctx.envName)} for this release and commit it`, 1, "gate");
   }
   return { receipt, ordinary, planHash, preflight, accepts: previous?.state === "verified" ? previous.runId : null, configuration };
 }

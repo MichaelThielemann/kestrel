@@ -353,10 +353,14 @@ With `--json` every command prints one document with a `schema` field such as `k
 holding `exitCode`, `state`, `message` and the run's report. That document and every document the tool stores
 (journal, manifests, receipts, the recorded configuration) hold no credential's value. Their schema, keys, names
 and every other field stay as they are; only the free-text fields `message`, `error`, `failure`, `detail` and
-`problems` are masked wherever a credential occurs in them as a string, also inside fixed text and in a message of
-success: with the access key `update`, the message of a verified deploy reads `verified; accept it with
-[redacted] accept --env prod, …`. A pipeline therefore takes the next command from `run.next` of
-`update status --json`, never from `message`. The update questions are `update-stop` (before the
+`problems` are masked. In a message and in a line for the terminal, the text the tool writes itself (command
+names, flags, environment names, run, backup and droplet ids, step names and states) stays as written, also when a
+credential equals one of its words: with the access key `update` and the environment `prod`, a verified deploy
+still reads `verified; accept it with update accept --env prod, …` and `update status` still ends with
+`next: kestrel update accept --env prod --run …`. A credential is masked wherever it occurs in text that comes
+from elsewhere: an error of the store, an answer of the platform, the output of a command. A credential of 16
+characters or more is masked everywhere. A pipeline takes the next command from `run.next` of
+`update status --json`, which is never masked. The update questions are `update-stop` (before the
 stop; `--yes` answers it), `unsealed-stop` (after the stop of a release that leaves no seal, such as one before 6;
 never answered by `--yes`; without an answer the previous release starts again and the deploy ends with exit 3),
 `break-lock` (with `--break-lock`; never answered by `--yes`), `rollback-accepted` (the environment's name, never

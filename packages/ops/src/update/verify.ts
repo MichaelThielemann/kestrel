@@ -7,6 +7,7 @@ import { guardRollback, wroteSinceStart } from "./rollback.ts";
 import { stoppedAfterRollback } from "./status.ts";
 import type { ReadyProbe } from "./target.ts";
 import { UPDATE_EXIT, type RollbackResult, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdatePhase, type UpdateRun, type VerifyCheck, type VerifyInput, type VerifyResult, type VerifyVerdict } from "./types.ts";
+import { fixedText, literal } from "../redact.ts";
 
 const sleeper = (ctx: UpdateContext) => ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
 
@@ -127,32 +128,32 @@ export async function outcomeOf(ctx: UpdateContext, exitCode: UpdateExitCode, me
 export async function concludeVerify(ctx: UpdateContext, phase: UpdatePhase, result: VerifyResult, known: (run: UpdateRun) => UpdateRun = (run) => run, guarded = phase === "verify"): Promise<UpdateOutcome> {
   const held = result.verdict === "failed" && guarded && (await wroteSinceStart(ctx, known(await readUpdateRun(ctx, ctx.run.id))));
   await ctx.journal.record("verify", "done", { phase, verdict: result.verdict, checks: result.checks, ownGeneration: result.ownGeneration, ...(held ? { held: true } : {}) });
-  if (held) return outcomeOf(ctx, UPDATE_EXIT.refused, `verification failed (${result.checks.filter((c) => c.hard && !c.ok).map((c) => `${c.name}: ${c.detail}`).join("; ")}), but the new release wrote since its start, so nothing was rolled back automatically and it keeps running; run update rollback --env ${ctx.envName} --run ${ctx.run.id}, which reports what it discards, asks and takes a safety backup first`);
-  if (result.verdict === "unverifiable") return outcomeOf(ctx, UPDATE_EXIT.refused, `verification could not tell (${describeProbe(result.ready)}); the new release keeps running and nothing was rolled back. Once its readiness can be checked, run update resume --env ${ctx.envName} --run ${ctx.run.id}, or update rollback`);
+  if (held) return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`verification failed (${result.checks.filter((c) => c.hard && !c.ok).map((c) => fixedText`${c.name}: ${c.detail}`).join("; ")}), but the new release wrote since its start, so nothing was rolled back automatically and it keeps running; run update rollback --env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}, which reports what it discards, asks and takes a safety backup first`);
+  if (result.verdict === "unverifiable") return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`verification could not tell (${describeProbe(result.ready)}); the new release keeps running and nothing was rolled back. Once its readiness can be checked, run update resume --env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}, or update rollback`);
   const run = known(await readUpdateRun(ctx, ctx.run.id));
   if (result.verdict === "failed") {
     const failure = result.checks.filter((c) => c.hard && !c.ok).map((c) => `${c.name}: ${c.detail}`).join("; ");
     if (guarded && run.cutoverBackup !== null) {
       const manifest = await readManifest(ctx, run.cutoverBackup);
       const guard = manifest === null ? { ok: false as const, message: `the cutover backup ${run.cutoverBackup} does not exist or is incomplete` } : await guardRollback(ctx, run, manifest, "backup");
-      if (!guard.ok) return outcomeOf(ctx, UPDATE_EXIT.refused, `verification failed (${failure}) and the automatic rollback did not begin: ${guard.message}; run update resume --env ${ctx.envName} --run ${ctx.run.id}, which stops the app again, asks before it discards what the release wrote and takes a safety backup first`);
+      if (!guard.ok) return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`verification failed (${failure}) and the automatic rollback did not begin: ${guard.message}; run update resume --env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}, which stops the app again, asks before it discards what the release wrote and takes a safety backup first`);
     }
     let ended: RollbackResult["ended"];
     try {
       ended = (await ctx.steps.rollback(ctx, run, { kind: "automatic", failure })).ended;
     } catch (cause) {
-      return outcomeOf(ctx, UPDATE_EXIT.refused, `verification failed (${failure}) and the automatic rollback did not finish: ${messageOf(cause)}; run update resume --env ${ctx.envName} --run ${ctx.run.id}, which runs the rollback again`);
+      return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`verification failed (${failure}) and the automatic rollback did not finish: ${messageOf(cause)}; run update resume --env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}, which runs the rollback again`);
     }
-    if (ended === "stopped") return outcomeOf(ctx, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, `verification failed (${failure})`, run.versions?.from ?? null));
-    return outcomeOf(ctx, UPDATE_EXIT.rolledBack, `verification failed (${failure}); rolled back to the cutover state`);
+    if (ended === "stopped") return outcomeOf(ctx, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, fixedText`verification failed (${failure})`, run.versions?.from ?? null));
+    return outcomeOf(ctx, UPDATE_EXIT.rolledBack, fixedText`verification failed (${failure}); rolled back to the cutover state`);
   }
   const retired = await retireStep(ctx, run);
   if (!retired.ok) return outcomeOf(ctx, UPDATE_EXIT.refused, retireFailed(ctx, retired.error));
-  return outcomeOf(ctx, UPDATE_EXIT.done, `verified; accept it with update accept --env ${ctx.envName}, or roll back with update rollback --env ${ctx.envName}`);
+  return outcomeOf(ctx, UPDATE_EXIT.done, fixedText`verified; accept it with update accept --env ${literal(ctx.envName)}, or roll back with update rollback --env ${literal(ctx.envName)}`);
 }
 
 function retireFailed(ctx: UpdateContext, error: string): string {
-  return `the new release is verified, but retiring the previous releases failed: ${error}; their droplets can still be started by the platform on the converted data until they are retired; run update resume --env ${ctx.envName} --run ${ctx.run.id} to retire them`;
+  return fixedText`the new release is verified, but retiring the previous releases failed: ${error}; their droplets can still be started by the platform on the converted data until they are retired; run update resume --env ${literal(ctx.envName)} --run ${literal(ctx.run.id)} to retire them`;
 }
 
 /**
@@ -181,7 +182,7 @@ export async function retireStep(ctx: UpdateContext, run: UpdateRun, again = fal
 
 /** `update verify`: verifies the running release of deploy run `run` again, for a halted run once readiness can be checked. */
 export async function verifyCommand(ctx: UpdateContext, run: UpdateRun): Promise<UpdateOutcome> {
-  if ((run.state !== "halted" && run.state !== "verifying") || run.promoted === null) return outcomeOf(ctx, UPDATE_EXIT.refused, `update run ${run.runId} is ${run.state}; only a started deploy whose verification did not conclude can be verified again`);
+  if ((run.state !== "halted" && run.state !== "verifying") || run.promoted === null) return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`update run ${literal(run.runId)} is ${literal(run.state)}; only a started deploy whose verification did not conclude can be verified again`);
   const start = [...run.records].reverse().find((r) => r.step === "start" && r.phase === "deploy");
   const recorded: unknown = start?.data.startedAt;
   const startedAt = typeof recorded === "number" ? recorded : (start?.at ?? run.lastAt);

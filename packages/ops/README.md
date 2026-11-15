@@ -102,10 +102,13 @@ from.
   the recorded configuration) and the `--json` output hold names, ids, keys and hashes, never a credential's
   value. Their schema, keys, names and every other field are written as they are; only the free-text fields
   `message`, `error`, `failure`, `detail` and `problems` are masked, since a failed call may quote what it was
-  sent, and there every occurrence of a credential is, also inside fixed text and in a message of success. A
-  credential that is part of a fixed text, such as an access key `kestrel`, therefore never changes a schema, key
-  or name; read the next command from `run.next` of
-  `update status --json`, not from `message`.
+  sent. A credential that is part of a fixed text, such as an access key `kestrel`, therefore never changes a
+  schema, key or name. In terminal lines and messages, what the tool writes itself (command names, flags,
+  environment names, run, backup and droplet ids) stays as written even when a credential equals one of its
+  words, so `next: kestrel update accept --env prod --run …` stays copyable with the access key `kestrel`; a
+  credential is masked wherever it occurs in text from elsewhere, such as an error of the store or an answer of
+  the platform, and a credential of 16 characters or more is masked everywhere. `run.next` of
+  `update status --json` names the next command for a pipeline.
 
 - `update` (optional) configures updates: `release.dir` (default `.`), the directory a target stages as the new
   release, relative to the environments file; `localBoot`, the start of a release on this machine that applies

@@ -1,4 +1,5 @@
 import { parseJsonOrNull } from "../layout.ts";
+import { fixedText, literal } from "../redact.ts";
 import { stableList } from "../store.ts";
 import { listUpdateRuns, readUpdateRun, reportOf, retirePending, RUN_STEP } from "./journal.ts";
 import { OPEN_STATES, type UpdateContext, type UpdateReport, type UpdateRun, type UpdateRunState, type VersionSet } from "./types.ts";
@@ -52,13 +53,13 @@ const OPS_PACKAGE = "@michaelthielemann/kestrel-ops";
  * otherwise the way it was deployed before the update.
  */
 export function previousReleaseDeploy(run: Pick<UpdateRun, "env" | "versions">): string {
-  return run.versions?.from?.[OPS_PACKAGE] !== undefined ? `node .kestrel-ops/run.mjs deploy --env ${run.env}` : `deploy the previous release of ${run.env} again the way it was deployed before the update; it brings no kestrel-ops`;
+  return run.versions?.from?.[OPS_PACKAGE] !== undefined ? fixedText`node .kestrel-ops/run.mjs deploy --env ${literal(run.env)}` : fixedText`deploy the previous release of ${literal(run.env)} again the way it was deployed before the update; it brings no kestrel-ops`;
 }
 
 /** The message of a rollback that brought back the cutover state after `what` but had no previous droplet to start. */
 export function stoppedAfterRollback(ctx: Pick<UpdateContext, "envName">, what: string, from: VersionSet | null): string {
   const again = previousReleaseDeploy({ env: ctx.envName, versions: { from, to: {} } });
-  return `${what}; the cutover state is back, but no previous droplet was left to start, so the app stays stopped: ${again.startsWith("node ") ? `deploy the previous release again with the bundle of its own build, ${again}` : again}`;
+  return fixedText`${what}; the cutover state is back, but no previous droplet was left to start, so the app stays stopped: ${again.startsWith("node ") ? fixedText`deploy the previous release again with the bundle of its own build, ${again}` : again}`;
 }
 
 /**
@@ -67,23 +68,23 @@ export function stoppedAfterRollback(ctx: Pick<UpdateContext, "envName">, what: 
  * releases did not end, `update resume`.
  */
 export function nextCommand(run: UpdateRun, command: string): string | null {
-  const scope = `--env ${run.env} --run ${run.runId}`;
-  if (command === "update prepare") return run.state === "prepared" ? `node .kestrel-ops/run.mjs deploy --env ${run.env}` : null;
-  if (retirePending(run)) return `kestrel update resume ${scope}`;
+  const scope = fixedText`--env ${literal(run.env)} --run ${literal(run.runId)}`;
+  if (command === "update prepare") return run.state === "prepared" ? fixedText`node .kestrel-ops/run.mjs deploy --env ${literal(run.env)}` : null;
+  if (retirePending(run)) return fixedText`kestrel update resume ${scope}`;
   switch (run.state) {
     case "deploying":
-      return `kestrel update abort ${scope}`;
+      return fixedText`kestrel update abort ${scope}`;
     case "down":
-      return run.records.some((r) => r.phase === "deploy" && r.step === "stop" && r.state === "done") ? `kestrel update resume ${scope}` : `kestrel update abort ${scope}`;
+      return run.records.some((r) => r.phase === "deploy" && r.step === "stop" && r.state === "done") ? fixedText`kestrel update resume ${scope}` : fixedText`kestrel update abort ${scope}`;
     case "verifying":
     case "rolling-back":
-      return `kestrel update resume ${scope}`;
+      return fixedText`kestrel update resume ${scope}`;
     case "halted":
-      return run.records.filter((r) => r.step === "verify" && r.state === "done").at(-1)?.data.held === true ? `kestrel update rollback ${scope}` : `kestrel update resume ${scope}`;
+      return run.records.filter((r) => r.step === "verify" && r.state === "done").at(-1)?.data.held === true ? fixedText`kestrel update rollback ${scope}` : fixedText`kestrel update resume ${scope}`;
     case "verified":
-      return `kestrel update accept ${scope}`;
+      return fixedText`kestrel update accept ${scope}`;
     case "accepted":
-      return `kestrel update cleanup ${scope}`;
+      return fixedText`kestrel update cleanup ${scope}`;
     case "rolled-back":
       return run.records.filter((r) => r.step === "rollback" && r.state === "done").at(-1)?.data.ended === "stopped" ? previousReleaseDeploy(run) : null;
     default:
@@ -161,28 +162,28 @@ const versionsText = (versions: Record<string, string>): string => {
 };
 
 function runLines(status: UpdateRunStatus): string[] {
-  const lines = [`run ${status.runId}  ${status.command}  ${status.state}  started ${new Date(status.startedAt).toISOString()}, last entry ${new Date(status.lastAt).toISOString()}`];
-  lines.push(`  ran on ${status.hosts.length === 0 ? "an unknown host" : status.hosts.join(", ")}`);
-  if (status.versions !== null) lines.push(`  versions ${status.versions.from === null ? "unknown" : versionsText(status.versions.from)} -> ${versionsText(status.versions.to)}`);
-  if (status.cutoverBackup !== null) lines.push(`  cutover backup ${status.cutoverBackup}`);
-  for (const step of status.report.steps) lines.push(`  ${`${step.phase} ${step.step}`.padEnd(36, " ")} ${duration(step.ms).padStart(12, " ")}${step.appDown ? "  app down" : ""}`);
-  lines.push(`  downtime ${status.report.downtimeMs === null ? "the app is still down" : duration(status.report.downtimeMs)}`);
+  const lines = [fixedText`run ${literal(status.runId)}  ${literal(status.command)}  ${literal(status.state)}  started ${literal(new Date(status.startedAt).toISOString())}, last entry ${literal(new Date(status.lastAt).toISOString())}`];
+  lines.push(fixedText`  ran on ${status.hosts.length === 0 ? literal("an unknown host") : status.hosts.join(", ")}`);
+  if (status.versions !== null) lines.push(fixedText`  versions ${literal(status.versions.from === null ? "unknown" : versionsText(status.versions.from))} -> ${literal(versionsText(status.versions.to))}`);
+  if (status.cutoverBackup !== null) lines.push(fixedText`  cutover backup ${literal(status.cutoverBackup)}`);
+  for (const step of status.report.steps) lines.push(fixedText`  ${literal(`${step.phase} ${step.step}`.padEnd(36, " "))} ${literal(duration(step.ms).padStart(12, " "))}${literal(step.appDown ? "  app down" : "")}`);
+  lines.push(fixedText`  downtime ${literal(status.report.downtimeMs === null ? "the app is still down" : duration(status.report.downtimeMs))}`);
   const derived = status.report.derived;
   if (derived !== undefined) {
     const sample = [...derived.keys.added, ...derived.keys.changed, ...derived.keys.missing].slice(0, 5);
-    lines.push(`  derived keys after the rollback: ${derived.added} added, ${derived.changed} changed, ${derived.missing} missing${sample.length === 0 ? "" : `, such as ${sample.join(", ")}`}`);
+    lines.push(fixedText`  derived keys after the rollback: ${derived.added} added, ${derived.changed} changed, ${derived.missing} missing${sample.length === 0 ? literal("") : fixedText`, such as ${sample.join(", ")}`}`);
   }
-  lines.push(status.next === null ? "  nothing to do" : `  next: ${status.next}`);
+  lines.push(status.next === null ? fixedText`  nothing to do` : fixedText`  next: ${status.next}`);
   return lines;
 }
 
 /** The lines `update status` prints for `report`. */
 export function renderStatus(report: UpdateStatusReport): string[] {
   const lines: string[] = [];
-  if (report.run === null) lines.push(`${report.env}: no deploy run`);
-  else lines.push(`${report.env}:`, ...runLines(report.run));
-  if (report.latestAttempt !== null) lines.push(`newest attempt ${report.latestAttempt.runId} is ${report.latestAttempt.state}: it changed nothing`);
+  if (report.run === null) lines.push(fixedText`${literal(report.env)}: no deploy run`);
+  else lines.push(fixedText`${literal(report.env)}:`, ...runLines(report.run));
+  if (report.latestAttempt !== null) lines.push(fixedText`newest attempt ${literal(report.latestAttempt.runId)} is ${literal(report.latestAttempt.state)}: it changed nothing`);
   const others = report.open.filter((status) => status.runId !== report.run?.runId);
-  if (others.length > 0) lines.push(`open runs besides it: ${others.length}`, ...others.flatMap(runLines));
+  if (others.length > 0) lines.push(fixedText`open runs besides it: ${others.length}`, ...others.flatMap(runLines));
   return lines;
 }

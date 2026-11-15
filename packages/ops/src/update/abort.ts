@@ -6,6 +6,7 @@ import { guardRollback } from "./rollback.ts";
 import { stoppedAfterRollback } from "./status.ts";
 import { readUpdateRun, reportOf } from "./journal.ts";
 import { OPEN_STATES, UPDATE_EXIT, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
+import { fixedText, literal } from "../redact.ts";
 
 async function outcome(ctx: UpdateContext, runId: string, exitCode: UpdateExitCode, message: string, fallback: UpdateRunState): Promise<UpdateOutcome> {
   const run = await readUpdateRun(ctx, runId).catch(() => null);
@@ -29,11 +30,11 @@ async function placedAfterCutover(ctx: UpdateContext, run: UpdateRun): Promise<b
  * cutover backup's source counts as promoted even when the journal did not record the promotion.
  */
 export async function abort(ctx: UpdateContext, run: UpdateRun): Promise<UpdateOutcome> {
-  if (!OPEN_STATES.has(run.state)) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is ${run.state}, not open; there is nothing to abort`, run.state);
+  if (!OPEN_STATES.has(run.state)) return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`run ${literal(run.runId)} is ${literal(run.state)}, not open; there is nothing to abort`, run.state);
   const promoted = run.promoted !== null || (await placedAfterCutover(ctx, run));
   if (promoted && run.cutoverBackup !== null) {
     const manifest = await readManifest(ctx, run.cutoverBackup);
-    if (manifest === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the cutover backup ${run.cutoverBackup} of run ${run.runId} does not exist or is incomplete`, run.state);
+    if (manifest === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`the cutover backup ${literal(run.cutoverBackup)} of run ${literal(run.runId)} does not exist or is incomplete`, run.state);
     const guarded = await guardRollback(ctx, run, manifest, "ask");
     if (!guarded.ok) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `not aborted: ${guarded.message}`, run.state);
   }
@@ -42,11 +43,11 @@ export async function abort(ctx: UpdateContext, run: UpdateRun): Promise<UpdateO
     try {
       const result = await ctx.steps.rollback(ctx, run, { kind: "abort" });
       await ctx.journal.record("abort", "done", { phase: "abort", promoted: true, ended: result.ended });
-      if (result.ended === "stopped") return outcome(ctx, run.runId, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, `run ${run.runId} was aborted`, run.versions?.from ?? null), "rolled-back");
-      return outcome(ctx, run.runId, UPDATE_EXIT.done, `aborted: the cutover state is promoted again and the previous release runs on generation ${result.generation}`, "rolled-back");
+      if (result.ended === "stopped") return outcome(ctx, run.runId, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, fixedText`run ${literal(run.runId)} was aborted`, run.versions?.from ?? null), "rolled-back");
+      return outcome(ctx, run.runId, UPDATE_EXIT.done, fixedText`aborted: the cutover state is promoted again and the previous release runs on generation ${literal(result.generation)}`, "rolled-back");
     } catch (error) {
       await recordQuietly(ctx, "abort", "failed", { phase: "abort", promoted: true, message: messageOf(error) });
-      return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the abort did not finish its rollback: ${messageOf(error)}; run update resume`, "rolling-back");
+      return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`the abort did not finish its rollback: ${messageOf(error)}; run update resume`, "rolling-back");
     }
   }
   try {
