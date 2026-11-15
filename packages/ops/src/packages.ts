@@ -19,6 +19,51 @@ export function packageDir(name: string, from: string): string | null {
   }
 }
 
+function directDependencies(root: string): string[] {
+  const file = join(root, "package.json");
+  if (!existsSync(file)) return [];
+  try {
+    const pkg = boundaryCast<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(JSON.parse(readFileSync(file, "utf8")), "json");
+    return Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The directory of package `name` as the project in `root` has it installed: resolved from `root` itself, or from the
+ * directory of one of the project's direct dependencies, so a package that a dependency brings along (a project that
+ * depends on one preset package, say, which pnpm does not hoist) is found too; null when none of them has it.
+ */
+export function installedPackageDir(name: string, root: string): string | null {
+  const own = packageDir(name, root);
+  if (own !== null) return own;
+  for (const dependency of directDependencies(root)) {
+    const dir = packageDir(dependency, root);
+    const found = dir === null ? null : packageDir(name, dir);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/**
+ * The packages whose name starts with `prefix` that the direct dependencies of the project in `root` depend on, one
+ * level deep, with the directory each resolves to from that dependency.
+ */
+export function packagesBroughtBy(root: string, prefix: string): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const dependency of directDependencies(root)) {
+    const dir = packageDir(dependency, root);
+    if (dir === null) continue;
+    for (const name of directDependencies(dir)) {
+      if (!name.startsWith(prefix) || found.has(name)) continue;
+      const at = packageDir(name, dir);
+      if (at !== null) found.set(name, at);
+    }
+  }
+  return found;
+}
+
 /** The version in the `package.json` of package `name` resolved from `from`, or null. */
 export function packageVersion(name: string, from: string): string | null {
   const dir = packageDir(name, from);

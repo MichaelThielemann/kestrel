@@ -64,7 +64,8 @@ reports, and when it reports none, the deploy counts as a version change.
   written into the backup location and deleted again. The plan step then needs a complete newest replica
   generation; how recent it is, is not checked.
 - **Plan** on a copy of the newest replica generation: the storage migrations of the release's module packages
-  that find their old form (detected and planned, nothing written), the content migrations the release brings
+  (those the project depends on, and those its direct dependencies bring along, such as the module packages of a
+  preset package; their versions count as the release's) that find their old form (detected and planned, nothing written), the content migrations the release brings
   that the copy's ledger does not hold, and the questions they ask. The release's content migrations are the ids
   the host facts list in `contentMigrations`. The plan hash covers the ids only, so an upload between prepare and
   deploy does not invalidate the receipt. A release whose storage migrations would keep stored SVGs as downloads
@@ -105,7 +106,8 @@ the stop without a seal:
 
 `update bundle [--out <dir>]` writes `.kestrel-ops/` into the project (or `<dir>`): `run.mjs`, kestrel-ops and
 the target package of every environment, the module packages of the release that export `./storage` with the
-persistence and SVG sanitizer packages a migration needs, each with the packages it depends on, the
+persistence and SVG sanitizer packages a migration needs, also when they come through a dependency of the
+project such as a preset package that pnpm does not hoist, each with the packages it depends on, the
 environments file and every target manifest it names at the same relative path, and `bundle.json` with the
 versions of the release's kestrel packages, the lockfile hash and the facts the host project contributes, such
 as its readiness path. `run.mjs` hands `deploy`, `verify` and `update <command>` to the update assistant and

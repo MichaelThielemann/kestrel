@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { err, ok, type Result } from "@michaelthielemann/kestrel/result";
@@ -7,7 +7,7 @@ import { orderStorages, type ModuleStorage } from "@michaelthielemann/kestrel-co
 import { exportsStorage, SANITIZE_SVG_PACKAGE } from "../bundle.ts";
 import { messageOf } from "../context.ts";
 import { OpsError } from "../errors.ts";
-import { packageDir } from "../packages.ts";
+import { installedPackageDir, packageDir } from "../packages.ts";
 import type { UpdateContext } from "./types.ts";
 
 /** The module package whose storage converts media keys; it is given the environment's media prefix. */
@@ -28,13 +28,25 @@ function conditional(value: unknown): string | null {
   return null;
 }
 
+function throughDependencies(name: string, from: string): string | null {
+  for (let dir = from; ; dir = dirname(dir)) {
+    const found = existsSync(join(dir, "package.json")) ? installedPackageDir(name, dir) : null;
+    if (found !== null) return found;
+    if (dirname(dir) === dir) return null;
+  }
+}
+
 /**
- * The directory of package `name` as the release has it installed: resolved from the release directory, or, in a
- * deploy job, from the bundle that carries kestrel-ops; null when neither has it.
+ * The directory of package `name` as the release has it installed: resolved from the release directory; through the
+ * direct dependencies of the nearest project at or above it, as {@link installedPackageDir} finds a package a preset
+ * dependency brings along; or, in a deploy job, from the bundle that carries kestrel-ops; null when none has it.
  */
 export function releasePackageDir(ctx: Pick<UpdateContext, "release">, name: string): string | null {
-  return packageDir(name, ctx.release.dir) ?? packageDir(name, OPS_DIR);
+  return packageDir(name, ctx.release.dir) ?? throughDependencies(name, ctx.release.dir) ?? packageDir(name, OPS_DIR);
 }
+
+/** The module packages with a storage an update looks for, also when the release's versions do not name them. */
+export const STORAGE_MODULE_PACKAGES: readonly string[] = [MEDIA_PACKAGE, "@michaelthielemann/kestrel-images-default"];
 
 /** Imports export `subpath` (such as `./storage`) of the release's package `name`; null when the release lacks the package or the export. */
 export async function importReleasePackage(ctx: Pick<UpdateContext, "release">, name: string, subpath: string): Promise<unknown> {
@@ -69,13 +81,14 @@ export async function releaseSvgSanitizer(ctx: Pick<UpdateContext, "release">): 
 }
 
 /**
- * The storages of the release's modules: the `storage` export of every module package installed for the release
- * (from the project on this machine, or from the bundle in a deploy job), in the order `orderStorages` gives.
+ * The storages of the release's modules: the `storage` export of every module package installed for the release that
+ * its versions or {@link STORAGE_MODULE_PACKAGES} name (from the project on this machine, also through a preset
+ * dependency, or from the bundle in a deploy job), in the order `orderStorages` gives.
  */
 export async function releaseStorages(ctx: UpdateContext): Promise<ModuleStorage[]> {
   const storages: ModuleStorage[] = [];
   const sanitizeSvg = await releaseSvgSanitizer(ctx);
-  for (const name of Object.keys(ctx.release.versions).sort()) {
+  for (const name of [...new Set([...Object.keys(ctx.release.versions), ...STORAGE_MODULE_PACKAGES])].sort()) {
     const dir = releasePackageDir(ctx, name);
     if (dir === null || !exportsStorage(dir)) continue;
     const mod = await importReleasePackage(ctx, name, "./storage");

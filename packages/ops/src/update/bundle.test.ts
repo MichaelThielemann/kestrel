@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { writeBundle, type BundleInfo } from "../bundle.ts";
+import { projectFacts, writeBundle, type BundleInfo } from "../bundle.ts";
 import { OpsError } from "../errors.ts";
 import { runUpdate } from "./command.ts";
 
@@ -30,6 +30,28 @@ function project(manifest = "deploy/manifest.yml"): string {
   mkdirSync(join(root, "deploy"), { recursive: true });
   writeFileSync(join(root, "deploy", "manifest.yml"), "applications:\n- name: site-api\n  env:\n    KESTREL_MIGRATIONS: check\n");
   const target = { adapter: "@michaelthielemann/kestrel-target-cloudfoundry", app: "site-api", org: "example-org", space: "prod", manifest };
+  writeFileSync(join(root, "kestrel.environments.json"), JSON.stringify({ environments: { prod: { target, storage: { bucket: "b" }, app: { replicaPrefix: "database/", mediaPrefix: "media/", deliveryPrefix: "www/" }, backups: { prefix: "kestrel-backups/" } } } }));
+  return root;
+}
+
+const PRESET_BRINGS = { "kestrel-media-default": "media-default", "kestrel-images-default": "images-default", "kestrel-persistence-sqlite": "persistence-sqlite", "kestrel-sanitize-svg": "sanitize-svg" };
+
+function presetProject(): string {
+  const base = mkdtempSync(join(realpathSync(tmpdir()), "kestrel-ops-update-bundle-preset-"));
+  dirs.push(base);
+  const root = join(base, "project");
+  const scope = join(root, "node_modules", "@michaelthielemann");
+  mkdirSync(scope, { recursive: true });
+  for (const [name, dir] of Object.entries({ "kestrel-ops": "ops", "kestrel-target-cloudfoundry": "target-cloudfoundry" })) symlinkSync(join(REPO, "packages", dir), join(scope, name), "dir");
+  const store = join(root, "node_modules", ".pnpm", "example-preset@1.0.0", "node_modules");
+  const preset = join(store, "example-preset");
+  mkdirSync(join(store, "@michaelthielemann"), { recursive: true });
+  mkdirSync(preset, { recursive: true });
+  for (const [name, dir] of Object.entries(PRESET_BRINGS)) symlinkSync(join(REPO, "packages", dir), join(store, "@michaelthielemann", name), "dir");
+  writeFileSync(join(preset, "package.json"), JSON.stringify({ name: "example-preset", version: "1.0.0", type: "module", dependencies: Object.fromEntries(Object.keys(PRESET_BRINGS).map((name) => [`@michaelthielemann/${name}`, "*"])) }));
+  symlinkSync(preset, join(root, "node_modules", "example-preset"), "dir");
+  writeFileSync(join(root, "package.json"), JSON.stringify({ name: "example-site", private: true, dependencies: { "@michaelthielemann/kestrel-ops": "*", "@michaelthielemann/kestrel-target-cloudfoundry": "*", "example-preset": "1.0.0" } }));
+  const target = { adapter: "@michaelthielemann/kestrel-target-cloudfoundry", app: "site-api", org: "example-org", space: "prod" };
   writeFileSync(join(root, "kestrel.environments.json"), JSON.stringify({ environments: { prod: { target, storage: { bucket: "b" }, app: { replicaPrefix: "database/", mediaPrefix: "media/", deliveryPrefix: "www/" }, backups: { prefix: "kestrel-backups/" } } } }));
   return root;
 }
@@ -84,5 +106,16 @@ describe("the update bundle", () => {
     const ops = call("backup", "list");
     expect(ops).toMatchObject({ fn: "runOps", argv: ["backup", "list"] });
     expect(Reflect.get(Object(ops.versions), "@michaelthielemann/kestrel-media-default")).toBe(version("media-default"));
+  }, 120_000);
+
+  it("finds the module packages a preset dependency brings, lists their versions as the release's, and carries them with the persistence and sanitize packages", () => {
+    const root = presetProject();
+    const facts = projectFacts(root);
+    expect(facts.versions).toMatchObject({ "@michaelthielemann/kestrel-media-default": version("media-default"), "@michaelthielemann/kestrel-images-default": version("images-default") });
+    const { dir } = writeBundle(root, root);
+    const info = boundaryCast<BundleInfo>(JSON.parse(readFileSync(join(dir, "bundle.json"), "utf8")), "json");
+    expect(info.storagePackages).toEqual(["@michaelthielemann/kestrel-images-default", "@michaelthielemann/kestrel-media-default"]);
+    expect(info.release.versions).toMatchObject({ "@michaelthielemann/kestrel-media-default": version("media-default") });
+    for (const name of Object.keys(PRESET_BRINGS)) expect(existsSync(join(dir, "node_modules", "@michaelthielemann", name, "package.json")), name).toBe(true);
   }, 120_000);
 });

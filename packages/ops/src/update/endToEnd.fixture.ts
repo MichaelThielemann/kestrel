@@ -260,7 +260,7 @@ export function updateEndToEnd(fresh: () => ScenarioStore): void {
       const prepared = await s.update(["prepare"]);
       expectOk(prepared);
       const planned = boundaryCast<{ storage: Array<{ id: string }> }>(Reflect.get(Object(prepared.json.receipt), "plan"), "json").storage.map((m) => m.id);
-      expect(planned.length).toBeGreaterThan(0);
+      expect(planned).toContain("media-default:id-key-layout");
       const deployed = await s.update(["deploy"]);
       const run = await s.run(ids(deployed));
       const migrated = run.records.find((r) => r.phase === "contentMigrations" && r.step === "storage-migrations" && r.state === "done");

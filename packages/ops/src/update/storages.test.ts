@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { isErr } from "@michaelthielemann/kestrel/result";
+import { projectFacts, releaseVersions } from "../bundle.ts";
 import { OpsError } from "../errors.ts";
 import { createUpdateHarness, type UpdateHarness } from "./harness.fixture.ts";
 import { releasePackageDir, releaseStorages, releaseSvgSanitizer } from "./storages.ts";
@@ -68,5 +69,22 @@ describe("the storages of the release", () => {
     const refused = await sanitize?.({ filename: "page.svg", contentType: "image/svg+xml", data: new TextEncoder().encode("<html><body>no svg</body></html>") });
     expect(refused !== undefined && isErr(refused)).toBe(true);
     rmSync(join(scope, "kestrel-sanitize-svg"));
+  });
+
+  it("finds the storages of the module packages a dependency of the release brings, in the layout pnpm installs them", async () => {
+    const h = createUpdateHarness();
+    harnesses.push(h);
+    const store = join(h.releaseDir, "node_modules", ".pnpm", "example-preset@1.0.0", "node_modules");
+    mkdirSync(join(store, "@michaelthielemann"), { recursive: true });
+    mkdirSync(join(store, "example-preset"), { recursive: true });
+    symlinkSync(join(REPO, "packages", "media-default"), join(store, "@michaelthielemann", "kestrel-media-default"), "dir");
+    symlinkSync(join(REPO, "packages", "images-default"), join(store, "@michaelthielemann", "kestrel-images-default"), "dir");
+    writeFileSync(join(store, "example-preset", "package.json"), JSON.stringify({ name: "example-preset", version: "1.0.0", dependencies: { "@michaelthielemann/kestrel-media-default": "*", "@michaelthielemann/kestrel-images-default": "*" } }));
+    symlinkSync(join(store, "example-preset"), join(h.releaseDir, "node_modules", "example-preset"), "dir");
+    writeFileSync(join(h.releaseDir, "package.json"), JSON.stringify({ name: "example-site", private: true, dependencies: { "example-preset": "1.0.0" } }));
+    const ctx = await contextWith(h, releaseVersions(projectFacts(h.releaseDir).versions));
+    expect(Object.keys(ctx.release.versions)).toEqual(["@michaelthielemann/kestrel-images-default", "@michaelthielemann/kestrel-media-default"]);
+    expect((await releaseStorages(ctx)).map((s) => s.module)).toEqual(["media/default", "images/default"]);
+    expect((await releaseStorages(await contextWith(h, {}))).map((s) => s.module)).toEqual(["media/default", "images/default"]);
   });
 });

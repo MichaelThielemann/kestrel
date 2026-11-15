@@ -12,6 +12,7 @@ import { FakeCloudFoundry, type FakeCfApp } from "../../../target-cloudfoundry/s
 import { FakeDroplets } from "../../../target-cloudfoundry/src/fakeDroplets.fixture.ts";
 // eslint-disable-next-line no-restricted-imports -- packages, staging and crash events of the stub platform
 import { installStaging, type FakeStaging } from "../../../target-cloudfoundry/src/fakeStaging.fixture.ts";
+import { projectFacts } from "../bundle.ts";
 import { FakeApp } from "../fakeApp.fixture.ts";
 import { fromJsonl, keys, parseJsonOrNull, type BlobEntry, type SiteEntry } from "../layout.ts";
 import { listGenerations, markerKey } from "../replica.ts";
@@ -44,7 +45,7 @@ export interface StandInRelease {
   crashes: boolean;
   /** Renders every page into the delivery prefix after its start. */
   renders: boolean;
-  /** The storage-migration packages of the workspace the release brings, linked into its directory. */
+  /** The storage-migration packages of the workspace the release brings through a preset dependency, in the layout pnpm installs them. */
   modules: boolean;
   /** With `modules`, whether the release brings the SVG sanitizer as well. */
   svgSanitizer: boolean;
@@ -150,10 +151,10 @@ const fullRelease = (overrides: Partial<StandInRelease> & { version: string }): 
 
 const modulesOf = (release: StandInRelease): Array<[string, string]> => (release.modules ? Object.entries(MODULES).filter(([name]) => release.svgSanitizer || name !== "kestrel-sanitize-svg") : []);
 
-const versionsOf = (release: StandInRelease): Record<string, string> => ({
+const versionsOf = (release: StandInRelease, dir: string): Record<string, string> => ({
+  ...projectFacts(dir).versions,
   "@michaelthielemann/kestrel": release.version,
   "@michaelthielemann/kestrel-replication-sqlite": release.runtime,
-  ...Object.fromEntries(modulesOf(release).map(([name]) => [`@michaelthielemann/${name}`, release.version])),
 });
 
 /**
@@ -223,9 +224,14 @@ export class CloudFoundryRun {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "server.mjs"), "export {};\n");
     if (release.modules) {
-      const scope = join(dir, "node_modules", "@michaelthielemann");
-      mkdirSync(scope, { recursive: true });
-      for (const [name, pkg] of modulesOf(release)) symlinkSync(join(REPO, "packages", pkg), join(scope, name), "dir");
+      const store = join(dir, "node_modules", ".pnpm", "example-preset@1.0.0", "node_modules");
+      const preset = join(store, "example-preset");
+      mkdirSync(join(store, "@michaelthielemann"), { recursive: true });
+      mkdirSync(preset, { recursive: true });
+      for (const [name, pkg] of modulesOf(release)) symlinkSync(join(REPO, "packages", pkg), join(store, "@michaelthielemann", name), "dir");
+      writeFileSync(join(preset, "package.json"), JSON.stringify({ name: "example-preset", version: "1.0.0", type: "module", dependencies: Object.fromEntries(modulesOf(release).map(([name]) => [`@michaelthielemann/${name}`, "*"])) }));
+      symlinkSync(preset, join(dir, "node_modules", "example-preset"), "dir");
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "example-site", private: true, dependencies: { "example-preset": "1.0.0" } }));
     }
     this.releases.set(`release ${release.version}`, release);
     this.newest = release.version;
@@ -333,7 +339,7 @@ export class CloudFoundryRun {
       poll: { delayMs: 20, attempts: 150 },
       readyTimeoutMs: 10_000,
       generationWaitMs: 1000,
-      project: { versions: versionsOf(release), lockfileSha256: null },
+      project: { versions: versionsOf(release, join(this.root, "releases", release.version)), lockfileSha256: null },
       ...(options.host === undefined ? {} : { host: options.host }),
       ...(options.steps === undefined ? {} : { updateSteps: options.steps }),
     });

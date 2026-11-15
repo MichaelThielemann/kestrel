@@ -4,7 +4,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { messageOf } from "./context.ts";
 import { ENVIRONMENTS_FILE, loadEnvironments } from "./environments.ts";
 import { OpsError } from "./errors.ts";
-import { packageDir } from "./packages.ts";
+import { installedPackageDir, packageDir, packagesBroughtBy } from "./packages.ts";
 import { sha256File } from "./sqlite.ts";
 import type { HostFacts, VersionSet } from "./update/types.ts";
 
@@ -55,7 +55,11 @@ function installedVersion(file: string): string | null {
   }
 }
 
-/** The installed versions of the project's direct dependencies and the hash of its lockfile. */
+/**
+ * The installed versions of the project's direct dependencies, and of the kestrel module packages with a `./storage`
+ * export those dependencies bring along (one level deep, such as the module packages of a preset package), and the
+ * hash of its lockfile.
+ */
 export function projectFacts(root: string): { versions: Record<string, string>; lockfileSha256: string | null } {
   const versions: Record<string, string> = {};
   const manifest = join(root, "package.json");
@@ -63,6 +67,10 @@ export function projectFacts(root: string): { versions: Record<string, string>; 
     const pkg = boundaryCast<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(readJsonFile(manifest), "json");
     for (const name of Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })) {
       const version = installedVersion(join(root, "node_modules", name, "package.json"));
+      if (version !== null) versions[name] = version;
+    }
+    for (const [name, dir] of packagesBroughtBy(root, RELEASE_PREFIX)) {
+      const version = versions[name] === undefined && exportsStorage(dir) ? installedVersion(join(dir, "package.json")) : null;
       if (version !== null) versions[name] = version;
     }
   }
@@ -128,8 +136,8 @@ process.exitCode = update === null ? await runOps(argv, options) : await (await 
 /**
  * Writes a self-contained `.kestrel-ops/` into `outDir`: `run.mjs`, the installed kestrel-ops, the target adapter
  * package of every environment, the module packages of the release that export `./storage` together with the
- * persistence package (and the SVG sanitizer, when installed) an update migrates a database copy with, each with the
- * packages it needs, under `node_modules/`; the project's `kestrel.environments.json` and every target manifest it
+ * persistence package (and the SVG sanitizer, when installed) an update migrates a database copy with, also when a
+ * dependency of the project brings them along, each with the packages it needs, under `node_modules/`; the project's `kestrel.environments.json` and every target manifest it
  * names, at the same relative path; and `bundle.json` with the release's versions and `hostFacts`. A deploy job then
  * needs only Node, the platform's CLI and the bundle: `node .kestrel-ops/run.mjs deploy --env <name>`, or
  * `node .kestrel-ops/run.mjs update status --env <name>`; `run.mjs` hands `deploy`, `verify` and `update …` to
@@ -150,20 +158,20 @@ export function writeBundle(projectRoot: string, outDir: string, hostFacts: Host
   const adapters = new Set(Object.values(loadEnvironments(projectRoot)).map((env) => env.target.adapter));
   adapters.delete("local");
   const storagePackages = Object.keys(release).filter((name) => {
-    const found = packageDir(name, projectRoot);
+    const found = installedPackageDir(name, projectRoot);
     return found !== null && exportsStorage(found);
   });
-  const optional = (name: string) => ({ name, from: projectRoot, optional: true });
-  const queue: Array<{ name: string; from: string; optional: boolean }> = [
+  const installed = (name: string, optional: boolean) => ({ name, from: projectRoot, optional, dir: installedPackageDir(name, projectRoot) });
+  const queue: Array<{ name: string; from: string; optional: boolean; dir?: string | null }> = [
     { name: OPS_PACKAGE, from: projectRoot, optional: false },
     ...[...adapters].map((name) => ({ name, from: projectRoot, optional: false })),
-    ...storagePackages.map((name) => ({ name, from: projectRoot, optional: false })),
-    ...(storagePackages.length > 0 ? [optional(PERSISTENCE_PACKAGE), optional(SANITIZE_SVG_PACKAGE)] : []),
+    ...storagePackages.map((name) => installed(name, false)),
+    ...(storagePackages.length > 0 ? [installed(PERSISTENCE_PACKAGE, true), installed(SANITIZE_SVG_PACKAGE, true)] : []),
   ];
   while (queue.length > 0) {
     const next = queue.shift();
     if (next === undefined || packages[next.name] !== undefined) continue;
-    const source = next.name === OPS_PACKAGE ? ops : packageDir(next.name, next.from);
+    const source = next.name === OPS_PACKAGE ? ops : (next.dir ?? packageDir(next.name, next.from));
     if (source === null && next.optional) continue;
     if (source === null) throw new OpsError(`cannot resolve ${next.name} from ${next.from}`, 2, next.name);
     const manifest = boundaryCast<Manifest>(JSON.parse(readFileSync(join(source, "package.json"), "utf8")), "json");

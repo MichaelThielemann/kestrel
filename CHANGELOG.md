@@ -1784,7 +1784,8 @@ Net changes since 5.8.2.
   `node .kestrel-ops/run.mjs deploy` in a deploy job) moves a deployed environment with one instance to a new
   release. `update prepare` checks the environment read-only, plans the update on a copy of the newest replica
   generation (storage migrations of the release's module packages, the pending content migrations the host
-  facts list in `contentMigrations`, their questions), rehearses the migrations on that copy without writing to
+  facts list in `contentMigrations`, their questions; the module packages also when a dependency of the project,
+  such as a preset package, brings them along), rehearses the migrations on that copy without writing to
   the app's store, content migrations through a local start of the release, checks that no referenced original
   went missing, and writes a receipt with the version change and the plan hash into the backup location. `deploy` refuses a version change or a pending storage
   migration without a matching receipt, more than one instance, an active deployment and any earlier deploy run of
