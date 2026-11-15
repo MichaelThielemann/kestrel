@@ -50,12 +50,15 @@ async function projectRunUpdate(root: string): Promise<UpdateRunner | null> {
   return null;
 }
 
+const PLANNING = new Set(["prepare", "bundle", "deploy", "verify", "resume"]);
+
 /**
  * `kestrel update`: the update assistant of the installed kestrel-ops. `--help` lists the seven commands an operator
- * runs. Every command but `status` hands the facts the project's host plugin contributes (its readiness path, secret
- * variable names, migration switches, export checks, local start variables, the ids of its content migrations) to
- * kestrel-ops, so a run continued on this machine plans with the same facts as the bundle; exit 2 when kestrel-ops
- * is missing or has no update assistant.
+ * runs. `prepare`, `bundle`, `deploy`, `verify` and `resume` hand the facts the project's host plugin contributes (its
+ * readiness path, secret variable names, migration switches, export checks, local start variables, the ids of its
+ * content migrations) to kestrel-ops, so a run continued on this machine plans with the same facts as the bundle;
+ * `status`, `accept`, `rollback`, `abort` and `cleanup` load no host plugin, so a broken one never blocks the way
+ * back. Exit 2 when kestrel-ops is missing or has no update assistant.
  */
 export async function run(argv: readonly string[]): Promise<number> {
   const [sub] = argv;
@@ -67,6 +70,7 @@ export async function run(argv: readonly string[]): Promise<number> {
   const root = process.cwd();
   const runUpdate = await projectRunUpdate(root);
   if (runUpdate === null) return runOpsCommand("update", argv);
+  if (!PLANNING.has(sub)) return runUpdate(argv, { host: {} });
   const facts = await hostFacts(root);
   if (!facts.ok) {
     process.stderr.write(`kestrel update: ${facts.message}\n`);

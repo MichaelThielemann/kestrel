@@ -147,7 +147,7 @@ describe("kestrel status, backup, restore and update", () => {
     expect(info.hostFacts).toEqual({ readyPath: "/ready", secretEnvNames: ["SESSION_SECRET"], contentMigrations: ["pages-mark-migrated"] });
   }, 120_000);
 
-  it("hands the host plugin's facts to every update command that continues a run, and loads no plugin for update status", async () => {
+  it("hands the host plugin's facts to update resume and verify, and loads no plugin for status, rollback, abort, accept and cleanup", async () => {
     const dir = project("update-resume-facts", true);
     const host = join(dir, "node_modules", "example-host");
     mkdirSync(host, { recursive: true });
@@ -159,11 +159,17 @@ describe("kestrel status, backup, restore and update", () => {
     const asked = (): number => (existsSync(join(dir, "ops-facts.log")) ? readFileSync(join(dir, "ops-facts.log"), "utf8").split("\n").filter((line) => line !== "").length : 0);
     await runCli(["update", "status", "--env", "prod"], { cwd: dir, nodeArgs: TRANSFORM, env: { XDG_STATE_HOME: join(dir, "state") } });
     expect(asked()).toBe(0);
-    for (const sub of ["resume", "verify", "rollback", "abort"]) {
+    for (const sub of ["resume", "verify", "rollback", "abort", "accept", "cleanup"]) {
       const before = asked();
       const result = await runCli(["update", sub, "--env", "prod"], { cwd: dir, nodeArgs: TRANSFORM, env: { XDG_STATE_HOME: join(dir, "state") } });
       expect(result.code, `${sub}: ${result.stderr}`).toBe(2);
-      expect(asked(), sub).toBe(before + 1);
+      expect(asked(), sub).toBe(sub === "resume" || sub === "verify" ? before + 1 : before);
+    }
+    writeFileSync(join(host, "plugin.mjs"), `export default () => ({ kind: "example", detect: async () => true, load: async () => ({ issues: [] }), ops: () => { throw new Error("the host plugin is broken"); } });\n`);
+    for (const sub of ["rollback", "abort", "accept", "cleanup"]) {
+      const result = await runCli(["update", sub, "--env", "prod"], { cwd: dir, nodeArgs: TRANSFORM, env: { XDG_STATE_HOME: join(dir, "state") } });
+      expect(result.stderr, sub).not.toContain("the host plugin is broken");
+      expect(result.stderr, sub).toContain("cannot run an update");
     }
   }, 120_000);
 

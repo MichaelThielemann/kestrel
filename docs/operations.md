@@ -232,7 +232,8 @@ command runs in `dir`, relative to `update.release.dir`; `node` is the Node that
 The journal of a run lives in the backup location, one object per step, so any machine with access to it can
 continue it. `kestrel update resume` refuses with exit 2 to continue a deploy from a process that has another
 release than the run: other versions of the kestrel packages, or other content migrations in the host facts
-(`kestrel update` passes the host plugin's facts to every command but `status`, `run.mjs` those of the bundle). It
+(`kestrel update` passes the host plugin's facts to `prepare`, `deploy`, `verify` and `resume`, `run.mjs` those of
+the bundle; `accept`, `rollback`, `abort` and `cleanup` load no host plugin). It
 then checks the last finished step and continues after it: a plan of the cutover database that differs from the
 receipt or from the plan the gate recorded is refused, an unfinished migration starts again from the cutover
 backup, a promotion whose generation is no longer the newest is refused, after `promote` it swaps and starts,

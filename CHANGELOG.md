@@ -1778,8 +1778,9 @@ Net changes since 5.8.2.
   the CLI; without it they print how to install it and exit 2, and the other commands, `upgrade` included,
   never load kestrel-ops. `update` answers 2 while the installed kestrel-ops brings no update assistant,
   and 3 for an update that was rolled back. `kestrel --help` lists the four commands; `kestrel update --help`
-  lists `prepare`, `accept`, `rollback`, `status`, `resume`, `abort` and `cleanup`, and every `update` command
-  but `status` passes the facts the project's host plugin returns from `ops()` to kestrel-ops.
+  lists `prepare`, `accept`, `rollback`, `status`, `resume`, `abort` and `cleanup`; `update prepare`, `bundle`,
+  `deploy`, `verify` and `resume` pass the facts the project's host plugin returns from `ops()` to kestrel-ops, and
+  the other `update` commands load no host plugin.
 - The update assistant of `@michaelthielemann/kestrel-ops` (`runUpdate` from `./run`, `kestrel update`, and
   `node .kestrel-ops/run.mjs deploy` in a deploy job) moves a deployed environment with one instance to a new
   release. `update prepare` checks the environment read-only, plans the update on a copy of the newest replica
