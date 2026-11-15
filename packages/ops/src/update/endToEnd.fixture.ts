@@ -232,6 +232,23 @@ export function updateEndToEnd(fresh: () => ScenarioStore): void {
     expect(s.current().version).toBe("6.0.1");
   });
 
+  scenarioTest("refuses the hop from the 5.8.1 fixture with exit 2 in prepare and at the gate, before the app stops, when the release cannot clean the stored SVGs", async (task) => {
+    const s = await scenario(task, { version: "5.8.1", runtime: "5.8.1", renders: false }, { version: "6.0.0", modules: true, svgSanitizer: false }, { fixture: true });
+    const starts = s.starts.length;
+    const prepared = await s.update(["prepare"]);
+    expectOk(prepared, UPDATE_EXIT.usage);
+    expect(prepared.stderr).toContain("kestrel-sanitize-svg");
+    expect(prepared.json.receipt).toBeUndefined();
+    const deployed = await s.update(["deploy"]);
+    expectOk(deployed, UPDATE_EXIT.usage);
+    expect(deployed.stderr + deployed.stdout).toContain("kestrel-sanitize-svg");
+    const run = await s.run(ids(deployed));
+    expect(run.records.some((r) => r.step === "stop")).toBe(false);
+    expect(s.starts.length).toBe(starts);
+    expect(s.current().version).toBe("5.8.1");
+    expect(s.app).not.toBeNull();
+  });
+
   for (const ready of ["ready", "not-ready"] as const) {
     const ending = ready === "ready" ? "verifies the new release" : "after a failed verification starts the release before 6 only on the cutover state promoted again";
     scenarioTest(`hops from the 5.8.1 fixture: prepare plans the storage migrations, deploy converts a copy of the cutover database and ${ending}`, async (task) => {

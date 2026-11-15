@@ -46,6 +46,8 @@ export interface StandInRelease {
   renders: boolean;
   /** The storage-migration packages of the workspace the release brings, linked into its directory. */
   modules: boolean;
+  /** With `modules`, whether the release brings the SVG sanitizer as well. */
+  svgSanitizer: boolean;
 }
 
 /** An app instance other than the stand-in app, such as one on the published packages of an older release. */
@@ -142,12 +144,14 @@ function files(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? files(join(dir, entry.name)) : [join(dir, entry.name)]));
 }
 
-const fullRelease = (overrides: Partial<StandInRelease> & { version: string }): StandInRelease => ({ runtime: overrides.version, ready: "ready", crashes: false, renders: true, modules: false, ...overrides });
+const fullRelease = (overrides: Partial<StandInRelease> & { version: string }): StandInRelease => ({ runtime: overrides.version, ready: "ready", crashes: false, renders: true, modules: false, svgSanitizer: true, ...overrides });
+
+const modulesOf = (release: StandInRelease): Array<[string, string]> => (release.modules ? Object.entries(MODULES).filter(([name]) => release.svgSanitizer || name !== "kestrel-sanitize-svg") : []);
 
 const versionsOf = (release: StandInRelease): Record<string, string> => ({
   "@michaelthielemann/kestrel": release.version,
   "@michaelthielemann/kestrel-replication-sqlite": release.runtime,
-  ...(release.modules ? Object.fromEntries(Object.keys(MODULES).map((name) => [`@michaelthielemann/${name}`, release.version])) : {}),
+  ...Object.fromEntries(modulesOf(release).map(([name]) => [`@michaelthielemann/${name}`, release.version])),
 });
 
 /**
@@ -219,7 +223,7 @@ export class CloudFoundryRun {
     if (release.modules) {
       const scope = join(dir, "node_modules", "@michaelthielemann");
       mkdirSync(scope, { recursive: true });
-      for (const [name, pkg] of Object.entries(MODULES)) symlinkSync(join(REPO, "packages", pkg), join(scope, name), "dir");
+      for (const [name, pkg] of modulesOf(release)) symlinkSync(join(REPO, "packages", pkg), join(scope, name), "dir");
     }
     this.releases.set(`release ${release.version}`, release);
     this.newest = release.version;

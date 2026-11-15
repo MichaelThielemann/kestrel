@@ -7,15 +7,14 @@ import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import type { Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { runShapeMigrations, STORAGE_VERSIONS, type BlobOps, type ModuleRun, type ModuleStorage } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import { readManifest } from "../backup.ts";
-import { SANITIZE_SVG_PACKAGE } from "../bundle.ts";
 import { messageOf } from "../context.ts";
 import { OpsError } from "../errors.ts";
 import { keys } from "../layout.ts";
 import { sha256, sha256File, tables } from "../sqlite.ts";
 import type { ObjectStore } from "../store.ts";
 import { CONTENT_LEDGER, runContentMigrations } from "./contentMigrations.ts";
-import { openDatabase } from "./plan.ts";
-import { releaseStorages, releaseSvgSanitizer } from "./storages.ts";
+import { openDatabase, refuseUnsanitizedSvgs } from "./plan.ts";
+import { releaseStorages } from "./storages.ts";
 import type { MigrateInput, MigrateResult, UpdateContext } from "./types.ts";
 
 const PHASE = "contentMigrations";
@@ -172,10 +171,7 @@ export async function migrateCopy(ctx: UpdateContext, input: MigrateInput): Prom
   const preview = await shapeRun(ctx, storages, outFile, false);
   const unplanned = pendingIds(preview).filter((id) => !planned.has(id));
   if (unplanned.length > 0) throw new OpsError(`the copy needs storage migrations the plan does not name: ${unplanned.join(", ")}; run update prepare again`, 1, "storage-migrations");
-  const demoted = preview.flatMap((m) => m.migrations).reduce((n, r) => n + (r.plan?.counts.svgDemoted ?? 0), 0);
-  if (demoted > 0 && storages.some((s) => s.module === "media/default") && (await releaseSvgSanitizer(ctx)) === null) {
-    throw new OpsError(`${demoted} stored SVG(s) would be kept as downloads, because the release has no ${SANITIZE_SVG_PACKAGE} to clean them with; install it in the project and bundle again`, 2, "storage-migrations");
-  }
+  await refuseUnsanitizedSvgs(ctx, storages, preview);
   const storage = await shapeRun(ctx, storages, outFile, true);
   const unfinished = storage.filter((m) => !FINISHED.has(m.state));
   if (unfinished.length > 0) throw new OpsError(`storage migrations still wait on the copy: ${unfinished.map((m) => `${m.module} ${m.state}`).join(", ")}`, 1, "storage-migrations");

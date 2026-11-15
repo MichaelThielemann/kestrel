@@ -63,7 +63,9 @@ reports, and when it reports none, the deploy counts as a version change.
   that find their old form (detected and planned, nothing written), the content migrations the release brings
   that the copy's ledger does not hold, and the questions they ask. The release's content migrations are the ids
   the host facts list in `contentMigrations`. The plan hash covers the ids only, so an upload between prepare and
-  deploy does not invalidate the receipt.
+  deploy does not invalidate the receipt. A release whose storage migrations would keep stored SVGs as downloads
+  for want of `kestrel-sanitize-svg` is refused with exit 2 and gets no receipt; the gate of a deploy plans the
+  same way and refuses it with exit 2 before the app stops.
 - **Rehearsal** on that copy: the storage migrations, whose blob writes stay in memory and whose copies only
   point at the source, so no key of the app's store changes; the content migrations through a local start of the
   release when any are pending; an integrity check; and the referenced originals, every one of which must still
@@ -176,8 +178,8 @@ The `migrate` step works on a copy and records its own steps in the journal (pha
 - `storage-migrations` runs the storage migrations of the release's module packages on the copy. A migration the
   plan does not name is refused. Blob writes reach the app's store only as server-side copies to keys that do not
   exist yet, or as new keys; a write over an existing key, a removal and a move are refused, so the keys the old
-  release reads stay as they are. Stored SVGs are cleaned with the release's `kestrel-sanitize-svg`; a run that
-  would keep them as downloads for want of it is refused with exit 2.
+  release reads stay as they are. Stored SVGs are cleaned with the release's `kestrel-sanitize-svg`; without it
+  prepare and the gate have refused the release already.
 - `content-migrations` applies the pending content migrations by starting the release on this machine on the
   copy, through `update.localBoot`, and stopping it once it is ready. Nothing starts when nothing is pending; a
   pending migration without `update.localBoot` is a configuration error (exit 2). The local start gets an

@@ -5,14 +5,14 @@ import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { failure, err, isErr, ok } from "@michaelthielemann/kestrel-contracts/errors";
 import { runShapeMigrations, type BlobOps, type ModuleRun, type ModuleStorage } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
-import { PERSISTENCE_PACKAGE } from "../bundle.ts";
+import { PERSISTENCE_PACKAGE, SANITIZE_SVG_PACKAGE } from "../bundle.ts";
 import { OpsError } from "../errors.ts";
 import { refuseUnfinishedPlacement } from "../placements.ts";
 import { blobstoreOf, buildDatabase, completeGeneration, stableGenerations } from "../replica.ts";
 import type { ObjectStore } from "../store.ts";
 import { ledgerIds } from "./contentMigrations.ts";
 import { listUpdateRuns, readUpdateRun } from "./journal.ts";
-import { importReleasePackage, releaseStorages } from "./storages.ts";
+import { importReleasePackage, releaseStorages, releaseSvgSanitizer } from "./storages.ts";
 import type { PlannedStorageMigration, UpdateContext, UpdatePlan, VersionSet } from "./types.ts";
 
 /** The packages a version change is decided on: every installed package whose name starts with this. */
@@ -115,6 +115,17 @@ export function pendingStorage(modules: readonly ModuleRun[]): PlannedStorageMig
   );
 }
 
+/**
+ * Refuses with exit 2 when the planned or previewed storage migrations in `modules` would keep stored SVGs as
+ * downloads (`svgDemoted`) because the release has no SVG sanitizer installed to clean them with.
+ */
+export async function refuseUnsanitizedSvgs(ctx: Pick<UpdateContext, "release">, storages: readonly ModuleStorage[], modules: readonly ModuleRun[]): Promise<void> {
+  const demoted = modules.flatMap((m) => m.migrations).reduce((n, r) => n + (r.plan?.counts.svgDemoted ?? 0), 0);
+  if (demoted > 0 && storages.some((s) => s.module === "media/default") && (await releaseSvgSanitizer(ctx)) === null) {
+    throw new OpsError(`${demoted} stored SVG(s) would be kept as downloads, because the release has no ${SANITIZE_SVG_PACKAGE} to clean them with; install it in the project and bundle again`, 2, "storage-migrations");
+  }
+}
+
 function questionsOf(storages: readonly ModuleStorage[], planned: readonly PlannedStorageMigration[]): string[] {
   const ids = new Set(planned.map((m) => m.id));
   return storages.flatMap((s) => s.migrations.filter((m) => ids.has(m.id)).flatMap((m) => (m.questions ?? []).map((q) => q.id))).sort();
@@ -124,7 +135,8 @@ function questionsOf(storages: readonly ModuleStorage[], planned: readonly Plann
  * Plans the update on `database`, a copy of the newest replica generation: the storage-shape migrations of the
  * release's modules that detect their old form (detect and plan only, no row or blob is written), and the content
  * migrations of the release that the copy's ledger does not hold. `versions` is the change from
- * {@link runningVersions} to the release's {@link versionSet}.
+ * {@link runningVersions} to the release's {@link versionSet}. Refuses with exit 2 through
+ * {@link refuseUnsanitizedSvgs}, so prepare and the gate of a deploy refuse such a release before anything changes.
  */
 export async function computePlan(ctx: UpdateContext, database: string): Promise<UpdatePlan> {
   const from = await runningVersions(ctx);
@@ -138,6 +150,7 @@ export async function computePlan(ctx: UpdateContext, database: string): Promise
       if (isErr(report)) throw new OpsError(`planning the storage migrations failed: ${report.error.message}`, 1, "plan");
       const refused = report.value.modules.find((m) => m.state === "too-old" || m.state === "too-new");
       if (refused !== undefined) throw new OpsError(`the stored data of ${refused.module} is ${refused.state === "too-old" ? "older" : "newer"} than this release converts (stored ${refused.stored ?? "none"}, release ${refused.version})`, 1, refused.module);
+      await refuseUnsanitizedSvgs(ctx, storages, report.value.modules);
       storage = pendingStorage(report.value.modules);
     } finally {
       db.close();
