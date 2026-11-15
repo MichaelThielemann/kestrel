@@ -1,15 +1,24 @@
-import { readUpdateRun, reportOf } from "./journal.ts";
+import { readUpdateRun, reportOf, retirePending } from "./journal.ts";
+import { retireStep } from "./verify.ts";
 import { UPDATE_EXIT, type UpdateContext, type UpdateOutcome, type UpdateRun } from "./types.ts";
 
 /**
  * Accepts a `verified` deploy run: records `accept`, after which a rollback discards what was written since and needs
  * the `rollback-accepted` answer. A pinned cutover backup stays pinned until `update cleanup`. Refuses with exit 1
- * for a run in any other state.
+ * for a run in any other state. When the retire of the previous releases after its verification did not end, it
+ * retires them first and refuses with exit 1 while that fails.
  */
 export async function accept(ctx: UpdateContext, run: UpdateRun): Promise<UpdateOutcome> {
   if (run.state !== "verified") {
     const message = `update run ${run.runId} is ${run.state}; only a verified deploy can be accepted`;
     return { exitCode: UPDATE_EXIT.refused, runId: run.runId, state: run.state, message, report: reportOf(run) };
+  }
+  if (retirePending(run)) {
+    const retired = await retireStep(ctx, run, true);
+    if (!retired.ok) {
+      const message = `update run ${run.runId} is not accepted: retiring its previous releases failed: ${retired.error}; their droplets can still be started by the platform; run update accept again once the target answers`;
+      return { exitCode: UPDATE_EXIT.refused, runId: run.runId, state: run.state, message, report: reportOf(await readUpdateRun(ctx, run.runId)) };
+    }
   }
   await ctx.journal.record("accept", "done", { phase: "accept", cutoverBackup: run.cutoverBackup });
   const accepted = await readUpdateRun(ctx, run.runId);

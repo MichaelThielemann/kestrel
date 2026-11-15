@@ -169,6 +169,19 @@ export async function listUpdateRuns(ctx: Pick<OpsContext, "backups" | "location
   return out.sort((a, b) => a.startedAt - b.startedAt || (a.runId < b.runId ? -1 : 1));
 }
 
+/**
+ * True when deploy run `run` passed its verification but the retire of the previous releases after it did not end:
+ * the newest `retire` record after the passing `verify` is missing, `started` or `failed`. A `skipped` retire counts as
+ * ended.
+ */
+export function retirePending(run: Pick<UpdateRun, "state" | "records">): boolean {
+  if (run.state !== "verified" && run.state !== "accepted") return false;
+  const passed = run.records.map((r) => r.step === "verify" && r.state === "done" && (r.phase === "deploy" || r.phase === "verify") && r.data.verdict === "passed").lastIndexOf(true);
+  if (passed < 0) return false;
+  const last = run.records.slice(passed + 1).filter((r) => r.step === "retire").at(-1);
+  return last === undefined || (last.state !== "done" && last.state !== "skipped");
+}
+
 /** The newest deploy run of `env`, or null when there is none. */
 export async function latestDeployRun(ctx: Pick<OpsContext, "backups" | "location" | "poll">, env: string): Promise<UpdateRun | null> {
   const newest = (await listUpdateRuns(ctx, env)).filter((r) => r.command === "update deploy").at(-1);

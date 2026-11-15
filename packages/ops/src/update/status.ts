@@ -1,6 +1,6 @@
 import { parseJsonOrNull } from "../layout.ts";
 import { stableList } from "../store.ts";
-import { listUpdateRuns, readUpdateRun, reportOf, RUN_STEP } from "./journal.ts";
+import { listUpdateRuns, readUpdateRun, reportOf, retirePending, RUN_STEP } from "./journal.ts";
 import { OPEN_STATES, type UpdateContext, type UpdateReport, type UpdateRun, type UpdateRunState } from "./types.ts";
 
 /** One update run as `update status` shows it. */
@@ -45,11 +45,13 @@ async function lockHosts(ctx: UpdateContext): Promise<Map<string, string>> {
 
 /**
  * The command run `run`, opened by `command`, needs next, or null when it needs nothing; for a run whose rollback left
- * the app stopped, a deploy of the previous release.
+ * the app stopped, a deploy of the previous release; for a verified or accepted run whose retire of the previous
+ * releases did not end, `update resume`.
  */
 export function nextCommand(run: UpdateRun, command: string): string | null {
   const scope = `--env ${run.env} --run ${run.runId}`;
   if (command === "update prepare") return run.state === "prepared" ? `node .kestrel-ops/run.mjs deploy --env ${run.env}` : null;
+  if (retirePending(run)) return `kestrel update resume ${scope}`;
   switch (run.state) {
     case "deploying":
       return `kestrel update abort ${scope}`;

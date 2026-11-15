@@ -96,7 +96,7 @@ describe("update resume", () => {
 
   it("does not roll back a run whose rollback after accept was refused", async () => {
     const s = await scenario();
-    const deployed = await deployUntil(s, "verify");
+    const deployed = await deployUntil(s, "retire");
     const { ctx } = await continueRun(s, deployed.runId, "update accept");
     await ctx.journal.record("accept", "done", { phase: "accept" });
     await continueRun(s, deployed.runId, "update rollback");
@@ -107,7 +107,7 @@ describe("update resume", () => {
 
   it("refuses a run that needs nothing", async () => {
     const s = await scenario();
-    const deployed = await deployUntil(s, "verify");
+    const deployed = await deployUntil(s, "retire");
     const { ctx, run } = await continueRun(s, deployed.runId, "update resume");
     expect(await resume(ctx, run)).toMatchObject({ exitCode: UPDATE_EXIT.refused, state: "verified" });
   });

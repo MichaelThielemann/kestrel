@@ -1,4 +1,4 @@
-import { messageOf } from "../context.ts";
+import { messageOf, recordQuietly } from "../context.ts";
 import { Interrupted } from "../interrupt.ts";
 import { acknowledgement, listGenerations, type Generation } from "../replica.ts";
 import { readUpdateRun, reportOf } from "./journal.ts";
@@ -116,7 +116,7 @@ export function stoppedAfterRollback(ctx: Pick<UpdateContext, "envName">, failur
 
 /**
  * Records a verification of phase `phase` and acts on its verdict: `passed` retires the previous releases and ends
- * with exit 0, `failed` rolls back automatically and ends with exit 3 (1 when the rollback did not finish or had no
+ * with exit 0 (1 when the retire failed, so the old droplets can still start until `update resume` retires them), `failed` rolls back automatically and ends with exit 3 (1 when the rollback did not finish or had no
  * previous droplet to start, so the app stays stopped),
  * `unverifiable` halts with exit 1 and leaves the new release running. `known` fills in what the caller knows of the
  * run and its journal listing may not show yet, such as the cutover backup and the promoted generation.
@@ -136,15 +136,37 @@ export async function concludeVerify(ctx: UpdateContext, phase: UpdatePhase, res
     if (ended === "stopped") return outcomeOf(ctx, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, `verification failed (${failure})`));
     return outcomeOf(ctx, UPDATE_EXIT.rolledBack, `verification failed (${failure}); rolled back to the cutover state`);
   }
+  const retired = await retireStep(ctx, run);
+  if (!retired.ok) return outcomeOf(ctx, UPDATE_EXIT.refused, retireFailed(ctx, retired.error));
+  return outcomeOf(ctx, UPDATE_EXIT.done, `verified; accept it with update accept --env ${ctx.envName}, or roll back with update rollback --env ${ctx.envName}`);
+}
+
+function retireFailed(ctx: UpdateContext, error: string): string {
+  return `the new release is verified, but retiring the previous releases failed: ${error}; their droplets can still be started by the platform on the converted data until they are retired; run update resume --env ${ctx.envName} --run ${ctx.run.id} to retire them`;
+}
+
+/**
+ * Runs the `retire` step of verified deploy run `run` between a `retire` started record and its `done` or `failed`
+ * record, and never throws but for an interrupt, which it records as `failed` first and throws again with the command
+ * that retires them. When `again` is set and the app runs another droplet than the one the run deployed, a later
+ * deploy replaced it and retired the releases itself: the step is recorded as `skipped`.
+ */
+export async function retireStep(ctx: UpdateContext, run: UpdateRun, again = false): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (again && run.stagedDroplet !== null && (await ctx.target.currentDroplet()) !== run.stagedDroplet) {
+    await ctx.journal.record("retire", "skipped", { phase: "deploy", reason: "a later deploy replaced the droplet of this run" });
+    return { ok: true };
+  }
   await ctx.journal.record("retire", "started", { phase: "deploy" });
   try {
     const retired = await ctx.steps.retire(ctx, run);
     await ctx.journal.record("retire", "done", { phase: "deploy", droplets: retired.droplets, revisions: retired.revisions, savedDroplet: retired.savedDroplet, kept: retired.kept });
+    return { ok: true };
   } catch (cause) {
-    await ctx.journal.record("retire", "failed", { phase: "deploy", error: messageOf(cause) });
-    ctx.out.warn(`the new release is verified, but retiring the previous releases failed: ${messageOf(cause)}`);
+    await recordQuietly(ctx, "retire", "failed", { phase: "deploy", error: messageOf(cause) });
+    if (cause instanceof Interrupted) throw new Interrupted(cause.signal, retireFailed(ctx, "it was interrupted"));
+    ctx.out.error(`retiring the previous releases failed: ${messageOf(cause)}`);
+    return { ok: false, error: messageOf(cause) };
   }
-  return outcomeOf(ctx, UPDATE_EXIT.done, `verified; accept it with update accept --env ${ctx.envName}, or roll back with update rollback --env ${ctx.envName}`);
 }
 
 /** `update verify`: verifies the running release of deploy run `run` again, for a halted run once readiness can be checked. */

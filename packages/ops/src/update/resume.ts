@@ -1,6 +1,6 @@
 import { messageOf } from "../context.ts";
-import { readUpdateRun, reportOf } from "./journal.ts";
-import { verifyCommand } from "./verify.ts";
+import { readUpdateRun, reportOf, retirePending } from "./journal.ts";
+import { retireStep, verifyCommand } from "./verify.ts";
 import { UPDATE_EXIT, type RollbackReason, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRecord, type UpdateRun, type UpdateRunState } from "./types.ts";
 
 async function outcome(ctx: UpdateContext, runId: string, exitCode: UpdateExitCode, message: string, fallback: UpdateRunState): Promise<UpdateOutcome> {
@@ -35,7 +35,8 @@ async function rollBackAgain(ctx: UpdateContext, run: UpdateRun, reason: Rollbac
  * `update resume`: continues an interrupted run where its journal ended, after a `resume` record. A deploy continues
  * through `continueDeploy`; a rollback that did not finish runs again from its first step (every rollback step can be
  * repeated); a run whose verification failed is rolled back; a halted run is verified again. The ending is that of
- * the step it continued: exit 0 verified, 3 rolled back, 1 halted or refused. A rollback that began only as a command
+ * the step it continued: exit 0 verified, 3 rolled back, 1 halted or refused. A verified or accepted run whose retire
+ * of the previous releases did not end (`retirePending`) retires them again: exit 0 once they are, 1 otherwise. A rollback that began only as a command
  * refused after `accept` is not resumed.
  */
 export async function resume(ctx: UpdateContext, run: UpdateRun): Promise<UpdateOutcome> {
@@ -43,7 +44,7 @@ export async function resume(ctx: UpdateContext, run: UpdateRun): Promise<Update
   const begun = since.filter((r) => r.step === "rollback" && r.state === "started").at(-1);
   const verifyFailed = since.some((r) => r.step === "verify" && r.state === "done" && (r.phase === "deploy" || r.phase === "verify") && r.data.verdict === "failed");
   const accepted = since.length < run.records.length;
-  const action = run.state === "rolling-back" ? (begun !== undefined ? "rollback" : verifyFailed && !accepted ? "rollback-failed-verify" : null) : run.state === "halted" ? "verify" : run.state === "deploying" || run.state === "down" || run.state === "verifying" ? "deploy" : null;
+  const action = retirePending(run) ? "retire" : run.state === "rolling-back" ? (begun !== undefined ? "rollback" : verifyFailed && !accepted ? "rollback-failed-verify" : null) : run.state === "halted" ? "verify" : run.state === "deploying" || run.state === "down" || run.state === "verifying" ? "deploy" : null;
   if (action === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is ${run.state}; there is nothing to resume${run.state === "rolling-back" ? " (no rollback began; update rollback starts one)" : ""}`, run.state);
   await ctx.journal.record("resume", "started", { phase: "resume", state: run.state, lastDone: run.lastDone });
   switch (action) {
@@ -56,5 +57,10 @@ export async function resume(ctx: UpdateContext, run: UpdateRun): Promise<Update
       return verifyCommand(ctx, run);
     case "deploy":
       return ctx.steps.continueDeploy(ctx, run);
+    case "retire": {
+      const retired = await retireStep(ctx, run, true);
+      if (!retired.ok) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `retiring the previous releases failed again: ${retired.error}; their droplets can still be started by the platform; run update resume once the target answers`, run.state);
+      return outcome(ctx, run.runId, UPDATE_EXIT.done, `the previous releases of run ${run.runId} are retired`, run.state);
+    }
   }
 }

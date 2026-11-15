@@ -51,6 +51,7 @@ const deployRun: Entry[] = [
   { step: "start", state: "started", at: minutes(7) },
   { step: "start", state: "done", at: minutes(9), data: { ready: true } },
   { step: "verify", state: "done", at: minutes(10), data: { verdict: "passed" } },
+  { step: "retire", state: "done", at: minutes(10), data: { droplets: ["old-droplet"] } },
 ];
 
 describe("update status", () => {
@@ -73,6 +74,7 @@ describe("update status", () => {
       ["promote", 60_000, true],
       ["start", 120_000, true],
       ["verify", 60_000, false],
+      ["retire", 0, false],
     ]);
     expect(report.run?.report.downtimeMs).toBe(6 * 60_000);
     const lines = renderStatus(report).join("\n");

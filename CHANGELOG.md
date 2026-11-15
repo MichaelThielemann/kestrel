@@ -1798,7 +1798,9 @@ Net changes since 5.8.2.
   rollback to the cutover state, exit 3, or exit 1 when no previous release was left to start) or unverifiable (403, no
   connection, or a check that cannot read the store or the platform: the run halts with exit 1). Only after a
   passed verification are the older releases of the app deleted, the replaced one's code saved into the backup
-  location first where the platform hands it out; a failed save does not keep it. A
+  location first where the platform hands it out; a failed save does not keep it. When deleting them fails or is
+  interrupted, the deploy ends with exit 1 because they can still start, and `update resume` or `update accept`
+  deletes them. A
   hard failure after the stop and before the cutover backup is written starts the previous release again on the
   unchanged replica. A rollback promotes the cutover database again before any old release starts, copies back
   originals, replaces the delivery prefix and lists it again, restores the recorded configuration verbatim, starts

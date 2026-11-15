@@ -12,6 +12,7 @@ import { listGenerations } from "../replica.ts";
 import { sha256File } from "../sqlite.ts";
 import type { ObjectStore } from "../store.ts";
 import { abort } from "./abort.ts";
+import { accept } from "./accept.ts";
 import { continueDeploy, deploy } from "./deploy.ts";
 import { createUpdateHarness, type UpdateHarness, type UpdateHarnessOptions } from "./harness.fixture.ts";
 import { readUpdateRun } from "./journal.ts";
@@ -612,5 +613,61 @@ describe("the configuration a deploy records", { timeout: 30_000 }, () => {
     for (const name of ["STORAGE_SECRET", "STORAGE_URL"]) expect(JSON.stringify(env)).toMatch(new RegExp(`"${name}":\\{"fingerprint":"[0-9a-f]{64}"\\}`));
     expect(env).toMatchObject({ SITE_NAME: { value: "Studio" } });
     expect(h.target.configuration.env).toMatchObject({ STORAGE_SECRET: SHARED, STORAGE_URL: `https://user:${SHARED}@store.example.net`, SITE_NAME: "Studio" });
+  });
+});
+
+describe("a verified deploy whose retire of the previous releases does not finish", { timeout: 30_000 }, () => {
+  it("ends with exit 1, says the old releases can still start, names update resume, and resume retires them", async () => {
+    const s = await scenario();
+    s.steps.retire.mockImplementationOnce(async () => {
+      throw new Error("cf curl -X DELETE /v3/droplets/old exited with 1");
+    });
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode, outcome.message).toBe(1);
+    expect(outcome.state).toBe("verified");
+    expect(outcome.message).toContain("can still be started");
+    expect(outcome.message).toContain(`update resume --env prod --run ${s.ctx.run.id}`);
+    expect((await updateStatus(s.ctx, s.ctx.run.id)).run?.next).toBe(`kestrel update resume --env prod --run ${s.ctx.run.id}`);
+    const run = await readUpdateRun(s.ctx, s.ctx.run.id);
+    const resumed = await resume(await s.h.context({ run, answers: ANSWERS, steps: { retire: s.steps.retire } }), run);
+    expect(resumed.exitCode, resumed.message).toBe(0);
+    expect(resumed.state).toBe("verified");
+    expect(s.steps.retire).toHaveBeenCalledTimes(2);
+    const after = await readUpdateRun(s.ctx, s.ctx.run.id);
+    expect(after.records.filter((r) => r.step === "retire").map((r) => r.state)).toEqual(["started", "failed", "started", "done"]);
+    expect((await updateStatus(s.ctx, s.ctx.run.id)).run?.next).toBe(`kestrel update accept --env prod --run ${s.ctx.run.id}`);
+  });
+
+  it("records the retire as failed and keeps it pending when a signal cuts it off", async () => {
+    const s = await scenario();
+    s.steps.retire.mockImplementationOnce(async () => {
+      throw new Interrupted("SIGTERM");
+    });
+    await expect(deploy(s.ctx)).rejects.toThrow("update resume");
+    const run = await readUpdateRun(s.ctx, s.ctx.run.id);
+    expect(run.state).toBe("verified");
+    expect(run.records.filter((r) => r.step === "retire").map((r) => r.state)).toEqual(["started", "failed"]);
+    expect((await updateStatus(s.ctx, run.runId)).run?.next).toBe(`kestrel update resume --env prod --run ${run.runId}`);
+  });
+
+  it("retires them before update accept records the accept, and refuses the accept while they cannot be retired", async () => {
+    const s = await scenario();
+    s.steps.retire.mockImplementationOnce(async () => {
+      throw new Error("cf api 502");
+    });
+    expect((await deploy(s.ctx)).exitCode).toBe(1);
+    s.steps.retire.mockImplementationOnce(async () => {
+      throw new Error("cf api 502 again");
+    });
+    const run = await readUpdateRun(s.ctx, s.ctx.run.id);
+    const refused = await accept(await s.h.context({ run, answers: ANSWERS, steps: { retire: s.steps.retire } }), run);
+    expect(refused.exitCode).toBe(1);
+    expect(refused.state).toBe("verified");
+    expect(refused.message).toContain("cf api 502 again");
+    const again = await readUpdateRun(s.ctx, s.ctx.run.id);
+    const accepted = await accept(await s.h.context({ run: again, answers: ANSWERS, steps: { retire: s.steps.retire } }), again);
+    expect(accepted.exitCode, accepted.message).toBe(0);
+    expect(accepted.state).toBe("accepted");
+    expect(s.steps.retire).toHaveBeenCalledTimes(3);
   });
 });
