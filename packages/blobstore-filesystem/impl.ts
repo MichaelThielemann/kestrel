@@ -36,19 +36,28 @@ function transientOrRethrow(cause: unknown): Err<BlobstoreError> {
   throw cause;
 }
 
-async function walkFiles(dir: string, visit: (path: string, name: string) => Promise<void>): Promise<void> {
+async function walkFiles(dir: string, visit: (path: string, name: string) => Promise<void>, accepts: (name: string) => boolean = () => true): Promise<void> {
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
   } catch (cause) {
-    if (errno(cause) === "ENOENT") return;
+    const code = errno(cause);
+    if (code === "ENOENT" || code === "ENOTDIR") return;
     throw cause;
   }
   for (const entry of entries) {
+    if (!accepts(entry.name)) continue;
     const path = join(dir, entry.name);
     if (entry.isDirectory()) await walkFiles(path, visit);
     else await visit(path, entry.name);
   }
+}
+
+function splitPrefix(prefix: string): { directories: string[]; partial: string } | null {
+  const cut = prefix.lastIndexOf("/");
+  const directories = cut === -1 ? [] : prefix.slice(0, cut).split("/");
+  if (directories.some((part) => part === "" || part === "." || part === "..")) return null;
+  return { directories, partial: prefix.slice(cut + 1) };
 }
 
 export function createBlobstoreFilesystem(config: Config): Blobstore {
@@ -126,13 +135,19 @@ export function createBlobstoreFilesystem(config: Config): Blobstore {
       }
     },
     async list(prefix) {
+      const parts = splitPrefix(prefix);
+      if (parts === null) return ok([]);
       try {
         const out: BlobInfo[] = [];
-        await walkFiles(root, async (path, name) => {
-          if (name.endsWith(LEGACY_META) || name.endsWith(TMP_SUFFIX)) return;
-          out.push({ key: relative(root, path).split(sep).join("/"), size: (await stat(path)).size });
-        });
-        return ok(out.filter((info) => info.key.startsWith(prefix)).sort((a, b) => a.key.localeCompare(b.key)));
+        await walkFiles(
+          resolve(root, ...parts.directories),
+          async (path, name) => {
+            if (name.endsWith(LEGACY_META) || name.endsWith(TMP_SUFFIX)) return;
+            out.push({ key: relative(root, path).split(sep).join("/"), size: (await stat(path)).size });
+          },
+          (name) => name.startsWith(parts.partial),
+        );
+        return ok(out.sort((a, b) => a.key.localeCompare(b.key)));
       } catch (cause) {
         return transientOrRethrow(cause);
       }

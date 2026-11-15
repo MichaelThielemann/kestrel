@@ -1,7 +1,7 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import type * as FsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { afterAll, afterEach, describe, it, expect, vi } from "vitest";
 import { blobstoreContractTests } from "@michaelthielemann/kestrel-contracts/blobstore.contract.test";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
@@ -9,7 +9,7 @@ import { assertKey, createBlobstoreFilesystem } from "./impl.ts";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof FsPromises>();
-  return { ...actual, writeFile: vi.fn(actual.writeFile) };
+  return { ...actual, writeFile: vi.fn(actual.writeFile), readdir: vi.fn(actual.readdir), stat: vi.fn(actual.stat) };
 });
 
 const roots: string[] = [];
@@ -23,6 +23,8 @@ afterAll(async () => {
 });
 afterEach(() => {
   vi.mocked(writeFile).mockClear();
+  vi.mocked(readdir).mockClear();
+  vi.mocked(stat).mockClear();
 });
 
 blobstoreContractTests(async () => createBlobstoreFilesystem({ root: await fresh() }));
@@ -146,4 +148,181 @@ describe("blobstore/filesystem", () => {
     const entries = await readdir(root);
     expect(entries.filter((name) => name.includes("kestrel-tmp"))).toEqual([]);
   });
+});
+
+describe("blobstore/filesystem list(prefix)", () => {
+  const KEYS = [
+    "a/x.txt",
+    "a/y.txt",
+    "a/b/c.txt",
+    "a/b/d/e.txt",
+    "a/b2.txt",
+    "a/B/upper.txt",
+    "ab/z.txt",
+    "abc.txt",
+    "b/q.txt",
+    "top.txt",
+    ".dot/f.txt",
+  ];
+
+  const populated = async () => {
+    const root = await fresh();
+    const store = createBlobstoreFilesystem({ root });
+    for (const [index, key] of KEYS.entries()) expectOk(await store.put(key, new Uint8Array(index + 1)));
+    await writeFile(join(root, "a", "b", "c.txt.meta.json"), "{}");
+    await writeFile(join(root, "a", "b", "c.txt.0123456789ab.kestrel-tmp"), "partial");
+    await writeFile(join(root, "a", "x.txt.deadbeef.kestrel-tmp"), "partial");
+    return { root, store };
+  };
+
+  const listed = async (store: ReturnType<typeof createBlobstoreFilesystem>, prefix: string) =>
+    expectOk(await store.list(prefix));
+
+  const prefixes = [
+    "",
+    "a",
+    "a/",
+    "a/b",
+    "a/b/",
+    "a/b/d",
+    "a/b/d/",
+    "a/b/d/e.txt",
+    "a/b/d/e.txt/",
+    "a/b/c",
+    "a/b/c.txt.",
+    "a/x.txt.dead",
+    "a/B",
+    "a/b2",
+    "a/b2.txt/",
+    "ab",
+    "abc",
+    "abc.txt",
+    "abcd",
+    "b",
+    "b/",
+    "b/q",
+    "top",
+    "top.txt/",
+    ".",
+    ".d",
+    ".dot/",
+    "missing",
+    "missing/",
+    "a/missing/",
+    "a/b/missing",
+    "/",
+    "/a",
+    "a//",
+    "a//b",
+    "a/./",
+    "a/../",
+    "../",
+    "a/.",
+  ];
+
+  it.each(prefixes)("returns exactly the keys that start with %j, sorted by key", async (prefix) => {
+    const { store } = await populated();
+    const everything = await listed(store, "");
+    const expected = everything.filter((info) => info.key.startsWith(prefix));
+    expect(await listed(store, prefix)).toEqual(expected);
+  });
+
+  it("lists every key under the empty prefix and hides sidecars and temporary files", async () => {
+    const { store } = await populated();
+    const keys = (await listed(store, "")).map((info) => info.key);
+    expect(keys).toEqual([...KEYS].sort((a, b) => a.localeCompare(b)));
+  });
+
+  it("returns sizes and ordering for nested and partial prefixes", async () => {
+    const { store } = await populated();
+    expect(await listed(store, "a/b/")).toEqual([
+      { key: "a/b/c.txt", size: 3 },
+      { key: "a/b/d/e.txt", size: 4 },
+    ]);
+    expect(await listed(store, "a/b")).toEqual([
+      { key: "a/b/c.txt", size: 3 },
+      { key: "a/b/d/e.txt", size: 4 },
+      { key: "a/b2.txt", size: 5 },
+    ]);
+    expect(await listed(store, "ab")).toEqual([
+      { key: "ab/z.txt", size: 7 },
+      { key: "abc.txt", size: 8 },
+    ]);
+  });
+
+  it("returns nothing when the directory part of the prefix is a file", async () => {
+    const { store } = await populated();
+    expect(await listed(store, "a/x.txt/")).toEqual([]);
+    expect(await listed(store, "a/x.txt/y")).toEqual([]);
+  });
+
+  it("returns nothing for a prefix whose directory does not exist", async () => {
+    const { store } = await populated();
+    expect(await listed(store, "nope/deeper/")).toEqual([]);
+  });
+
+  it("returns nothing for a prefix that cannot match any key, without touching the disk", async () => {
+    const { store } = await populated();
+    vi.mocked(readdir).mockClear();
+    vi.mocked(stat).mockClear();
+    for (const prefix of ["/", "/a", "a//", "../", "a/../", "a/./b", "../x"]) {
+      expect(await listed(store, prefix)).toEqual([]);
+    }
+    expect(vi.mocked(readdir)).not.toHaveBeenCalled();
+    expect(vi.mocked(stat)).not.toHaveBeenCalled();
+  });
+
+  it("reads only the directory named by the prefix and stats only the files below it", async () => {
+    const { root, store } = await populated();
+    vi.mocked(readdir).mockClear();
+    vi.mocked(stat).mockClear();
+    expect((await listed(store, "a/b/")).map((info) => info.key)).toEqual(["a/b/c.txt", "a/b/d/e.txt"]);
+    const read = vi.mocked(readdir).mock.calls.map(([path]) => String(path)).sort();
+    expect(read).toEqual([join(root, "a", "b"), join(root, "a", "b", "d")]);
+    const statted = vi.mocked(stat).mock.calls.map(([path]) => String(path)).sort();
+    expect(statted).toEqual([join(root, "a", "b", "c.txt"), join(root, "a", "b", "d", "e.txt")]);
+  });
+
+  it("descends only into entries that match the partial last segment", async () => {
+    const { root, store } = await populated();
+    vi.mocked(readdir).mockClear();
+    vi.mocked(stat).mockClear();
+    expect((await listed(store, "a/b")).map((info) => info.key)).toEqual(["a/b/c.txt", "a/b/d/e.txt", "a/b2.txt"]);
+    const read = vi.mocked(readdir).mock.calls.map(([path]) => String(path)).sort();
+    expect(read).toEqual([join(root, "a"), join(root, "a", "b"), join(root, "a", "b", "d")].sort());
+    const statted = vi.mocked(stat).mock.calls.map(([path]) => String(path)).sort();
+    expect(statted).toEqual([join(root, "a", "b", "c.txt"), join(root, "a", "b", "d", "e.txt"), join(root, "a", "b2.txt")].sort());
+  });
+
+  it("never reads or stats anything outside the subtree that can hold the prefix", async () => {
+    const { root, store } = await populated();
+    for (const prefix of ["a/", "a/x", "ab/", "b/q", "a/b/d/"]) {
+      vi.mocked(readdir).mockClear();
+      vi.mocked(stat).mockClear();
+      await listed(store, prefix);
+      const dir = prefix.endsWith("/") ? prefix.slice(0, -1) : prefix.includes("/") ? prefix.slice(0, prefix.lastIndexOf("/")) : "";
+      const base = join(root, ...dir.split("/").filter(Boolean));
+      const touched = [...vi.mocked(readdir).mock.calls, ...vi.mocked(stat).mock.calls].map(([path]) => String(path));
+      expect(touched.length).toBeGreaterThan(0);
+      for (const path of touched) expect(path === base || path.startsWith(base + sep)).toBe(true);
+    }
+  });
+
+  it.skipIf(typeof process.getuid === "function" && process.getuid() === 0)(
+    "lists a prefix while a sibling directory is unreadable",
+    async () => {
+      const { root, store } = await populated();
+      const sibling = join(root, "b");
+      await chmod(sibling, 0o000);
+      try {
+        expect(await listed(store, "a/b/")).toEqual([
+          { key: "a/b/c.txt", size: 3 },
+          { key: "a/b/d/e.txt", size: 4 },
+        ]);
+        expect((await listed(store, "ab")).map((info) => info.key)).toEqual(["ab/z.txt", "abc.txt"]);
+      } finally {
+        await chmod(sibling, 0o755);
+      }
+    },
+  );
 });

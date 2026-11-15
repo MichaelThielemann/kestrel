@@ -2225,6 +2225,11 @@ Net changes since 5.8.2.
   an equality value. `createOne` and `createMany` store `null` for an omitted field named like an
   `Object.prototype` member instead of reading the inherited value (a boolean field became `true`, a
   string or json field failed the insert).
+- `blobstore-filesystem`: `list(prefix)` reads only the part of the directory tree that can hold keys with that
+  prefix, instead of walking and stating every file of the store and filtering afterwards. Its cost follows the
+  number of matching keys rather than the size of the whole store, which shortens every caller that lists a narrow
+  prefix, such as the replica listing in `replication-sqlite` on a store with many objects. The result and its
+  order are unchanged.
 
 ## 5.8.2 – 2026-09-27
 

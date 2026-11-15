@@ -4,7 +4,9 @@ store keeps bytes only – the `contentType` hint of `put` is ignored, the modul
 knows its type (media from its row, images from the variant row, delivery from the extension).
 Keys must be relative, without `.`/`..` segments, and must not end in `.meta.json` or
 `.kestrel-tmp`: files with either suffix are ignored by `list` and cannot be written. Config:
-`{ root: "./data/blobs" }`. For local development and tests; on ephemeral disks use `blobstore-s3`.
+`{ root: "./data/blobs" }`. `list(prefix)` visits only the directories that can hold keys with that prefix: the
+directory part of the prefix, and below it the entries whose name starts with the last, possibly partial, segment.
+For local development and tests; on ephemeral disks use `blobstore-s3`.
 
 `put` replaces a file atomically: it writes the bytes to a temporary file in the same directory
 (`.<24 hex digits>.kestrel-tmp`, whose length does not depend on the key) and renames it onto the
