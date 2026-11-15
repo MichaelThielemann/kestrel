@@ -61,14 +61,14 @@ localized message: `{ row, field, reason, path? }`. `row` is the 1-based positio
 
 A list that is not a list (`not-a-list`) or holds more than 1000 rules (`too-many-rules`) is rejected as
 a whole: `details` is `{ reason }` without `row` and `field`. Duplicate rules are not rejected: the first
-match wins. A row is checked in the order `from`, `to`, status, and the first failing check is reported.
+match wins. The first failing check of a row is reported. A row is checked in this order: `from` blank, the form of `to` and its placeholders, the other checks of `from` including reserved paths, then the status; a rule that fails more than one check is reported with the field of the first one in that order.
 
 `redirects.export` reports each row it leaves out when publishing: as a line in `skipped` and as an
 entry of `skippedRules` with the same `{ row, field?, reason, path? }` structure, in the same order. A row
 beyond the 1000-rule limit is `{ row, reason: "too-many-rules" }` there.
 
-The types `RedirectRuleReason`, `RedirectRuleField` and `RedirectRuleDetails` and the class
-`RedirectRuleError` are exported from `@michaelthielemann/kestrel-redirects-default/impl`.
+The types `RedirectRuleReason`, `RedirectRuleField` and `RedirectRuleDetails`, the list
+`REDIRECT_RULE_REASONS` of every reason and the class `RedirectRuleError` are exported from `@michaelthielemann/kestrel-redirects-default/impl`.
 
 ## Reserved paths
 
