@@ -6,8 +6,8 @@ import { MemoryBucket, memoryStore } from "./memoryStore.ts";
 
 const DAY = 24 * 60 * 60 * 1000;
 
-function writeFakeBackup(bucket: MemoryBucket, id: string, kestrel: string, verified: boolean | null = true): void {
-  const manifest = { schema: "kestrel-ops/backup@1", id, versions: { "@michaelthielemann/kestrel": kestrel } };
+function writeFakeBackup(bucket: MemoryBucket, id: string, kestrel: string | { major: number }, verified: boolean | null = true): void {
+  const manifest = { schema: "kestrel-ops/backup@1", id, ...(typeof kestrel === "string" ? { versions: { "@michaelthielemann/kestrel": kestrel } } : { versions: {}, major: kestrel.major }) };
   bucket.write(LOCATION + keys.manifest(id), jsonBytes(manifest), "put");
   bucket.write(LOCATION + keys.blobs(id), new Uint8Array(), "put");
   bucket.write(LOCATION + keys.site(id), new Uint8Array(), "put");
@@ -210,6 +210,27 @@ describe("backup prune and verification", () => {
       const dry = await h.run(["backup", "prune", "--dry-run", "--json"], { clock: () => now });
       expect(dry.code).toBe(0);
       expect(dry.json.backups).toEqual([failed]);
+    } finally {
+      await h.dispose();
+    }
+  });
+});
+
+describe("backup prune and the major a manifest records without versions", () => {
+  it("keeps the newest verified backup of a major the manifest names only by its major", async () => {
+    let now = Date.parse("2026-09-01T00:00:00Z");
+    const bucket = new MemoryBucket("recorded-major", { clock: () => now });
+    const h = createHarness({ store: memoryStore(bucket) });
+    try {
+      const older = backupId("prod", now, "manual", "0010");
+      writeFakeBackup(bucket, older, { major: 5 });
+      const hop = backupId("prod", now + 60_000, "manual", "0011");
+      writeFakeBackup(bucket, hop, { major: 5 });
+      for (let i = 0; i < 10; i++) writeFakeBackup(bucket, backupId("prod", now + (i + 2) * 60_000, "manual", (i + 32).toString(16).padStart(4, "0")), "6.0.0");
+      now += 3 * DAY;
+      const dry = await h.run(["backup", "prune", "--dry-run", "--json"], { clock: () => now });
+      expect(dry.code).toBe(0);
+      expect(dry.json.backups).toEqual([older]);
     } finally {
       await h.dispose();
     }

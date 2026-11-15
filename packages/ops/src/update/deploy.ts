@@ -13,6 +13,7 @@ import { checkGate } from "./gate.ts";
 import { continueJournal, listUpdateRuns, readUpdateRun } from "./journal.ts";
 import { UPDATE_PIN_PREFIX, updateKeys } from "./layout.ts";
 import { computePlan, pinsCutover, planHash, replicaCopy } from "./plan.ts";
+import { releaseStorages } from "./storages.ts";
 import { UPDATE_EXIT, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateRun, type VerifyResult, type VersionSet } from "./types.ts";
 import { concludeVerify, outcomeOf } from "./verify.ts";
 
@@ -40,6 +41,14 @@ async function cutoverDatabase(ctx: UpdateContext, backupId: string, file: strin
   if (data === null || sha256(data) !== manifest.db.sha256) throw new OpsError(`the database of the cutover backup ${backupId} is missing or differs from its manifest`, 1, keys.db(backupId));
   writeFileSync(file, data);
   return file;
+}
+
+async function sourceMajor(ctx: UpdateContext, plan: UpdatePlan | null): Promise<number | null> {
+  if (plan === null || plan.storage.length === 0) return null;
+  const pending = new Set(plan.storage.map((m) => m.module));
+  const majors = new Set((await releaseStorages(ctx)).filter((s) => pending.has(s.module)).map((s) => Number(s.convertsFrom.split(".")[0])));
+  const [major] = [...majors];
+  return majors.size === 1 && major !== undefined && Number.isInteger(major) ? major : null;
 }
 
 async function earlierDeploys(ctx: UpdateContext): Promise<UpdateRun[]> {
@@ -74,7 +83,8 @@ function stopQuestion(ctx: UpdateContext, plan: UpdatePlan): string {
  * Deploys the release in the order of `DEPLOY_STEPS`. While the old release serves: `gate`, `stage` (a staging
  * failure ends the run with exit 1 and the app was never stopped), `configuration` (recorded once into the backup
  * location), `precopy`. Then `stop` (after the `update-stop` answer), `seal` (waits for the seal after STOPPED),
- * `cutover-backup` (verified; pinned for this run until `update cleanup` when {@link pinsCutover} says so), `migrate` (on a copy of the cutover
+ * `cutover-backup` (verified; it records the running versions, or without them the major the pending storage
+ * migrations convert from; pinned for this run until `update cleanup` when {@link pinsCutover} says so), `migrate` (on a copy of the cutover
  * database), and `promote`, `swap` and `start` as one step without a question between them. `verify` decides: passed
  * runs `retire` and ends with exit 0; failed runs the automatic rollback and ends with exit 3 once it verified the
  * cutover state; unverifiable halts with exit 1 and leaves the new release running.
@@ -159,7 +169,9 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
       step = "cutover-backup";
       await record(ctx, "cutover-backup", "started");
       const running = { ...ctx, project: { versions: flow.from ?? {}, lockfileSha256: null } };
-      const backup = await createBackup(running, { kind: "cutover", mode: { kind: "stopped", seal, stoppedAt: flow.stoppedAt }, ...(flow.pin ? { pinFor: UPDATE_PIN_PREFIX + ctx.run.id } : {}) });
+      const major = flow.from === null ? await sourceMajor(ctx, flow.plan) : null;
+      if (flow.from === null && major === null) ctx.out.warn("the running versions are unknown and no pending storage migration names the major they convert from; the cutover backup records neither, so prune cannot keep it as the newest backup of its major");
+      const backup = await createBackup(running, { kind: "cutover", mode: { kind: "stopped", seal, stoppedAt: flow.stoppedAt }, versions: flow.from ?? {}, ...(major === null ? {} : { major }), ...(flow.pin ? { pinFor: UPDATE_PIN_PREFIX + ctx.run.id } : {}) });
       flow.cutoverBackup = backup.id;
       await record(ctx, "cutover-backup", "done", { backupId: backup.id, pinned: flow.pin });
       ctx.out.info(`cutover backup ${backup.id} written and verified${flow.pin ? ", pinned until update cleanup" : ""}`);

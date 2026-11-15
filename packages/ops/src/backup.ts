@@ -26,6 +26,10 @@ export interface BackupOptions {
   mode: BackupMode;
   /** Pin the backup for this run, so prune keeps it until the run has ended. */
   pinFor?: string;
+  /** Versions the manifest records in place of the project's and the target's, such as the running versions an update knows. */
+  versions?: Record<string, string>;
+  /** The Kestrel major that wrote the backed-up data, recorded when the versions do not name it. */
+  major?: number;
 }
 
 /** A written and verified backup. */
@@ -220,7 +224,8 @@ async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: Exclud
     frozen: mode.kind !== "live",
     tool: ctx.tool,
     source: seal === null ? { generation: null, lastFrameAt: null, seal: "unreadable", sealAt: null } : { generation: seal.generation, lastFrameAt: seal.lastFrameAt, seal: seal.state, sealAt: seal.seal?.at ?? null },
-    versions: { ...ctx.project.versions, ...facts.packages },
+    versions: options.versions ?? { ...ctx.project.versions, ...facts.packages },
+    ...(options.major === undefined ? {} : { major: options.major }),
     node: process.version,
     lockfileSha256: ctx.project.lockfileSha256,
     db,
@@ -465,7 +470,8 @@ export const PRUNE_MIN_AGE_MS = 24 * 60 * 60 * 1000;
 
 const majorOfKestrel = (manifest: Manifest | null): string | null => {
   const version = manifest?.versions["@michaelthielemann/kestrel"] ?? manifest?.versions[REPLICATION_PACKAGE];
-  return version === undefined ? null : (version.split(".")[0] ?? null);
+  if (version !== undefined) return version.split(".")[0] ?? null;
+  return typeof manifest?.major === "number" ? String(manifest.major) : null;
 };
 
 const dayOf = (at: number): string => stamp(at).slice(0, 8);

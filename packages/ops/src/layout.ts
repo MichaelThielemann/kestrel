@@ -103,6 +103,8 @@ export interface Manifest {
   tool: { name: string; version: string };
   source: { generation: string | null; lastFrameAt: number | null; seal: SealState; sealAt: number | null };
   versions: Record<string, string>;
+  /** The Kestrel major that wrote the backed-up data, present when `versions` does not name it. */
+  major?: number;
   node: string;
   lockfileSha256: string | null;
   /** Null for a backup taken while the replica could not be read: it holds originals and delivery keys only. */

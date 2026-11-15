@@ -262,6 +262,48 @@ describe("deploying 5.8.1 to 6.0 on the stand-in target", { timeout: 30_000 }, (
   });
 });
 
+describe("the versions the cutover backup records", { timeout: 30_000 }, () => {
+  const media: ModuleStorage = { module: "media/default", version: "6.0.0", convertsFrom: "5.0.0", migrations: [{ id: "media-default:key-layout", introducedIn: "6.0.0", kind: "auto", blobWrites: true, summary: "moves originals", detect: async () => ok({ pending: 2, sample: [] }), plan: async () => ok({ counts: {}, notes: [] }), apply: async () => ok({ counts: {}, notes: [] }) }] };
+
+  async function cutoverManifest(s: Scenario): Promise<Record<string, unknown>> {
+    const run = await readUpdateRun(s.ctx, s.ctx.run.id);
+    const data = await s.h.store.get(LOCATION + keys.manifest(run.cutoverBackup ?? ""));
+    const value: unknown = data === null ? null : parseJsonOrNull(data);
+    if (typeof value !== "object" || value === null) throw new Error("no cutover manifest");
+    return Object.fromEntries(Object.entries(value));
+  }
+
+  it("records the running versions, whatever the target reports once the cutover backup is taken", async () => {
+    const s = await scenario();
+    const describe = s.h.target.describe.bind(s.h.target);
+    let calls = 0;
+    s.h.target.describe = async () => {
+      calls += 1;
+      const facts = await describe();
+      return calls === 1 ? facts : { ...facts, packages: { "@michaelthielemann/kestrel": "6.0.0", "@michaelthielemann/kestrel-replication-sqlite": "6.0.0" } };
+    };
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode, outcome.message).toBe(0);
+    expect((await cutoverManifest(s)).versions).toMatchObject({ "@michaelthielemann/kestrel": "5.8.1" });
+  });
+
+  it("records the major the pending storage migrations convert from when the running versions are unknown", async () => {
+    storages.list = [media];
+    const s = await scenario({}, false);
+    await receiptFor(s.ctx, [{ module: "media/default", id: "media-default:key-layout", kind: "auto", blobWrites: true, pending: 2 }]);
+    const describe = s.h.target.describe.bind(s.h.target);
+    s.h.target.describe = async () => ({ ...(await describe()), packages: {} });
+    const scope = join(s.h.releaseDir, "node_modules", "@michaelthielemann");
+    mkdirSync(scope, { recursive: true });
+    symlinkSync(resolve(dirname(new URL(import.meta.url).pathname), "..", "..", "..", "persistence-sqlite"), join(scope, "kestrel-persistence-sqlite"));
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode, outcome.message).toBe(0);
+    const manifest = await cutoverManifest(s);
+    expect(manifest.versions).toEqual({});
+    expect(manifest.major).toBe(5);
+  });
+});
+
 describe("continuing an interrupted deploy", { timeout: 30_000 }, () => {
   async function killedAfterPromote(): Promise<{ s: Scenario; run: UpdateRun }> {
     const s = await scenario();
