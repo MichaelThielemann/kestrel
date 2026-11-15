@@ -107,7 +107,7 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
     const plan = await computePlan(ctx, await replicaCopy(ctx, ctx.workspace.path("plan.db")));
     const gate = await checkGate(ctx, plan, await earlierDeploys(ctx));
     if (gate.accepts !== null) await acceptImplicitly(ctx, gate.accepts);
-    await record(ctx, "gate", "done", { receipt: gate.receipt === null ? null : `${gate.planHash}/${gate.receipt.runId}`, versions: plan.versions, planHash: gate.planHash, ordinary: gate.ordinary, pin: pinsCutover(plan), releaseContent: releaseContentMigrations(ctx) });
+    await record(ctx, "gate", "done", { receipt: gate.receipt === null ? null : `${gate.planHash}/${gate.receipt.runId}`, versions: plan.versions, planHash: gate.planHash, ordinary: gate.ordinary, pin: pinsCutover(plan), releaseContent: releaseContentMigrations(ctx), configuration: gate.configuration });
 
     step = "stage";
     await record(ctx, "stage", "started");
@@ -258,6 +258,18 @@ function releaseMismatch(ctx: UpdateContext, run: UpdateRun, gate: UpdateRecord 
   return null;
 }
 
+async function configurationMismatch(ctx: UpdateContext, gate: UpdateRecord | undefined): Promise<string | null> {
+  const recorded: unknown = gate?.data.configuration;
+  if (typeof recorded !== "string") return null;
+  let here: string | null;
+  try {
+    here = (await ctx.target.checkReleaseConfiguration?.({ dir: ctx.release.dir }, { resolveSources: true }))?.fingerprint ?? null;
+  } catch (error) {
+    return `the configuration of the release cannot be applied from this process: ${messageOf(error)}`;
+  }
+  return here === recorded ? null : `the configuration this process would apply (${here?.slice(0, 12) ?? "none"}) differs from the one the gate checked (${recorded.slice(0, 12)})`;
+}
+
 const describeVersions = (versions: Readonly<Record<string, string>>): string => Object.entries(versionSet(versions)).map(([name, version]) => `${name}@${version}`).join(", ") || "no kestrel package";
 
 const doneStep = (run: UpdateRun, step: string): boolean => run.records.some((r) => r.phase === "deploy" && r.step === step && r.state === "done");
@@ -266,7 +278,8 @@ const startedStep = (run: UpdateRun, step: string): boolean => run.records.some(
 /**
  * Continues deploy run `run` after its last done step (see `UpdateRun.lastDone`). It refuses with exit 2 when this
  * process deploys another release than the run, by its versions or by the content migrations the host facts name
- * (the gate records both), and checks the last step's postcondition first: a plan of the cutover database that
+ * (the gate records both), or, while the swap is still ahead, by the fingerprint of the configuration it would apply
+ * (`UpdateTarget.checkReleaseConfiguration`); and checks the last step's postcondition first: a plan of the cutover database that
  * differs from the receipt or from the plan the gate recorded is refused; a migration that did not finish starts again from the cutover backup's database; a promotion whose generation
  * is not the newest any more is refused; after `promote` it swaps and starts; after `start` it verifies. A run whose
  * `start` began keeps its recorded start time, so verification counts the render and every crash since that start.
@@ -279,7 +292,7 @@ export async function continueDeploy(ctx: UpdateContext, run: UpdateRun): Promis
   const startRecord = [...run.records].reverse().find((r) => r.phase === "deploy" && r.step === "start");
   const recordedStart = startRecord?.data.startedAt;
   const gate = run.records.find((r) => r.phase === "deploy" && r.step === "gate" && r.state === "done");
-  const mismatch = releaseMismatch(ctx, run, gate);
+  const mismatch = releaseMismatch(ctx, run, gate) ?? (doneStep(run, "swap") ? null : await configurationMismatch(ctx, gate));
   if (mismatch !== null) return outcomeOf(ctx, UPDATE_EXIT.usage, `refusing to continue update run ${run.runId}: ${mismatch}; continue it with the bundle or checkout that started it (node .kestrel-ops/run.mjs update resume --env ${ctx.envName} --run ${run.runId}), or roll it back`);
   const pin = gate?.data.pin;
   const flow: Flow = { plan: null, from: run.versions?.from ?? null, pin: pin !== false, staged: run.stagedDroplet, stoppedAt, cutoverBackup: run.cutoverBackup, promoted: run.promoted === null ? null : { ...run.promoted, at: unstamp(run.promoted.generation) }, startedAt: typeof recordedStart === "number" ? recordedStart : null };

@@ -105,7 +105,10 @@ The target implements the update interface of `kestrel-ops`, which `kestrel upda
 - **Configuration**: the app's variables, health check, memory, disk, start command and instance count are read
   before the update changes them, the values of secret variables (those the host names and those `vars` fills)
   only as salted fingerprints. The release's configuration is applied from `manifest` while the app is stopped,
-  and a rollback puts the recorded configuration back verbatim.
+  and a rollback puts the recorded configuration back verbatim. Before anything changes, `update prepare` checks
+  that every placeholder of the manifest has a source in `vars`, and the gate of a deploy also resolves every
+  source, so a missing source or an unset variable ends with exit 2 while the app still runs; `update resume`
+  refuses with exit 2 to swap in a release whose manifest or sources differ from those the gate checked.
 - **Swap**: `setDroplet()` makes the staged droplet current, only while the app is stopped; promotion of the
   migrated database, the swap and the start run as one step of the update.
 - **Verification** probes the readiness of the app in three outcomes (200 ready; 503 or another 5xx not ready;

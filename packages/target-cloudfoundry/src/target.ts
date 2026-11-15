@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { z } from "zod";
 // eslint-disable-next-line no-restricted-imports -- a target adapter implements the Target interface of kestrel-ops and resolves credentials the way it does
@@ -170,6 +171,25 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     }
   };
 
+  const releaseManifest = (): { text: string; vars: string[] } => {
+    if (config.manifest === undefined) throw new OpsError("target cloudfoundry: manifest is not set", 2, "target");
+    const manifest = appManifest(resolve(deps.root, config.manifest), app);
+    const missing = manifest.vars.filter((name) => config.vars[name] === undefined);
+    if (missing.length > 0) throw new OpsError(`${config.manifest}: target.vars names no source for ${missing.map((name) => `((${name}))`).join(", ")}`, 2, "target");
+    return manifest;
+  };
+
+  const resolveVars = async (vars: readonly string[]): Promise<Record<string, string>> => {
+    const redactor = new Redactor();
+    const runCommand = commandRunner();
+    const values: Record<string, string> = {};
+    for (const name of vars) {
+      const source = config.vars[name];
+      if (source !== undefined) values[name] = await resolveCredential(source, `target.vars.${name}`, redactor, env, runCommand);
+    }
+    return values;
+  };
+
   const session: CfSession = { app, config, deps, env, pollMs, run, api, appGuid, confirmTarget, requireStopped, status };
 
   const target: CloudFoundryTarget = {
@@ -279,24 +299,23 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
     },
 
     async applyManifest() {
-      if (config.manifest === undefined) throw new OpsError("target cloudfoundry: manifest is not set", 2, "target");
-      const { text, vars } = appManifest(resolve(deps.root, config.manifest), app);
-      const missing = vars.filter((name) => config.vars[name] === undefined);
-      if (missing.length > 0) throw new OpsError(`${config.manifest}: target.vars names no source for ${missing.map((name) => `((${name}))`).join(", ")}`, 2, "target");
+      const { text, vars } = releaseManifest();
       await requireStopped("apply the manifest");
-      const redactor = new Redactor();
-      const runCommand = commandRunner();
-      const values: Record<string, string> = {};
-      for (const name of vars) {
-        const source = config.vars[name];
-        if (source !== undefined) values[name] = await resolveCredential(source, `target.vars.${name}`, redactor, env, runCommand);
-      }
+      const values = await resolveVars(vars);
       await withManifestFiles(text, values, async (manifestFile, varsFile) => {
         await confirmTarget();
         const args = ["apply-manifest", "-f", manifestFile, "--vars-file", varsFile];
         const result = await run(args, { timeoutMs: 600_000 });
         if (result.code !== 0) throw new OpsError(`cf apply-manifest for ${app} exited with ${result.code}`, 1, "target");
       });
+    },
+
+    async checkReleaseConfiguration(_release, options) {
+      if (config.manifest === undefined) return { fingerprint: null };
+      const { text, vars } = releaseManifest();
+      if (options.resolveSources) await resolveVars(vars);
+      const sources = Object.fromEntries(vars.map((name) => [name, config.vars[name] ?? null]));
+      return { fingerprint: createHash("sha256").update(JSON.stringify({ manifest: text, sources })).digest("hex") };
     },
 
     async setDroplet(guid) {

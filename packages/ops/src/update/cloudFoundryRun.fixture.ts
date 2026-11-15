@@ -85,6 +85,8 @@ export interface CommandOptions {
   host?: HostFacts;
   /** Extra entries of the environment's `update` block. */
   update?: Record<string, unknown>;
+  /** Extra entries of the environment's `target` block, such as a `manifest` and its `vars`. */
+  target?: Record<string, unknown>;
 }
 
 /** A store that throws on every call once {@link KilledStore.kill} ran, as the store looks from a process that was killed. */
@@ -293,10 +295,10 @@ export class CloudFoundryRun {
     await instance?.stop();
   }
 
-  private environments(release: string, update: Record<string, unknown>): void {
+  private environments(release: string, update: Record<string, unknown>, target: Record<string, unknown>): void {
     const environment = {
       production: true,
-      target: { adapter: "@michaelthielemann/kestrel-target-cloudfoundry", app: APP.name, org: "example-org", space: "dev", dir: "target", readyUrl: this.readyUrl, stopGraceSeconds: 0 },
+      target: { adapter: "@michaelthielemann/kestrel-target-cloudfoundry", app: APP.name, org: "example-org", space: "dev", dir: "target", readyUrl: this.readyUrl, stopGraceSeconds: 0, ...target },
       storage: { bucket: "kestrel-test" },
       app: { replicaPrefix: RUN_PREFIXES.replica, mediaPrefix: RUN_PREFIXES.media, deliveryPrefix: RUN_PREFIXES.delivery, derivedPrefixes: [RUN_PREFIXES.derived] },
       backups: { prefix: RUN_LOCATION },
@@ -310,7 +312,7 @@ export class CloudFoundryRun {
     const version = options.release ?? this.newest;
     const release = this.releases.get(`release ${version}`);
     if (release === undefined) throw new Error(`no release ${version}`);
-    this.environments(version, options.update ?? {});
+    this.environments(version, options.update ?? {}, options.target ?? {});
     const answers = join(this.root, `answers-${String(Date.now())}-${String(Math.random()).slice(2, 8)}.json`);
     writeFileSync(answers, JSON.stringify({ "unsealed-stop": "accept", ...options.answers }));
     const store = options.store?.(this.store) ?? this.store;

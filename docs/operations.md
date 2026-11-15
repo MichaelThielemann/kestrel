@@ -57,7 +57,9 @@ reports, and when it reports none, the deploy counts as a version change.
 
 - **Preflight**: one instance, no active deployment of the platform, a target that can check the release's
   readiness (one that would count any running instance as ready, such as the Cloud Foundry target without
-  `readyUrl`, is refused with exit 2), the type of the health check (anything but an http check warns; its path
+  `readyUrl`, is refused with exit 2), a release configuration the target can apply (for the Cloud Foundry target,
+  a source in `vars` for every placeholder of the manifest, refused with exit 2 otherwise; the sources are not
+  resolved, since they may exist only in the deploy job), the type of the health check (anything but an http check warns; its path
   is not compared with the readiness path), and the clock skew against the store, measured with a probe object
   written into the backup location and deleted again. The plan step then needs a complete newest replica
   generation; how recent it is, is not checked.
@@ -115,7 +117,7 @@ that start in the same moment.
 
 | Step | App | What happens |
 |---|---|---|
-| `gate` | serving | A target that can check readiness (exit 2 otherwise), receipt, one instance, no active deployment, no earlier deploy run of this environment in an open state, also behind later runs the gate refused; the refusal names the command that finishes that run. The newest earlier run that got past its gate is accepted on the way when it is verified. A refusal ends with exit 1 before anything changed. |
+| `gate` | serving | A target that can check readiness, a release configuration the target can apply with every source resolved, and `update.localBoot` when content migrations are pending (exit 2 otherwise), receipt, one instance, no active deployment, no earlier deploy run of this environment in an open state, also behind later runs the gate refused; the refusal names the command that finishes that run. The newest earlier run that got past its gate is accepted on the way when it is verified. A refusal ends with exit 1 before anything changed. |
 | `stage` | serving | The release is uploaded and staged while the app keeps running. A staging failure ends the run with exit 1; the app was never stopped. |
 | `configuration` | serving | The app's configuration is recorded once: plain values verbatim, secret values only as salted fingerprints (also a plain value that contains one of the tool's own credentials), the health check, memory, disk, start command and instance count. |
 | `precopy` | serving | Originals and the delivery prefix are copied into the backup location, so only the difference is copied after the stop. |
@@ -188,8 +190,8 @@ The `migrate` step works on a copy and records its own steps in the journal (pha
   prepare and the gate have refused the release already.
 - `content-migrations` applies the pending content migrations by starting the release on this machine on the
   copy, through `update.localBoot`, and stopping it once it is ready. Nothing starts when nothing is pending; a
-  pending migration without `update.localBoot` fails the rehearsal of prepare (exit 1, no receipt), and a deploy
-  that reaches it after the stop rolls back (exit 3). The local start gets an
+  pending migration without `update.localBoot` fails the rehearsal of prepare (exit 1, no receipt), and the gate of
+  a deploy refuses it with exit 2 before the app stops. The local start gets an
   environment of exactly the host's `localBootEnv` and the `localBoot.env` values, never a variable of the
   deploy job's own environment, so it sees no credential of the tool. A start that applies a migration the plan
   does not name, or becomes ready without applying one it names, is refused.

@@ -72,6 +72,8 @@ export class FakeUpdateTarget implements UpdateTarget {
   /** The desired instance count. */
   instances: number = 1;
   activeDeployment: string | null = null;
+  /** Message the check of a release's configuration refuses with (exit 2), or null. */
+  configurationProblem: string | null = null;
   /** Message a staging attempt fails with, or null. */
   failStaging: string | null = null;
   /** Milliseconds between a stop reporting stopped and the instance's teardown. */
@@ -222,6 +224,12 @@ export class FakeUpdateTarget implements UpdateTarget {
     for (const [name, value] of Object.entries(this.configuration.env)) env[name] = secretNames.has(name) || this.vaultNames.has(name) ? { fingerprint: fingerprint(salt, value) } : { value };
     const revision = this.revisions.at(-1);
     return { schema: "kestrel-ops/configuration@1", recordedAt: Date.now(), droplet: await this.currentDroplet(), revision: revision === undefined ? null : { guid: revision.guid, version: revision.version }, salt, env, healthCheck: { ...this.configuration.healthCheck }, memoryMb: this.configuration.memoryMb, diskMb: this.configuration.diskMb, command: this.configuration.command, instances: this.instances };
+  }
+
+  async checkReleaseConfiguration(release: ReleaseSource): Promise<{ fingerprint: string | null }> {
+    if (this.configurationProblem !== null) throw new OpsError(this.configurationProblem, 2, "target");
+    const found = this.releases.get(release.dir);
+    return { fingerprint: createHash("sha256").update(JSON.stringify(found?.env ?? {})).digest("hex") };
   }
 
   async applyReleaseConfiguration(release: ReleaseSource): Promise<void> {

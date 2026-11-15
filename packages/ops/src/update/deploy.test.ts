@@ -14,6 +14,7 @@ import type { ObjectStore } from "../store.ts";
 import { abort } from "./abort.ts";
 import { accept } from "./accept.ts";
 import { continueDeploy, deploy } from "./deploy.ts";
+import { fakeRelease } from "./fakeUpdateTarget.fixture.ts";
 import { createUpdateHarness, type UpdateHarness, type UpdateHarnessOptions } from "./harness.fixture.ts";
 import { readUpdateRun } from "./journal.ts";
 import { resume } from "./resume.ts";
@@ -468,7 +469,7 @@ describe("continuing a deploy from another process than the one that started it"
   }
 
   it("refuses with exit 2 to continue an ordinary run without the content migrations the gate planned, so the unmigrated copy is never promoted, and continues it with them", async () => {
-    const { h, steps, run } = await killedInMigration({ from: { runtime: "6.0.0" }, to: { runtime: "6.0.0" } });
+    const { h, steps, run } = await killedInMigration({ from: { runtime: "6.0.0" }, to: { runtime: "6.0.0" }, update: { localBoot: { command: ["node", "server.mjs"], dir: ".", env: {}, readyPath: "/ready", timeoutSeconds: 60 } } });
     expect(run.receipt).toBeNull();
     const bare = await h.context({ run, answers: ANSWERS, steps: { rollback: steps.rollback, retire: steps.retire, migrateCopy: steps.migrateCopy } });
     const refused = await continueDeploy(bare, run);
@@ -503,6 +504,29 @@ describe("continuing a deploy from another process than the one that started it"
     expect(refused.message).toContain("5.8.1");
     expect(afterStop(s)).toEqual([]);
     expect(s.steps.retire).not.toHaveBeenCalled();
+  });
+
+  it("refuses with exit 2 to swap in a promoted run from a process whose release brings another configuration", async () => {
+    const s = await scenario();
+    const setDroplet = s.h.target.setDroplet.bind(s.h.target);
+    s.h.target.setDroplet = async () => {
+      s.h.target.setDroplet = setDroplet;
+      throw new Interrupted("SIGTERM");
+    };
+    await expect(deploy(s.ctx)).rejects.toBeInstanceOf(Interrupted);
+    const run = await readUpdateRun(s.ctx, s.ctx.run.id);
+    const otherDir = join(s.h.root, "other-release");
+    mkdirSync(otherDir, { recursive: true });
+    s.h.target.releases.set(otherDir, { ...(s.h.target.releases.get(s.h.releaseDir) ?? fakeRelease()), env: { KESTREL_MIGRATIONS: "apply", OLD_ONLY: "1" } });
+    const other = await s.h.context({ run, answers: ANSWERS, steps: { rollback: s.steps.rollback, retire: s.steps.retire } });
+    other.release = { ...other.release, dir: otherDir };
+    const refused = await continueDeploy(other, run);
+    expect(refused.exitCode, refused.message).toBe(2);
+    expect(refused.message).toContain("configuration");
+    expect(afterStop(s)).toEqual([]);
+    expect(s.h.target.configuration.env.OLD_ONLY).toBeUndefined();
+    const same = await s.h.context({ run, answers: ANSWERS, steps: { rollback: s.steps.rollback, retire: s.steps.retire } });
+    expect((await continueDeploy(same, run)).exitCode).toBe(0);
   });
 });
 

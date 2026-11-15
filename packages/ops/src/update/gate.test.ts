@@ -56,6 +56,21 @@ describe("the deploy gate", () => {
     expect(error.message).toContain("update prepare");
   });
 
+  it("refuses with exit 2 a pending content migration without update.localBoot, and a release configuration the target refuses, and records the configuration's fingerprint", async () => {
+    const h = harness();
+    const ctx = await h.context();
+    const ordinary = plan({ versions: { from: NEW, to: NEW } });
+    const content = await refusal(checkGate(ctx, { ...ordinary, content: ["count-hits"] }, []));
+    expect(content.exitCode).toBe(2);
+    expect(content.message).toContain("update.localBoot");
+    h.target.configurationProblem = "manifest.yml: target.vars names no source for ((device-key))";
+    const configured = await refusal(checkGate(ctx, ordinary, []));
+    expect(configured.exitCode).toBe(2);
+    expect(configured.message).toContain("((device-key))");
+    h.target.configurationProblem = null;
+    expect((await checkGate(ctx, ordinary, [])).configuration).toMatch(/^[0-9a-f]{64}$/);
+  });
+
   it("refuses a pending storage migration without a matching receipt, also when the versions stay", async () => {
     const ctx = await harness().context();
     expect((await refusal(checkGate(ctx, plan({ versions: { from: NEW, to: NEW }, storage: pending }), []))).exitCode).toBe(1);

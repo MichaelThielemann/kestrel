@@ -50,6 +50,29 @@ describe("the Cloud Foundry target as an update target", () => {
     expect(cf.app(API.name).env.KESTREL_MIGRATIONS).toBe("check");
   });
 
+  it("checks the release's manifest without touching the app: a placeholder without a source, and with resolving a source that does not resolve, end with exit 2", async () => {
+    writeFileSync(join(root, "manifest.yml"), "applications:\n- name: site-api\n  env:\n    KESTREL_DEVICE_KEY: ((device-key))\n");
+    const unsourced = await (await target({ manifest: "manifest.yml" })).checkReleaseConfiguration?.({ dir: root }, { resolveSources: false }).then(() => null, (error: unknown) => error);
+    expect(unsourced).toMatchObject({ exitCode: 2 });
+    expect(String(unsourced)).toContain("((device-key))");
+    const sourced = await target({ manifest: "manifest.yml", vars: { "device-key": { env: "MISSING_DEVICE_KEY" } } });
+    const statically = await sourced.checkReleaseConfiguration?.({ dir: root }, { resolveSources: false });
+    expect(statically?.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    const unresolved = await sourced.checkReleaseConfiguration?.({ dir: root }, { resolveSources: true }).then(() => null, (error: unknown) => error);
+    expect(unresolved).toMatchObject({ exitCode: 2 });
+    expect(String(unresolved)).toContain("MISSING_DEVICE_KEY");
+    expect(String(unresolved)).not.toContain("secret-device-value");
+    const resolving = await cloudFoundryTarget({ app: API.name, org: "example-org", space: "dev", manifest: "manifest.yml", vars: { "device-key": { env: "DEVICE_KEY" } } }, { root, clock: Date.now }, { env: cf.env({ ...process.env, DEVICE_KEY: "secret-device-value" }), pollMs: 5 });
+    const checked = await resolving.checkReleaseConfiguration?.({ dir: root }, { resolveSources: true });
+    expect(JSON.stringify(checked)).not.toContain("secret-device-value");
+    expect(checked?.fingerprint).not.toBe(statically?.fingerprint);
+    writeFileSync(join(root, "manifest.yml"), "applications:\n- name: site-api\n  env:\n    KESTREL_DEVICE_KEY: ((device-key))\n    OTHER: value\n");
+    expect((await resolving.checkReleaseConfiguration?.({ dir: root }, { resolveSources: true }))?.fingerprint).not.toBe(checked?.fingerprint);
+    expect(await (await target()).checkReleaseConfiguration?.({ dir: root }, { resolveSources: true })).toEqual({ fingerprint: null });
+    expect(cf.applied).toHaveLength(0);
+    expect(cf.actions).toEqual([]);
+  });
+
   it("lets a test add API routes and subcommands to the fake platform, with request bodies read from a file", async () => {
     const bodies: string[] = [];
     cf.routes.push(({ method, url, data }) => {

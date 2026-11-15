@@ -213,7 +213,9 @@ async function failed(ctx: UpdateContext, step: string, message: string, exitCod
 
 /**
  * Prepares an update from this machine without changing production: preflight (one instance, no active deployment,
- * a readiness check the target can make, with exit 2 otherwise, the health check's type, and the clock skew against the store, measured with a probe written into the backup
+ * a readiness check the target can make, with exit 2 otherwise, a release configuration whose every placeholder has a
+ * source, with exit 2 otherwise (`UpdateTarget.checkReleaseConfiguration` without resolving the sources, which may
+ * exist only in the deploy job), the health check's type, and the clock skew against the store, measured with a probe written into the backup
  * location), plan on a copy of the newest replica generation, rehearsal of the migrations on that copy (with a local
  * start of the release when content migrations are pending), and the receipt with the version change
  * and the plan hash, written once into the backup location. Journal steps: `preflight`, `plan`, `rehearsal`,
@@ -226,6 +228,11 @@ export async function prepare(ctx: UpdateContext, options: PrepareOptions): Prom
     const pre = await preflightProblems(ctx);
     if (pre.data.readinessChecked === false) return await failed(ctx, "preflight", `preflight: ${UNCHECKED_READINESS}`, 2);
     if (pre.problems.length > 0) return await failed(ctx, "preflight", `preflight: ${pre.problems.join("; ")}`);
+    try {
+      await ctx.target.checkReleaseConfiguration?.({ dir: ctx.release.dir }, { resolveSources: false });
+    } catch (error) {
+      return await failed(ctx, "preflight", `preflight: the configuration of the release: ${messageOf(error)}`, error instanceof OpsError ? error.exitCode : 1);
+    }
     await record(ctx, "preflight", "done", pre.data);
 
     step = "plan";

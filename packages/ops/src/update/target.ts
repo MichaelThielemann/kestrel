@@ -124,6 +124,13 @@ export interface UpdateTarget extends Target {
   readConfiguration(secretNames: ReadonlySet<string>): Promise<RecordedConfiguration>;
   /** Applies the configuration the release brings (its manifest and variables); refuses unless the app is stopped. */
   applyReleaseConfiguration(release: ReleaseSource): Promise<void>;
+  /**
+   * Checks the configuration {@link UpdateTarget.applyReleaseConfiguration} would apply, without changing the app or
+   * keeping a value: every placeholder has a source and, with `resolveSources`, every source resolves. Rejects with
+   * exit 2 for a configuration error. Resolves to a fingerprint of the configuration that changes with its text and
+   * its sources but not with their values, or null when the target applies no configuration of the release.
+   */
+  checkReleaseConfiguration?(release: ReleaseSource, options: { resolveSources: boolean }): Promise<{ fingerprint: string | null }>;
   /** Puts a recorded configuration back verbatim, without asking; refuses unless the app is stopped. */
   restoreConfiguration(recorded: RecordedConfiguration): Promise<ConfigurationRestore>;
   /** One readiness check of the running app. */
