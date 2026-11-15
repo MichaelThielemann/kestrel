@@ -67,16 +67,18 @@ describe("retiring the previous releases after an update", () => {
     expect(s.h.output.warn.join("\n")).toContain("no bits");
   });
 
-  it("keeps the replaced droplet when saving its bits fails, so a rollback can still start it", async () => {
+  it("deletes the replaced droplet also when saving its bits fails, so no old release can start on the converted data, and says what a later rollback does", async () => {
     const s = await scenario();
     s.h.target.saveDroplet = async () => {
       throw new Error("downloading the bits failed 3 times");
     };
     const deployed = await deployUntil(s, "verify");
     const result = await retire(deployed.ctx, await runOf(s, deployed.runId));
-    expect(result).toMatchObject({ droplets: [], savedDroplet: null, kept: [s.previousDroplet] });
-    expect(s.h.target.droplets.has(s.previousDroplet)).toBe(true);
-    expect(s.h.output.warn.join("\n")).toContain(`droplet ${s.previousDroplet} stays`);
+    expect(result).toMatchObject({ droplets: [s.previousDroplet], savedDroplet: null, kept: [] });
+    expect(s.h.target.droplets.has(s.previousDroplet)).toBe(false);
+    const warned = s.h.output.warn.join("\n");
+    expect(warned).toContain("downloading the bits failed 3 times");
+    expect(warned).toContain("leaves the app stopped");
   });
 
   it("keeps a droplet another open run needs to roll back to", async () => {

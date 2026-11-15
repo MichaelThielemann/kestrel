@@ -32,7 +32,8 @@ async function neededByOpenRuns(ctx: UpdateContext, run: UpdateRun): Promise<Map
 /**
  * Retires the previous releases of deploy run `run` once its verification passed, and only then: saves the replaced
  * droplet's bits into the backup location when the target hands them out, then deletes every droplet but the current
- * one (the replaced droplet stays when saving its bits failed), so neither the platform's own rollback nor an old pipeline run can start an old release on the converted data.
+ * one, also when saving the bits failed, so neither the platform's own rollback nor an old pipeline run can start an
+ * old release on the converted data.
  * Refuses unless the run's journal shows `verify` done with verdict `passed`, and while the app runs another droplet
  * than the one the run deployed. A droplet that another open deploy run of the environment recorded as its previous or
  * staged droplet stays.
@@ -50,8 +51,7 @@ export async function retire(ctx: UpdateContext, run: UpdateRun): Promise<Retire
       savedDroplet = await saveBits(ctx, run, previous);
       if (savedDroplet === null) ctx.out.warn(`the target hands out no bits of droplet ${previous}; once it is deleted, a rollback of run ${run.runId} brings back the cutover state but leaves the app stopped`);
     } catch (error) {
-      kept.push(previous);
-      ctx.out.warn(`droplet ${previous} stays: saving its bits failed (${messageOf(error)}), and a rollback of run ${run.runId} needs it; never start it through the platform, only through update rollback; the next deploy that passes verification deletes it`);
+      ctx.out.warn(`saving the bits of droplet ${previous} failed (${messageOf(error)}); it is deleted all the same, so no old release starts on the converted data, and a rollback of run ${run.runId} brings back the cutover state but leaves the app stopped`);
     }
   }
   const revisions = await ctx.target.listRevisions();

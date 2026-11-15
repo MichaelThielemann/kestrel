@@ -123,7 +123,7 @@ that start in the same moment.
 | `migrate` | down | The migration of a copy of the cutover database, see below. |
 | `promote`, `swap`, `start` | down | The migrated copy becomes the newest replica generation, the staged release becomes the app's code with its own configuration, and the app starts; one step with no question between them, so no old release starts on converted data. |
 | `verify` | down until it passes | See below. |
-| `retire` | serving | Only after `verify` passed: the replaced release's code is saved into the backup location when the platform hands it out, then every older release of the app is deleted, so neither the platform's own rollback nor an old pipeline run can start it on the converted data. When saving the replaced release's code fails, that release stays so `update rollback` can still start it, and a warning says so; a release another open deploy run needs stays as well. |
+| `retire` | serving | Only after `verify` passed: the replaced release's code is saved into the backup location when the platform hands it out, then every older release of the app is deleted, so neither the platform's own rollback nor an old pipeline run can start it on the converted data. When the platform hands out no code or saving it fails, that release is deleted all the same and a warning says that a later `update rollback` brings back the cutover state with the app stopped; a release another open deploy run needs stays. |
 
 ### Verification
 

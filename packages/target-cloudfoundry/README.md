@@ -114,7 +114,8 @@ The target implements the update interface of `kestrel-ops`, which `kestrel upda
   release passed verification, after its bits were saved into the backup location, so neither `cf rollback` nor
   an old pipeline run can start an old release on converted data. A droplet of a container image has no bits to
   save and is deleted all the same. A download that fails is tried three times; when all three fail, the previous
-  droplet stays, so `update rollback` can still start it.
+  droplet is deleted all the same, and a later `update rollback` brings back the cutover state with the app
+  stopped.
 
 ## API
 `createTarget(config, { root, clock })` is the factory `kestrel-ops` imports. `cloudFoundryTarget(config, deps,
