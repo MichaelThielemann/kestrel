@@ -304,10 +304,10 @@ names every generation after the ones it listed, so the restore does not wait fo
 `runUpdate` takes the same `RunOptions` as `runOps`, plus `releaseRoot` (the directory `update.release.dir` is
 relative to), `host` (the facts a host plugin contributes) and, for tests, `updateSteps` and `updateCommands`. It
 refuses a target that does not implement `UpdateTarget` with exit 2, takes the lock for every command but `status`,
-writes into the journal of the deploy run it continues, and exits 0, 1, 2 or 3 (rolled back); with `--json` it
-prints `kestrel-ops/update-<command>@1`. The migration of the cutover copy downloads its database again on every
-run, writes blobs to the app's store only as server-side copies or new keys, and applies content migrations
-through `update.localBoot` with an environment of exactly its configured values. The repository's
+writes into the journal of the deploy run it continues, and exits 0, 1, 2 or 3 (rolled back automatically); with
+`--json` it prints `kestrel-ops/update-<command>@1`. The migration of the cutover copy downloads its database again
+on every run, writes blobs to the app's store only as server-side copies or new keys, and applies content
+migrations through `update.localBoot` with an environment of exactly its configured values. The repository's
 `docs/operations.md` describes an update step by step.
 
 ## Questions

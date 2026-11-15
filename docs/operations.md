@@ -95,8 +95,16 @@ node .kestrel-ops/run.mjs update status --env prod
 ```
 
 A deploy job has no terminal, so every question the deploy asks needs an answer from `--answers`; without one
-the run stops at that question. `deploy-answers.json` answers the stop and, for a deploy from a release before 6,
-the stop without a seal:
+the run stops at that question. `deploy-answers.json` answers the stop:
+
+```json
+{ "update-stop": "accept" }
+```
+
+The deploy from a release before 6 also needs `unsealed-stop`, since that release leaves no seal. Give that one
+deploy a file of its own and remove it once the deploy has run: a standing answer would also accept a later stop
+of a 6.x release that went without its teardown, and its cutover backup would then lack the frames that stop did
+not ship.
 
 ```json
 { "update-stop": "accept", "unsealed-stop": "accept" }
@@ -111,9 +119,11 @@ project such as a preset package that pnpm does not hoist, each with the package
 environments file and every target manifest it names at the same relative path, and `bundle.json` with the
 versions of the release's kestrel packages, the lockfile hash and the facts the host project contributes, such
 as its readiness path. `run.mjs` hands `deploy`, `verify` and `update <command>` to the update assistant and
-every other command to `status`, `backup` and `restore`; `update.release.dir` is read relative to the directory
-that holds `.kestrel-ops/`. Run one deploy job at a time per environment: the lock trace cannot exclude two runs
-that start in the same moment.
+every other command to `status`, `backup` and `restore`. `update.release.dir` is read relative to the project the
+bundle was written from, which the bundle finds at the same place relative to `.kestrel-ops/` as when it was
+written: with the default output the directory that holds `.kestrel-ops/`; with `--out <dir>` the artifact keeps
+the project's layout around `<dir>`. Run one deploy job at a time per environment: the lock trace cannot exclude
+two runs that start in the same moment.
 
 ### Deploy steps
 
@@ -173,19 +183,19 @@ its `applied.json` names the generation and its nonce, or the first snapshot it 
 the marker row the rollback put into the promoted database. Releases before 6 write no `applied.json`, so the
 marker row proves it for them; it stays in the table `kestrel_ops_provenance`, one row per rollback.
 
-`kestrel update rollback` of a run whose new release started stops the app first and waits for the seal, so
-nothing is written between the report and the stop. It then compares the stopped state with the promoted
-generation, after `accept` with the cutover backup. When the new release wrote more than login sessions, or after
-`accept` always, it shows what would be lost and needs the environment's name as the answer to
-`rollback-accepted`; without it the app is started again and the run stays as it was. Every such rollback takes a
-verified `pre-restore` backup of the stopped app before it changes the store; once the command ended, its retention
-keeps it like any other `pre-restore` backup. `kestrel update abort` of a run
-whose new release started goes through the same steps. A halted run whose verification fails again, and a deploy
-that `update resume` continues after a start an earlier process began whose verification or start then fails, is
-rolled back automatically only when its release wrote nothing since its start, after the stop and a `pre-restore`
-backup; otherwise it stays halted with exit 1 and `update status` names `update rollback`. When that stop or backup
-fails, the app is started again and `update resume` rolls back the way a run whose failed verification is recorded
-does: the stop, the `rollback-accepted` question when the release wrote, and a `pre-restore` backup.
+`kestrel update rollback` of a run whose new release started stops the app first and waits for the seal, so nothing
+is written between the report and the stop. It then compares the stopped state with the promoted generation, after
+`accept` with the cutover backup. When the new release wrote more than login sessions, or after `accept` always, it
+shows what would be lost and needs the environment's name as the answer to `rollback-accepted`; without it the app
+is started again and the run stays as it was. Every such rollback takes a verified `pre-restore` backup of the
+stopped app before it changes the store; once the command ended, its retention keeps it like any other
+`pre-restore` backup. `kestrel update abort` of a run whose new release started goes through the same steps. A
+halted run whose verification fails again, and a deploy that `update resume` continues after a start an earlier
+process began whose verification or start then fails, is rolled back automatically only when its release wrote
+nothing since its start, after the stop and a `pre-restore` backup; otherwise it stays halted with exit 1 and
+`update status` names `update rollback`. When that stop or backup fails, the app is started again and `update
+resume` rolls back the way a run whose failed verification is recorded does: the stop, the `rollback-accepted`
+question when the release wrote, and a `pre-restore` backup.
 
 ### Migrating the cutover copy
 
@@ -233,19 +243,21 @@ The journal of a run lives in the backup location, one object per step, so any m
 continue it. `kestrel update resume` refuses with exit 2 to continue a deploy from a process that has another
 release than the run: other versions of the kestrel packages, or other content migrations in the host facts
 (`kestrel update` passes the host plugin's facts to `prepare`, `deploy`, `verify` and `resume`, `run.mjs` those of
-the bundle; `accept`, `rollback`, `abort` and `cleanup` load no host plugin). It
-then checks the last finished step and continues after it: a plan of the cutover database that differs from the
-receipt or from the plan the gate recorded is refused, an unfinished cutover backup is taken again and the
-unfinished one loses its update pin, so prune removes it, an unfinished migration starts again from the cutover
-backup, a promotion whose generation is no longer the newest is refused, after `promote` it swaps and starts,
-after `start` it verifies; an unfinished rollback runs again from its first step, a run whose failed verification
-is recorded but whose rollback did not begin, and a deploy whose step after the stop failed before its automatic
-rollback began, go through the same stop, question and `pre-restore` backup as `update rollback` and are rolled
-back, a halted run is verified again,
-and a verified run whose retire did not finish retires the older releases. A run that has not finished its stop is
-not resumed; `update abort` ends it. `kestrel update abort` ends an open run: before the promotion it starts the
-previous release on the unchanged replica and releases the pin on the cutover backup, after it it rolls back
-first.
+the bundle; `accept`, `rollback`, `abort` and `cleanup` load no host plugin). It then checks the last finished step
+and continues after it: a plan of the cutover database that differs from the receipt or from the plan the gate
+recorded is refused, an unfinished cutover backup is taken again and the unfinished one loses its update pin, so
+prune removes it, an unfinished migration starts again from the cutover backup, a promotion whose generation is no
+longer the newest is refused, after `promote` it swaps and starts, after `start` it verifies; an unfinished
+rollback runs again from its first step, a run whose failed verification is recorded but whose rollback did not
+begin, and a deploy whose step after the stop failed before its automatic rollback began, go through the same stop,
+question and `pre-restore` backup as `update rollback` and are rolled back, a halted run is verified again, and a
+verified run whose retire did not finish retires the older releases. A run that has not finished its stop is not
+resumed; `update abort` ends it. `kestrel update abort` ends an open run: before the promotion it starts the
+previous release on the unchanged replica and releases the pin on the cutover backup, after it it rolls back first.
+
+A run whose `swap` is still ahead checks the configuration it would apply with every source of the release
+configuration resolved, so it continues only where those sources resolve, in the deploy job's environment or with
+its bundle there; elsewhere `update resume` refuses with exit 2 and the app stays stopped.
 
 A process that was killed leaves its lock behind. The command that continues its run therefore needs
 `--break-lock` and the answer `"break-lock": "accept"`, given only once that process no longer runs:
@@ -266,20 +278,20 @@ no lock and writes nothing.
 `kestrel update accept` closes a verified run; from then on a rollback discards what was written since. A pinned
 cutover backup stays pinned. `kestrel update cleanup [--dry-run]`, at least `update.cleanupAfterDays` (default 14)
 after the accept, removes the originals under the media prefix that no row of the current replica references and
-that the cutover backup holds, after the `cleanup-delete` answer, releases the pin, so prune treats the
-cutover backup like any other, and deletes the replaced release's code the run saved. A later deploy that passes
+that the cutover backup holds, after the `cleanup-delete` answer, releases the pin, so prune treats the cutover
+backup like any other, and deletes the replaced release's code the run saved. A later deploy that passes
 verification deletes the saved code of every earlier deploy run that is no longer open and holds no pin on its
 cutover backup as well, so the code of the release before a major change stays until that run's cleanup. A deploy
 that accepts such a run on the way names its `update cleanup --run <id>`, and so does `update cleanup` when it
 refuses a later run that is not accepted.
 
-`kestrel update rollback` of a run that a later verified deploy superseded rolls back only while the run holds
-the pin on its cutover backup, the way back across a major change, and never while a later deploy is open. The
-later runs then read `rolled-back`, and what they wrote is part of the loss the rollback reports. When the app
-stays stopped because no previous release was left to start, the output of the command and `update status` name a
-deploy of that release with the bundle of its own build when it brings kestrel-ops (the bundle in the workspace of
-the failed deploy job is the new release's and would deploy it again), and otherwise a deploy the way it was
-deployed before the update.
+`kestrel update rollback` of a run that a later verified deploy superseded rolls back only while the run holds the
+pin on its cutover backup, the way back across a major change, and never while a later deploy is open. The later
+runs then read `rolled-back`, and what they wrote is part of the loss the rollback reports. When the app stays
+stopped because no previous release was left to start, the output of the command and `update status` name a deploy
+of that release with the bundle of its own build when it brings kestrel-ops (the bundle in the workspace of the
+failed deploy job is the new release's and would deploy it again), and otherwise a deploy the way it was deployed
+before the update.
 
 ### Exit codes and questions
 
