@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ContentModel } from "@michaelthielemann/kestrel-contracts/content";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createContentDefault } from "@michaelthielemann/kestrel-content-default/impl";
@@ -164,6 +164,24 @@ describe("site/default nested pages: moving a section", () => {
     const error = expectErr(await s.content.update("pages", root, { slug: "wurzel-3" }), "VALIDATION");
     expect(error.details?.fields).toEqual([{ field: "slug", message: expect.stringContaining("more than the limit of 4 (config key maxCascade") as unknown }]);
     expect(await s.resolve("wurzel-2")).toBe(root);
+  });
+
+  it("counts every locale row of the saved page whether or not the clock has advanced since its last save", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(1_700_000_000_000);
+      const s = await site({ maxCascade: 4 });
+      const root = await s.page({ slug: "wurzel" });
+      await s.page({ slug: "k1", parent: root });
+      await s.page({ slug: "k2", parent: root });
+      expectOk(await s.content.update("pages", root, { slug: "wurzel-2" }));
+      await s.page({ slug: "k3", parent: root });
+      const error = expectErr(await s.content.update("pages", root, { slug: "wurzel-3" }), "VALIDATION");
+      expect(error.details?.fields).toEqual([{ field: "slug", message: expect.stringContaining("moves 5 paths") as unknown }]);
+      expect(await s.resolve("wurzel-2")).toBe(root);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

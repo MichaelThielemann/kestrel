@@ -2060,6 +2060,9 @@ Net changes since 5.8.2.
 
 ### Fixed
 
+- `site-default`: the `maxCascade` limit counts every language row of the page being saved, so a save is refused or accepted
+  the same way whatever the clock reads. Before, a row of the saved page whose only change was its timestamp counted only
+  when the clock had advanced since the page was last saved.
 - `kestrel upgrade data` loads the module configs through the project's host plugin when
   `kestrel.config.ts` does not load by itself, the way `migrate` does, and loads the project once for
   all its checks, so `data/redirect-reserved-paths`, `data/site-media-leftovers`,

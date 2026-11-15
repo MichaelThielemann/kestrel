@@ -451,6 +451,12 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     throw fieldError(field, `${[...new Set(named)].join(", ")} ${lost.length === 1 ? "is" : "are"} published below and would lose ${lost.length === 1 ? "its" : "their"} path; give the page a slug in that locale or withdraw them first`);
   }
 
+  function cascadeCost(change: Diff, rows: readonly DocRow[], saved: { key: string } | undefined): number {
+    const counted = new Set(change.changed.map((c) => (c.after ?? c.before)!.id));
+    if (saved !== undefined) for (const row of rows) if (docKey(row.type, row.docId) === saved.key) counted.add(row.id);
+    return counted.size;
+  }
+
   async function settleMoving(current: DocRow[], bases: Base[], mounts: Mounts, moving: Set<string>, field: (key: string) => string, cascade: { field: string; publishing: boolean }, runId: string, saved?: { key: string; locale: string; field: string }): Promise<Move[]> {
     const { rows, conflicts } = derive(format, bases, current, mounts);
     const pathConflicts: PathConflict[] = [];
@@ -476,8 +482,9 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     if (fieldErrors.length > 0) throw new Abort(failure("VALIDATION", text, { details: { fields: fieldErrors } }));
     await refuseLostPaths(rows, current, mounts, moving, saved, saved === undefined ? cascade.field : field(saved.key));
     const change = diff(current, current.flatMap((r) => claimOf(r) ?? []), rows);
-    if (change.changed.length > config.maxCascade) {
-      const stall = `this change moves ${change.changed.length} paths (documents × locales), more than the limit of ${config.maxCascade} (config key maxCascade, preset option paths.maxCascade); a larger change blocks every request while it runs`;
+    const cost = cascadeCost(change, rows, saved);
+    if (cost > config.maxCascade) {
+      const stall = `this change moves ${cost} paths (documents × locales), more than the limit of ${config.maxCascade} (config key maxCascade, preset option paths.maxCascade); a larger change blocks every request while it runs`;
       throw fieldError(cascade.field, stall);
     }
     return apply(change, runId, true);
