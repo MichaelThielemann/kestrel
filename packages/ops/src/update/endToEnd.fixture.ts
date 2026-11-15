@@ -169,6 +169,23 @@ export function updateEndToEnd(fresh: () => ScenarioStore): void {
     });
   }
 
+  scenarioTest("halts with exit 1 instead of rolling back a new release that still boots when the readiness windows end, and resume verifies it once it is ready", async (task) => {
+    const s = await scenario(task, { version: "6.0.0" }, { version: "6.0.1", ready: "booting" });
+    expectOk(await s.update(["prepare"]));
+    const deployed = await s.update(["deploy"]);
+    expectOk(deployed, UPDATE_EXIT.refused);
+    expect(deployed.stderr + deployed.stdout).toContain("still boots");
+    const run = await s.run(ids(deployed));
+    expect(run.state).toBe("halted");
+    expect(run.records.some((r) => r.step === "rollback")).toBe(false);
+    expect(s.current().version).toBe("6.0.1");
+    expect(s.app).not.toBeNull();
+    s.current().ready = "ready";
+    const resumed = await s.update(["resume"]);
+    expectOk(resumed);
+    expect((await s.run(ids(deployed))).state).toBe("verified");
+  });
+
   scenarioTest("halts with exit 1 while readiness answers 403, leaves the new release running, and resume verifies it once it answers", async (task) => {
     const s = await scenario(task, { version: "6.0.0" }, { version: "6.0.1", ready: "forbidden" });
     expectOk(await s.update(["prepare"]));

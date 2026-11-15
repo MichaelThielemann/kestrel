@@ -15,7 +15,7 @@ export interface FakeRelease {
   /** Versions of the packages the release brings, as a target reports them. */
   versions: Record<string, string>;
   /** What its readiness check answers: 200, 503, 403, or no connection. */
-  ready: "ready" | "not-ready" | "forbidden" | "unreachable";
+  ready: "ready" | "not-ready" | "booting" | "forbidden" | "unreachable";
   /** No instance comes up; the platform records a crash. */
   crashes: boolean;
   /** Renders every page into the delivery prefix right after it started, as a release that re-renders after a restore does. */
@@ -189,6 +189,8 @@ export class FakeUpdateTarget implements UpdateTarget {
         return { outcome: "ready", status: 200 };
       case "not-ready":
         return { outcome: "not-ready", status: 503 };
+      case "booting":
+        return { outcome: "starting", status: 503 };
       case "forbidden":
         return { outcome: "unverifiable", status: 403, reason: "forbidden" };
       case "unreachable":

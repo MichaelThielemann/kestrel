@@ -165,7 +165,7 @@ async function runSteps(ctx: UpdateContext, scenario: Scenario, run: UpdateRun |
     verify: async () => {
       const probe = await ctx.target.probeReady();
       const crashes = await ctx.target.crashEvents(startedAt);
-      end.verdict = crashes.length > 0 || probe.outcome === "not-ready" ? "failed" : probe.outcome === "unverifiable" ? "unverifiable" : "passed";
+      end.verdict = crashes.length > 0 || probe.outcome === "not-ready" ? "failed" : probe.outcome === "unverifiable" || probe.outcome === "starting" ? "unverifiable" : "passed";
       await ctx.journal.record("verify", "done", { ...deploy, verdict: end.verdict, promoted });
     },
     retire: async () => {

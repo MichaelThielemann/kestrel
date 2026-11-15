@@ -135,6 +135,30 @@ describe("verifying a started release", { timeout: 20_000 }, () => {
     expect(result.ready).toEqual({ outcome: "not-ready", status: 503 });
   });
 
+  it("halts instead of failing a release that still answers that it boots when the readiness window ends", async () => {
+    const s = await startOnPromoted({ ready: "booting" });
+    const result = await verify(s);
+    expect(result.verdict).toBe("unverifiable");
+    expect(result.ready).toEqual({ outcome: "starting", status: 503 });
+    expect(failed(result)).toEqual(["ready"]);
+    expect(result.checks.find((c) => c.name === "ready")?.detail).toContain("still boots");
+  });
+
+  it("keeps waiting while the release answers that it boots and passes it once it is ready within the window", async () => {
+    const s = await startOnPromoted({ ready: "booting" });
+    s.ctx.update = { ...s.ctx.update, readyTimeoutSeconds: 5 };
+    const booted = setTimeout(() => {
+      s.h.target.release.ready = "ready";
+    }, 300);
+    try {
+      const result = await verify(s);
+      expect(failed(result)).toEqual([]);
+      expect(result.verdict).toBe("passed");
+    } finally {
+      clearTimeout(booted);
+    }
+  });
+
   it.each(["forbidden", "unreachable"] as const)("halts when readiness is %s", async (ready) => {
     const result = await verify(await startOnPromoted({ ready }));
     expect(result.verdict).toBe("unverifiable");

@@ -111,8 +111,11 @@ The target implements the update interface of `kestrel-ops`, which `kestrel upda
   refuses with exit 2 to swap in a release whose manifest or sources differ from those the gate checked.
 - **Swap**: `setDroplet()` makes the staged droplet current, only while the app is stopped; promotion of the
   migrated database, the swap and the start run as one step of the update.
-- **Verification** probes the readiness of the app in three outcomes (200 ready; 503 or another 5xx not ready;
-  401, 403, 404, a timeout or no connection unverifiable) and reads the crash events since the start.
+- **Verification** probes the readiness of the app (200 ready; 503 with a JSON body whose `state` or `code` is
+  `"booting"` still starting; any other 503 or another 5xx not ready; 401, 403, 404, a timeout or no connection
+  unverifiable) and reads the crash events since the start. Point the app's health check at a liveness path that
+  answers while the app boots: Cloud Foundry restarts an instance whose health check fails for longer than its
+  timeout, also during a long first start after an update.
 - **Retiring** lists the app's droplets and revisions and deletes every droplet but the current one once the new
   release passed verification, after its bits were saved into the backup location, so neither `cf rollback` nor
   an old pipeline run can start an old release on converted data. A droplet of a container image has no bits to

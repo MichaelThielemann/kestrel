@@ -119,7 +119,8 @@ describe("the readiness probe of the Cloud Foundry target", () => {
       if (path === "/hang") return;
       const status = Number(path.split("/")[1] ?? "200");
       response.statusCode = Number.isFinite(status) ? status : 200;
-      response.end(path.endsWith("/not-ready") ? JSON.stringify({ ready: false }) : JSON.stringify({ ready: true }));
+      const state = /\/(booting|failed)$/.exec(path)?.[1];
+      response.end(state !== undefined ? JSON.stringify({ ready: false, state, code: state }) : path.endsWith("/not-ready") ? JSON.stringify({ ready: false }) : JSON.stringify({ ready: true }));
     });
     await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
     const address = server.address();
@@ -152,6 +153,9 @@ describe("the readiness probe of the Cloud Foundry target", () => {
     ["/200", { outcome: "ready", status: 200 }],
     ["/200/not-ready", { outcome: "not-ready", status: 200 }],
     ["/503", { outcome: "not-ready", status: 503 }],
+    ["/503/booting", { outcome: "starting", status: 503 }],
+    ["/503/failed", { outcome: "not-ready", status: 503 }],
+    ["/500/booting", { outcome: "not-ready", status: 500 }],
     ["/500", { outcome: "not-ready", status: 500 }],
     ["/403", { outcome: "unverifiable", status: 403 }],
     ["/401", { outcome: "unverifiable", status: 401 }],

@@ -197,13 +197,15 @@ two runs that start in the same moment.
 Verification has three outcomes. **Passed**: every hard check held; the run ends with exit 0. **Failed**: a hard
 check failed, and the automatic rollback brings back the cutover state and verifies it; exit 3, or exit 1 when it
 had no previous release to start and the app stays stopped. **Unverifiable**:
-the readiness check could not tell (403, 401, 404, a timeout or no connection), or a check could not read the
-store or the platform; the run halts with exit 1, leaves the new release running, rolls nothing back and names
-the next command.
+the readiness check could not tell (403, 401, 404, a timeout or no connection), the release still answers that it
+boots when the readiness window ends, or a check could not read the store or the platform; the run halts with exit
+1, leaves the new release running, rolls nothing back and names the next command.
 
 The hard checks: an instance runs and the platform recorded no crash since the start, both read once more after
 every wait below ended, so a crash while verification waits fails it; the readiness path
-answers 200 (503, a body with `ready: false` or another 5xx answer fails); within `update.syncWindowSeconds`
+answers 200 within `update.readyTimeoutSeconds` (503, a body with `ready: false` or another 5xx answer fails; a
+503 whose JSON body has `state` or `code` `"booting"` counts as a release that has not finished its boot: the
+check keeps waiting, and when the window ends first, the run halts instead of rolling back); within `update.syncWindowSeconds`
 `applied.json` of the promoted generation names it and the nonce of its `origin.json` (the release writes it at its
 first sync after the start, so the window has to cover the interval at which the project runs `replication.sync`);
 the release's own generation, sorting after the promoted one, shows its first snapshot, and within
@@ -212,6 +214,20 @@ the release's own generation, sorting after the promoted one, shows its first sn
 segment without frames at its first sync after that snapshot, so the window has to cover two sync intervals); a
 key of the delivery prefix newer than the start shows within `update.renderTimeoutSeconds` that rendering began.
 A delivery prefix without any key only warns. No page or medium is fetched over the network.
+
+#### The first start of a new release
+
+A release can take longer than usual to report ready on its first start after an update, while it converts or
+copies stored data the new major keeps in another shape; with many originals that takes minutes. The deploy waits
+up to `update.readyTimeoutSeconds` for its start and, once more, for the readiness check of its verification, so
+set the value of the environment to cover a first start with room to spare (at most 3600), measured on a copy of
+production where you can. A release that is ready ends each wait at once; a higher value only delays the verdict
+on a release that never becomes ready. A readiness path that answers a probe from the tool's machine with a 503
+whose body names `"state": "booting"` lets verification tell a booting release from a broken one: a release that
+still boots when the window ends halts the run with exit 1 instead of rolling it back, and `update resume`
+verifies it once it is ready. Point the platform's own health check at a liveness path that answers while the
+release boots, not at the readiness path: the platform restarts an instance whose health check fails for longer
+than its own timeout, and no wait of the tool extends that.
 
 ### Rollback
 

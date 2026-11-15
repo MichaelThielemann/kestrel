@@ -70,19 +70,27 @@ export async function stagePackage(session: CfSession, release: ReleaseSource): 
   return { droplet, package: pkg, stagedAt: session.deps.clock() };
 }
 
-function readyFalse(body: string): boolean {
+function parsedBody(body: string): object | null {
   try {
     const parsed: unknown = JSON.parse(body);
-    return typeof parsed === "object" && parsed !== null && Reflect.get(parsed, "ready") === false;
+    return typeof parsed === "object" && parsed !== null ? parsed : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
+const readyFalse = (body: string): boolean => Reflect.get(parsedBody(body) ?? {}, "ready") === false;
+
+function booting(body: string): boolean {
+  const parsed = parsedBody(body) ?? {};
+  return Reflect.get(parsed, "state") === "booting" || Reflect.get(parsed, "code") === "booting";
+}
+
 /**
- * One readiness check against `readyUrl` once an instance runs: 200 is `ready`; 503, a JSON body with `ready: false`
- * or another 5xx is `not-ready`; 401, 403, 404, a timeout or no connection is `unverifiable`. Without `readyUrl` an
- * instance in state `RUNNING` is `ready`. `timeoutMs` bounds the request, {@link PROBE_TIMEOUT_MS} by default.
+ * One readiness check against `readyUrl` once an instance runs: 200 is `ready`; 503 with a JSON body whose `state` or
+ * `code` is `"booting"` is `starting`; any other 503, a JSON body with `ready: false` or another 5xx is `not-ready`;
+ * 401, 403, 404, a timeout or no connection is `unverifiable`. Without `readyUrl` an instance in state `RUNNING` is
+ * `ready`. `timeoutMs` bounds the request, {@link PROBE_TIMEOUT_MS} by default.
  */
 export async function probeReady(session: CfSession, options: { timeoutMs?: number } = {}): Promise<ReadyProbe> {
   const stats = await session.api(`/v3/apps/${await session.appGuid()}/processes/web/stats`, statsSchema);
@@ -101,6 +109,7 @@ export async function probeReady(session: CfSession, options: { timeoutMs?: numb
   }
   const status = response.status;
   if (status === 200) return readyFalse(body) ? { outcome: "not-ready", status } : { outcome: "ready", status };
+  if (status === 503 && booting(body)) return { outcome: "starting", status };
   if (status >= 500) return { outcome: "not-ready", status };
   return { outcome: "unverifiable", status, reason: status === 401 || status === 403 ? "the readiness check is not allowed from here" : `the readiness check answered ${status}` };
 }

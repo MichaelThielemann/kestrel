@@ -200,7 +200,7 @@ async function preflightProblems(ctx: UpdateContext): Promise<{ problems: string
   const problems: string[] = [];
   if (pre.instances > 1 || pre.running > 1) problems.push(`the app is scaled to ${Math.max(pre.instances, pre.running)} instances; an update needs exactly one`);
   if (pre.activeDeployment !== null) problems.push(`a deployment of the platform is in progress (${pre.activeDeployment})`);
-  if (pre.healthCheck !== "http") ctx.out.warn(`the app's health check is ${pre.healthCheck}; an http check on the readiness path lets the platform see a release that does not become ready`);
+  if (pre.healthCheck !== "http") ctx.out.warn(`the app's health check is ${pre.healthCheck}; an http check on a liveness path that answers while the release boots lets the platform replace an instance that stops answering, without restarting one that is still booting`);
   const clock = await serverClock(ctx.backups, ctx.location, ctx.runId, ctx.clock, ctx.poll, ctx.out);
   if (Math.abs(clock.skewMs) > MAX_SKEW_MS) problems.push(`this machine's clock is ${Math.round(clock.skewMs / 1000)} s off the store's (limit ${MAX_SKEW_MS / 1000} s)`);
   return { problems, data: { instances: pre.instances, running: pre.running, activeDeployment: pre.activeDeployment, healthCheck: pre.healthCheck, readinessChecked: pre.readinessChecked !== false, skewMs: clock.skewMs } };

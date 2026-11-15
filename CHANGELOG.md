@@ -1835,7 +1835,8 @@ Net changes since 5.8.2.
   outcomes, waiting up to `update.syncWindowSeconds` for the `applied.json` the release writes at its first sync
   and reading the instance and the crash events again once its waits ended: passed, failed (an automatic
   rollback to the cutover state, exit 3, or exit 1 when no previous release was left to start) or unverifiable (403, no
-  connection, or a check that cannot read the store or the platform: the run halts with exit 1). Only after a
+  connection, a release whose readiness still answers 503 with `state` or `code` `"booting"` when
+  `update.readyTimeoutSeconds` ends, or a check that cannot read the store or the platform: the run halts with exit 1). Only after a
   passed verification are the older releases of the app deleted, the replaced one's code saved into the backup
   location first where the platform hands it out; a failed save does not keep it. When deleting them fails or is
   interrupted, the deploy ends with exit 1 because they can still start, `update resume` or `update accept`
@@ -1893,7 +1894,8 @@ Net changes since 5.8.2.
   instances, an active deployment, the health check type and whether `readyUrl` lets it check readiness, staging of the release while the app runs, reading
   and restoring the app's configuration, checking the release's manifest and its `vars` sources without changing the
   app, applying the release's manifest and making the staged droplet current
-  while the app is stopped, a readiness probe with three outcomes, crash events, and listing, saving and deleting
+  while the app is stopped, a readiness probe whose 503 with `state` or `code` `"booting"` reads as a release still
+  starting (`ReadyProbe` outcome `starting`), crash events, and listing, saving and deleting
   droplets and revisions. A droplet download that fails is tried three times before it is reported as failed; only
   a droplet of a container image counts as one whose bits the platform does not hand out.
 - New package `@michaelthielemann/kestrel-target-cloudfoundry`: a `kestrel-ops` target for one app in a

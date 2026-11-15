@@ -40,8 +40,8 @@ export interface StandInRelease {
   version: string;
   /** The replication runtime: from 6 on it seals at teardown and acknowledges a promoted generation. */
   runtime: string;
-  /** What the readiness URL answers while it runs: 200, 503 or 403. */
-  ready: "ready" | "not-ready" | "forbidden";
+  /** What the readiness URL answers while it runs: 200, 503, 503 with a body that says it boots, or 403. */
+  ready: "ready" | "not-ready" | "booting" | "forbidden";
   /** No instance comes up and the platform records a crash. */
   crashes: boolean;
   /** Renders every page into the delivery prefix after its start. */
@@ -203,8 +203,8 @@ export class CloudFoundryRun {
     await run.cf.listen();
     run.server = createServer((_request, response) => {
       const release = run.current();
-      response.statusCode = run.app === null && run.instance === null ? 503 : release.ready === "ready" ? 200 : release.ready === "not-ready" ? 503 : 403;
-      response.end(release.ready === "not-ready" ? JSON.stringify({ ready: false }) : "");
+      response.statusCode = run.app === null && run.instance === null ? 503 : release.ready === "ready" ? 200 : release.ready === "not-ready" || release.ready === "booting" ? 503 : 403;
+      response.end(release.ready === "not-ready" ? JSON.stringify({ ready: false }) : release.ready === "booting" ? JSON.stringify({ ready: false, state: "booting", code: "booting" }) : "");
     });
     await new Promise<void>((done) => run.server?.listen(0, "127.0.0.1", done));
     const address = run.server.address();

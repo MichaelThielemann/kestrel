@@ -33,12 +33,13 @@ function advanced(gens: readonly Generation[], first: Generation): boolean {
 
 const check = (name: VerifyCheck["name"], ok: boolean, detail: string, hard = true): VerifyCheck => ({ name, hard, ok, detail });
 
-const describeProbe = (probe: ReadyProbe): string => (probe.outcome === "unverifiable" ? `${probe.reason}${probe.status === null ? "" : ` (${probe.status})`}` : `answered ${probe.status}`);
+const describeProbe = (probe: ReadyProbe): string => (probe.outcome === "unverifiable" ? `${probe.reason}${probe.status === null ? "" : ` (${probe.status})`}` : probe.outcome === "starting" ? `the release still boots (${probe.status})` : `answered ${probe.status}`);
 
 /**
  * Verifies a started release. Hard checks: an instance runs and the platform recorded no crash since the start, both
  * read again once every wait below ended, so a crash inside the windows fails the verification;
- * readiness in three outcomes (ready; not-ready fails; unverifiable halts); within `update.syncWindowSeconds`
+ * readiness within `update.readyTimeoutSeconds` (ready; not-ready fails; unverifiable halts, and so does a release
+ * that still answers `starting` when the window ends, without the checks below); within `update.syncWindowSeconds`
  * `applied.json` of the promoted generation names it and the nonce of its `origin.json`, since a runtime writes it at
  * the first sync after the start; the release's own generation, sorting after the promoted one, shows its
  * first snapshot; within `update.syncWindowSeconds` a WAL segment written after that snapshot, or a later generation
@@ -74,9 +75,9 @@ async function checkRelease(ctx: UpdateContext, input: VerifyInput, checks: Veri
   checks.push(...(await platformChecks(ctx, input.startedAt)));
   const running = checks.every((c) => c.ok);
   const ready = running ? await until(ctx, ctx.update.readyTimeoutSeconds, () => ctx.target.probeReady(), (p) => p.outcome === "ready") : await ctx.target.probeReady();
-  checks.push(check("ready", ready.outcome === "ready", describeProbe(ready)));
+  checks.push(check("ready", ready.outcome === "ready", ready.outcome === "starting" ? `${describeProbe(ready)} after ${ctx.update.readyTimeoutSeconds} s (update.readyTimeoutSeconds)` : describeProbe(ready)));
   let ownGeneration: string | null = null;
-  if (running && ready.outcome !== "not-ready") {
+  if (running && ready.outcome !== "not-ready" && ready.outcome !== "starting") {
     const prefix = ctx.env.app.replicaPrefix;
     const promoted = input.promoted.generation;
     const ack = await until(ctx, ctx.update.syncWindowSeconds, () => readAcknowledgement(ctx.app, prefix, input.promoted), (read) => read === "applied");
@@ -100,7 +101,7 @@ async function checkRelease(ctx: UpdateContext, input: VerifyInput, checks: Veri
     checks.splice(0, 2, instance, crashes);
   }
   const hardFailed = checks.some((c) => c.hard && !c.ok && c.name !== "ready");
-  const verdict: VerifyVerdict = hardFailed || ready.outcome === "not-ready" ? "failed" : ready.outcome === "unverifiable" ? "unverifiable" : "passed";
+  const verdict: VerifyVerdict = hardFailed || ready.outcome === "not-ready" ? "failed" : ready.outcome === "unverifiable" || ready.outcome === "starting" ? "unverifiable" : "passed";
   for (const c of checks) {
     if (!c.ok && c.hard) ctx.out.error(`verify ${c.name}: ${c.detail}`);
     else if (!c.ok) ctx.out.warn(`verify ${c.name}: ${c.detail}`);
@@ -129,6 +130,7 @@ export async function concludeVerify(ctx: UpdateContext, phase: UpdatePhase, res
   const held = result.verdict === "failed" && guarded && (await wroteSinceStart(ctx, known(await readUpdateRun(ctx, ctx.run.id))));
   await ctx.journal.record("verify", "done", { phase, verdict: result.verdict, checks: result.checks, ownGeneration: result.ownGeneration, ...(held ? { held: true } : {}) });
   if (held) return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`verification failed (${result.checks.filter((c) => c.hard && !c.ok).map((c) => fixedText`${c.name}: ${c.detail}`).join("; ")}), but the new release wrote since its start, so nothing was rolled back automatically and it keeps running; run update rollback --env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}, which reports what it discards, asks and takes a safety backup first`);
+  if (result.verdict === "unverifiable" && result.ready.outcome === "starting") return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`the new release still boots after ${ctx.update.readyTimeoutSeconds} s (update.readyTimeoutSeconds); it keeps running and nothing was rolled back. Once it is ready, run update resume --env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}, which verifies it, or update rollback`);
   if (result.verdict === "unverifiable") return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`verification could not tell (${describeProbe(result.ready)}); the new release keeps running and nothing was rolled back. Once its readiness can be checked, run update resume --env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}, or update rollback`);
   const run = known(await readUpdateRun(ctx, ctx.run.id));
   if (result.verdict === "failed") {

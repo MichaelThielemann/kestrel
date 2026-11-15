@@ -36,11 +36,13 @@ export interface RevisionInfo {
 }
 
 /**
- * The answer of the app's readiness check, in three outcomes: `ready` (200), `not-ready` (503, a body with
- * `ready: false`, or another 5xx answer: the release runs and reports itself broken, which rolls back), and
- * `unverifiable` (403, 401, 404, a timeout or no connection: the check cannot tell, which halts without a rollback).
+ * The answer of the app's readiness check: `ready` (200), `starting` (503 with a JSON body whose `state` or `code` is
+ * `"booting"`: the release runs and has not finished its boot, so verification keeps waiting and halts without a
+ * rollback when its window ends first), `not-ready` (any other 503, a body with `ready: false`, or another 5xx
+ * answer: the release runs and reports itself broken, which rolls back), and `unverifiable` (403, 401, 404, a
+ * timeout or no connection: the check cannot tell, which halts without a rollback).
  */
-export type ReadyProbe = { outcome: "ready"; status: number } | { outcome: "not-ready"; status: number } | { outcome: "unverifiable"; status: number | null; reason: string };
+export type ReadyProbe = { outcome: "ready"; status: number } | { outcome: "starting"; status: number } | { outcome: "not-ready"; status: number } | { outcome: "unverifiable"; status: number | null; reason: string };
 
 /** A crash or failed start the platform recorded for the app. */
 export interface CrashEvent {
