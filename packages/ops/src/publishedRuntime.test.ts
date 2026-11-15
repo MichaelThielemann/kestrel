@@ -204,6 +204,35 @@ describe.skipIf(runtimeDir === undefined)("replicas between this version and the
     expect(Buffer.from(old.bytes).equals(Buffer.from(current.bytes))).toBe(true);
   }, 60_000);
 
+  it("restores with the published package, byte for byte to the snapshot, a generation of this version whose only segment holds no frames", async () => {
+    const published = await loadPublishedReplication(runtimeDir ?? "");
+    const bucket = new MemoryBucket("published-replica");
+    const blobs = blobstoreOf(memoryStore(bucket));
+    const { file, db, write } = liveDatabase();
+    const replication = createReplicationSqlite(config(file), blobs);
+    try {
+      write(30);
+      for (let run = 0; run < 2; run++) {
+        const synced = await replication.sync();
+        if (isErr(synced)) throw new Error(synced.error.message);
+      }
+    } finally {
+      replication.close();
+    }
+    const generation = (await listGenerations(memoryStore(bucket), "replica/")).at(-1);
+    if (generation === undefined || generation.snapshot === null) throw new Error("the replica holds no snapshot");
+    expect(generation.segments.map((segment) => segment.size)).toEqual([32]);
+    const snapshot = bucket.objects.get(generation.snapshot.key)?.data ?? new Uint8Array();
+    for (const [key, object] of [...bucket.objects]) if (key.startsWith(`replica/gen/${generation.name}/`)) bucket.objects.set(key.replace(`/gen/${generation.name}/`, `/gen/${generation.name.slice(0, 16)}/`), object);
+    const old = await restoredRows(async (out) => {
+      const restored = await published.restoreFromBlobs(blobs, "replica/", { generation: generation.name.slice(0, 16) }, out);
+      if (isErr(restored)) throw new Error(restored.error.message);
+    });
+    db.close();
+    expect(old.rows).toEqual(allRows(file));
+    expect(Buffer.from(old.bytes).equals(Buffer.from(snapshot))).toBe(true);
+  }, 60_000);
+
   it("restores with this version, byte for byte as the published package does, what the published package wrote", async () => {
     const published = await loadPublishedReplication(runtimeDir ?? "");
     const bucket = new MemoryBucket("published-replica");
