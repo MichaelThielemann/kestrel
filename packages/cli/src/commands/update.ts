@@ -6,7 +6,7 @@ import { PLUGIN_API_VERSION, type OpsFacts } from "@michaelthielemann/kestrel-up
 import { OPS_PACKAGE, runOpsCommand } from "../ops.ts";
 import { cliVersion, COMMAND_USAGE } from "../usage.ts";
 
-type HostFacts = Pick<OpsFacts, "readyPath" | "localBootEnv" | "exportChecks" | "secretEnvNames" | "migrationSwitches">;
+type HostFacts = Pick<OpsFacts, "readyPath" | "localBootEnv" | "exportChecks" | "secretEnvNames" | "migrationSwitches" | "contentMigrations">;
 type UpdateRunner = (argv: readonly string[], options: { host: HostFacts }) => Promise<number>;
 
 const isRunner = (value: unknown): value is UpdateRunner => typeof value === "function";
@@ -31,8 +31,8 @@ async function hostFacts(root: string): Promise<{ ok: true; facts: HostFacts } |
     const selection = await selectHostPlugin(loaded, root);
     if (!selection.ok) return selection;
     const facts = (await selection.active?.plugin.ops?.(root)) ?? {};
-    const { readyPath, localBootEnv, exportChecks, secretEnvNames, migrationSwitches } = facts;
-    return { ok: true as const, facts: { ...(readyPath === undefined ? {} : { readyPath }), ...(localBootEnv === undefined ? {} : { localBootEnv }), ...(exportChecks === undefined ? {} : { exportChecks }), ...(secretEnvNames === undefined ? {} : { secretEnvNames }), ...(migrationSwitches === undefined ? {} : { migrationSwitches }) } };
+    const { readyPath, localBootEnv, exportChecks, secretEnvNames, migrationSwitches, contentMigrations } = facts;
+    return { ok: true as const, facts: { ...(readyPath === undefined ? {} : { readyPath }), ...(localBootEnv === undefined ? {} : { localBootEnv }), ...(exportChecks === undefined ? {} : { exportChecks }), ...(secretEnvNames === undefined ? {} : { secretEnvNames }), ...(migrationSwitches === undefined ? {} : { migrationSwitches }), ...(contentMigrations === undefined ? {} : { contentMigrations }) } };
   });
 }
 
@@ -53,7 +53,8 @@ async function projectRunUpdate(root: string): Promise<UpdateRunner | null> {
 /**
  * `kestrel update`: the update assistant of the installed kestrel-ops. `--help` lists the seven commands an operator
  * runs. `prepare` and `bundle` hand the facts the project's host plugin contributes (its readiness path, secret
- * variable names, migration switches, export checks, local start variables) to kestrel-ops; exit 2 when kestrel-ops
+ * variable names, migration switches, export checks, local start variables, the ids of its content migrations) to
+ * kestrel-ops; exit 2 when kestrel-ops
  * is missing or has no update assistant.
  */
 export async function run(argv: readonly string[]): Promise<number> {

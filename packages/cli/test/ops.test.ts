@@ -137,14 +137,14 @@ describe("kestrel status, backup, restore and update", () => {
     mkdirSync(host, { recursive: true });
     const version = boundaryCast<{ version: string }>(JSON.parse(readFileSync(join(CLI_DIR, "package.json"), "utf8")), "json").version;
     writeFileSync(join(host, "package.json"), JSON.stringify({ name: "example-host", version: "1.0.0", type: "module", kestrel: { plugin: "./plugin.mjs", pluginApi: 6, engine: `^${version.split(".")[0] ?? "0"}.0.0` } }));
-    writeFileSync(join(host, "plugin.mjs"), `export default () => ({ kind: "example", detect: async () => true, load: async () => ({ issues: [] }), ops: () => ({ readyPath: "/ready", secretEnvNames: ["SESSION_SECRET"], blobstoreFromEnv: () => undefined }) });\n`);
+    writeFileSync(join(host, "plugin.mjs"), `export default () => ({ kind: "example", detect: async () => true, load: async () => ({ issues: [] }), ops: () => ({ readyPath: "/ready", secretEnvNames: ["SESSION_SECRET"], contentMigrations: ["pages-mark-migrated"], blobstoreFromEnv: () => undefined }) });\n`);
     writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "example-site", private: true, dependencies: { "example-host": "1.0.0", [OPS]: "*" } }));
     writeFileSync(join(dir, "kestrel.environments.json"), JSON.stringify({ environments: { prod: { target: { adapter: "local", dir: ".", database: "data/kestrel.db", command: ["node", "server.mjs"], disk: "ephemeral" }, storage: { bucket: "b" }, app: { replicaPrefix: "database/", mediaPrefix: "media/", deliveryPrefix: "www/" }, backups: { prefix: "kestrel-backups/" } } } }));
     const result = await runCli(["update", "bundle"], { cwd: dir, nodeArgs: TRANSFORM });
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     const info = boundaryCast<{ hostFacts: Record<string, unknown> }>(JSON.parse(readFileSync(join(dir, ".kestrel-ops", "bundle.json"), "utf8")), "json");
-    expect(info.hostFacts).toEqual({ readyPath: "/ready", secretEnvNames: ["SESSION_SECRET"] });
+    expect(info.hostFacts).toEqual({ readyPath: "/ready", secretEnvNames: ["SESSION_SECRET"], contentMigrations: ["pages-mark-migrated"] });
   }, 120_000);
 
   it("keeps kestrel-ops and every @aws-sdk package out of the CLI's production dependency tree", () => {

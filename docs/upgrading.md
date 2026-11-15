@@ -1526,8 +1526,10 @@ classification never imports a plugin.
   a local start of the project), `exportChecks` (paths inside the static export that must exist once
   the project has rendered again), `blobstoreFromEnv(env)` and `databaseFile(env)` (the blob store
   entry and the database file the project builds from an environment passed as a plain map, never
-  `process.env`), `secretEnvNames` (variables the tooling never prints, logs or puts on a command line)
-  and `migrationSwitches` (the variables that switch content and storage migrations at start-up).
+  `process.env`), `secretEnvNames` (variables the tooling never prints, logs or puts on a command line),
+  `migrationSwitches` (the variables that switch content and storage migrations at start-up) and
+  `contentMigrations` (the ids of the content migrations the project's release brings, which an update
+  rehearses and applies).
   Every member is optional. The upgrade commands do not call it. Available from plugin API `6`.
 
 A `Rule` answers one of its own `ask` questions the same way every other finding changes: through

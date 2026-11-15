@@ -197,8 +197,9 @@ Net changes since 5.8.2.
   runs. Plugin API `5` adds the optional `UpgradePlugin.dataFindings` hook, through which a host
   package reports what only its stored data can show in `kestrel upgrade data`. Plugin API `6` adds
   the optional `UpgradePlugin.ops` hook and its `OpsFacts` type: the readiness path, environment
-  mapping for the blob store and the database file, secret variable names and migration switches the
-  operations tooling needs; the upgrade commands do not call it. A plugin that declares `pluginApi` `5`
+  mapping for the blob store and the database file, secret variable names, migration switches and the
+  ids of the release's content migrations the operations tooling needs; the upgrade commands do not
+  call it. A plugin that declares `pluginApi` `5`
   keeps running.
 
 - The pipeline grammar gains an atomic group: `steps` accepts `{ atomic: [...] }` next to a plain

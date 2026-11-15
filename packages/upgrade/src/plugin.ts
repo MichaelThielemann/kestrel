@@ -344,6 +344,8 @@ export interface OpsFacts {
   secretEnvNames?: readonly string[];
   /** Names of the environment variables that switch content migrations (`content`) and storage migrations (`storage`) at start-up. */
   migrationSwitches?: { content?: string; storage?: string };
+  /** Ids of the content migrations the project's release brings; an update rehearses and applies those the database's ledger does not hold. */
+  contentMigrations?: readonly string[];
 }
 
 /** What the running kestrel CLI passes to a plugin factory. */
