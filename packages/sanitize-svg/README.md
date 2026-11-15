@@ -17,6 +17,19 @@ without this module (or another one registering `sanitize.svg`) fails the boot. 
 publishes an SVG as `image/svg+xml` only when this step ran before `media.upload` in the same
 pipeline, with no step in between that declares a write to `files`.
 
+**Styles are dropped.** Neither the `style` attribute nor the `<style>` element is on the allowlist, and
+`class` stays without any rule to apply. A file that sets its colours through CSS therefore loses them
+without an error: shapes without a `fill` are drawn black, and strokes set only in CSS disappear. That
+is the usual export of drawing programs — Illustrator writes `<style>.cls-1{fill:#0a5}</style>` and
+`class="cls-1"`, Inkscape writes `style="fill:#0a5"`. The attributes of the filter primitives
+(`stdDeviation`, `in`, `result`, …), `markerWidth`, `refX`, `stroke-miterlimit`, `font-style`, `display`
+and `visibility` are dropped as well. Export logos and icons with presentation attributes instead, such as
+`fill="#0a5"` and `stroke="#333"`: in Illustrator choose "Presentation Attributes" under Styling in the SVG
+export options; in Inkscape save as "Optimized SVG" with "Convert CSS attributes to XML attributes"; or
+run the file through `svgo` with the `inlineStyles` and `convertStyleToAttrs` plugins. A file whose
+markup still contains `style` after that will not look the same once uploaded; compare the uploaded file
+with the original before using it.
+
 Not included: deciding whether SVG uploads are allowed at all, storage, naming and serving of the
 file (`media-default`'s `allowedTypes`/`deniedTypes` and the pipeline order that makes an upload
 count as sanitized); full XML well-formedness or schema validation – a tag or attribute outside the

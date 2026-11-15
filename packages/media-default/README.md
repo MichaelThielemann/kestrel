@@ -374,6 +374,45 @@ when `allowedTypes` lets it through under another declared type. Other types (AV
 PDF, ...) are stored as sent and keep their metadata, including a GPS position. A JPEG, PNG, WebP or GIF
 that cannot be read to its end is stored as sent as well, and the module logs a warning naming the file.
 
+### What keeps its metadata
+
+Stripping applies to what `media.upload` stores from now on. Three kinds of file are published with all of
+their metadata, EXIF and GPS included:
+
+- **Files stored before stripping existed** (every upload of a 5.x release) and files stored with
+  `stripImageMetadata: false`. Nothing cleans a stored file afterwards: the storage migration copies
+  originals as they are, `media.syncPublic` copies them as they are, and uploading the same file again
+  answers the item that is already there (`created: false`) without storing anything. A cleaned copy of
+  the file at the same place is a `CONFLICT`, because the stored item keeps its metadata.
+- **AVIF, HEIC, HEIF, TIFF and every other type but JPEG, PNG, WebP and GIF.** They are stored as sent and
+  written to the public copy at once; the upload answers like any other and the item carries no mark.
+  A HEIC from a phone is the usual case: iOS converts HEIC to JPEG when a browser asks for `image/*`, but
+  a file copied to a computer first and uploaded from there stays HEIC.
+- **A JPEG, PNG, WebP or GIF that cannot be read to its end.** It is stored as sent; only the log says so,
+  with `media/default: could not remove the metadata from <name>, it is stored as uploaded`. When sharp
+  cannot decode such a file, `images-default` puts the original's bytes at every variant path of it, so
+  the variants carry the metadata as well.
+
+To check a library, look at the stored originals. With `blobstore-filesystem`, under the blob store root:
+
+```sh
+exiftool -r -if '$GPSLatitude or $Make or $Model' -p '$Directory/$FileName $GPSPosition $Make $Model' <blob store root>/<media prefix>
+```
+
+lists every original that still carries a position or a camera; for S3, download the media prefix
+first, or run the same `exiftool` on `/media/<id>/<name>` for one item. `media.list` names the items of
+the other types by `contentType`, and the log names the files that could not be read to their end.
+
+To publish such a file without its metadata, clean it locally (`exiftool -all= -tagsFromFile @
+-Orientation -ICC_Profile <file>`, or export it from an image editor as JPEG or WebP without
+metadata) and upload the result under another name or into another folder, which makes it a new item.
+Point every page, setting and document that uses the old item at the new one and publish them again,
+then move the old item to the trash and purge it: that removes its original, its public copy and its
+variants. A purge behind `references.dropReferenced:media` leaves the old item alone while a page still
+uses it. To keep types that are never
+cleaned out of the library, add them to `deniedTypes`, for example `"image/heic"`, `"image/heif"`,
+`"image/tiff"` and, when no one needs it, `"image/avif"`; an upload of such a file is then refused.
+
 ## Anonymous reads
 
 `media.get`, `media.serve` and `images.serve` answer an anonymous caller the same as a signed-in one

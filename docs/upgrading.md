@@ -229,7 +229,10 @@ entry in `kestrel.config.ts` (or the host plugin) that registers it. The cleaned
 `<id>/<stem>.svg`, typed `image/svg+xml` and marked as sanitised like an upload; the item keeps its
 id, so every page, setting and document that uses it still does, its size and sha256 are those of
 the cleaned file, and its `updatedAt` is the time of the run, so `media.export:<dir>` writes the
-cleaned file over a 5.x export of it. The 5.x original stays under its old key. `migrate --plan` and
+cleaned file over a 5.x export of it. The 5.x original stays under its old key. The cleaning drops
+`style` attributes and `<style>` elements, so an SVG that sets its colours through CSS, as drawing
+programs export it by default, is shown without them afterwards; `sanitize-svg`'s README says how to
+export such a file with presentation attributes and upload it again. `migrate --plan` and
 the report count these items as `svgSanitized`, and a note names the module entry whose step cleaned
 them. Publish the site again after the update (step 5), so that the public copies and the exported
 pages use the new names.
@@ -279,6 +282,23 @@ longer shows it. An item stored as `application/octet-stream` is not affected.
   with the count and the item ids.
 - To show one as an image again, upload the file again with a listed type and point everything that
   uses the old item at the new one, as for an SVG above.
+
+### Image metadata
+
+6.0.0 removes EXIF, GPS, XMP and IPTC data from JPEG, PNG, WebP and GIF files when they are uploaded
+(`stripImageMetadata`, on by default). It does not clean what is stored already: every original a 5.x
+release stored keeps its metadata through `migrate`, and its public copy and `/media/<id>/<name>` publish
+it as before. Uploading the same file again answers the stored item and stores nothing, and a cleaned
+copy at the same place is refused with `CONFLICT`. AVIF, HEIC, HEIF and TIFF files, and a JPEG or PNG
+that cannot be read to its end, keep their metadata in 6.0.0 too.
+
+After the update, check the converted blob store for originals that still carry a position or a
+camera, for example with
+`exiftool -r -if '$GPSLatitude or $Make or $Model' -p '$Directory/$FileName' <blob store root>/<media prefix>`,
+and clean the ones that matter: clean the file locally, upload it under another name, point the pages
+that use the old item at the new one, publish them, then move the old item to the trash and purge it.
+`media-default`'s README, section [What keeps its metadata](../packages/media-default/README.md#what-keeps-its-metadata),
+has the commands and the `deniedTypes` entries that keep HEIC, HEIF, TIFF and AVIF out.
 
 ### Leftovers
 

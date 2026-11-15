@@ -2456,6 +2456,14 @@ Net changes since 5.8.2.
   renders it, with the default locale's title (`_locales.title`) and `_translations[locale]: false`, so a
   renderer decides by the answer of `site.resolve` whether a path is served, not by `_translations`;
   `completeWhen` refuses such a save.
+- Docs: `media-default`'s README (section "What keeps its metadata") and the upgrading guide say which stored
+  files keep their EXIF and GPS data — originals stored by 5.x or with `stripImageMetadata: false`, AVIF,
+  HEIC, HEIF, TIFF and other types, and JPEG or PNG files that cannot be read to their end, whose variants
+  carry the original's bytes when sharp cannot decode them — how to find them with `exiftool`, how to publish
+  a cleaned copy and which `deniedTypes` entries keep the uncleaned types out.
+- Docs: `sanitize-svg`'s README and the upgrading guide say that the cleaning drops `style` attributes and
+  `<style>` elements, so a logo that sets its colours through CSS loses them, and how to export one with
+  presentation attributes.
 
 ## 5.8.2 – 2026-09-27
 
