@@ -6845,7 +6845,10 @@
           "type": "object",
           "properties": {
             "id": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "ids": {
               "type": "array",
@@ -6905,7 +6908,10 @@
           "type": "object",
           "properties": {
             "id": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "ids": {
               "type": "array",
@@ -17685,7 +17691,10 @@
               "type": "object",
               "properties": {
                 "id": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "ids": {
                   "type": "array",
@@ -29881,7 +29890,10 @@
               "type": "object",
               "properties": {
                 "id": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "ids": {
                   "type": "array",

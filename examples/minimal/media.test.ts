@@ -683,3 +683,41 @@ describe("examples/minimal media: placing and rendering in separate lanes of eve
     }
   });
 });
+
+describe("examples/minimal media: an upload of several files in one request", { timeout: 30_000 }, () => {
+  async function uploadMany(example: Example, token: string, count: number): Promise<string[]> {
+    const files = Array.from({ length: count }, (_, i) => ({ field: "file", filename: `batch${i}.jpg`, contentType: "image/jpeg", data: TEST_JPEG }));
+    const uploaded = await example.kestrel.run("uploadMedia", { trigger, headers: bearer(token), files });
+    expect(uploaded.status).toBe(200);
+    const result = boundaryCast<{ ids: string[] }>(uploaded.result, "json");
+    expect(result.ids).toHaveLength(count);
+    return result.ids;
+  }
+
+  it("with events-queue, places and renders every file and leaves no delivery in the dead-letter", async () => {
+    const example = await bootExample({ lanes: { variants: ["generateImageVariants"] } });
+    try {
+      const token = await adminToken(example);
+      const ids = await uploadMany(example, token, 3);
+      await pollUntil(async () => {
+        for (const id of ids) if ((await getItem(example, id, token)).variantCounts.done !== 5) return false;
+        return true;
+      }, 20_000);
+      const status = await example.kestrel.run("queueStatus", { trigger, headers: bearer(token) });
+      expect(boundaryCast<{ dead: number }>(status.result, "json").dead).toBe(0);
+    } finally {
+      await example.dispose();
+    }
+  });
+
+  it("with direct delivery, renders every file within the upload request", async () => {
+    const example = await bootExample();
+    try {
+      const token = await adminToken(example);
+      const ids = await uploadMany(example, token, 3);
+      for (const id of ids) expect((await getItem(example, id, token)).variantCounts.done).toBe(5);
+    } finally {
+      await example.dispose();
+    }
+  });
+});

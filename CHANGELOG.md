@@ -2350,6 +2350,12 @@ Net changes since 5.8.2.
 - `ratelimit-memory`: with a bucket that has `knownDevices`, the boot reports no `unwritten-optional-read` warning
   (in `kestrel.warnings` and `kestrel check`) for the `knownDevice` that `mfa.check` reads; `ratelimit.check` on
   that bucket writes it. Without such a bucket the warning stays, since nothing writes `knownDevice` then.
+- `images-default`: `images.plan` and `images.generate` accept an event envelope whose `id` is `null`. An upload
+  of several files in one request raises `media.uploaded` with `id: null` and the new items in `ids`; both steps
+  refused that envelope with `VALIDATION` (`$.id expected string, got null`), so with direct delivery the upload
+  answered with an error in `_events` and no variants were rendered, and with `events-queue` the delivery went to
+  the dead-letter and the items were placed and rendered only by the next `images.resume`. The same applies to
+  `images.planned` raised after such an upload.
 
 ## 5.8.2 – 2026-09-27
 

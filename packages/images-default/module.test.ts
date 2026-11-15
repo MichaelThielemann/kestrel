@@ -550,6 +550,19 @@ describe("images/default steps via runPipeline", () => {
     expect(envelope.status).toBe(200);
   });
 
+  it("plan and generate: accept the envelope of an event raised for several items, whose id is null", async () => {
+    const { images, media } = await makeInstance();
+    addImage(media, "a", await jpeg(400, 300));
+    addImage(media, "b", await jpeg(300, 400));
+    const envelope = { eventId: "e1", event: "media.uploaded", at: 1, runId: "r1", identity: null, params: {}, id: null, ids: ["a", "b"], ip: null };
+    const planned = await runPipeline(pipeline("images.plan"), { body: envelope }, { modules: [{ module, instance: images }] });
+    expect(planned.status).toBe(200);
+    expect(planned.result).toEqual({ ids: ["a", "b"] });
+    const generated = await runPipeline(pipeline("images.generate"), { body: { ...envelope, event: "images.planned" } }, { modules: [{ module, instance: images }] });
+    expect(generated.status).toBe(200);
+    expect(boundaryCast<{ items: Array<{ id: string }> }>(generated.result, "host").items.map((item) => item.id)).toEqual(["a", "b"]);
+  });
+
   it("sync: starts a job", async () => {
     const { images, media } = await makeInstance();
     addImage(media, "a", await jpeg(200, 200));
