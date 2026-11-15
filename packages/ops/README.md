@@ -80,7 +80,10 @@ from.
   `requestChecksumCalculation: "WHEN_REQUIRED"` leaves out checksum trailers a store may reject. `region` is
   required next to an `endpoint`; without an endpoint it may come from `AWS_REGION` or the AWS config file.
   Without `credentials` the AWS SDK's default chain applies: the `AWS_*` variables, `~/.aws/credentials` or
-  the instance's role.
+  the instance's role. A request to either store that opens no connection, or sends and receives nothing, for 60 s
+  fails as a timeout and is tried again up to three attempts in all, so a store that stops answering ends the
+  command with exit 1 instead of holding it; a transfer that keeps moving data, such as a large droplet, is never
+  cut off.
 - `app` names the prefixes the app writes: the replica, the originals, the public output and derived output
   (image variants), which a backup only lists. `media` (default `{ "collection": "media_items", "keyField":
   "key", "checksumField": "checksum" }`) says where the rows keep an original's key and its sha256.

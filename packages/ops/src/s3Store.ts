@@ -20,7 +20,15 @@ export interface S3StoreConfig {
   secretAccessKey?: string | undefined;
   /** `"WHEN_REQUIRED"` leaves out the checksum trailers some S3-compatible stores reject. */
   requestChecksumCalculation?: "WHEN_SUPPORTED" | "WHEN_REQUIRED" | undefined;
+  /**
+   * How long, in milliseconds, opening a connection may take and a request may go without sending or receiving a
+   * byte before that attempt fails as a timeout; a transfer that keeps moving data is never cut off. Default 60 000.
+   */
+  timeoutMs?: number | undefined;
 }
+
+/** The default of {@link S3StoreConfig.timeoutMs}. */
+export const STORE_IDLE_TIMEOUT_MS = 60_000;
 
 /** An {@link ObjectStore} with its client, which {@link S3Store.close} releases. */
 export interface S3Store extends ObjectStore {
@@ -51,11 +59,14 @@ const refusedMatchingCondition = (details: Record<string, unknown> | undefined, 
  * answers 412 to `x-amz-copy-source-if-match` although the source still has that ETag gets this and every later
  * copy without the header, checked by comparing the source's ETag before and after. A copy with
  * `replace` is a single CopyObject request that never removes its target. Reads and writes of whole objects use the
- * same S3 client. Two stores copy server-side only within one bucket reached with the same credentials.
+ * same S3 client. Two stores copy server-side only within one bucket reached with the same credentials. Every
+ * request attempt that stays silent for `config.timeoutMs` fails as a timeout, so a store that stops answering ends
+ * the command with an error instead of holding it.
  */
 export function s3Store(config: S3StoreConfig): S3Store {
-  const base: Config = { ...config, timeoutMs: 60_000 };
-  const options = clientOptions(base);
+  const timeoutMs = config.timeoutMs ?? STORE_IDLE_TIMEOUT_MS;
+  const base: Config = { ...config, timeoutMs };
+  const options = { ...clientOptions(base), requestHandler: { connectionTimeout: timeoutMs, socketTimeout: timeoutMs } };
   if (config.requestChecksumCalculation !== undefined) options.responseChecksumValidation = config.requestChecksumCalculation;
   const client = new S3Client(options);
   const full = (key: string): string => config.prefix + key;

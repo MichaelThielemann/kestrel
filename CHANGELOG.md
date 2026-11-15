@@ -1038,7 +1038,9 @@ Net changes since 5.8.2.
   to look for and the app's log to check, and for a runtime before 6, which writes no `applied.json`, it reports
   `unconfirmed` at once with a warning that the app does not render its output again. The seal, origin and acknowledgement files use the formats
   `replication-sqlite` defines; listings, server-side copies into the backup location and the store's
-  clock go through the admin client of `kestrel-blobstore-s3`. Neither a backup nor a restore holds or writes the instance-lock file
+  clock go through the admin client of `kestrel-blobstore-s3`; a request attempt that opens no connection, or
+  sends and receives nothing, for 60 s fails as a timeout, while a transfer that keeps moving data is never cut
+  off. Neither a backup nor a restore holds or writes the instance-lock file
   next to the database. Also `status`, `backup list|verify|prune` with retention per
   kind, `restore --to local`, a `local` target, credentials from environment variables or commands
   that never reach any output (lines for a person are masked; the documents the tool stores and its `--json`
