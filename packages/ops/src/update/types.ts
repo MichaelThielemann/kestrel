@@ -58,7 +58,9 @@ export const CLEANUP_STEPS = ["cleanup-check", "cleanup-delete", "unpin"] as con
 
 /**
  * Where an update run stands, derived from its journal. `prepared`: a prepare run wrote its receipt. `deploying`: a
- * deploy began and has not stopped the app. `untouched`: a deploy ended before the stop; production is as it was.
+ * deploy began and has not stopped the app, or began its stop without recording how it ended. `untouched`: the deploy's
+ * own process ended before its stop began, or its stop failed with the app still running; production is as it was. A
+ * later command on the run that ends does not change its state.
  * `down`: the app was stopped, or a failed stop left it stopped, and the new release is not started yet. `verifying`: the new release was started and
  * verification has not concluded. `halted`: verification could not tell. `verified`: the new release passed. `accepted`.
  * `rolling-back`. `rolled-back`. `aborted`: ended by `abort` before the promotion. `cleaned`: `cleanup` ended the run.

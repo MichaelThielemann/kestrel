@@ -92,6 +92,21 @@ describe("update abort", () => {
     expect(s.h.target.release.runtime).toBe("6.0.0");
   });
 
+  it("starts the previous release of a deploy killed while it stopped the app, also after a resume of it was refused", async () => {
+    const s = await scenario();
+    const deployed = await deployUntil(s, "precopy");
+    await deployed.ctx.journal.record("stop", "started", { phase: "deploy" });
+    await s.h.target.stop();
+    const refused = await continueRun(s, deployed.runId, "update resume");
+    await refused.ctx.journal.finish(false, { message: "its stop began, so the app may be stopped" });
+    const { ctx, run } = await continueRun(s, deployed.runId, "update abort");
+    expect(run.state).toBe("deploying");
+    const outcome = await abort(ctx, run);
+    expect(outcome, outcome.message).toMatchObject({ exitCode: UPDATE_EXIT.done, state: "aborted" });
+    expect((await s.h.target.status()).state).toBe("started");
+    expect(s.h.target.release.runtime).toBe("5.8.1");
+  });
+
   it("refuses with exit 1 to abort a halted run whose new release wrote since its start without the environment's name, and with it reports the loss and takes a safety backup", async () => {
     const s = await scenario();
     const deployed = await deployUntil(s, "start");

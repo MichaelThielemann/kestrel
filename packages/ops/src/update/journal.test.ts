@@ -62,6 +62,35 @@ describe("update run journal", () => {
     expect(OPEN_STATES.has(run.state)).toBe(true);
   });
 
+  it("keeps a deploy whose stop began open when its own process ended without a stop record, and when a later command on it was refused", async () => {
+    const bucket = new MemoryBucket("journal");
+    const signalled = journalOn(bucket, "signalled", () => 1);
+    await signalled.record(RUN_STEP, "started", { command: "update deploy", env: "prod", phase: "deploy" });
+    await signalled.record("stop", "started", { phase: "deploy" });
+    await signalled.finish(false, { message: "interrupted by SIGTERM" });
+    expect((await readUpdateRun(ctxOf(bucket), "signalled")).state).toBe("deploying");
+
+    const killed = journalOn(bucket, "killed", () => 2);
+    await killed.record(RUN_STEP, "started", { command: "update deploy", env: "prod", phase: "deploy" });
+    await killed.record("precopy", "done", { phase: "deploy" });
+    await killed.record("stop", "started", { phase: "deploy" });
+    const later = continueJournal({ journal: journalOn(bucket, "other", () => 3) }, await readUpdateRun(ctxOf(bucket), "killed"));
+    await later.record(RUN_STEP, "started", { command: "update resume", env: "prod", phase: "resume" });
+    await later.record("resume", "started", { phase: "resume" });
+    await later.finish(false, { message: "its stop began" });
+    const run = await readUpdateRun(ctxOf(bucket), "killed");
+    expect(run.state).toBe("deploying");
+    expect(OPEN_STATES.has(run.state)).toBe(true);
+
+    const early = journalOn(bucket, "early", () => 4);
+    await early.record(RUN_STEP, "started", { command: "update deploy", env: "prod", phase: "deploy" });
+    await early.record("precopy", "done", { phase: "deploy" });
+    const accept = continueJournal({ journal: journalOn(bucket, "other", () => 5) }, await readUpdateRun(ctxOf(bucket), "early"));
+    await accept.record(RUN_STEP, "started", { command: "update accept", env: "prod", phase: "accept" });
+    await accept.finish(false, { exitCode: 1 });
+    expect((await readUpdateRun(ctxOf(bucket), "early")).state).toBe("deploying");
+  });
+
   it("marks a deploy whose step failed before the stop as untouched without an end record, and leaves an accepted run accepted while a rollback command only opened", async () => {
     const bucket = new MemoryBucket("journal");
     const refused = journalOn(bucket, "refused", () => 1);

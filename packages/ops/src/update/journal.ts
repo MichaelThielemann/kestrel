@@ -85,14 +85,16 @@ function summarize(runId: string, env: string, firstCommand: string | null, reco
   const prepare = phaseOfCommand(firstCommand) === "prepare";
   let state: UpdateRunState = prepare ? "untouched" : "deploying";
   const run: UpdateRun = { runId, env, records, state, lastDone: null, lastSeq: records.at(-1)?.seq ?? 0, receipt: null, stagedDroplet: null, previousDroplet: null, cutoverBackup: null, promoted: null, versions: null, startedAt: records[0]?.at ?? 0, lastAt: records.at(-1)?.at ?? 0 };
+  let stopping = false;
   for (const r of records) {
     if (r.state === "done" && r.step !== RUN_STEP && r.step !== "run-done" && r.step !== "run-failed") run.lastDone = { phase: r.phase, step: r.step };
     if (r.phase === "prepare") {
       if (r.step === "receipt" && r.state === "done") state = "prepared";
       continue;
     }
+    if (r.phase === "deploy" && r.step === "stop") stopping = r.state === "started";
     if (r.step === "run-done" || r.step === "run-failed") {
-      if (state === "deploying") state = "untouched";
+      if (state === "deploying" && r.phase === "deploy" && !stopping) state = "untouched";
       continue;
     }
     if (r.state !== "done") {
