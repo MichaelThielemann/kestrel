@@ -19,7 +19,8 @@ import { computePlan, pinsCutover, planHash, releaseContentMigrations, replicaCo
 import { releaseStorages } from "./storages.ts";
 import type { RecordedConfiguration } from "./target.ts";
 import { UPDATE_EXIT, type RollbackResult, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateRecord, type UpdateRun, type VerifyResult, type VersionSet } from "./types.ts";
-import { concludeVerify, outcomeOf, stoppedAfterRollback } from "./verify.ts";
+import { stoppedAfterRollback } from "./status.ts";
+import { concludeVerify, outcomeOf } from "./verify.ts";
 
 type Entry = "seal" | "cutover-backup" | "migrate" | "swap" | "start" | "verify";
 

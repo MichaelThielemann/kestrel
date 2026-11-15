@@ -19,7 +19,7 @@ import { fakeRelease } from "./fakeUpdateTarget.fixture.ts";
 import { createUpdateHarness, type UpdateHarness, type UpdateHarnessOptions } from "./harness.fixture.ts";
 import { latestDeployRun, readUpdateRun } from "./journal.ts";
 import { resume } from "./resume.ts";
-import { rollback } from "./rollback.ts";
+import { rollback, rollbackCommand } from "./rollback.ts";
 import { updateKeys } from "./layout.ts";
 import { planHash, versionSet } from "./plan.ts";
 import { renderStatus, updateStatus } from "./status.ts";
@@ -208,6 +208,23 @@ describe("deploying 5.8.1 to 6.0 on the stand-in target", { timeout: 30_000 }, (
     expect(outcome.exitCode, outcome.message).toBe(1);
     expect(outcome.message).toContain("node .kestrel-ops/run.mjs deploy --env prod");
     expect((await updateStatus(s.ctx, s.ctx.run.id)).run?.next).toBe("node .kestrel-ops/run.mjs deploy --env prod");
+  });
+
+  it.each(["rollback", "abort", "resume"] as const)("names a deploy of the previous release when update %s leaves the app stopped", async (command) => {
+    const s = await scenario({ to: { ready: "forbidden" } });
+    s.steps.rollback.mockImplementation(async (ctx: UpdateContext, _run: UpdateRun, reason: RollbackReason): Promise<RollbackResult> => {
+      await ctx.journal.record("rollback", "started", { phase: "rollback", reason: reason.kind });
+      await ctx.journal.record("rollback", "done", { phase: "rollback", ended: "stopped" });
+      return { ended: "stopped", generation: "", seal: "sealed", delivery: { written: [], removed: [], relisted: 0 }, originalsRestored: [], configuration: { set: [], removed: [], unrestorable: [] }, derived: { added: [], changed: [], missing: [] } };
+    });
+    expect((await deploy(s.ctx)).state).toBe("halted");
+    const ctx = await s.h.context({ run: await readUpdateRun(s.ctx, s.ctx.run.id), answers: ANSWERS, steps: { rollback: s.steps.rollback, retire: s.steps.retire, migrateCopy: s.steps.migrateCopy } });
+    if (command === "resume") await ctx.journal.record("rollback", "started", { phase: "rollback", reason: "requested" });
+    const run = await readUpdateRun(ctx, s.ctx.run.id);
+    const outcome = command === "rollback" ? await rollbackCommand(ctx, run) : command === "abort" ? await abort(ctx, run) : await resume(ctx, run);
+    expect(outcome.exitCode, outcome.message).toBe(1);
+    expect(outcome.message).toContain("stays stopped");
+    expect(outcome.message).toContain("deploy the previous release of prod again the way it was deployed before the update");
   });
 
   it("ends with exit 1 and says the app stays stopped when the rollback after a failed step could start no previous droplet", async () => {

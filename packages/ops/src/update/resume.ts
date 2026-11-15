@@ -2,6 +2,7 @@ import { readManifest } from "../backup.ts";
 import { messageOf } from "../context.ts";
 import { readUpdateRun, reportOf, retirePending, RUN_STEP } from "./journal.ts";
 import { guardRollback } from "./rollback.ts";
+import { stoppedAfterRollback } from "./status.ts";
 import { retireStep, verifyCommand } from "./verify.ts";
 import { UPDATE_EXIT, type RollbackReason, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRecord, type UpdateRun, type UpdateRunState } from "./types.ts";
 
@@ -26,7 +27,7 @@ async function rollBackAgain(ctx: UpdateContext, run: UpdateRun, reason: Rollbac
   try {
     const result = await ctx.steps.rollback(ctx, run, reason);
     if (reason.kind === "abort") await ctx.journal.record("abort", "done", { phase: "abort", promoted: true, ended: result.ended });
-    if (result.ended === "stopped") return outcome(ctx, run.runId, UPDATE_EXIT.refused, "the cutover state is promoted again, but no previous droplet was left to start; the app stays stopped", "rolled-back");
+    if (result.ended === "stopped") return outcome(ctx, run.runId, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, `the rollback of run ${run.runId} ran again`, run.versions?.from ?? null), "rolled-back");
     return outcome(ctx, run.runId, reason.kind === "automatic" ? UPDATE_EXIT.rolledBack : UPDATE_EXIT.done, `rolled back: the previous release runs on generation ${result.generation}`, "rolled-back");
   } catch (error) {
     return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the rollback did not finish: ${messageOf(error)}; run update resume again`, "rolling-back");

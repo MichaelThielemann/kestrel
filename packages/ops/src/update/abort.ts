@@ -3,6 +3,7 @@ import { messageOf, recordQuietly, startTarget } from "../context.ts";
 import { stableGenerations } from "../replica.ts";
 import { releaseUpdatePin } from "./cleanup.ts";
 import { guardRollback } from "./rollback.ts";
+import { stoppedAfterRollback } from "./status.ts";
 import { readUpdateRun, reportOf } from "./journal.ts";
 import { OPEN_STATES, UPDATE_EXIT, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
 
@@ -41,7 +42,7 @@ export async function abort(ctx: UpdateContext, run: UpdateRun): Promise<UpdateO
     try {
       const result = await ctx.steps.rollback(ctx, run, { kind: "abort" });
       await ctx.journal.record("abort", "done", { phase: "abort", promoted: true, ended: result.ended });
-      if (result.ended === "stopped") return outcome(ctx, run.runId, UPDATE_EXIT.refused, "the cutover state is promoted again, but no previous droplet was left to start; the app stays stopped", "rolled-back");
+      if (result.ended === "stopped") return outcome(ctx, run.runId, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, `run ${run.runId} was aborted`, run.versions?.from ?? null), "rolled-back");
       return outcome(ctx, run.runId, UPDATE_EXIT.done, `aborted: the cutover state is promoted again and the previous release runs on generation ${result.generation}`, "rolled-back");
     } catch (error) {
       await recordQuietly(ctx, "abort", "failed", { phase: "abort", promoted: true, message: messageOf(error) });

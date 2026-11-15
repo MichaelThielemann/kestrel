@@ -1,7 +1,7 @@
 import { parseJsonOrNull } from "../layout.ts";
 import { stableList } from "../store.ts";
 import { listUpdateRuns, readUpdateRun, reportOf, retirePending, RUN_STEP } from "./journal.ts";
-import { OPEN_STATES, type UpdateContext, type UpdateReport, type UpdateRun, type UpdateRunState } from "./types.ts";
+import { OPEN_STATES, type UpdateContext, type UpdateReport, type UpdateRun, type UpdateRunState, type VersionSet } from "./types.ts";
 
 /** One update run as `update status` shows it. */
 export interface UpdateRunStatus {
@@ -53,6 +53,12 @@ const OPS_PACKAGE = "@michaelthielemann/kestrel-ops";
  */
 export function previousReleaseDeploy(run: Pick<UpdateRun, "env" | "versions">): string {
   return run.versions?.from?.[OPS_PACKAGE] !== undefined ? `node .kestrel-ops/run.mjs deploy --env ${run.env}` : `deploy the previous release of ${run.env} again the way it was deployed before the update; it brings no kestrel-ops`;
+}
+
+/** The message of a rollback that brought back the cutover state after `what` but had no previous droplet to start. */
+export function stoppedAfterRollback(ctx: Pick<UpdateContext, "envName">, what: string, from: VersionSet | null): string {
+  const again = previousReleaseDeploy({ env: ctx.envName, versions: { from, to: {} } });
+  return `${what}; the cutover state is back, but no previous droplet was left to start, so the app stays stopped: ${again.startsWith("node ") ? `deploy the previous release again with the bundle of its own build, ${again}` : again}`;
 }
 
 /**

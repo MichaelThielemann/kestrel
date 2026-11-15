@@ -14,6 +14,7 @@ import { stableList, type ObjectInfo } from "../store.ts";
 import { holdsUpdatePin, releaseUpdatePin } from "./cleanup.ts";
 import { continueJournal, listUpdateRuns, readUpdateRun, reportOf } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
+import { stoppedAfterRollback } from "./status.ts";
 import type { ConfigurationRestore, RecordedConfiguration } from "./target.ts";
 import { OPEN_STATES, UPDATE_EXIT, type DerivedReport, type RollbackReason, type RollbackResult, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
 
@@ -492,7 +493,7 @@ export async function rollbackCommand(ctx: UpdateContext, run: UpdateRun): Promi
   for (const other of later) await continueJournal(ctx, other).record("superseded", "done", { phase: "rollback", by: run.runId, cutoverBackup: manifest.id });
   try {
     const result = await ctx.steps.rollback(ctx, run, { kind: "requested" });
-    if (result.ended === "stopped") return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the cutover state is back, but no previous droplet was left to start; the app stays stopped`, "rolled-back");
+    if (result.ended === "stopped") return outcome(ctx, run.runId, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, `run ${run.runId} was rolled back to the cutover backup ${manifest.id}`, run.versions?.from ?? null), "rolled-back");
     return outcome(ctx, run.runId, UPDATE_EXIT.done, `rolled back to the cutover backup ${manifest.id}; the previous release runs on generation ${result.generation}`, "rolled-back");
   } catch (error) {
     return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the rollback did not finish: ${messageOf(error)}; run update resume`, "rolling-back");

@@ -4,9 +4,9 @@ import { acknowledgement, listGenerations, type Generation } from "../replica.ts
 import { readManifest } from "../backup.ts";
 import { readUpdateRun, reportOf } from "./journal.ts";
 import { guardRollback, wroteSinceStart } from "./rollback.ts";
-import { previousReleaseDeploy } from "./status.ts";
+import { stoppedAfterRollback } from "./status.ts";
 import type { ReadyProbe } from "./target.ts";
-import { UPDATE_EXIT, type RollbackResult, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdatePhase, type UpdateRun, type VerifyCheck, type VerifyInput, type VerifyResult, type VerifyVerdict, type VersionSet } from "./types.ts";
+import { UPDATE_EXIT, type RollbackResult, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdatePhase, type UpdateRun, type VerifyCheck, type VerifyInput, type VerifyResult, type VerifyVerdict } from "./types.ts";
 
 const sleeper = (ctx: UpdateContext) => ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
 
@@ -110,12 +110,6 @@ async function checkRelease(ctx: UpdateContext, input: VerifyInput, checks: Veri
 export async function outcomeOf(ctx: UpdateContext, exitCode: UpdateExitCode, message: string): Promise<UpdateOutcome> {
   const run = await readUpdateRun(ctx, ctx.run.id);
   return { exitCode, runId: run.runId, state: run.state, message, report: reportOf(run) };
-}
-
-/** The message of an automatic rollback that brought back the cutover state but had no previous droplet to start. */
-export function stoppedAfterRollback(ctx: Pick<UpdateContext, "envName">, failure: string, from: VersionSet | null): string {
-  const again = previousReleaseDeploy({ env: ctx.envName, versions: { from, to: {} } });
-  return `${failure}; the cutover state is back, but no previous droplet was left to start, so the app stays stopped: ${again.startsWith("node ") ? `deploy the previous release again with ${again}` : again}`;
 }
 
 /**

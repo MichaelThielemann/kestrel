@@ -274,8 +274,10 @@ cutover backup as well, so the code of the release before a major change stays u
 `kestrel update rollback` of a run that a later verified deploy superseded rolls back only while the run holds
 the pin on its cutover backup, the way back across a major change, and never while a later deploy is open. The
 later runs then read `rolled-back`, and what they wrote is part of the loss the rollback reports. When the app
-stays stopped because no previous release was left to start, the next command is a deploy of that release with
-its bundle when it brings kestrel-ops, and otherwise a deploy the way it was deployed before the update.
+stays stopped because no previous release was left to start, the output of the command and `update status` name a
+deploy of that release with the bundle of its own build when it brings kestrel-ops (the bundle in the workspace of
+the failed deploy job is the new release's and would deploy it again), and otherwise a deploy the way it was
+deployed before the update.
 
 ### Exit codes and questions
 
