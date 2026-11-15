@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { loadEnvironments } from "./environments.ts";
-import { createHarness, LOCATION } from "./harness.fixture.ts";
+import { createHarness, LOCATION, PREFIXES, type Harness } from "./harness.fixture.ts";
+import { backupId, jsonBytes, keys } from "./layout.ts";
 import { MemoryBucket, memoryStore } from "./memoryStore.ts";
 import type { Output } from "./output.ts";
 import { appClock, serverClock } from "./serverTime.ts";
@@ -26,6 +27,22 @@ function refusingProbeDeletes(store: ObjectStore): ObjectStore {
 function collecting(): { out: Output; warnings: string[] } {
   const warnings: string[] = [];
   return { out: { info: () => undefined, warn: (line) => warnings.push(line), error: () => undefined }, warnings };
+}
+
+const DAY = 24 * 60 * 60 * 1000;
+
+function writeVerifiedBackup(bucket: MemoryBucket, id: string): void {
+  bucket.write(LOCATION + keys.manifest(id), jsonBytes({ schema: "kestrel-ops/backup@1", id, versions: { "@michaelthielemann/kestrel": "6.0.0" } }), "put");
+  bucket.write(LOCATION + keys.blobs(id), new Uint8Array(), "put");
+  bucket.write(LOCATION + keys.site(id), new Uint8Array(), "put");
+  bucket.write(LOCATION + keys.verification(id, bucket.now()), jsonBytes({ ok: true }), "put");
+}
+
+function keepOneManual(h: Harness, storage?: { bucket: string }): void {
+  h.editEnvironments((file) => {
+    const prod = file.environments.prod ?? {};
+    prod.backups = { prefix: LOCATION, retention: { manual: 1 }, ...(storage === undefined ? {} : { storage }) };
+  });
 }
 
 const harnesses: UpdateHarness[] = [];
@@ -73,6 +90,66 @@ describe("the clock probe of a key that may not delete it", () => {
     expect(outcome.exitCode, outcome.message).toBe(UPDATE_EXIT.done);
     expect(outcome.state).toBe("verified");
     expect(h.output.warn.filter((line) => line.includes("clock probe"))).toHaveLength(1);
+  });
+
+  it("does not stop backup prune from removing due backups and objects when it cannot be deleted either", async () => {
+    let now = Date.parse("2026-10-01T00:00:00Z");
+    const bucket = new MemoryBucket("clock-prune-refused", { clock: () => now });
+    const h = createHarness({ store: refusingProbeDeletes(memoryStore(bucket)) });
+    keepOneManual(h);
+    try {
+      const older = backupId("prod", now, "manual", "0a01");
+      const newer = backupId("prod", now + 60_000, "manual", "0a02");
+      writeVerifiedBackup(bucket, older);
+      writeVerifiedBackup(bucket, newer);
+      bucket.write(`${LOCATION}objects/${PREFIXES.media}gone@abc`, new Uint8Array([1]), "put");
+      bucket.write(`${LOCATION}.kestrel-clock/4d5e6f`, new Uint8Array(), "put");
+      bucket.write(`${LOCATION}probes/0a1b2c-9f8e`, new TextEncoder().encode("1"), "put");
+      now += 3 * DAY;
+      const pruned = await h.run(["backup", "prune", "--yes", "--json"], { clock: () => now });
+      expect(pruned.code, pruned.stderr).toBe(0);
+      expect(pruned.json.backups).toEqual([older]);
+      expect([...bucket.objects.keys()].some((k) => k.startsWith(LOCATION + keys.backupDir(older)))).toBe(false);
+      expect(bucket.objects.has(LOCATION + keys.manifest(newer))).toBe(true);
+      expect(bucket.objects.has(`${LOCATION}objects/${PREFIXES.media}gone@abc`)).toBe(false);
+      expect(bucket.objects.has(`${LOCATION}.kestrel-clock/4d5e6f`)).toBe(true);
+      expect(bucket.objects.has(`${LOCATION}probes/0a1b2c-9f8e`)).toBe(true);
+      const warnings = pruned.stderr.split("\n").filter((line) => line.startsWith("warning: "));
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("2 stale probe(s)");
+      expect(warnings[0]).toContain(`${LOCATION}probes/0a1b2c-9f8e`);
+      expect(warnings[0]).toContain("backup prune");
+    } finally {
+      await h.dispose();
+    }
+  });
+
+  it("does not stop backup prune of a backup store of its own when the replica prefix refuses the delete", async () => {
+    let now = Date.parse("2026-10-01T00:00:00Z");
+    const appBucket = new MemoryBucket("clock-prune-app", { clock: () => now });
+    const backupBucket = new MemoryBucket("clock-prune-backups", { clock: () => now });
+    const app = refusingProbeDeletes(memoryStore(appBucket));
+    const backups = memoryStore(backupBucket);
+    const h = createHarness({ store: app });
+    keepOneManual(h, { bucket: "clock-prune-backups" });
+    const stores = { stores: (config: { bucket: string }) => (config.bucket === "clock-prune-backups" ? backups : app), clock: () => now };
+    try {
+      const older = backupId("prod", now, "manual", "0b01");
+      writeVerifiedBackup(backupBucket, older);
+      writeVerifiedBackup(backupBucket, backupId("prod", now + 60_000, "manual", "0b02"));
+      appBucket.write(`${PREFIXES.replica}.kestrel-clock/7a8b9c`, new Uint8Array(), "put");
+      backupBucket.write(`${LOCATION}.kestrel-clock/1f2e3d`, new Uint8Array(), "put");
+      now += 3 * DAY;
+      const pruned = await h.run(["backup", "prune", "--yes", "--json"], stores);
+      expect(pruned.code, pruned.stderr).toBe(0);
+      expect(pruned.json.backups).toEqual([older]);
+      expect(backupBucket.objects.has(LOCATION + keys.manifest(older))).toBe(false);
+      expect(backupBucket.objects.has(`${LOCATION}.kestrel-clock/1f2e3d`)).toBe(false);
+      expect(appBucket.objects.has(`${PREFIXES.replica}.kestrel-clock/7a8b9c`)).toBe(true);
+      expect(pruned.stderr).toContain(`${PREFIXES.replica}.kestrel-clock/7a8b9c`);
+    } finally {
+      await h.dispose();
+    }
   });
 
   it("is removed by backup prune once it is older than an hour", async () => {

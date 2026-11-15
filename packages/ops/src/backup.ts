@@ -4,6 +4,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { messageOf, REPLICATION_PACKAGE, runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
 import { openRuns, listRuns, RUN_STALE_MS } from "./journal.ts";
+import { Interrupted } from "./interrupt.ts";
 import { heldLocks } from "./lock.ts";
 import { BACKUP_KINDS, backupId, fromJsonl, jsonBytes, keys, parseBackupId, parseJson, parseJsonOrNull, stamp, toJsonl, type BackupKind, type BlobEntry, type DerivedEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { placedUnstarted, refuseUnfinishedPlacement } from "./placements.ts";
@@ -480,9 +481,21 @@ const PROBE_DIRS = ["probes/", ".kestrel-clock/"];
 async function removeStaleProbes(ctx: OpsContext, now: number): Promise<void> {
   const places: Array<[ObjectStore, string]> = [[ctx.backups, ctx.location]];
   if (ctx.env.backups.storage !== undefined) places.push([ctx.app, ctx.env.app.replicaPrefix]);
+  const left: string[] = [];
+  const failure = (key: string) => (cause: unknown): void => {
+    if (cause instanceof Interrupted) throw cause;
+    left.push(key);
+  };
   for (const [store, base] of places) {
-    for (const dir of PROBE_DIRS) for (const info of await store.list(base + dir)) if (now - info.lastModified >= PROBE_MAX_AGE_MS) await store.delete(info.key);
+    for (const dir of PROBE_DIRS) {
+      const listed = await store.list(base + dir).catch((cause: unknown) => {
+        failure(base + dir)(cause);
+        return [];
+      });
+      for (const info of listed) if (now - info.lastModified >= PROBE_MAX_AGE_MS) await store.delete(info.key).catch(failure(info.key));
+    }
   }
+  if (left.length > 0) ctx.out.warn(`${left.length} stale probe(s) could not be listed or removed with the tool's credentials, such as ${left[0] ?? ""}; prune went on without them, and they stay until credentials that may delete there run backup prune`);
 }
 
 const majorOfKestrel = (manifest: Manifest | null): string | null => {
@@ -535,9 +548,9 @@ async function backupIdsAtLocation(ctx: Pick<OpsContext, "backups" | "location">
  * whether or not that run ended, until the pin's `released` key exists, and the newest verified backup of every Kestrel major, never removes anything
  * younger than a day, keeps every object a backup of any environment at the same location refers to, also a backup
  * of today or yesterday that the listing does not show yet (read from `recent/`), and refuses while a run is open or
- * another run holds the lock. Unless `dryRun` is set, it also removes the clock and protection probes older than
+ * another run holds the lock. Unless `dryRun` is set, it then also removes the clock and protection probes older than
  * {@link PROBE_MAX_AGE_MS} that a refused delete left in the backup location, and below the replica prefix when the
- * backups live in a store of their own.
+ * backups live in a store of their own; a probe it cannot list or delete there is warned about once and left in place.
  */
 export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResult> {
   const now = ctx.clock();
@@ -591,18 +604,19 @@ export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResu
   }
   const objects = (await ctx.backups.list(`${ctx.location}objects/`)).filter((o) => !referenced.has(o.key) && now - o.lastModified >= PRUNE_MIN_AGE_MS).map((o) => o.key);
   const result: PruneResult = { dryRun, backups: remove, objects, kept: [...keep].sort() };
-  if (!dryRun) {
-    const oldest = dayOf(now - PRUNE_MIN_AGE_MS);
-    for (const info of await ctx.backups.list(`${ctx.location}recent/`)) {
-      const day = /^recent\/(\d{8})\//.exec(info.key.slice(ctx.location.length))?.[1];
-      if (day !== undefined && day < oldest) await ctx.backups.delete(info.key);
-    }
-    await removeStaleProbes(ctx, now);
+  if (dryRun) return result;
+  const oldest = dayOf(now - PRUNE_MIN_AGE_MS);
+  for (const info of await ctx.backups.list(`${ctx.location}recent/`)) {
+    const day = /^recent\/(\d{8})\//.exec(info.key.slice(ctx.location.length))?.[1];
+    if (day !== undefined && day < oldest) await ctx.backups.delete(info.key);
   }
-  if (dryRun || (remove.length === 0 && objects.length === 0)) return result;
-  await confirm(ctx.answers, "prune-delete", `prune removes ${remove.length} backup(s) and ${objects.length} object(s)`);
-  for (const id of remove) for (const info of await ctx.backups.list(ctx.location + keys.backupDir(id))) await ctx.backups.delete(info.key);
-  for (const key of objects) await ctx.backups.delete(key);
-  await ctx.journal.record("prune", "done", { backups: remove, objects: objects.length });
+  const due = remove.length > 0 || objects.length > 0;
+  if (due) {
+    await confirm(ctx.answers, "prune-delete", `prune removes ${remove.length} backup(s) and ${objects.length} object(s)`);
+    for (const id of remove) for (const info of await ctx.backups.list(ctx.location + keys.backupDir(id))) await ctx.backups.delete(info.key);
+    for (const key of objects) await ctx.backups.delete(key);
+  }
+  await removeStaleProbes(ctx, now);
+  if (due) await ctx.journal.record("prune", "done", { backups: remove, objects: objects.length });
   return result;
 }

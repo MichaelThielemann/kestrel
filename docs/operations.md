@@ -39,18 +39,20 @@ prefix its credentials need:
 
 | Prefix | List and read | Write | Delete |
 |---|---|---|---|
-| `app.replicaPrefix` | yes | a promotion writes `gen/<generation>/snapshot.db` and `origin.json` (deploy, rollback, restore) | no |
+| `app.replicaPrefix` | yes | a promotion writes `gen/<generation>/snapshot.db` and `origin.json` (deploy, rollback, restore) | no; with a backup location in a store of its own, the clock probes under `.kestrel-clock/` and `probes/` (see below) |
 | `app.mediaPrefix` | yes | storage migrations write new keys, also as server-side copies (deploy); changed originals are copied back (rollback, restore) | no; only `update cleanup` removes originals |
 | `app.deliveryPrefix` | yes | the backup's keys are written back (rollback, restore) | yes: a rollback or restore removes the keys the backup does not hold |
 | `app.derivedPrefixes` | yes | no | no |
-| `backups.prefix` | yes | every command but `status` and `backup list` | yes: the `retire` step of a verified deploy removes the code an earlier, closed run saved (`updates/<env>/runs/<run>/droplet-*`), and a copy into `objects/` that failed is removed again; `backup prune` and `update cleanup` remove backups, objects and saved code |
+| `backups.prefix` | yes | every command but `status` and `backup list` | yes: the `retire` step of a verified deploy removes the code an earlier, closed run saved (`updates/<env>/runs/<run>/droplet-*`), and a copy into `objects/` that failed is removed again; `backup prune` and `update cleanup` remove backups, objects and saved code; the clock and protection probes under `.kestrel-clock/` and `probes/` are deleted again |
 
 The store's clock is measured with a probe object that is written, listed and deleted again: below the backup
 location under `.kestrel-clock/` on an S3-compatible store and `probes/` on any other, or below
 `app.replicaPrefix` when the backup location lies in a store of its own. `status` and `update prepare` measure it
 once, a deploy before its promotion, its swap and its start, a rollback and a restore before their promotion. Credentials that may not delete the probe still get the
-measurement: the command warns once and goes on, and `backup prune` removes probes older than an hour with
-credentials that may delete there. `status` writes a probe into `probes/` to find out whether the app's credentials can delete in the backup
+measurement: the command warns once and goes on, and the probe stays. `backup prune` removes probes older than an
+hour from both places where its credentials may delete them; a probe they may not list or delete there stays, and
+prune warns once and still removes the backups and objects that are due, so only credentials with delete rights
+under `.kestrel-clock/` and `probes/` clear such probes. `status` writes a probe into `probes/` to find out whether the app's credentials can delete in the backup
 location, and deletes it with the tool's.
 
 ## Updating a deployed environment
