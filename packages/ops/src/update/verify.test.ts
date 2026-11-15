@@ -62,6 +62,42 @@ describe("verifying a started release", { timeout: 20_000 }, () => {
     expect(result.ownGeneration! > s.promoted.generation).toBe(true);
   });
 
+  it("fails when the platform records a crash during the readiness and sync windows, after the first look found none", async () => {
+    const s = await startOnPromoted();
+    const probe = s.h.target.probeReady.bind(s.h.target);
+    let crashed = false;
+    s.h.target.probeReady = async () => {
+      if (!crashed) {
+        crashed = true;
+        s.h.target.crashes.push({ at: Date.now(), type: "audit.app.process.crash", reason: "APP/PROC/WEB: Exited with status 137 (out of memory)" });
+      }
+      return probe();
+    };
+    const result = await verify(s);
+    expect(crashed).toBe(true);
+    expect(result.verdict).toBe("failed");
+    expect(failed(result)).toEqual(["crashes"]);
+    expect(result.checks.find((c) => c.name === "crashes")?.detail).toContain("out of memory");
+  });
+
+  it("fails when no instance runs any more at the end of the windows", async () => {
+    const s = await startOnPromoted();
+    const list = s.h.store.list.bind(s.h.store);
+    let stopped = false;
+    s.h.store.list = async (prefix) => {
+      const listed = await list(prefix);
+      if (!stopped && prefix === PREFIXES.delivery && listed.length > 0) {
+        stopped = true;
+        s.h.target.kill();
+      }
+      return listed;
+    };
+    const result = await verify(s);
+    expect(stopped).toBe(true);
+    expect(result.verdict).toBe("failed");
+    expect(failed(result)).toContain("instance");
+  });
+
   it("fails on 503", async () => {
     const result = await verify(await startOnPromoted({ ready: "not-ready" }));
     expect(result.verdict).toBe("failed");

@@ -131,7 +131,8 @@ the readiness check could not tell (403, 401, 404, a timeout or no connection), 
 store or the platform; the run halts with exit 1, leaves the new release running, rolls nothing back and names
 the next command.
 
-The hard checks: an instance runs and the platform recorded no crash since the start; the readiness path
+The hard checks: an instance runs and the platform recorded no crash since the start, both read once more after
+every wait below ended, so a crash while verification waits fails it; the readiness path
 answers 200 (503, a body with `ready: false` or another 5xx answer fails); `applied.json` of the promoted
 generation names it and the nonce of its `origin.json`; the release's own generation, sorting after the
 promoted one, shows its first snapshot, and within `update.syncWindowSeconds` a WAL segment of that generation

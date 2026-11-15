@@ -32,7 +32,8 @@ const check = (name: VerifyCheck["name"], ok: boolean, detail: string, hard = tr
 const describeProbe = (probe: ReadyProbe): string => (probe.outcome === "unverifiable" ? `${probe.reason}${probe.status === null ? "" : ` (${probe.status})`}` : `answered ${probe.status}`);
 
 /**
- * Verifies a started release. Hard checks: an instance runs and the platform recorded no crash since the start;
+ * Verifies a started release. Hard checks: an instance runs and the platform recorded no crash since the start, both
+ * read again once every wait below ended, so a crash inside the windows fails the verification;
  * readiness in three outcomes (ready; not-ready fails; unverifiable halts); `applied.json` of the promoted generation
  * names it and the nonce of its `origin.json`; the release's own generation, sorting after the promoted one, shows its
  * first snapshot; within `update.syncWindowSeconds` a WAL segment written after that snapshot, or a later generation
@@ -55,11 +56,17 @@ export async function verifyRelease(ctx: UpdateContext, input: VerifyInput): Pro
   }
 }
 
-async function checkRelease(ctx: UpdateContext, input: VerifyInput, checks: VerifyCheck[]): Promise<VerifyResult> {
+async function platformChecks(ctx: UpdateContext, startedAt: number): Promise<[VerifyCheck, VerifyCheck]> {
   const status = await ctx.target.status();
-  const crashes = await ctx.target.crashEvents(input.startedAt);
-  checks.push(check("instance", status.state === "started" && status.instances > 0, `${status.state} with ${status.instances} running instance(s)`));
-  checks.push(check("crashes", crashes.length === 0, crashes.length === 0 ? "no crash since the start" : crashes.map((c) => `${new Date(c.at).toISOString()} ${c.type}${c.reason === null ? "" : `: ${c.reason}`}`).join("; ")));
+  const crashes = await ctx.target.crashEvents(startedAt);
+  return [
+    check("instance", status.state === "started" && status.instances > 0, `${status.state} with ${status.instances} running instance(s)`),
+    check("crashes", crashes.length === 0, crashes.length === 0 ? "no crash since the start" : crashes.map((c) => `${new Date(c.at).toISOString()} ${c.type}${c.reason === null ? "" : `: ${c.reason}`}`).join("; ")),
+  ];
+}
+
+async function checkRelease(ctx: UpdateContext, input: VerifyInput, checks: VerifyCheck[]): Promise<VerifyResult> {
+  checks.push(...(await platformChecks(ctx, input.startedAt)));
   const running = checks.every((c) => c.ok);
   const ready = running ? await until(ctx, ctx.update.readyTimeoutSeconds, () => ctx.target.probeReady(), (p) => p.outcome === "ready") : await ctx.target.probeReady();
   checks.push(check("ready", ready.outcome === "ready", describeProbe(ready)));
@@ -82,6 +89,10 @@ async function checkRelease(ctx: UpdateContext, input: VerifyInput, checks: Veri
     const fresh = rendered.filter((info) => info.lastModified >= input.startedAt).length;
     checks.push(check("render-started", fresh > 0, fresh > 0 ? `${fresh} key(s) under ${delivery} written since the start` : `no key under ${delivery} was written within ${ctx.update.renderTimeoutSeconds} s of the start; the release did not render again`));
     checks.push(check("pages", rendered.length > 0, `${rendered.length} key(s) under ${delivery}`, false));
+  }
+  if (running) {
+    const [instance, crashes] = await platformChecks(ctx, input.startedAt);
+    checks.splice(0, 2, instance, crashes);
   }
   const hardFailed = checks.some((c) => c.hard && !c.ok && c.name !== "ready");
   const verdict: VerifyVerdict = hardFailed || ready.outcome === "not-ready" ? "failed" : ready.outcome === "unverifiable" ? "unverifiable" : "passed";

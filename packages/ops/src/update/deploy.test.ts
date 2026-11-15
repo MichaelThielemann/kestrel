@@ -155,6 +155,27 @@ describe("deploying 5.8.1 to 6.0 on the stand-in target", { timeout: 30_000 }, (
     expect(run.records.find((r) => r.step === "verify" && r.state === "done")?.data.verdict).toBe("failed");
   });
 
+  it("rolls back and retires nothing when the new release crashes while verification waits for its sync and render", async () => {
+    const s = await scenario();
+    const probe = s.h.target.probeReady.bind(s.h.target);
+    let crashed = false;
+    s.h.target.probeReady = async () => {
+      if (!crashed && s.h.target.release.runtime === "6.0.0") {
+        crashed = true;
+        s.h.target.crashes.push({ at: Date.now(), type: "audit.app.process.crash", reason: "APP/PROC/WEB: Exited with status 137 (out of memory)" });
+      }
+      return probe();
+    };
+    const outcome = await deploy(s.ctx);
+    expect(crashed).toBe(true);
+    expect(s.steps.rollback).toHaveBeenCalledTimes(1);
+    expect(s.steps.retire).not.toHaveBeenCalled();
+    expect(s.h.target.droplets.size).toBe(2);
+    const verify = (await readUpdateRun(s.ctx, s.ctx.run.id)).records.find((r) => r.step === "verify" && r.state === "done");
+    expect(verify?.data.verdict).toBe("failed");
+    expect(outcome.message).toContain("crashes: ");
+  });
+
   it.each(["forbidden", "unreachable"] as const)("halts with exit 1 and leaves the new release running when readiness is %s", async (ready) => {
     const s = await scenario({ to: { ready } });
     const outcome = await deploy(s.ctx);
