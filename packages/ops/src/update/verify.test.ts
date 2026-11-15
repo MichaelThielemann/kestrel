@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { FakeApp } from "../fakeApp.fixture.ts";
 import { PREFIXES } from "../harness.fixture.ts";
 import { buildDatabase, listGenerations, markerKey, promote, stableGenerations, type Promoted } from "../replica.ts";
 import { appClock } from "../serverTime.ts";
@@ -20,7 +22,7 @@ interface Started {
   startedAt: number;
 }
 
-async function startOnPromoted(release: Partial<FakeRelease> = {}): Promise<Started> {
+async function startOnPromoted(release: Partial<FakeRelease> = {}, seed: (app: FakeApp) => void = () => undefined): Promise<Started> {
   const h = createUpdateHarness({ from: { runtime: "6.0.0", ...release } });
   harnesses.push(h);
   const ctx = await h.context();
@@ -28,6 +30,7 @@ async function startOnPromoted(release: Partial<FakeRelease> = {}): Promise<Star
   harnesses.push(seeding);
   await seeding.target.start();
   await seeding.target.app?.seed();
+  if (seeding.target.app) seed(seeding.target.app);
   await seeding.target.stop();
   await seeding.target.idle();
   const newest = (await stableGenerations(h.store, PREFIXES.replica, ctx.poll)).at(-1);
@@ -68,6 +71,25 @@ describe("verifying a started release", { timeout: 20_000 }, () => {
     expect(own?.segments.map((segment) => segment.size)).toEqual([32]);
     const result = await verify(s);
     expect(failed(result)).toEqual([]);
+    expect(result.verdict).toBe("passed");
+  });
+
+  it("passes a release that writes nothing to a database its first snapshot reads in several chunks, and its generation rebuilds byte for byte to that snapshot", async () => {
+    const s = await startOnPromoted({ records: false }, (app) => {
+      for (let i = 0; i < 900; i++) app.run(`INSERT INTO audit_entries VALUES (?, ?, 'login', ?, 'u1', '127.0.0.1', ?)`, `bulk-${i}`, `bulk-event-${i}`, i, JSON.stringify({ note: `${i}-`.padEnd(3800, "n") }));
+    });
+    const own = (await listGenerations(s.h.store, PREFIXES.replica)).find((g) => g.name > s.promoted.generation);
+    if (own === undefined || own.snapshot === null) throw new Error("the release's generation holds no snapshot");
+    expect(own.snapshot.size).toBeGreaterThan(3 * 1024 * 1024);
+    expect(own.segments.map((segment) => segment.size)).toEqual([32]);
+    expect(own.segments[0]?.lastModified ?? 0).toBeGreaterThanOrEqual(own.snapshot.lastModified);
+    const built = join(s.h.root, "own.db");
+    await buildDatabase(s.h.store, PREFIXES.replica, own, built);
+    const snapshot = await s.h.store.get(own.snapshot.key);
+    expect(snapshot !== null && Buffer.from(readFileSync(built)).equals(Buffer.from(snapshot))).toBe(true);
+    const result = await verify(s);
+    expect(failed(result)).toEqual([]);
+    expect(result.checks.find((c) => c.name === "sync-advances")?.ok).toBe(true);
     expect(result.verdict).toBe("passed");
   });
 
