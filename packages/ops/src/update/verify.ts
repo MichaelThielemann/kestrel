@@ -76,11 +76,9 @@ export async function verifyRelease(ctx: UpdateContext, input: VerifyInput): Pro
   return { verdict, checks, ready, ownGeneration };
 }
 
-/** The outcome of a command on run `ctx.run.id`, with its state and report read back from the journal. */
+/** The outcome of a command on run `ctx.run.id`, with its state and report read back from the journal; the command line prints its message. */
 export async function outcomeOf(ctx: UpdateContext, exitCode: UpdateExitCode, message: string): Promise<UpdateOutcome> {
   const run = await readUpdateRun(ctx, ctx.run.id);
-  if (exitCode === UPDATE_EXIT.done) ctx.out.info(message);
-  else ctx.out.error(message);
   return { exitCode, runId: run.runId, state: run.state, message, report: reportOf(run) };
 }
 
@@ -110,7 +108,6 @@ export async function concludeVerify(ctx: UpdateContext, phase: UpdatePhase, res
     await ctx.journal.record("retire", "failed", { phase: "deploy", error: messageOf(cause) });
     ctx.out.warn(`the new release is verified, but retiring the previous releases failed: ${messageOf(cause)}`);
   }
-  await ctx.journal.finish(true, { phase: "deploy" });
   return outcomeOf(ctx, UPDATE_EXIT.done, `verified; accept it with update accept --env ${ctx.envName}, or roll back with update rollback --env ${ctx.envName}`);
 }
 

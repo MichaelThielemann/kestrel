@@ -45,7 +45,7 @@ describe("update resume", () => {
     expect(outcome).toMatchObject({ exitCode: UPDATE_EXIT.done, state: "verified" });
     expect(s.h.target.droplets.has(s.previousDroplet)).toBe(false);
     const steps = (await runOf(s, deployed.runId)).records.map((r) => `${r.step} ${r.state} ${r.phase}`);
-    expect(steps.slice(-2)).toEqual(["verify done verify", "retire done verify"]);
+    expect(steps.slice(-3)).toEqual(["verify done verify", "retire started deploy", "retire done deploy"]);
   });
 
   it("stays halted while verification still cannot tell, and rolls back when it fails", async () => {

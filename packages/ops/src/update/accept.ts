@@ -9,12 +9,10 @@ import { UPDATE_EXIT, type UpdateContext, type UpdateOutcome, type UpdateRun } f
 export async function accept(ctx: UpdateContext, run: UpdateRun): Promise<UpdateOutcome> {
   if (run.state !== "verified") {
     const message = `update run ${run.runId} is ${run.state}; only a verified deploy can be accepted`;
-    ctx.out.error(message);
     return { exitCode: UPDATE_EXIT.refused, runId: run.runId, state: run.state, message, report: reportOf(run) };
   }
   await ctx.journal.record("accept", "done", { phase: "accept", cutoverBackup: run.cutoverBackup });
   const accepted = await readUpdateRun(ctx, run.runId);
   const message = `update run ${run.runId} accepted; the cutover backup ${run.cutoverBackup ?? "(none)"} stays pinned until update cleanup, and a rollback from now on discards what was written since`;
-  ctx.out.info(message);
   return { exitCode: UPDATE_EXIT.done, runId: run.runId, state: accepted.state, message, report: reportOf(accepted) };
 }

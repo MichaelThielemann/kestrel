@@ -1,5 +1,6 @@
 import { messageOf } from "../context.ts";
 import { readUpdateRun, reportOf } from "./journal.ts";
+import { verifyCommand } from "./verify.ts";
 import { UPDATE_EXIT, type RollbackReason, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRecord, type UpdateRun, type UpdateRunState } from "./types.ts";
 
 async function outcome(ctx: UpdateContext, runId: string, exitCode: UpdateExitCode, message: string, fallback: UpdateRunState): Promise<UpdateOutcome> {
@@ -30,22 +31,6 @@ async function rollBackAgain(ctx: UpdateContext, run: UpdateRun, reason: Rollbac
   }
 }
 
-async function verifyAgain(ctx: UpdateContext, run: UpdateRun): Promise<UpdateOutcome> {
-  if (run.promoted === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is halted without a recorded promotion; run update rollback or update abort`, run.state);
-  const started = run.records.filter((r) => r.phase === "deploy" && r.step === "start").at(-1);
-  const result = await ctx.steps.verify(ctx, { promoted: run.promoted, startedAt: started?.at ?? run.startedAt });
-  await ctx.journal.record("verify", "done", { phase: "verify", verdict: result.verdict, checks: result.checks, ownGeneration: result.ownGeneration });
-  if (result.verdict === "unverifiable") return outcome(ctx, run.runId, UPDATE_EXIT.refused, `verification still cannot tell (readiness ${result.ready.outcome}); the new release keeps running`, "halted");
-  const now = await readUpdateRun(ctx, run.runId);
-  if (result.verdict === "failed") {
-    const failed = result.checks.filter((c) => c.hard && !c.ok).map((c) => c.name);
-    return rollBackAgain(ctx, now, { kind: "automatic", failure: `verification failed${failed.length > 0 ? `: ${failed.join(", ")}` : ""}` });
-  }
-  const retired = await ctx.steps.retire(ctx, now);
-  await ctx.journal.record("retire", "done", { droplets: retired.droplets, revisions: retired.revisions, savedDroplet: retired.savedDroplet });
-  return outcome(ctx, run.runId, UPDATE_EXIT.done, "verified: the new release passed", "verified");
-}
-
 /**
  * `update resume`: continues an interrupted run where its journal ended, after a `resume` record. A deploy continues
  * through `continueDeploy`; a rollback that did not finish runs again from its first step (every rollback step can be
@@ -67,7 +52,8 @@ export async function resume(ctx: UpdateContext, run: UpdateRun): Promise<Update
     case "rollback-failed-verify":
       return rollBackAgain(ctx, run, { kind: "automatic", failure: "verification failed" });
     case "verify":
-      return verifyAgain(ctx, run);
+      if (run.promoted === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is halted without a recorded promotion; run update rollback or update abort`, run.state);
+      return verifyCommand(ctx, run);
     case "deploy":
       return ctx.steps.continueDeploy(ctx, run);
   }
