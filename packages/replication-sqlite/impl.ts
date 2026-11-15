@@ -751,7 +751,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   const checkpointBeforeGeneration = (): void => {
     const state = walState();
     if (state.log <= 0 || WAL_HEADER_SIZE + state.log * frameSize(pageSize) < config.checkpointBytes) return;
-    if (state.busy === 0 && state.log === state.checkpointed) lastCheckpointAt = now();
+    const restarted = boundaryCast<WalState | undefined>(writeLock.prepare("PRAGMA wal_checkpoint(RESTART)").get(), "host");
+    if (restarted?.busy === 0) lastCheckpointAt = now();
   };
   const timer = setInterval(() => {
     if (closed || stopping || sealedAs !== null) return;

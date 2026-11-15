@@ -788,6 +788,28 @@ describe("replication/sqlite WAL before the first generation", () => {
     expect(await restored(l.blobs, l.dir)).toMatchObject({ ...fingerprint(l.app), check: "ok" });
   }, 60_000);
 
+  it("keeps the WAL bounded before the first generation while another thread with its own checkpoints turned off commits more often than a checkpoint takes", async () => {
+    const l = live();
+    const repl = l.start({ checkpointBytes: MB }, { checkIntervalMs: 200 });
+    let writing = true;
+    const writer = threadWriter(l.file, { ms: 2_500, rowsPerCommit: 4, pauseMs: 1 }).finally(() => {
+      writing = false;
+    });
+    let maxWal = 0;
+    while (writing) {
+      maxWal = Math.max(maxWal, l.walSize());
+      await sleep(5);
+    }
+    await writer;
+    const page = boundaryCast<{ page_count: number; page_size: number }>(l.app.prepare("SELECT page_count, page_size FROM pragma_page_count(), pragma_page_size()").get(), "host");
+    const databaseBytes = page.page_count * page.page_size;
+    reportMeasurement("WAL before the first generation beside a writer without checkpoints", { maxWalMb: maxWal / MB, databaseMb: databaseBytes / MB });
+    expect(maxWal).toBeLessThan(databaseBytes / 2);
+    expect((await repl.status()).lastCheckpointAt).not.toBeNull();
+    const generation = expectOk(await repl.sync()).generation;
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation, ...fingerprint(l.app), check: "ok" });
+  }, 60_000);
+
   it("seals a first snapshot when another connection committed and then truncated the WAL before the first sync", async () => {
     const l = live();
     const repl = l.start();

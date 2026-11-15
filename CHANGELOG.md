@@ -2128,11 +2128,13 @@ Net changes since 5.8.2.
   the module's read transaction kept SQLite from starting the WAL over, and the first snapshot then had to
   read it whole. The module now takes its read transaction when the first snapshot starts reading, so until
   then the checkpoints SQLite runs after a commit keep the WAL as short as without replication, also while
-  write transactions stay open across awaits; the once-per-second check runs a passive checkpoint as well,
-  for a writer that turned those off. A WAL of `checkpointBytes` or more that a process left behind when it
-  ended without closing the database is copied back on a worker thread when the module opens the file, and
-  the first snapshot waits for it. A seal before the first generation takes the first snapshot whenever
-  another connection committed since the module opened the file, also when the WAL was truncated since.
+  write transactions stay open across awaits; for a writer that turned those off, the once-per-second check
+  runs a passive checkpoint as well, and a restarting one, which holds the write lock while it copies, when
+  the WAL still holds `checkpointBytes` of frames after it. A WAL of `checkpointBytes` or more that a
+  process left behind when it ended without closing the database is copied back on a worker thread when
+  the module opens the file, and the first snapshot waits for it. A seal before the first generation takes
+  the first snapshot whenever another connection committed since the module opened the file, also when the
+  WAL was truncated since.
 - `replication-sqlite`: `stop()` no longer waits for a periodic snapshot, a checkpoint or a prune that a
   running sync has still to do. The module now declares `quiesce`: from the start of `stop()` a sync ships
   its frames but skips the checkpoint, the periodic snapshot and the prune, a periodic snapshot or

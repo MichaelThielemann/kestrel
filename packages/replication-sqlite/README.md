@@ -88,12 +88,16 @@ WAL as short as without replication: once the WAL holds `wal_autocheckpoint` pag
 writing connection sets another value), the connection that commits copies it back, and the next write
 transaction starts it over, also when write transactions stay open across awaits. The once-per-second check
 runs `wal_checkpoint(PASSIVE)` as well, for a writer that turned those checkpoints off, also while the first
-`replication.sync` lists the replica; it pauses from the moment a snapshot starts reading until it is
-uploaded or given up, since the frames committed meanwhile belong to the generation it starts. A WAL of
-`checkpointBytes` or more that the file already has when the module opens it, left behind by a process that
-ended without closing the database, is copied back on a worker thread with a connection of its own; the
-check, the first snapshot and a seal wait for it, and a checkpoint that SQLite starts after a commit on
-another connection meanwhile finds the WAL busy and leaves it to the worker.
+`replication.sync` lists the replica. A commit that lands while that checkpoint copies keeps the WAL from
+starting over, so when the WAL still holds `checkpointBytes` of frames after it, the check runs
+`wal_checkpoint(RESTART)`: it takes the write lock for the copy, without waiting for it, so that no commit
+lands meanwhile and the next writer starts the WAL over; `lastCheckpointAt` is set only when it finishes.
+The check pauses from the moment a snapshot starts reading until it is uploaded or given up, since the
+frames committed meanwhile belong to the generation it starts. A WAL of `checkpointBytes` or more that the
+file already has when the module opens it, left behind by a process that ended without closing the
+database, is copied back on a worker thread with a connection of its own; the check, the first snapshot
+and a seal wait for it, and a checkpoint that SQLite starts after a commit on another connection meanwhile
+finds the WAL busy and leaves it to the worker.
 
 If an upload fails after a checkpoint, the frames stay in memory and go out first on the next run;
 a new snapshot supersedes them, as does the snapshot a restarted process takes on its first sync.
