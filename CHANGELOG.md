@@ -1786,19 +1786,22 @@ Net changes since 5.8.2.
   facts list in `contentMigrations`, their questions), rehearses the migrations on that copy without writing to
   the app's store, content migrations through a local start of the release, checks that no referenced original
   went missing, and writes a receipt with the version change and the plan hash into the backup location. `deploy` refuses a version change or a pending storage
-  migration without a matching receipt, more than one instance and an active deployment with exit 1 before
-  anything changes; stages the release while the old one serves (a staging failure never stops the app); records
+  migration without a matching receipt, more than one instance, an active deployment and any earlier deploy run of
+  the environment that is still open with exit 1 before anything changes; stages the release while the old one serves (a staging failure never stops the app); records
   the app's configuration, secret values only as salted fingerprints; stops the app and waits for the seal; takes
-  a verified cutover backup, pinned until `update cleanup`, so no migration starts without one; migrates a copy
+  a verified cutover backup that records the running versions, pinned until `update cleanup` for a change of the
+  major or a pending storage migration, so no migration starts without one; migrates a copy
   of its database; promotes it, swaps the code and starts the release as one step; and verifies it with three
-  outcomes: passed, failed (an automatic rollback to the cutover state, exit 3) or unverifiable (403 or no
-  connection: the run halts with exit 1). Only after a passed verification are the older releases of the app
-  deleted, the replaced one's code saved into the backup location first where the platform hands it out. A
+  outcomes: passed, failed (an automatic rollback to the cutover state, exit 3) or unverifiable (403, no
+  connection, or a check that cannot read the store or the platform: the run halts with exit 1). Only after a
+  passed verification are the older releases of the app deleted, the replaced one's code saved into the backup
+  location first where the platform hands it out; a replaced release whose code cannot be saved stays. A
   hard failure after the stop and before the cutover backup is written starts the previous release again on the
   unchanged replica. A rollback promotes the cutover database again before any old release starts, copies back
   originals, replaces the delivery prefix and lists it again, restores the recorded configuration verbatim, starts
   the previous release and proves through `applied.json` or a marker row in its first snapshot (table
-  `kestrel_ops_provenance`) that it restored the cutover state. The migration of the cutover copy downloads the cutover database again on every run, so a kill inside
+  `kestrel_ops_provenance`) that it restored the cutover state; it reports the derived keys that differ from the
+  cutover backup and releases the pin on it. The migration of the cutover copy downloads the cutover database again on every run, so a kill inside
   a content migration that is not idempotent is resumed from the same state; it refuses a migration the plan does
   not name, writes blobs to the app's store only as server-side copies or new keys and never over, or instead of,
   an existing key, cleans stored SVGs with the release's sanitize package, and applies content migrations through
@@ -1816,7 +1819,8 @@ Net changes since 5.8.2.
   instances, an active deployment and the health check type, staging of the release while the app runs, reading
   and restoring the app's configuration, applying the release's manifest and making the staged droplet current
   while the app is stopped, a readiness probe with three outcomes, crash events, and listing, saving and deleting
-  droplets and revisions.
+  droplets and revisions. A droplet download that fails is tried three times before it is reported as failed; only
+  a droplet of a container image counts as one whose bits the platform does not hand out.
 - New package `@michaelthielemann/kestrel-target-cloudfoundry`: a `kestrel-ops` target for one app in a
   Cloud Foundry space, through the `cf` CLI. It reads state and instances through the v3 API and recognises
   a stopped app only with no instance in any state but `DOWN`. `status`, `backup create` (live or frozen)

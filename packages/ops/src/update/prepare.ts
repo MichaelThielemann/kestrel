@@ -211,9 +211,10 @@ async function failed(ctx: UpdateContext, step: string, message: string, exitCod
 }
 
 /**
- * Prepares an update from this machine without changing production: preflight (read only: one instance, no active
- * deployment, replica live, backup location writable, clock skew), plan on a copy of the newest replica generation,
- * rehearsal of the migrations and a local start of the release on that copy, and the receipt with the version change
+ * Prepares an update from this machine without changing production: preflight (one instance, no active deployment,
+ * the health check's type, and the clock skew against the store, measured with a probe written into the backup
+ * location), plan on a copy of the newest replica generation, rehearsal of the migrations on that copy (with a local
+ * start of the release when content migrations are pending), and the receipt with the version change
  * and the plan hash, written once into the backup location. Journal steps: `preflight`, `plan`, `rehearsal`,
  * `receipt`. A failed rehearsal check writes no receipt and ends with exit 1.
  */

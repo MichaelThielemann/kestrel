@@ -298,7 +298,7 @@ names every generation after the ones it listed, so the restore does not wait fo
 | `verify` | Verifies the running release of a halted run again. |
 | `update accept`, `rollback`, `resume`, `abort` | Close, roll back, continue or end the newest deploy run, or the one `--run <id>` names. |
 | `update status` | Every update run of the environment from the backup location, with its hosts, state, next command and the time and downtime of each step. Takes no lock. |
-| `update cleanup [--dry-run]` | After `cleanupAfterDays`: removes the originals only the cutover backup still references and releases its pin. |
+| `update cleanup [--dry-run]` | After `cleanupAfterDays`: removes the originals only the cutover backup still references and releases its pin. A deploy pins its cutover backup only for a change of the major or a pending storage migration; a rollback or an abort that brought the previous release back releases the pin as well. |
 | `update bundle [--out <dir>]` | Writes `.kestrel-ops/` with the release's versions, the target manifests, the module packages whose storage migrations a deploy runs and the host facts `RunOptions.host` passes. |
 
 `runUpdate` takes the same `RunOptions` as `runOps`, plus `releaseRoot` (the directory `update.release.dir` is
@@ -332,7 +332,9 @@ without an answer, the run stops at the question with exit 1.
 10, `pre-restore` 5); only verified backups count. A failed or unverified backup stays while it is newer than the
 oldest verified one kept, or, when its kind has no verified backup, while it is among the newest of the count.
 Prune also keeps every backup pinned by a run that has not ended (a run without an end entry, active in the last
-two hours) and the newest verified backup of each Kestrel major, then removes the objects no kept backup refers to.
+two hours), every backup an update pinned until its pin is released, and the newest verified backup of each Kestrel
+major (named by the manifest's versions, or by its `major` when it records no versions), then removes the objects
+no kept backup refers to.
 The `pre-restore` backup of a failed restore stays pinned in `backup list`, but once that run ended it counts
 towards the retention of its kind like any other. Nothing younger than a day is removed. A backup reuses an object it finds
 under `objects/` without writing it again, so the object's age does not protect it; a backup the listing does

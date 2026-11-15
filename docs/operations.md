@@ -37,8 +37,8 @@ An update moves an environment to a new release: other package versions, storage
 only new code. It runs in two places:
 
 1. **On a workstation**, `kestrel update prepare --env prod` checks the environment without changing it, plans
-   the update on a copy of the newest replica generation, rehearses the migrations and a start of the new
-   release on that copy, and writes a receipt into the backup location.
+   the update on a copy of the newest replica generation, rehearses the migrations on that copy (pending content
+   migrations through a local start of the new release), and writes a receipt into the backup location.
 2. **In the deploy job**, `node .kestrel-ops/run.mjs deploy --env prod` stages the release, stops the app, takes
    a verified cutover backup, migrates a copy of its database, promotes it, starts the new release and verifies
    it. A hard failure after the stop rolls back on its own.
@@ -55,8 +55,10 @@ reports, and when it reports none, the deploy counts as a version change.
 
 `update prepare [--full-media]` runs from the project, with the new release installed:
 
-- **Preflight**, read only: one instance, no active deployment of the platform, a live replica, a writable
-  backup location, the clock skew against the store.
+- **Preflight**: one instance, no active deployment of the platform, the type of the health check (anything but
+  an http check on the readiness path warns), and the clock skew against the store, measured with a probe object
+  written into the backup location and deleted again. The plan step then needs a complete newest replica
+  generation; how recent it is, is not checked.
 - **Plan** on a copy of the newest replica generation: the storage migrations of the release's module packages
   that find their old form (detected and planned, nothing written), the content migrations the release brings
   that the copy's ledger does not hold, and the questions they ask. The release's content migrations are the ids
@@ -81,9 +83,19 @@ command-line client and that directory:
 pnpm exec kestrel update bundle
 
 # deploy stage, from the build artifact
-node .kestrel-ops/run.mjs deploy --env prod
+node .kestrel-ops/run.mjs deploy --env prod --answers deploy-answers.json
 node .kestrel-ops/run.mjs update status --env prod
 ```
+
+A deploy job has no terminal, so every question the deploy asks needs an answer from `--answers`; without one
+the run stops at that question. `deploy-answers.json` answers the stop and, for a deploy from a release before 6,
+the stop without a seal:
+
+```json
+{ "update-stop": "accept", "unsealed-stop": "accept" }
+```
+
+`--yes` answers `update-stop` as well, but never `unsealed-stop`.
 
 `update bundle [--out <dir>]` writes `.kestrel-ops/` into the project (or `<dir>`): `run.mjs`, kestrel-ops and
 the target package of every environment, the module packages of the release that export `./storage` with the
@@ -99,31 +111,33 @@ that start in the same moment.
 
 | Step | App | What happens |
 |---|---|---|
-| `gate` | serving | Receipt, one instance, no active deployment, no other run of this environment in an open state. A verified run before it is accepted on the way. A refusal ends with exit 1 before anything changed. |
+| `gate` | serving | Receipt, one instance, no active deployment, no earlier deploy run of this environment in an open state, also behind later runs the gate refused; the refusal names the command that finishes that run. The newest earlier run that got past its gate is accepted on the way when it is verified. A refusal ends with exit 1 before anything changed. |
 | `stage` | serving | The release is uploaded and staged while the app keeps running. A staging failure ends the run with exit 1; the app was never stopped. |
 | `configuration` | serving | The app's configuration is recorded once: plain values verbatim, secret values only as salted fingerprints, the health check, memory, disk, start command and instance count. |
 | `precopy` | serving | Originals and the delivery prefix are copied into the backup location, so only the difference is copied after the stop. |
-| `stop` | **down** | After the `update-stop` answer. From here on the run is never cancelled, only resumed or aborted. A hard failure before the cutover backup is written makes the previous release current again and starts it on the unchanged replica; exit 3. |
-| `seal` | down | Waits until the stopped replica's newest generation shows its seal, at most `update.sealTimeoutSeconds`; a runtime before 6 writes none. |
-| `cutover-backup` | down | A verified backup of the stopped state, pinned for this run until `update cleanup`. |
+| `stop` | **down** | After the `update-stop` answer. From here on the run is never cancelled, only resumed or aborted. When the stop itself fails after it stopped the app, the app is started again; if that fails too, the run stays open with exit 1 and `update abort` starts the previous release. A hard failure before the cutover backup is written makes the previous release current again and starts it on the unchanged replica; exit 3. A signal (SIGINT, SIGTERM) after the stop ends the process with exit 1 and a message that says what state the app is in and which command continues or ends the run; never start the app by hand while the run is open. |
+| `seal` | down | Waits until the stopped replica's newest generation shows its seal, at most `update.sealTimeoutSeconds`; a runtime before 6 writes none, which needs the `unsealed-stop` answer. Without it the previous release starts again; exit 3. |
+| `cutover-backup` | down | A verified backup of the stopped state. Its manifest records the running versions; when they are unknown, the major the pending storage migrations convert from, so `backup prune` keeps the newest backup of that major. A deploy that changes the major of Kestrel, runs on unknown versions or has a storage migration pending pins it for this run until `update cleanup`; otherwise the retention of `cutover` backups keeps it. |
 | `migrate` | down | The migration of a copy of the cutover database, see below. |
 | `promote`, `swap`, `start` | down | The migrated copy becomes the newest replica generation, the staged release becomes the app's code with its own configuration, and the app starts; one step with no question between them, so no old release starts on converted data. |
 | `verify` | down until it passes | See below. |
-| `retire` | serving | Only after `verify` passed: the replaced release's code is saved into the backup location when the platform hands it out, then every older release of the app is deleted, so neither the platform's own rollback nor an old pipeline run can start it on the converted data. |
+| `retire` | serving | Only after `verify` passed: the replaced release's code is saved into the backup location when the platform hands it out, then every older release of the app is deleted, so neither the platform's own rollback nor an old pipeline run can start it on the converted data. When saving the replaced release's code fails, that release stays so `update rollback` can still start it, and a warning says so; a release another open deploy run needs stays as well. |
 
 ### Verification
 
 Verification has three outcomes. **Passed**: every hard check held; the run ends with exit 0. **Failed**: a hard
 check failed, and the automatic rollback brings back the cutover state and verifies it; exit 3. **Unverifiable**:
-the readiness check could not tell (403, 401, 404, a timeout or no connection); the run halts with exit 1,
-leaves the new release running and names the next command.
+the readiness check could not tell (403, 401, 404, a timeout or no connection), or a check could not read the
+store or the platform; the run halts with exit 1, leaves the new release running, rolls nothing back and names
+the next command.
 
 The hard checks: an instance runs and the platform recorded no crash since the start; the readiness path
 answers 200 (503, a body with `ready: false` or another 5xx answer fails); `applied.json` of the promoted
 generation names it and the nonce of its `origin.json`; the release's own generation, sorting after the
-promoted one, shows its first snapshot and its newest object advances within `update.syncWindowSeconds`; a key
-of the delivery prefix newer than the start shows within `update.renderTimeoutSeconds` that rendering began.
-Pages and media of the delivery prefix are checked as well, but only warn.
+promoted one, shows its first snapshot, and within `update.syncWindowSeconds` a WAL segment of that generation
+or a later snapshot shows that its sync advances (`origin.json`, `applied.json` and `sealed.json` do not count); a
+key of the delivery prefix newer than the start shows within `update.renderTimeoutSeconds` that rendering began.
+A delivery prefix without any key only warns. No page or medium is fetched over the network.
 
 ### Rollback
 
@@ -132,7 +146,16 @@ any old release can start, copies back originals whose key holds other bytes, se
 backup's and lists it again until no key is newer than the start of the replacement, compares the derived
 prefixes with the backup's listing, restores the recorded configuration verbatim without a question, makes the
 previous release current again (uploading its saved code when it was deleted), starts it and verifies it. Without
-a previous release or its saved code it ends with the app stopped on the cutover state.
+a previous release or its saved code it ends with the app stopped on the cutover state. The derived keys it finds
+added, changed or missing against the backup's listing are printed as a warning and kept in the run's report;
+the release renders them again. Once the previous release runs verified, the run's pin on the cutover backup is
+released.
+
+The automatic rollback uses the cutover backup and the promotion the deploy knows, also when the journal's
+listing does not show them yet. A rollback of a run without a cutover backup starts the previous release on the
+unchanged replica; it refuses while the app's code is the staged release or while the newest generation was
+placed by an update and no release acknowledged it, and `update resume` rolls back once the journal lists the
+cutover backup.
 
 The verification after a rollback proves that the started release restored the promoted cutover state: either
 its `applied.json` names the generation and its nonce, or the first snapshot it wrote after that generation holds
@@ -187,17 +210,26 @@ The journal of a run lives in the backup location, one object per step, so any m
 continue it. `kestrel update resume` checks the last finished step and continues after it: an unfinished
 migration starts again from the cutover backup, a promotion whose generation is no longer the newest is refused,
 after `promote` it swaps and starts, after `start` it verifies; an unfinished rollback runs again from its first
-step, and a halted run is verified again. `kestrel update abort` ends an open run instead: before the promotion it
-starts the previous release on the unchanged replica, after it it rolls back first.
+step, and a halted run is verified again. A run that has not finished its stop is not resumed; `update abort`
+ends it. `kestrel update abort` ends an open run: before the promotion it starts the previous release on the
+unchanged replica and releases the pin on the cutover backup, after it it rolls back first.
+
+A process that was killed leaves its lock behind. The command that continues its run therefore needs
+`--break-lock` and the answer `"break-lock": "accept"`, given only once that process no longer runs:
+
+```sh
+kestrel update resume --env prod --run <id> --break-lock --answers break-lock.json
+```
 
 `kestrel update status` reads the runs of the environment from the backup location: the newest deploy run, or
 the one `--run` names, with its state, the hosts its processes ran on, the version change, the cutover backup,
-the time of every step with the ones the app was down for, the total downtime and the command to run next, and
+the time of every step with the ones the app was down for, the total downtime (until a start that became ready, a
+verification that passed or a verified rollback), the derived keys of a rollback, the command to run next, and
 every other run in an open state. It takes no lock and writes nothing.
 
 ### Accept and cleanup
 
-`kestrel update accept` closes a verified run; from then on a rollback discards what was written since. The
+`kestrel update accept` closes a verified run; from then on a rollback discards what was written since. A pinned
 cutover backup stays pinned. `kestrel update cleanup [--dry-run]`, at least `update.cleanupAfterDays` (default 14)
 after the accept, removes the originals under the media prefix that no row of the current replica references and
 that the cutover backup holds, after the `cleanup-delete` answer, and releases the pin, so prune treats the
@@ -214,8 +246,11 @@ cutover backup like any other.
 
 With `--json` every command prints one document with a `schema` field such as `kestrel-ops/update-deploy@1`,
 holding `exitCode`, `state`, `message` and the run's report. The update questions are `update-stop` (before the
-stop; `--yes` answers it), `rollback-accepted` (the environment's name, never answered by `--yes`) and
-`cleanup-delete` (never answered by `--yes`); `--answers <file>` answers them in a pipeline.
+stop; `--yes` answers it), `unsealed-stop` (after the stop of a release that leaves no seal, such as one before 6;
+never answered by `--yes`; without an answer the previous release starts again and the deploy ends with exit 3),
+`break-lock` (with `--break-lock`; never answered by `--yes`), `rollback-accepted` (the environment's name, never
+answered by `--yes`) and `cleanup-delete` (never answered by `--yes`); `--answers <file>` answers them in a
+pipeline.
 
 The `update` block of an environment also sets the waits: `sealTimeoutSeconds` (60), `syncWindowSeconds` (120),
 `renderTimeoutSeconds` (600) and `readyTimeoutSeconds` (300).

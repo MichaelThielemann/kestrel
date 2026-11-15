@@ -10,8 +10,9 @@ import type { ReadyProbe, UpdateTarget } from "./target.ts";
  * Exit codes of an update command. `done` (0): the command finished, for `deploy` and `resume` with the new release
  * verified. `refused` (1): a gate or check refused before production changed (no matching receipt for a version or
  * storage-shape change, more than one instance, an active rolling deployment, a staging failure), the run halted
- * because verification could not tell (403 or no connection), a question had no answer, or a rollback could not
- * finish; the output and `update status` name the state production is in and the command to run next. `usage` (2):
+ * because verification could not tell (403, no connection, or a check that could not read the store or the target),
+ * a question had no answer, or a rollback could not finish; the output and `update status` name the state
+ * production is in and the command to run next. `usage` (2):
  * a usage or configuration error. `rolledBack` (3): a hard failure after the stop, after which the automatic rollback
  * brought back the cutover state and verified it.
  */
