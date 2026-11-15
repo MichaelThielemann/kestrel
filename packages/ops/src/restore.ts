@@ -49,7 +49,8 @@ function noDatabase(manifest: Manifest): OpsError {
   return new OpsError(`backup ${manifest.id} holds no database: it was taken while the replica could not be read; blobs.jsonl and site.jsonl list its originals and delivery keys`, 1, manifest.id);
 }
 
-async function downloadDb(ctx: OpsContext, manifest: Manifest, file: string): Promise<void> {
+/** Downloads `db.sqlite` of a backup into `file` and refuses one that is missing or does not hash to its manifest. */
+export async function downloadDb(ctx: OpsContext, manifest: Manifest, file: string): Promise<void> {
   if (manifest.db === null) throw noDatabase(manifest);
   const data = await ctx.backups.get(ctx.location + keys.db(manifest.id));
   if (data === null || sha256(data) !== manifest.db.sha256) throw new OpsError(`backup ${manifest.id}: db.sqlite is missing or differs from its manifest`, 1, "db.sqlite");
@@ -80,7 +81,8 @@ async function waitForVersion(ctx: OpsContext, entry: SiteEntry, before: string 
   return false;
 }
 
-async function restoreOriginals(ctx: OpsContext, blobs: readonly BlobEntry[], dryRun: boolean, beforeWrite: () => void = () => undefined): Promise<string[]> {
+/** Copies back every original of `blobs` whose live key is missing or holds other bytes; never deletes a key. Resolves to the keys it copied, or would copy in a dry run. */
+export async function restoreOriginals(ctx: OpsContext, blobs: readonly BlobEntry[], dryRun: boolean, beforeWrite: () => void = () => undefined): Promise<string[]> {
   const live = await listMap(ctx.app, ctx.env.app.mediaPrefix);
   const restored: string[] = [];
   for (const entry of blobs) {
@@ -94,7 +96,8 @@ async function restoreOriginals(ctx: OpsContext, blobs: readonly BlobEntry[], dr
   return restored;
 }
 
-async function restoreDelivery(ctx: OpsContext, site: readonly SiteEntry[], dryRun: boolean, beforeWrite: () => void = () => undefined): Promise<{ written: string[]; removed: string[] }> {
+/** Sets the delivery prefix to `site`: writes every key that differs, waits until each reads back, then removes the keys `site` does not know. */
+export async function restoreDelivery(ctx: OpsContext, site: readonly SiteEntry[], dryRun: boolean, beforeWrite: () => void = () => undefined): Promise<{ written: string[]; removed: string[] }> {
   const live = new Map((await stableList(ctx.app, ctx.env.app.deliveryPrefix, ctx.poll)).map((info) => [info.key, info]));
   const wanted = new Map(site.map((s) => [s.key, s]));
   const written: string[] = [];

@@ -1,5 +1,252 @@
-import type { RollbackReason, RollbackResult, UpdateContext, UpdateOutcome, UpdateRun } from "./types.ts";
-import { notImplemented } from "./pending.ts";
+import { writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { acceptSeal, createBackup, readManifest, readSeal } from "../backup.ts";
+import { messageOf, recordQuietly, REPLICATION_PACKAGE, runtimeVersion, startTarget, stopTarget } from "../context.ts";
+import { OpsError } from "../errors.ts";
+import { fromJsonl, hex, keys, parseJsonOrNull, type BlobEntry, type DerivedEntry, type Manifest, type SealState, type SiteEntry } from "../layout.ts";
+import { acknowledgement, buildDatabase, completeGeneration, listGenerations, namesAfterListed, promote, stableGenerations, type Promoted } from "../replica.ts";
+import { downloadDb, restoreDelivery, restoreOriginals } from "../restore.ts";
+import { appClock, type ServerClock } from "../serverTime.ts";
+import { deleteSessions, hasAccessChanges, lossReport, sha256, type LossReport } from "../sqlite.ts";
+import { stableList, type ObjectInfo } from "../store.ts";
+import { readUpdateRun, reportOf } from "./journal.ts";
+import { updateKeys } from "./layout.ts";
+import type { ConfigurationRestore, RecordedConfiguration } from "./target.ts";
+import { UPDATE_EXIT, type RollbackReason, type RollbackResult, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
+
+/** The table a rollback adds to the database it promotes for a release before 6, holding one marker row per rollback. */
+export const PROVENANCE_TABLE = "kestrel_ops_provenance";
+
+const DELIVERY_PASSES = 5;
+
+const sleepOf = (ctx: UpdateContext): ((ms: number) => Promise<void>) => ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+
+async function jsonl<T>(ctx: UpdateContext, key: string): Promise<T[]> {
+  const data = await ctx.backups.get(ctx.location + key);
+  if (data === null) throw new OpsError(`${key} is missing`, 1, key);
+  return boundaryCast<T[]>(fromJsonl(data), "json");
+}
+
+function isRecordedConfiguration(value: unknown): value is RecordedConfiguration {
+  return typeof value === "object" && value !== null && Reflect.get(value, "schema") === "kestrel-ops/configuration@1" && typeof Reflect.get(value, "env") === "object" && typeof Reflect.get(value, "salt") === "string";
+}
+
+async function recordedConfiguration(ctx: UpdateContext, runId: string): Promise<RecordedConfiguration | null> {
+  const data = await ctx.backups.get(ctx.location + updateKeys.configuration(ctx.envName, runId));
+  const value: unknown = data === null ? null : parseJsonOrNull(data);
+  if (data !== null && !isRecordedConfiguration(value)) throw new OpsError(`the recorded configuration of run ${runId} cannot be read`, 1, "configuration.json");
+  return isRecordedConfiguration(value) ? value : null;
+}
+
+const markerDue = (runtime: string | null): boolean => !namesAfterListed(runtime);
+
+function writeMarker(file: string, nonce: string, runId: string, at: number): void {
+  const db = new DatabaseSync(file);
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS "${PROVENANCE_TABLE}" ("nonce" TEXT PRIMARY KEY, "run" TEXT NOT NULL, "at" REAL NOT NULL)`);
+    db.prepare(`INSERT INTO "${PROVENANCE_TABLE}" ("nonce", "run", "at") VALUES (?, ?, ?)`).run(nonce, runId, at);
+  } finally {
+    db.close();
+  }
+}
+
+function holdsMarker(file: string, nonce: string): boolean {
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    if (db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(PROVENANCE_TABLE) === undefined) return false;
+    return db.prepare(`SELECT 1 FROM "${PROVENANCE_TABLE}" WHERE "nonce" = ?`).get(nonce) !== undefined;
+  } finally {
+    db.close();
+  }
+}
+
+async function waitUntilStartable(ctx: UpdateContext, at: number, clock: ServerClock): Promise<void> {
+  const sleep = sleepOf(ctx);
+  const behind = (): number => at + 1000 - Math.min(clock.now(), ctx.clock());
+  while (behind() > 0) await sleep(Math.min(1000, behind()));
+}
+
+async function holdsEntry(ctx: UpdateContext, info: ObjectInfo, entry: SiteEntry): Promise<boolean> {
+  if (info.size !== entry.size) return false;
+  if (info.etag === entry.etag || info.etag === entry.objectEtag) return true;
+  const live = await ctx.app.get(info.key);
+  const copy = await ctx.backups.get(ctx.location + entry.object);
+  return live !== null && copy !== null && sha256(live) === sha256(copy);
+}
+
+async function replaceDelivery(ctx: UpdateContext, site: readonly SiteEntry[], clock: ServerClock): Promise<RollbackResult["delivery"]> {
+  const written = new Set<string>();
+  const removed = new Set<string>();
+  const wanted = new Map(site.map((entry) => [entry.key, entry]));
+  for (let pass = 1; ; pass++) {
+    const startedAt = clock.now();
+    const done = await restoreDelivery(ctx, site, false);
+    done.written.forEach((key) => written.add(key));
+    done.removed.forEach((key) => removed.add(key));
+    const live = await stableList(ctx.app, ctx.env.app.deliveryPrefix, ctx.poll);
+    const stray: string[] = [];
+    for (const info of live) {
+      const entry = wanted.get(info.key);
+      if (entry === undefined || (info.lastModified >= startedAt - 1000 && !(await holdsEntry(ctx, info, entry))) || info.size !== entry.size) stray.push(info.key);
+    }
+    const listed = new Set(live.map((info) => info.key));
+    stray.push(...site.filter((entry) => !listed.has(entry.key)).map((entry) => entry.key));
+    if (stray.length === 0) return { written: [...written].sort(), removed: [...removed].sort(), relisted: pass };
+    if (pass >= DELIVERY_PASSES) throw new OpsError(`the delivery prefix ${ctx.env.app.deliveryPrefix} still changed after ${pass} replacements (${stray.slice(0, 5).join(", ")}): a render keeps writing; check that no instance of the app runs`, 1, ctx.env.app.deliveryPrefix);
+    ctx.out.warn(`${stray.length} key(s) under ${ctx.env.app.deliveryPrefix} changed while it was replaced, such as ${stray[0] ?? ""}; replacing it again`);
+    await sleepOf(ctx)(ctx.poll.delayMs ?? 1000);
+  }
+}
+
+async function changedDerived(ctx: UpdateContext, backupId: string): Promise<string[]> {
+  const recorded = new Map((await jsonl<DerivedEntry>(ctx, keys.derived(backupId))).map((entry) => [entry.key, entry]));
+  const changed = new Set<string>();
+  const seen = new Set<string>();
+  for (const prefix of ctx.env.app.derivedPrefixes) {
+    for (const info of await stableList(ctx.app, prefix, ctx.poll)) {
+      seen.add(info.key);
+      const entry = recorded.get(info.key);
+      if (entry === undefined || entry.etag !== info.etag || entry.size !== info.size) changed.add(info.key);
+    }
+  }
+  for (const key of recorded.keys()) if (!seen.has(key)) changed.add(key);
+  return [...changed].sort();
+}
+
+async function stopAndSeal(ctx: UpdateContext): Promise<SealState> {
+  const before = await ctx.target.status();
+  if (before.state !== "stopped" || before.instances > 0) {
+    const stop = await stopTarget(ctx);
+    const seal = await ctx.steps.waitForSeal(ctx, stop.stoppedAt).catch((cause: unknown) => {
+      ctx.out.warn(`the stopped replica could not be read: ${messageOf(cause)}`);
+      return null;
+    });
+    await ctx.journal.record("seal", "done", seal === null ? { state: "unreadable" } : { state: seal.state, generation: seal.generation });
+    return seal?.state ?? "unreadable";
+  }
+  await ctx.journal.record("stop", "skipped", { reason: "the app is stopped" });
+  const seal = await readSeal(ctx).catch(() => null);
+  const state = seal?.state ?? "unreadable";
+  await ctx.journal.record("seal", state === "sealed" ? "skipped" : "done", seal === null ? { state } : { state, generation: seal.generation });
+  return state;
+}
+
+async function restoreDroplet(ctx: UpdateContext, run: UpdateRun, recorded: RecordedConfiguration | null): Promise<boolean> {
+  const wanted = run.previousDroplet ?? recorded?.droplet ?? null;
+  if (wanted === null) {
+    await ctx.journal.record("restore-droplet", "failed", { reason: "the run recorded no previous droplet" });
+    ctx.out.error("the run recorded no previous droplet; the app stays stopped on the cutover state");
+    return false;
+  }
+  if ((await ctx.target.currentDroplet()) === wanted) {
+    await ctx.journal.record("restore-droplet", "skipped", { droplet: wanted });
+    return true;
+  }
+  if ((await ctx.target.listDroplets()).some((d) => d.guid === wanted)) {
+    await ctx.target.setDroplet(wanted);
+    await ctx.journal.record("restore-droplet", "done", { droplet: wanted });
+    return true;
+  }
+  const key = updateKeys.droplet(ctx.envName, run.runId, wanted);
+  const bits = await ctx.backups.get(ctx.location + key);
+  if (bits === null || ctx.target.restoreDroplet === undefined) {
+    const reason = `droplet ${wanted} is gone and ${bits === null ? "no bits of it were saved" : "the target cannot upload droplet bits"}`;
+    await ctx.journal.record("restore-droplet", "failed", { droplet: wanted, reason });
+    ctx.out.error(`${reason}; the app stays stopped on the cutover state: deploy the previous release again and start it`);
+    return false;
+  }
+  const file = ctx.workspace.path(`droplet-${wanted}`);
+  writeFileSync(file, bits, { mode: 0o600 });
+  const uploaded = await ctx.target.restoreDroplet(file);
+  await ctx.target.setDroplet(uploaded);
+  await ctx.journal.record("restore-droplet", "done", { droplet: uploaded, savedAs: key, replaces: wanted });
+  return true;
+}
+
+async function firstSnapshotHolds(ctx: UpdateContext, promoted: string, nonce: string): Promise<string | null> {
+  const prefix = ctx.env.app.replicaPrefix;
+  const sleep = sleepOf(ctx);
+  for (let i = 0; i < (ctx.poll.attempts ?? 30); i++) {
+    const own = (await listGenerations(ctx.app, prefix)).find((g) => g.name > promoted && g.snapshot !== null);
+    if (own?.snapshot) {
+      const data = await ctx.app.get(own.snapshot.key);
+      if (data !== null) {
+        const file = ctx.workspace.path(`first-snapshot-${own.name}.db`);
+        writeFileSync(file, data, { mode: 0o600 });
+        return holdsMarker(file, nonce) ? own.name : null;
+      }
+    }
+    await sleep(ctx.poll.delayMs ?? 1000);
+  }
+  return null;
+}
+
+async function verifyPrevious(ctx: UpdateContext, promoted: Promoted, marker: string | null): Promise<Record<string, unknown>> {
+  const ready = await ctx.target.probeReady();
+  if (ready.outcome !== "ready") throw new OpsError(`the previous release started but its readiness answers ${ready.outcome}${ready.status === null ? "" : ` (${ready.status})`}`, 1, "target");
+  const runtime = runtimeVersion(await ctx.target.describe());
+  if (namesAfterListed(runtime)) {
+    const ack = await acknowledgement(ctx.app, ctx.env.app.replicaPrefix, promoted, ctx.poll);
+    if (ack !== "applied") throw new OpsError(`the previous release did not acknowledge generation ${promoted.generation} in applied.json`, 1, ctx.env.app.replicaPrefix);
+    return { ready: ready.status, provenance: "applied", generation: promoted.generation };
+  }
+  if (marker === null) throw new OpsError(`the previous release runs replication ${runtime ?? "of an unknown version"}, but the promoted database carries no marker row`, 1, "target");
+  const own = await firstSnapshotHolds(ctx, promoted.generation, marker);
+  if (own === null) throw new OpsError(`the first snapshot the previous release wrote after ${promoted.generation} does not hold the marker row of this rollback: it did not start from the promoted cutover state`, 1, ctx.env.app.replicaPrefix);
+  return { ready: ready.status, provenance: "marker", generation: promoted.generation, ownGeneration: own };
+}
+
+async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Manifest): Promise<RollbackResult> {
+  const seal = await stopAndSeal(ctx);
+
+  const dbFile = ctx.workspace.path(`rollback-${hex(4)}.db`);
+  await downloadDb(ctx, manifest, dbFile);
+  const sessionsDeleted = deleteSessions(dbFile);
+  const marker = markerDue(manifest.versions[REPLICATION_PACKAGE] ?? null) ? hex(16) : null;
+  if (marker !== null) writeMarker(dbFile, marker, run.runId, ctx.clock());
+  const clock = await appClock(ctx);
+  const promoted = await promote({ store: ctx.app, prefix: ctx.env.app.replicaPrefix, target: ctx.target, database: dbFile, origin: { kind: "restore", source: manifest.id }, serverNow: clock.now, skewMs: clock.skewMs, clock: ctx.clock, poll: ctx.poll });
+  await ctx.journal.record("re-promote", "done", { generation: promoted.generation, nonce: promoted.nonce, sha256: promoted.sha256, sessionsDeleted, marker });
+
+  const blobs = await jsonl<BlobEntry>(ctx, keys.blobs(manifest.id));
+  const originalsRestored = await restoreOriginals(ctx, blobs, false);
+  await ctx.journal.record("restore-originals", "done", { restored: originalsRestored });
+
+  const delivery = await replaceDelivery(ctx, await jsonl<SiteEntry>(ctx, keys.site(manifest.id)), clock);
+  const derivedChanged = await changedDerived(ctx, manifest.id);
+  await ctx.journal.record("restore-delivery", "done", { written: delivery.written.length, removed: delivery.removed.length, relisted: delivery.relisted, derivedChanged: derivedChanged.length });
+
+  const recorded = await recordedConfiguration(ctx, run.runId);
+  let configuration: ConfigurationRestore = { set: [], removed: [], unchanged: [], unrestorable: [] };
+  if (recorded === null) {
+    ctx.out.warn(`run ${run.runId} recorded no configuration; the app keeps its current one`);
+    await ctx.journal.record("restore-configuration", "skipped", { reason: "no recorded configuration" });
+  } else {
+    configuration = await ctx.target.restoreConfiguration(recorded);
+    await ctx.journal.record("restore-configuration", "done", { ...configuration });
+    for (const name of configuration.unrestorable) ctx.out.warn(`${name} holds another value than when the update began; its old value is not known and was not restored`);
+  }
+
+  const result: RollbackResult = { ended: "stopped", generation: promoted.generation, seal, delivery, originalsRestored, configuration: { set: configuration.set, removed: configuration.removed, unrestorable: configuration.unrestorable }, derivedChanged };
+  if (!(await restoreDroplet(ctx, run, recorded))) {
+    await ctx.journal.record("start", "skipped", { reason: "no previous droplet to start" });
+    await ctx.journal.record("rollback", "done", { ended: "stopped", generation: promoted.generation });
+    return result;
+  }
+
+  await waitUntilStartable(ctx, promoted.at, clock);
+  await ctx.journal.record("start", "started", { generation: promoted.generation });
+  await startTarget(ctx);
+  try {
+    await ctx.journal.record("rollback-verify", "done", await verifyPrevious(ctx, promoted, marker));
+  } catch (error) {
+    await recordQuietly(ctx, "rollback-verify", "failed", { message: messageOf(error) });
+    throw error;
+  }
+  await ctx.journal.record("rollback", "done", { ended: "previous-release", generation: promoted.generation });
+  return { ...result, ended: "previous-release" };
+}
 
 /**
  * Brings back the cutover state of deploy run `run`, in the order of `ROLLBACK_STEPS`, opened by a `rollback`
@@ -13,7 +260,57 @@ import { notImplemented } from "./pending.ts";
  * ends with the app stopped on the cutover state (`ended: "stopped"`).
  */
 export async function rollback(ctx: UpdateContext, run: UpdateRun, reason: RollbackReason): Promise<RollbackResult> {
-  return notImplemented(`rollback(${run.runId}, ${reason.kind})`);
+  if (run.cutoverBackup === null) throw new OpsError(`run ${run.runId} has no cutover backup to roll back to; before the cutover backup, update abort starts the previous release again`, 1, "rollback");
+  const manifest = await readManifest(ctx, run.cutoverBackup);
+  if (manifest === null) throw new OpsError(`the cutover backup ${run.cutoverBackup} of run ${run.runId} does not exist or is incomplete`, 1, run.cutoverBackup);
+  await ctx.journal.record("rollback", "started", { phase: "rollback", reason: reason.kind, ...(reason.kind === "automatic" ? { failure: reason.failure } : {}), cutoverBackup: manifest.id });
+  try {
+    return await rollBackStopped(ctx, run, manifest);
+  } catch (error) {
+    await recordQuietly(ctx, "rollback", "failed", { message: messageOf(error) });
+    ctx.out.error(`the rollback of run ${run.runId} did not finish: ${messageOf(error)}; update resume runs it again from its first step`);
+    throw error;
+  }
+}
+
+async function outcome(ctx: UpdateContext, runId: string, exitCode: UpdateExitCode, message: string, fallback: UpdateRunState): Promise<UpdateOutcome> {
+  const run = await readUpdateRun(ctx, runId).catch(() => null);
+  return { exitCode, runId, state: run?.state ?? fallback, message, report: run === null ? { runId, steps: [], downtimeMs: null } : reportOf(run) };
+}
+
+const ROLLBACK_FROM: ReadonlySet<UpdateRunState> = new Set(["down", "verifying", "halted", "verified", "accepted", "rolling-back"]);
+
+async function liveLoss(ctx: UpdateContext, manifest: Manifest): Promise<LossReport | null> {
+  try {
+    const newest = (await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).at(-1);
+    if (newest === undefined) return null;
+    const current = ctx.workspace.path("current.db");
+    await buildDatabase(ctx.app, ctx.env.app.replicaPrefix, await completeGeneration(ctx.app, ctx.env.app.replicaPrefix, newest, ctx.poll), current);
+    const cutover = ctx.workspace.path("cutover.db");
+    await downloadDb(ctx, manifest, cutover);
+    return lossReport(current, cutover, manifest.source.lastFrameAt ?? manifest.createdAt);
+  } catch (cause) {
+    ctx.out.warn(`the current database could not be read for the loss report: ${messageOf(cause)}`);
+    return null;
+  }
+}
+
+function lossLines(loss: LossReport | null, since: number): string[] {
+  if (loss === null) return ["what the rollback discards cannot be listed: the current database could not be read"];
+  const lines = [`changes since ${new Date(since).toISOString()} that the rollback discards or reverts:`];
+  for (const [table, d] of Object.entries(loss.tables)) lines.push(`  ${table}: ${d.added} newer row(s) dropped, ${d.changed} changed row(s) reverted, ${d.removed} deleted row(s) back`);
+  if (loss.auditEntriesAfter > 0) lines.push(`  audit entries after the cutover: ${loss.auditEntriesAfter}`);
+  const a = loss.access;
+  lines.push(`access changes: ${hasAccessChanges(loss) ? "" : "none"}`);
+  for (const [label, users] of [["created", a.created], ["deleted", a.deleted], ["deactivated", a.deactivated], ["roles changed", a.rolesChanged], ["second factor reset", a.mfaReset]] as const) if (users.length > 0) lines.push(`  ${label}: ${users.join(", ")}`);
+  return lines;
+}
+
+async function typedName(ctx: UpdateContext, text: string): Promise<string | null> {
+  const given = ctx.answers.answers["rollback-accepted"];
+  if (given !== undefined) return given.trim();
+  if (ctx.answers.prompt === undefined) return null;
+  return (await ctx.answers.prompt(`${text}\nType the environment's name to roll back (rollback-accepted): `)).trim();
 }
 
 /**
@@ -22,5 +319,37 @@ export async function rollback(ctx: UpdateContext, run: UpdateRun, reason: Rollb
  * the previous release runs verified, 1 when the rollback could not finish.
  */
 export async function rollbackCommand(ctx: UpdateContext, run: UpdateRun): Promise<UpdateOutcome> {
-  return notImplemented(`rollbackCommand(${run.runId})`);
+  if (!ROLLBACK_FROM.has(run.state) || run.cutoverBackup === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is ${run.state}${run.cutoverBackup === null ? " without a cutover backup" : ""}; there is nothing to roll back${run.state === "deploying" || run.state === "down" ? " (update abort ends a run before its cutover backup)" : ""}`, run.state);
+  const manifest = await readManifest(ctx, run.cutoverBackup);
+  if (manifest === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the cutover backup ${run.cutoverBackup} of run ${run.runId} does not exist or is incomplete`, run.state);
+  const acceptRecord = run.records.filter((r) => r.step === "accept" && r.state === "done").at(-1);
+  if (acceptRecord !== undefined) {
+    const accepted = acceptRecord.at;
+    const lines = [`run ${run.runId} was accepted ${new Date(accepted).toISOString()}; rolling back discards everything written since the cutover backup ${manifest.id}`, ...lossLines(await liveLoss(ctx, manifest), manifest.source.lastFrameAt ?? manifest.createdAt), "every login session ends; everyone signs in again"];
+    for (const line of lines) ctx.out.info(line);
+    const name = await typedName(ctx, lines.join("\n"));
+    if (name !== ctx.envName) {
+      const message = name === null ? `stopped: "rollback-accepted" needs the environment's name ${ctx.envName} as its answer ("rollback-accepted": "${ctx.envName}" in --answers; --yes does not answer it)` : `stopped: "rollback-accepted" was answered with "${name}", not the environment's name`;
+      ctx.out.error(message);
+      return outcome(ctx, run.runId, UPDATE_EXIT.refused, message, run.state);
+    }
+    try {
+      const stop = await stopTarget(ctx);
+      const seal = await ctx.steps.waitForSeal(ctx, stop.stoppedAt);
+      await acceptSeal(ctx, seal, stop.stoppedAt);
+      const safety = await createBackup(ctx, { kind: "pre-restore", mode: { kind: "stopped", seal, stoppedAt: stop.stoppedAt }, pinFor: ctx.runId });
+      ctx.out.info(`pre-restore backup ${safety.id} written and verified`);
+    } catch (error) {
+      const message = `the rollback stopped before it changed the store: ${messageOf(error)}`;
+      ctx.out.error(message);
+      return outcome(ctx, run.runId, UPDATE_EXIT.refused, message, run.state);
+    }
+  }
+  try {
+    const result = await ctx.steps.rollback(ctx, run, { kind: "requested" });
+    if (result.ended === "stopped") return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the cutover state is back, but no previous droplet was left to start; the app stays stopped`, "rolled-back");
+    return outcome(ctx, run.runId, UPDATE_EXIT.done, `rolled back to the cutover backup ${manifest.id}; the previous release runs on generation ${result.generation}`, "rolled-back");
+  } catch (error) {
+    return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the rollback did not finish: ${messageOf(error)}; run update resume`, "rolling-back");
+  }
 }
