@@ -2424,6 +2424,8 @@ Net changes since 5.8.2.
   loop renders it again after the first `dependencies.backoffSeconds`; with `"events"`, `delivery.resumeStale`
   raises its job once that backoff has passed, as for any mark it finds due. An output that already carried a
   mark keeps it, with its attempts, and an output without a public path is not marked.
+- `media-default`: an upload whose `provenance` starts with `{` but is not valid JSON answers 400 `VALIDATION`
+  instead of 500 `INTERNAL`, and stores nothing.
 
 ## 5.8.2 – 2026-09-27
 

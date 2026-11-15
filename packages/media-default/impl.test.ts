@@ -542,6 +542,8 @@ describe("media/default", () => {
     expect(expectOk(await media.upload({ ...png, filename: "ai.png" }, "", "ai")).item.provenance).toEqual({ origin: "ai" });
     expect(expectOk(await media.upload({ ...png, filename: "mixed.png" }, "", '{"origin":"mixed","tool":"editor","model":"x-1","at":5}')).item.provenance).toEqual({ origin: "mixed", tool: "editor", model: "x-1", at: 5 });
     expect(expectErr(await media.upload({ ...png, filename: "robot.png" }, "", "robot"), "VALIDATION").message).toMatch(/origin must be/);
+    expect(expectErr(await media.upload({ ...png, filename: "broken.png" }, "", "{bad"), "VALIDATION").message).toMatch(/provenance must be/);
+    expect(expectErr(parseProvenance('{"origin":'), "VALIDATION").message).toMatch(/provenance must be/);
     expect(expectOk(parseProvenance({ origin: "ai", tool: "" }))).toEqual({ origin: "ai" });
     const item = expectOk(await media.upload({ ...png, filename: "plain.png" })).item;
     expect(expectOk(await media.update(item.id, { provenance: { origin: "ai", model: "m" } }))?.provenance).toEqual({ origin: "ai", model: "m" });

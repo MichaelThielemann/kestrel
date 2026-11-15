@@ -375,10 +375,18 @@ function isNonNullObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function parsedJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
 export function parseProvenance(value: unknown): Result<Provenance, MediaError> {
   if (value === undefined || value === null || value === "") return ok({ origin: "unknown" });
-  const raw: unknown = typeof value === "string" ? (value.startsWith("{") ? JSON.parse(value) : { origin: value }) : value;
-  if (!isNonNullObject(raw)) return err(failure("VALIDATION", "media/default: provenance must be an object or origin string"));
+  const raw: unknown = typeof value === "string" ? (value.startsWith("{") ? parsedJson(value) : { origin: value }) : value;
+  if (!isNonNullObject(raw)) return err(failure("VALIDATION", "media/default: provenance must be an object, its JSON or an origin string"));
   const p = raw;
   if (typeof p.origin !== "string" || !isOrigin(p.origin)) return err(failure("VALIDATION", "media/default: provenance.origin must be human, ai, mixed or unknown"));
   const out: Provenance = { origin: p.origin };
