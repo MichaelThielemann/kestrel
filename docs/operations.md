@@ -124,7 +124,7 @@ that start in the same moment.
 | `cutover-backup` | down | A verified backup of the stopped state. Its manifest records the running versions; when they are unknown, the major the pending storage migrations convert from, so `backup prune` keeps the newest backup of that major. A deploy that changes the major of Kestrel, runs on unknown versions or has a storage migration pending pins it for this run until `update cleanup`; otherwise the retention of `cutover` backups keeps it. |
 | `migrate` | down | The migration of a copy of the cutover database, see below. |
 | `promote`, `swap`, `start` | down | The migrated copy becomes the newest replica generation, the staged release becomes the app's code with its own configuration, and the app starts; one step with no question between them, so no old release starts on converted data. |
-| `verify` | down until it passes | See below. |
+| `verify` | serving once the start became ready | See below. The downtime ends with a start that became ready, or with a verification that passed after a start that was not ready yet. |
 | `retire` | serving | Only after `verify` passed: the replaced release's code is saved into the backup location when the platform hands it out, then every older release of the app is deleted, so neither the platform's own rollback nor an old pipeline run can start it on the converted data. When the platform hands out no code or saving it fails, that release is deleted all the same and a warning says that a later `update rollback` brings back the cutover state with the app stopped; a release another open deploy run needs stays. |
 
 ### Verification
@@ -188,7 +188,8 @@ The `migrate` step works on a copy and records its own steps in the journal (pha
   prepare and the gate have refused the release already.
 - `content-migrations` applies the pending content migrations by starting the release on this machine on the
   copy, through `update.localBoot`, and stopping it once it is ready. Nothing starts when nothing is pending; a
-  pending migration without `update.localBoot` is a configuration error (exit 2). The local start gets an
+  pending migration without `update.localBoot` fails the rehearsal of prepare (exit 1, no receipt), and a deploy
+  that reaches it after the stop rolls back (exit 3). The local start gets an
   environment of exactly the host's `localBootEnv` and the `localBoot.env` values, never a variable of the
   deploy job's own environment, so it sees no credential of the tool. A start that applies a migration the plan
   does not name, or becomes ready without applying one it names, is refused.

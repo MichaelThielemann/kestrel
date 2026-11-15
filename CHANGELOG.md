@@ -1788,12 +1788,14 @@ Net changes since 5.8.2.
   the app's store, content migrations through a local start of the release, checks that no referenced original
   went missing, and writes a receipt with the version change and the plan hash into the backup location. `deploy` refuses a version change or a pending storage
   migration without a matching receipt, more than one instance, an active deployment and any earlier deploy run of
-  the environment that is still open with exit 1 before anything changes; stages the release while the old one serves (a staging failure never stops the app); records
+  the environment that is still open with exit 1 before anything changes, and with exit 2 a target that cannot
+  check the release's readiness or a release that cannot clean the stored SVGs, which prepare refuses as well; stages the release while the old one serves (a staging failure never stops the app); records
   the app's configuration, secret values only as salted fingerprints; stops the app and waits for the seal; takes
   a verified cutover backup that records the running versions, pinned until `update cleanup` for a change of the
   major or a pending storage migration, so no migration starts without one; migrates a copy
   of its database; promotes it, swaps the code and starts the release as one step; and verifies it with three
-  outcomes: passed, failed (an automatic rollback to the cutover state, exit 3) or unverifiable (403, no
+  outcomes, reading the instance and the crash events again once its waits ended: passed, failed (an automatic
+  rollback to the cutover state, exit 3, or exit 1 when no previous release was left to start) or unverifiable (403, no
   connection, or a check that cannot read the store or the platform: the run halts with exit 1). Only after a
   passed verification are the older releases of the app deleted, the replaced one's code saved into the backup
   location first where the platform hands it out; a failed save does not keep it. A
@@ -1818,7 +1820,7 @@ Net changes since 5.8.2.
   target manifest the environments name and the module packages whose storage migrations a deploy runs;
   `run.mjs` hands `deploy`, `verify` and `update …` to `runUpdate`. `docs/operations.md` describes the flow.
 - `kestrel-target-cloudfoundry` implements the update target of `kestrel-ops`: a preflight that reports
-  instances, an active deployment and the health check type, staging of the release while the app runs, reading
+  instances, an active deployment, the health check type and whether `readyUrl` lets it check readiness, staging of the release while the app runs, reading
   and restoring the app's configuration, applying the release's manifest and making the staged droplet current
   while the app is stopped, a readiness probe with three outcomes, crash events, and listing, saving and deleting
   droplets and revisions. A droplet download that fails is tried three times before it is reported as failed; only

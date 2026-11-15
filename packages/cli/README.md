@@ -27,12 +27,14 @@ kestrel manifest [--json] [--root <dir>] [--run-setup <use>]... [--no-plugins]
 kestrel openapi  [--out <file>] [--title <t>] [--version <v>] [--server <url>] [--mount <path>]
                  [--root <dir>] [--run-setup <use>]... [--no-plugins]
 kestrel upgrade  check|fix|data [options]
-kestrel upgrade  migrate --db <copy> --blobs-dir <dir> [--root <dir>] [--plan] [--answers <file>] [--json]
+kestrel upgrade  migrate --db <copy> --blobs-dir <dir> [--root <dir>] [--plan] [--answers <file>]
+                 [--media-prefix <prefix>] [--originals-gone] [--json]
 kestrel status   [--env <name>] [--json]
 kestrel backup   create [--freeze] [--kind manual|scheduled|cutover] | list | verify <id> | prune [--dry-run]
 kestrel restore  --backup <id> [--no-safety-backup]
 kestrel restore  --to local <dir> (--backup <id> | --latest) [--with-media] [--keep-sessions]
 kestrel update   prepare [--full-media] | accept | rollback | status | resume | abort | cleanup [--dry-run]
+                 [--run <id>]
 kestrel help [<command>] | kestrel --help | kestrel --version
 ```
 
