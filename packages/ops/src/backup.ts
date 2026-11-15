@@ -560,7 +560,7 @@ async function backupIdsAtLocation(ctx: Pick<OpsContext, "backups" | "location">
  */
 export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResult> {
   const now = ctx.clock();
-  const runs = await listRuns(ctx.backups, ctx.location);
+  const runs = await listRuns(ctx.backups, ctx.location, ctx.poll);
   const ended = new Set(runs.filter((r) => r.finished || now - r.lastAt >= RUN_STALE_MS).map((r) => r.runId));
   const open = openRuns(runs, now).filter((r) => r.runId !== ctx.runId);
   if (open.length > 0) throw new OpsError(`refusing to prune: run ${open.map((r) => r.runId).join(", ")} is still open`, 1, "runs");

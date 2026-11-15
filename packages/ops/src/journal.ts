@@ -1,7 +1,8 @@
 import { appendFileSync } from "node:fs";
 import { keys, parseJson } from "./layout.ts";
 import type { Redactor } from "./redact.ts";
-import type { ObjectStore } from "./store.ts";
+import type { PollOptions } from "./replica.ts";
+import { stableList, type ObjectStore } from "./store.ts";
 
 /** One journal entry: a step's transition with its inputs and outputs (ids and hashes, never secrets). */
 export interface JournalEntry {
@@ -80,10 +81,10 @@ export interface RunSummary {
 /** How long a run without a new journal entry still counts as open. */
 export const RUN_STALE_MS = 2 * 60 * 60 * 1000;
 
-/** Every run in the journal of the backup location. */
-export async function listRuns(store: ObjectStore, location: string): Promise<RunSummary[]> {
+/** Every run in the journal of the backup location; with `poll`, listed until two listings agree. */
+export async function listRuns(store: ObjectStore, location: string, poll?: PollOptions): Promise<RunSummary[]> {
   const byRun = new Map<string, RunSummary>();
-  for (const info of await store.list(`${location}runs/`)) {
+  for (const info of poll === undefined ? await store.list(`${location}runs/`) : await stableList(store, `${location}runs/`, poll)) {
     const m = /^runs\/([^/]+)\/(\d{6})-(.+)-(started|done|failed|skipped)\.json$/.exec(info.key.slice(location.length));
     if (!m) continue;
     const runId = m[1] ?? "";
