@@ -2102,6 +2102,9 @@ Net changes since 5.8.2.
 
 ### Fixed
 
+- `replication-sqlite`: a restore applies the WAL segments into one image that grows in place, instead of
+  copying the image at every commit that changes the database size, so restoring a generation of a growing
+  database takes time in proportion to its segments.
 - `site-default`: the `maxCascade` limit counts every language row of the page being saved, so a save is refused or accepted
   the same way whatever the clock reads. Before, a row of the saved page whose only change was its timestamp counted only
   when the clock had advanced since the page was last saved.

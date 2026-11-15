@@ -36,28 +36,52 @@ export function frameSize(pageSize: number): number {
   return FRAME_HEADER_SIZE + pageSize;
 }
 
+const grown = new WeakSet<ArrayBufferLike>();
+const GROWTH = 1.25;
+
+/**
+ * Applies the committed frames of `segment`, a WAL header followed by frames, to the database image `image` and
+ * returns the image after them: each commit frame sets the image to its database size, zero-filled where it grows,
+ * and writes the pages of its transaction. Frames after the last commit frame, or from the first frame whose salts
+ * differ from the header's, are left out. The image is written in place while it has room; when a segment needs
+ * more, it moves once into a larger buffer, which later calls with the returned image grow into before they copy
+ * it again, so a restore applying many segments to a growing database copies the image only a few times.
+ */
 export function applySegment(image: Uint8Array, segment: Uint8Array): Uint8Array {
   const header = parseWalHeader(segment);
   if (!header) throw new Error("replication/sqlite: segment has no WAL header");
   const size = frameSize(header.pageSize);
-  let out = image;
-  let pending: Array<{ pageNumber: number; data: Uint8Array }> = [];
+  let largest = 0;
   for (let offset = WAL_HEADER_SIZE; offset + size <= segment.byteLength; offset += size) {
     const frame = parseFrameHeader(segment, offset);
     if (frame.salt1 !== header.salt1 || frame.salt2 !== header.salt2) break;
-    pending.push({ pageNumber: frame.pageNumber, data: segment.subarray(offset + FRAME_HEADER_SIZE, offset + size) });
-    if (frame.commitSize > 0) {
-      const needed = frame.commitSize * header.pageSize;
-      if (out.byteLength !== needed) {
-        const grown = new Uint8Array(needed);
-        grown.set(out.subarray(0, Math.min(out.byteLength, needed)));
-        out = grown;
-      }
-      for (const p of pending) out.set(p.data, (p.pageNumber - 1) * header.pageSize);
-      pending = [];
-    }
+    largest = Math.max(largest, frame.commitSize * header.pageSize);
   }
-  return out;
+  const ours = image.byteOffset === 0 && grown.has(image.buffer);
+  let buffer = ours ? new Uint8Array(image.buffer) : image;
+  let length = image.byteLength;
+  if (largest > buffer.byteLength) {
+    const next = new Uint8Array(ours ? Math.max(largest, Math.ceil(buffer.byteLength * GROWTH)) : largest);
+    next.set(buffer.subarray(0, length));
+    grown.add(next.buffer);
+    buffer = next;
+  }
+  let first = WAL_HEADER_SIZE;
+  for (let offset = WAL_HEADER_SIZE; offset + size <= segment.byteLength; offset += size) {
+    const frame = parseFrameHeader(segment, offset);
+    if (frame.salt1 !== header.salt1 || frame.salt2 !== header.salt2) break;
+    if (frame.commitSize === 0) continue;
+    const needed = frame.commitSize * header.pageSize;
+    if (needed > length) buffer.fill(0, length, needed);
+    length = needed;
+    for (let at = first; at <= offset; at += size) {
+      const page = parseFrameHeader(segment, at).pageNumber;
+      const to = (page - 1) * header.pageSize;
+      if (page >= 1 && to + header.pageSize <= length) buffer.set(segment.subarray(at + FRAME_HEADER_SIZE, at + size), to);
+    }
+    first = offset + size;
+  }
+  return length === buffer.byteLength ? buffer : buffer.subarray(0, length);
 }
 
 /** Running WAL checksum pair, as stored in the WAL header and in every frame header. */

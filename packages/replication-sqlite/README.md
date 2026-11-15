@@ -6,9 +6,9 @@ committed WAL frames applied on top, assembled under the module's read transacti
 `VACUUM INTO`: segments address pages by number, so the snapshot has to keep the live file's page
 layout. Frames the snapshot already contains are not shipped again; without a generation there is
 nowhere to ship frames to, so they wait. Point-in-time
-restore = snapshot + segments up to the requested time, applied page by page; the rebuilt file is
-opened and passes `PRAGMA quick_check` before it is handed over, otherwise the restore fails with
-`TRANSIENT` naming the generation.
+restore = snapshot + segments up to the requested time, applied page by page into one image that grows
+in place; the rebuilt file is opened and passes `PRAGMA quick_check` before it is handed over, otherwise
+the restore fails with `TRANSIENT` naming the generation.
 
 A generation is named by a time, then 12 hex digits of the same time in milliseconds, 12 hex digits of
 the time the snapshot was taken in milliseconds and 20 random hex digits (`20260927T101500Z-0192…9f…`),
