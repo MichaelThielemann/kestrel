@@ -52,7 +52,7 @@ running instance with a login, a content type and a step of your own.
 | `@michaelthielemann/kestrel-redirects-default` | Steps redirects.validate/lookup/export/render: admin-managed redirect rules, honoured in site resolution and exported as redirects.json for an edge proxy. |
 | `@michaelthielemann/kestrel-references-default` | Referential integrity for content ref fields: existence on write, delete protection. |
 | `@michaelthielemann/kestrel-renderer-plain` | renderer@1 reference: a plain HTML page from a document (title, fields, JSON). For examples and tests. |
-| `@michaelthielemann/kestrel-replication-sqlite` | Continuous SQLite replication to blobstore@1 (snapshots + WAL segments), point-in-time restore, retention. |
+| `@michaelthielemann/kestrel-replication-sqlite` | Continuous SQLite replication to blobstore@1 (snapshots + WAL segments), point-in-time restore on a persistent disk, retention. |
 | `@michaelthielemann/kestrel-revisions-default` | revisions@1: a full snapshot per save, branching through a parent pointer, restore as a new save, retention with a prune step. |
 | `@michaelthielemann/kestrel-sanitize-svg` | Step sanitize.svg: strips scripts, event handlers and external references from uploaded SVG files. |
 | `@michaelthielemann/kestrel-site-default` | site@1: path <-> document resolution and internal link rewriting on top of content@1. |

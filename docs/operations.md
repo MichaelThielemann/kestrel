@@ -51,7 +51,7 @@ The backups are the restore points of an app on an ephemeral disk, such as Cloud
 starts a new instance with an empty disk. The app's own restore steps, `replication.prepareRestore` (restore to a
 point in time from the replica) and `backup.restore` of `backup-blobstore`, only stage a file next to the
 database for the next start on the same disk. A new instance never sees that file: it rebuilds the database from
-the newest replica generation, so the app comes back with its current data and the staged restore has no
+the newest replica generation or the latest backup, so the app comes back with its current data and the staged restore has no
 effect. There, `kestrel restore --backup <id>` is the way back to an earlier state, and the newest backup
 before the damage is the earliest point it reaches. Schedule `backup create --kind scheduled` at least as often as
 the work you can afford to lose, for example every hour, and keep enough of them with

@@ -1,7 +1,7 @@
 {
   "name": "@michaelthielemann/kestrel-replication-sqlite",
   "version": "5.8.1",
-  "description": "Continuous SQLite replication to blobstore@1 (snapshots + WAL segments), point-in-time restore, retention.",
+  "description": "Continuous SQLite replication to blobstore@1 (snapshots + WAL segments), point-in-time restore on a persistent disk, retention.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
