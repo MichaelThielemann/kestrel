@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { commandRunner, resolveCredential, withSecretFile } from "./credentials.ts";
@@ -8,6 +8,12 @@ import { MemoryBucket, memoryStore } from "./memoryStore.ts";
 import { Redactor } from "./redact.ts";
 
 const SRC = dirname(fileURLToPath(import.meta.url));
+
+function productionSources(): string[] {
+  return filesUnder(SRC)
+    .map((file) => relative(SRC, file).split("\\").join("/"))
+    .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && !f.endsWith(".fixture.ts"));
+}
 
 function filesUnder(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -163,18 +169,19 @@ describe("secrets", () => {
 describe("source", () => {
   it("names no host route, host environment variable or host output prefix", () => {
     const forbidden = ["/api/", "KESTREL_S3_", "KESTREL_DATA_DIR", "site/"];
-    const sources = readdirSync(SRC).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && !f.endsWith(".fixture.ts"));
-    expect(sources.length).toBeGreaterThan(15);
+    const sources = productionSources();
+    expect(sources.length).toBeGreaterThan(40);
+    expect(sources).toContain("update/contentMigrations.ts");
     const hits = sources.flatMap((f) => forbidden.filter((term) => readFileSync(join(SRC, f), "utf8").includes(term)).map((term) => `${f}: ${term}`));
     expect(hits).toEqual([]);
   });
 
-  it("spawns no external binary besides the configured app command, ps for a local app's start time and credential commands", () => {
-    const spawning = readdirSync(SRC)
-      .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && !f.endsWith(".fixture.ts"))
-      .filter((f) => readFileSync(join(SRC, f), "utf8").includes('from "node:child_process"'));
-    expect(spawning.sort()).toEqual(["credentials.ts", "target.ts"]);
-    const target = readFileSync(join(SRC, "target.ts"), "utf8");
-    expect([...target.matchAll(/\b(spawn|execFileSync|execFile|exec|execSync|spawnSync|fork)\(([^,]+),/g)].map((m) => `${m[1] ?? ""}(${m[2] ?? ""})`)).toEqual(['execFileSync("ps")', "spawn(file)"]);
+  it("spawns no external binary besides the configured app command, ps for a local app's start time, credential commands and the configured local start of a release", () => {
+    const spawning = productionSources().filter((f) => readFileSync(join(SRC, f), "utf8").includes('from "node:child_process"'));
+    expect(spawning.sort()).toEqual(["credentials.ts", "target.ts", "update/contentMigrations.ts"]);
+    const calls = (file: string): string[] => [...readFileSync(join(SRC, file), "utf8").matchAll(/\b(spawn|execFileSync|execFile|exec|execSync|spawnSync|fork)\(([^,]+),/g)].map((m) => `${m[1] ?? ""}(${m[2] ?? ""})`);
+    expect(calls("target.ts")).toEqual(['execFileSync("ps")', "spawn(file)"]);
+    expect(calls("update/contentMigrations.ts")).toEqual(["spawn(executable(command)"]);
+    expect(readFileSync(join(SRC, "update", "contentMigrations.ts"), "utf8")).not.toMatch(/process\.env(?!\.PATH)/);
   });
 });
