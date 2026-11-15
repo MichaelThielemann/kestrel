@@ -1024,7 +1024,11 @@ Net changes since 5.8.2.
   every original the media rows reference and the delivery prefix into write-once objects
   (server-side, guarded by the listed ETag) and is verified from the backup location: hash, full
   `integrity_check`, row counts, entry counts and delivery keys against the manifest, an entry and
-  object for every referenced original, and a hashed sample. A restore stops the app, reports what it discards, including access it would bring back
+  object for every referenced original, and a hashed sample. A restore refuses, before it stops the app, a
+  backup of another Kestrel major than the environment runs (the newest deploy run of the update journal tells
+  the running one, else the target), naming `kestrel update rollback` and `restore --to local` with `kestrel
+  upgrade migrate`, unless the answer `other-major` accepts it (`--yes` does not), and warns when either major is
+  unknown. A restore stops the app, reports what it discards, including access it would bring back
   (which needs the explicit answer `access-changes`), takes a `pre-restore` backup, copies originals
   back without deleting any, sets the delivery prefix to the backup's, ends every login session and
   promotes the database as the newest replica generation under a plain time name from the store's

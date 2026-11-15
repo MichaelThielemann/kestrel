@@ -222,7 +222,12 @@ is listed until two listings agree.
 
 ## Restore
 1. The backup is verified again, then the app is stopped and must report stopped with no instance. A backup
-   taken under another delivery prefix than the environment names is refused before the stop.
+   taken under another delivery prefix than the environment names is refused before the stop, and so is a backup
+   of another Kestrel major than the environment runs, unless the answer `other-major` accepts it. The backup's
+   major is the one the versions in its manifest name, else its recorded `major`; the running one is the one the
+   newest deploy run of the update journal left running (its target versions once verified, its starting versions
+   or its cutover backup's major once rolled back or aborted), else the one the target reports. When either is
+   unknown, the restore warns and goes on.
 2. The stopped replica is rebuilt and compared with the backup. The report counts, per table, the rows the
    restore drops, reverts and brings back, the audit entries the backup does not hold, and the access changes: users
    created, deleted or deactivated, changed roles and reset second factors. A restore that would bring back
@@ -349,6 +354,7 @@ migrations through `update.localBoot` with an environment of exactly its configu
 | `update-stop` | before a deploy stops the app | answers yes |
 | `rollback-accepted` | `update rollback` or `update abort` after accept, or before it once the stopped new release holds what it wrote since its start; the answer is the environment's name | never |
 | `cleanup-delete` | before `update cleanup` removes originals | never |
+| `other-major` | a restore of a backup another Kestrel major wrote than the environment runs | never |
 
 `--answers <file>` is a JSON object from id to answer (`"yes"` or `"accept"`); a relative path is read from
 the directory the tool is called in, and a file that is missing or not JSON stops the run with exit 2. Without a terminal and

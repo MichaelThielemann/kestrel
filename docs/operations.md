@@ -34,6 +34,15 @@ and starts the app. Once the app is ready, it waits up to `update.syncWindowSeco
 `replication.sync`, and reports `applied` or `unconfirmed`; raise the window when the app's sync runs less often
 than once a minute or its first boot run takes long. Schedule `backup create --kind scheduled` and `backup prune` in the pipeline.
 
+A restore takes back only a backup of the Kestrel major the environment runs. Before it stops the app it compares
+the major that wrote the backup (from the versions its manifest records) with the running one: the one the newest
+deploy run of the update journal left running, or, without one, the one the target reports. A backup of another
+major stops the restore with exit 1 unless the answer `other-major` accepts it, which `--yes` never gives. To go
+back to the release before an upgrade, run `kestrel update rollback`, which brings back the cutover state together
+with the previous release; to read a 5.x backup under 6, copy it with `kestrel restore --to local <dir> --backup
+<id> --with-media` and convert the copy with `kestrel upgrade migrate`. When neither the journal nor the target
+tells the running major, or the backup names none, the restore warns and goes on.
+
 ## Permissions of the tool's credentials
 
 The tool reaches the app's bucket with `storage.credentials`, and a backup location in a store of its own with

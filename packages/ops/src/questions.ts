@@ -16,6 +16,7 @@ export const QUESTIONS = {
   "update-stop": { risky: false },
   "rollback-accepted": { risky: true },
   "cleanup-delete": { risky: true },
+  "other-major": { risky: true },
 } as const;
 
 export type QuestionId = keyof typeof QUESTIONS;

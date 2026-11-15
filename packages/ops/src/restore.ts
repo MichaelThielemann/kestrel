@@ -1,7 +1,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { acceptSeal, createBackup, entryCountMismatch, readManifest, verifyBackup, type BackupMode } from "./backup.ts";
-import { messageOf, recordQuietly, runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
+import { messageOf, recordQuietly, REPLICATION_PACKAGE, runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
 import { fixedLines, fixedText, literal } from "./redact.ts";
 import { Interrupted } from "./interrupt.ts";
@@ -14,6 +14,8 @@ import { appClock, type ServerClock } from "./serverTime.ts";
 import { deleteSessions, hasAccessChanges, integrityCheck, lossReport, sha256, vacuumInto, type LossReport } from "./sqlite.ts";
 import { listMap, stableList, transfer, type ObjectInfo, type ObjectStore } from "./store.ts";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { latestDeployRun, readUpdateRun } from "./update/journal.ts";
+import type { UpdateRun } from "./update/types.ts";
 
 /** Options of {@link restoreBackup}. */
 export interface RestoreOptions {
@@ -141,8 +143,67 @@ function describeLoss(ctx: OpsContext, loss: LossReport): string[] {
   return lines;
 }
 
+const kestrelMajor = (versions: Readonly<Record<string, string>> | null | undefined): number | null => majorOf(versions?.["@michaelthielemann/kestrel"] ?? versions?.[REPLICATION_PACKAGE] ?? null);
+
+/** The Kestrel major that wrote the data of backup `manifest`: the one its versions name, else its recorded `major`, or null. */
+export function backupMajor(manifest: Pick<Manifest, "versions" | "major">): number | null {
+  return kestrelMajor(manifest.versions) ?? (typeof manifest.major === "number" ? manifest.major : null);
+}
+
+async function journalMajor(ctx: OpsContext, run: UpdateRun): Promise<number | null> {
+  let current = run;
+  for (let hops = 0; hops < 10; hops++) {
+    const superseded = current.records.filter((r) => r.step === "superseded" && r.state === "done").at(-1)?.data.by;
+    if (current.state !== "rolled-back" || typeof superseded !== "string") break;
+    current = await readUpdateRun(ctx, superseded);
+  }
+  if (current.state === "verified" || current.state === "accepted" || current.state === "cleaned") return kestrelMajor(current.versions?.to);
+  if (current.state !== "rolled-back" && current.state !== "aborted" && current.state !== "untouched") return null;
+  const cutover = current.cutoverBackup === null ? null : await readManifest(ctx, current.cutoverBackup);
+  return kestrelMajor(current.versions?.from) ?? (cutover === null ? null : backupMajor(cutover));
+}
+
 /**
- * Restores a backup over the environment: verifies the backup, stops the app, reports what the restore discards
+ * The Kestrel major environment `ctx.envName` runs, with where it was read: the one the newest deploy run of the
+ * update journal leaves running (its target versions while it is verified, accepted or cleaned; while it is rolled
+ * back, aborted or untouched, its starting versions, else the data major of its cutover backup; a `superseded` record
+ * leads to the run that rolled it back), since that is what the tool put there; without one, the one the target
+ * reports. Null with the reason when neither tells it.
+ */
+export async function runningMajor(ctx: OpsContext): Promise<{ major: number; from: string } | { major: null; unknown: string }> {
+  const run = await latestDeployRun(ctx, ctx.envName);
+  const recorded = run === null ? null : await journalMajor(ctx, run);
+  if (recorded !== null) return { major: recorded, from: fixedText`as update run ${literal(run?.runId ?? "")} left it` };
+  const reported = kestrelMajor((await ctx.target.describe()).packages);
+  if (reported !== null) return { major: reported, from: fixedText`as the target reports it` };
+  return { major: null, unknown: run === null ? fixedText`no update run and the target name its Kestrel version` : fixedText`update run ${literal(run.runId)} is ${literal(run.state)} and the target names no Kestrel version` };
+}
+
+async function checkMajor(ctx: OpsContext, manifest: Manifest): Promise<void> {
+  const data = backupMajor(manifest);
+  const running = await runningMajor(ctx);
+  const id = literal(manifest.id);
+  if (running.major === null) {
+    ctx.out.warn(fixedText`the restore cannot tell which Kestrel major the environment runs (${running.unknown}), so it cannot check that backup ${id} matches it; restore only a backup of the major that runs`);
+    return;
+  }
+  if (data === null) {
+    ctx.out.warn(fixedText`backup ${id} names no Kestrel version, so the restore cannot check that it matches Kestrel ${running.major}, which the environment runs`);
+    return;
+  }
+  if (data === running.major) return;
+  const env = literal(ctx.envName);
+  const way =
+    data < running.major
+      ? fixedText`Kestrel ${running.major} does not start on it. To go back to the release before the upgrade, run kestrel update rollback --env ${env}; to read the backup under Kestrel ${running.major}, copy it with kestrel restore --to local <dir> --backup ${id} --with-media and convert the copy with kestrel upgrade migrate`
+      : fixedText`Kestrel ${running.major} does not know its storage shape. Restore a backup Kestrel ${running.major} wrote, or move the environment to Kestrel ${data} with kestrel update prepare and kestrel update deploy first`;
+  await confirm(ctx.answers, "other-major", fixedText`backup ${id} holds data Kestrel ${data} wrote, but environment ${env} runs Kestrel ${running.major} (${running.from}): ${way}`);
+}
+
+/**
+ * Restores a backup over the environment: refuses a backup of another Kestrel major than the environment runs
+ * ({@link backupMajor}, {@link runningMajor}) unless the answer `other-major` accepts it, and warns when either major
+ * is unknown; verifies the backup, stops the app, reports what the restore discards
  * (with explicit consent for access changes), takes a `pre-restore` backup of the stopped state, copies originals
  * back without deleting any, replaces the delivery prefix, empties the login sessions of the restored database,
  * promotes it as the newest replica generation (or places it for a target that keeps its disk) and starts the app.
@@ -154,6 +215,7 @@ export async function restoreBackup(ctx: OpsContext, options: RestoreOptions): P
   if (manifest.env !== ctx.envName) throw new OpsError(`backup ${options.backupId} belongs to environment ${manifest.env}, not ${ctx.envName}`, 1, options.backupId);
   if (manifest.db === null) throw noDatabase(manifest);
   if (manifest.site.prefix !== ctx.env.app.deliveryPrefix) throw new OpsError(`backup ${manifest.id} holds the delivery prefix ${manifest.site.prefix}, the environment names ${ctx.env.app.deliveryPrefix}; restoring it would write under the old prefix and empty the current one`, 1, "deliveryPrefix");
+  await checkMajor(ctx, manifest);
   const check = await verifyBackup(ctx, manifest.id);
   if (!check.ok) throw new OpsError(`backup ${manifest.id} failed verification: ${check.problems.map((p) => `${p.element}: ${p.message}`).join("; ")}`, 1, check.problems[0]?.element);
   await ctx.journal.record("restore", "started", { backupId: manifest.id });
