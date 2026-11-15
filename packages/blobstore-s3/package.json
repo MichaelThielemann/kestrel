@@ -41,7 +41,7 @@
   },
   "dependencies": {
     "zod": "^4.6.6",
-    "@aws-sdk/client-s3": "^3.600.0"
+    "@aws-sdk/client-s3": "^3.1165.0"
   },
   "devDependencies": {
     "@michaelthielemann/kestrel": "workspace:*",

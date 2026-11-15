@@ -102,6 +102,27 @@ describe("blobstore/s3 against a socket that accepts and never answers", () => {
   }, 10000);
 });
 
+describe("blobstore/s3 against a store that sends the headers and part of the body, then stalls", () => {
+  it("get and list answer TRANSIENT within about twice a timeoutMs of several seconds", async () => {
+    const timeoutMs = 6500;
+    const port = await httpServer((req, res) => {
+      if (req.url?.includes("list-type=2") === true) {
+        res.writeHead(200, { "Content-Type": "application/xml" });
+        res.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult><Name>b</Name><Contents><Key>a");
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": "100000" });
+      res.write(Buffer.alloc(1000));
+    });
+    const store = storeAt(port, { timeoutMs });
+    const [got, listed] = await Promise.all([timed(() => store.get("a.bin")), timed(() => store.list(""))]);
+    expectErr(got.value, "TRANSIENT");
+    expect(got.ms).toBeLessThan(timeoutMs * 2);
+    expectErr(listed.value, "TRANSIENT");
+    expect(listed.ms).toBeLessThan(timeoutMs * 2);
+  }, 30000);
+});
+
 describe("blobstore/s3 timeoutMs is an idle limit, not a limit on the whole request", () => {
   it("completes an upload that keeps moving for much longer than timeoutMs", async () => {
     const slowBytes = 8 * 1024 * 1024;

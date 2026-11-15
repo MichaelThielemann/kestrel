@@ -40,7 +40,7 @@
     "@michaelthielemann/kestrel-contracts": "workspace:^"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.600.0",
+    "@aws-sdk/client-s3": "^3.1165.0",
     "@michaelthielemann/kestrel-blobstore-s3": "workspace:^",
     "@michaelthielemann/kestrel-replication-sqlite": "workspace:^",
     "zod": "^4.6.6"

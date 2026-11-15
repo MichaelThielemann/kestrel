@@ -2155,9 +2155,13 @@ Net changes since 5.8.2.
 - `blobstore-s3`: `timeoutMs` ends an attempt on a socket that stays idle that long. A store that accepted the
   connection and then sent nothing kept the call waiting until the operating system gave up on the connection,
   or forever behind a proxy that kept it open, so a replication sync and the seal at teardown hung without an
-  error; such a call now answers `TRANSIENT` after about `timeoutMs` per attempt. A transfer that keeps moving,
-  such as a large snapshot upload, is not cut off. The client no longer logs a warning for a request that takes
-  longer than `timeoutMs`. `kestrel-ops` builds its store client the same way, with 60 s.
+  error; such a call, and one whose response body stops arriving after the headers, now answers `TRANSIENT`
+  after about `timeoutMs` per attempt, up to 3 s more for a `timeoutMs` of 6000 or more. A transfer that keeps
+  moving, such as a large snapshot upload, is not cut off. `blobstore-s3` and `kestrel-ops` require
+  `@aws-sdk/client-s3` 3.1165.0 or later: the request handler of earlier releases stops watching the socket once
+  the headers arrive when the limit is 6000 ms or more, so a stalled body kept the call waiting. The client no longer logs a warning for a request that takes
+  longer than `timeoutMs`. `kestrel-ops` builds its store client the same way, with 60 s; a store that answers a
+  server-side copy only once it is done fails a copy that takes longer than that.
 - `replication-sqlite`: a snapshot no longer stops the process. The snapshot that starts a generation (the
   first sync of a process, `replication.snapshot`, the periodic snapshot after `snapshotSeconds` and the
   first snapshot at teardown) read the database file and the whole WAL synchronously, held the WAL twice

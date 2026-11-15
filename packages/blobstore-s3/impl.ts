@@ -16,7 +16,7 @@ export interface Config {
   forcePathStyle?: boolean | undefined;
   accessKeyId?: string | undefined;
   secretAccessKey?: string | undefined;
-  /** Milliseconds a connection may take to open and a socket may stay idle before the attempt fails; a transfer that keeps moving has no overall limit. */
+  /** Milliseconds a connection may take to open and a socket may stay idle before the attempt fails, up to 3 s more from 6000 on; a transfer that keeps moving has no overall limit. */
   timeoutMs?: number | undefined;
   maxAttempts?: number | undefined;
   /** `"WHEN_REQUIRED"` stops the SDK from adding a checksum trailer to uploads; some S3-compatible stores reject or ignore it. */

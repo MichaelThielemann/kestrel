@@ -5,8 +5,9 @@ holds, such as `"kestrel/"`), `region`, `endpoint`, `allowInsecureEndpoint`, `fo
 environment, profile, instance role), `timeoutMs` (default 10000: how long a connection may take to
 open and how long a socket may stay idle, nothing sent and nothing received, before the attempt fails) and
 `maxAttempts` (default 3, the SDK's retry limit including the first try). A store that accepts the connection
-and never answers fails the attempt after about `timeoutMs`, and the call answers `TRANSIENT` once the attempts
-are spent, so a silent socket does not hang a pipeline step. A transfer that keeps moving has no overall limit:
+and never answers, or stops sending in the middle of a response body, fails the attempt after about `timeoutMs`
+(up to 3 s more for a `timeoutMs` of 6000 or more, since the SDK then starts watching the socket 3 s into the
+request), and the call answers `TRANSIENT` once the attempts are spent, so a silent socket does not hang a pipeline step. A transfer that keeps moving has no overall limit:
 a large upload, such as a database snapshot, may take longer than `timeoutMs` as long as data flows. `put` stores the `contentType` hint as the object's
 `Content-Type`, so a public copy served straight from the bucket answers with the right type (serve
 only the public tree, `site/*`, see the key table in `media-default`'s README; the rest of the bucket
