@@ -55,22 +55,22 @@ reports, and when it reports none, the deploy counts as a version change.
 
 `update prepare [--full-media]` runs from the project, with the new release installed:
 
-- **Preflight**: one instance, no active deployment of the platform, a target that can check the release's
-  readiness (one that would count any running instance as ready, such as the Cloud Foundry target without
-  `readyUrl`, is refused with exit 2), a release configuration the target can apply (for the Cloud Foundry target,
-  a source in `vars` for every placeholder of the manifest, refused with exit 2 otherwise; the sources are not
-  resolved, since they may exist only in the deploy job), the type of the health check (anything but an http check warns; its path
+- **Preflight**: one instance, no active deployment of the platform, a target that can check the release's readiness
+  (one that would count any running instance as ready, such as the Cloud Foundry target without `readyUrl`, is
+  refused with exit 2), a release configuration the target can apply (for the Cloud Foundry target, a source in
+  `vars` for every placeholder of the manifest, refused with exit 2 otherwise; the sources are not resolved, since
+  they may exist only in the deploy job), the type of the health check (anything but an http check warns; its path
   is not compared with the readiness path), and the clock skew against the store, measured with a probe object
-  written into the backup location and deleted again. The plan step then needs a complete newest replica
-  generation; how recent it is, is not checked.
+  written into the backup location and deleted again. The plan step then needs a complete newest replica generation;
+  how recent it is, is not checked.
 - **Plan** on a copy of the newest replica generation: the storage migrations of the release's module packages
   (those the project depends on, and those its direct dependencies bring along, such as the module packages of a
-  preset package; their versions count as the release's) that find their old form (detected and planned, nothing written), the content migrations the release brings
-  that the copy's ledger does not hold, and the questions they ask. The release's content migrations are the ids
-  the host facts list in `contentMigrations`. The plan hash covers the ids only, so an upload between prepare and
-  deploy does not invalidate the receipt. A release whose storage migrations would keep stored SVGs as downloads
-  for want of `kestrel-sanitize-svg` is refused with exit 2 and gets no receipt; the gate of a deploy plans the
-  same way and refuses it with exit 2 before the app stops.
+  preset package; their versions count as the release's) that find their old form (detected and planned, nothing
+  written), the content migrations the release brings that the copy's ledger does not hold, and the questions they
+  ask. The release's content migrations are the ids the host facts list in `contentMigrations`. The plan hash covers
+  the ids only, so an upload between prepare and deploy does not invalidate the receipt. A release whose storage
+  migrations would keep stored SVGs as downloads for want of `kestrel-sanitize-svg` is refused with exit 2 and gets
+  no receipt; the gate of a deploy plans the same way and refuses it with exit 2 before the app stops.
 - **Rehearsal** on that copy: the storage migrations, whose blob writes stay in memory and whose copies only
   point at the source, so no key of the app's store changes; the content migrations through a local start of the
   release when any are pending; an integrity check; and the referenced originals, every one of which must still
@@ -228,14 +228,15 @@ command runs in `dir`, relative to `update.release.dir`; `node` is the Node that
 The journal of a run lives in the backup location, one object per step, so any machine with access to it can
 continue it. `kestrel update resume` refuses with exit 2 to continue a deploy from a process that has another
 release than the run: other versions of the kestrel packages, or other content migrations in the host facts
-(`kestrel update` passes the host plugin's facts to every command but `status`, `run.mjs` those of the bundle).
-It then checks the last finished step and continues after it: a plan of the cutover database that differs from
-the receipt or from the plan the gate recorded is refused, an unfinished
-migration starts again from the cutover backup, a promotion whose generation is no longer the newest is refused,
-after `promote` it swaps and starts, after `start` it verifies; an unfinished rollback runs again from its first
-step, a halted run is verified again, and a verified run whose retire did not finish retires the older releases. A run that has not finished its stop is not resumed; `update abort`
-ends it. `kestrel update abort` ends an open run: before the promotion it starts the previous release on the
-unchanged replica and releases the pin on the cutover backup, after it it rolls back first.
+(`kestrel update` passes the host plugin's facts to every command but `status`, `run.mjs` those of the bundle). It
+then checks the last finished step and continues after it: a plan of the cutover database that differs from the
+receipt or from the plan the gate recorded is refused, an unfinished migration starts again from the cutover
+backup, a promotion whose generation is no longer the newest is refused, after `promote` it swaps and starts,
+after `start` it verifies; an unfinished rollback runs again from its first step, a halted run is verified again,
+and a verified run whose retire did not finish retires the older releases. A run that has not finished its stop is
+not resumed; `update abort` ends it. `kestrel update abort` ends an open run: before the promotion it starts the
+previous release on the unchanged replica and releases the pin on the cutover backup, after it it rolls back
+first.
 
 A process that was killed leaves its lock behind. The command that continues its run therefore needs
 `--break-lock` and the answer `"break-lock": "accept"`, given only once that process no longer runs:
@@ -245,10 +246,11 @@ kestrel update resume --env prod --run <id> --break-lock --answers break-lock.js
 ```
 
 `kestrel update status` reads the runs of the environment from the backup location: the newest deploy run that
-changed something, or the one `--run` names (a newer deploy the gate refused is named beside it), with its state, the hosts its processes ran on, the version change, the cutover backup,
-the time of every step with the ones the app was down for, the total downtime (until a start that became ready, a
-verification that passed or a verified rollback), the derived keys of a rollback, the command to run next, and
-every other run in an open state. It takes no lock and writes nothing.
+changed something, or the one `--run` names (a newer deploy the gate refused is named beside it), with its state,
+the hosts its processes ran on, the version change, the cutover backup, the time of every step with the ones the
+app was down for, the total downtime (until a start that became ready, a verification that passed or a verified
+rollback), the derived keys of a rollback, the command to run next, and every other run in an open state. It takes
+no lock and writes nothing.
 
 ### Accept and cleanup
 
