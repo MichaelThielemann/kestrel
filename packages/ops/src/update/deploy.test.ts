@@ -758,6 +758,27 @@ describe("the configuration a deploy records", { timeout: 30_000 }, () => {
     expect(env).toMatchObject({ SITE_NAME: { value: "Studio" } });
     expect(h.target.configuration.env).toMatchObject({ STORAGE_SECRET: SHARED, STORAGE_URL: `https://user:${SHARED}@store.example.net`, SITE_NAME: "Studio" });
   });
+
+  it("records a plain value that only contains a short credential of the tool verbatim, so the automatic rollback restores it", async () => {
+    const h = createUpdateHarness({ to: { ready: "not-ready", env: { S3_BUCKET: "kestrel-media-next" } } });
+    harnesses.push(h);
+    Object.assign(h.target.configuration.env, { S3_BUCKET: "kestrel-media", STORAGE_KEY_ID: "kestrel" });
+    await h.target.start();
+    await h.target.app?.seed();
+    const steps = fakes();
+    const ctx = await h.context({ answers: ANSWERS, steps: { retire: steps.retire, migrateCopy: steps.migrateCopy } });
+    ctx.redactor.add("kestrel");
+    await receiptFor(ctx);
+    const outcome = await deploy(ctx);
+    expect(outcome.exitCode, outcome.message).toBe(3);
+    expect(outcome.message).toContain("rolled back to the cutover state");
+    const recorded: unknown = JSON.parse(new TextDecoder().decode((await h.store.get(LOCATION + updateKeys.configuration("prod", ctx.run.id))) ?? new Uint8Array()));
+    const env: unknown = typeof recorded === "object" && recorded !== null ? Reflect.get(recorded, "env") : null;
+    expect(env).toMatchObject({ S3_BUCKET: { value: "kestrel-media" } });
+    expect(JSON.stringify(env)).toMatch(/"STORAGE_KEY_ID":\{"fingerprint":"[0-9a-f]{64}"\}/);
+    expect(h.target.configuration.env).toMatchObject({ S3_BUCKET: "kestrel-media", STORAGE_KEY_ID: "kestrel" });
+    expect(h.output.warn.join("\n")).not.toContain("S3_BUCKET");
+  });
 });
 
 describe("a verified deploy whose retire of the previous releases does not finish", { timeout: 30_000 }, () => {

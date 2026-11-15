@@ -1801,7 +1801,9 @@ Net changes since 5.8.2.
   check the release's readiness, a release that cannot clean the stored SVGs, which prepare refuses as well, a release
   configuration the target cannot apply (`UpdateTarget.checkReleaseConfiguration`, optional; prepare checks it
   without resolving the sources), and pending content migrations without `update.localBoot`; stages the release while the old one serves (a staging failure never stops the app); records
-  the app's configuration, secret values only as salted fingerprints; stops the app and waits for the seal, except
+  the app's configuration, secret values only as salted fingerprints (also a plain value that is one of the tool's
+  credentials, holds one as a URL's user or password or as the value of a `key=value` pair, or contains one of 16
+  or more characters; any other plain value verbatim, so a rollback restores it); stops the app and waits for the seal, except
   when the running versions name a runtime before 6, which writes none; takes
   a verified cutover backup that records the running versions, pinned until `update cleanup` for a change of the
   major, unknown running versions or a pending storage migration, so no migration starts without one; migrates a copy

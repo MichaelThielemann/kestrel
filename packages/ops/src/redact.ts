@@ -4,6 +4,21 @@ export const MASK = "[redacted]";
 /** The fields of a document whose string values are free text, such as an error message that may quote what a failed call answered. */
 export const FREE_TEXT_FIELDS: ReadonlySet<string> = new Set(["message", "error", "failure", "detail", "problems"]);
 
+/** The length from which {@link Redactor.holds} finds a registered secret anywhere in a value, as real access keys and secrets have it. */
+export const EMBEDDED_SECRET_LENGTH = 16;
+
+function credentialPositions(text: string): string[] {
+  const values = [text];
+  for (const match of text.matchAll(/\/\/([^/?#\s@]+)@/g)) {
+    const userinfo = match[1] ?? "";
+    const colon = userinfo.indexOf(":");
+    if (colon < 0) values.push(userinfo);
+    else values.push(userinfo.slice(0, colon), userinfo.slice(colon + 1));
+  }
+  for (const match of text.matchAll(/=\s*(["']?)([^\s"'&;,]*)\1/g)) values.push(match[2] ?? "");
+  return values;
+}
+
 /** Replaces every registered secret, and its URL-encoded and JSON-escaped forms, in text before it leaves the process. */
 export class Redactor {
   readonly #secrets = new Set<string>();
@@ -25,9 +40,15 @@ export class Redactor {
     return out;
   }
 
-  /** Whether `text` holds a registered secret, whole or as a part, in any form {@link Redactor.apply} masks. */
+  /**
+   * Whether the value `text` carries a registered secret, in any form {@link Redactor.apply} masks: as the whole value,
+   * as the user or password of a URL, as the value of a `key=value` pair, or, for a secret of at least
+   * {@link EMBEDDED_SECRET_LENGTH} characters, anywhere in it. A shorter secret that is only part of other text, such
+   * as an access key `kestrel` in `kestrel-media`, does not count.
+   */
   holds(text: string): boolean {
-    for (const secret of this.#secrets) if (text.includes(secret)) return true;
+    const positions = credentialPositions(text);
+    for (const secret of this.#secrets) if (secret.length >= EMBEDDED_SECRET_LENGTH ? text.includes(secret) : positions.includes(secret)) return true;
     return false;
   }
 
