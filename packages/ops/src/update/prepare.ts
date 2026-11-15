@@ -7,7 +7,7 @@ import { jsonBytes } from "../layout.ts";
 import { MemoryBucket, memoryStore } from "../memoryStore.ts";
 import { blobstoreOf, MAX_SKEW_MS } from "../replica.ts";
 import { serverClock } from "../serverTime.ts";
-import { integrityCheck, referencedBlobs } from "../sqlite.ts";
+import { integrityCheck, referencedBlobs, sha256 } from "../sqlite.ts";
 import { listMap, type ObjectInfo, type ObjectStore } from "../store.ts";
 import { runContentMigrations } from "./contentMigrations.ts";
 import { updateKeys } from "./layout.ts";
@@ -28,24 +28,40 @@ export interface PrepareResult {
   outcome: UpdateOutcome;
 }
 
-/** How many referenced originals the rehearsal checks without `fullMedia`. */
+/** How many referenced originals the rehearsal reads back without `fullMedia`. */
 export const REHEARSAL_SAMPLE = 25;
 
 const record = (ctx: UpdateContext, step: string, state: "started" | "done" | "failed", data: Record<string, unknown> = {}): Promise<void> => ctx.journal.record(step, state, { phase: "prepare", ...data });
 
 /**
  * A store that reads through to `base` and keeps every write in memory, so a rehearsed migration never changes a key
- * of the app's store.
+ * of the app's store. A copy of a key the overlay does not hold is kept as a reference to the source, so a migration
+ * that copies every original holds none of their bytes.
  */
 export function overlayStore(base: ObjectStore): ObjectStore {
   const overlay = memoryStore(new MemoryBucket("rehearsal"));
   const removed = new Set<string>();
-  const head = async (key: string): Promise<ObjectInfo | null> => (removed.has(key) ? null : ((await overlay.head(key)) ?? (await base.head(key))));
-  const read = async (key: string) => (removed.has(key) ? null : ((await overlay.read(key)) ?? (await base.read(key))));
+  const aliases = new Map<string, string>();
+  const head = async (key: string): Promise<ObjectInfo | null> => {
+    if (removed.has(key)) return null;
+    const own = await overlay.head(key);
+    if (own !== null) return own;
+    const info = await base.head(aliases.get(key) ?? key);
+    return info === null ? null : { ...info, key };
+  };
+  const read = async (key: string) => (removed.has(key) ? null : ((await overlay.read(key)) ?? (await base.read(aliases.get(key) ?? key))));
+  const forget = (key: string): void => {
+    removed.delete(key);
+    aliases.delete(key);
+  };
   return {
     id: `rehearsal:${base.id}`,
     async list(prefix) {
       const merged = new Map((await base.list(prefix)).map((info) => [info.key, info]));
+      for (const key of aliases.keys()) {
+        const info = key.startsWith(prefix) ? await head(key) : null;
+        if (info !== null) merged.set(key, info);
+      }
       for (const info of await overlay.list(prefix)) merged.set(info.key, info);
       return [...merged.values()].filter((info) => !removed.has(info.key)).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
     },
@@ -55,17 +71,22 @@ export function overlayStore(base: ObjectStore): ObjectStore {
       return (await read(key))?.data ?? null;
     },
     async put(key, data, options) {
-      removed.delete(key);
+      forget(key);
       await overlay.put(key, data, options);
     },
     async copy(sourceKey, key) {
-      const source = await read(sourceKey);
-      if (source === null) throw new OpsError(`${sourceKey} does not exist`, 1, sourceKey);
-      removed.delete(key);
-      await overlay.put(key, source.data, source.contentType === undefined ? {} : { contentType: source.contentType });
+      if ((await head(sourceKey)) === null) throw new OpsError(`${sourceKey} does not exist`, 1, sourceKey);
+      const own = removed.has(sourceKey) ? null : await overlay.read(sourceKey);
+      forget(key);
+      if (own !== null) await overlay.put(key, own.data, own.contentType === undefined ? {} : { contentType: own.contentType });
+      else {
+        await overlay.delete(key);
+        aliases.set(key, aliases.get(sourceKey) ?? sourceKey);
+      }
     },
     async delete(key) {
       removed.add(key);
+      aliases.delete(key);
       await overlay.delete(key);
     },
     locate: (key) => base.locate(key),
@@ -74,11 +95,10 @@ export function overlayStore(base: ObjectStore): ObjectStore {
 
 function overlayOps(store: ObjectStore): BlobOps {
   return {
-    copy: async (from, to, options) => {
+    copy: async (from, to) => {
       try {
-        const source = await store.read(from);
-        if (source === null) return err(failure("NOT_FOUND", `${from} does not exist`));
-        await store.put(to, source.data, options?.contentType === undefined ? (source.contentType === undefined ? {} : { contentType: source.contentType }) : { contentType: options.contentType });
+        if ((await store.head(from)) === null) return err(failure("NOT_FOUND", `${from} does not exist`));
+        await store.copy(from, to);
         return ok(undefined);
       } catch (cause) {
         return err(failure("TRANSIENT", `copy ${from} failed`, { cause }));
@@ -95,10 +115,9 @@ function overlayOps(store: ObjectStore): BlobOps {
   };
 }
 
-async function rehearseStorage(ctx: UpdateContext, plan: UpdatePlan, database: string): Promise<RehearsalCheck> {
+async function rehearseStorage(ctx: UpdateContext, plan: UpdatePlan, database: string, store: ObjectStore): Promise<RehearsalCheck> {
   if (plan.storage.length === 0) return { name: "storage-migrations", ok: true, detail: "none pending" };
   const storages = await releaseStorages(ctx);
-  const store = overlayStore(ctx.app);
   const blobs = blobstoreOf(store);
   const blobOps = overlayOps(store);
   const db = await openDatabase(ctx, database);
@@ -117,13 +136,28 @@ async function rehearseStorage(ctx: UpdateContext, plan: UpdatePlan, database: s
   }
 }
 
-async function rehearseOriginals(ctx: UpdateContext, database: string, fullMedia: boolean): Promise<RehearsalCheck> {
+async function missingOriginals(ctx: UpdateContext, database: string, store: ObjectStore): Promise<{ referenced: number; missing: string[] }> {
   const referenced = referencedBlobs(database, ctx.env.app.media);
-  const live = await listMap(ctx.app, ctx.env.app.mediaPrefix);
-  const sample = fullMedia ? referenced : referenced.filter((_, i) => i % Math.max(1, Math.ceil(referenced.length / REHEARSAL_SAMPLE)) === 0);
+  const live = await listMap(store, ctx.env.app.mediaPrefix);
   const missing: string[] = [];
-  for (const ref of sample) if (!live.has(ref.key) && (await ctx.app.head(ref.key)) === null) missing.push(ref.key);
-  return { name: "originals", ok: missing.length === 0, detail: missing.length === 0 ? `${sample.length} of ${referenced.length} referenced original(s) checked` : `missing: ${missing.slice(0, 10).join(", ")}`, counts: { referenced: referenced.length, checked: sample.length, missing: missing.length } };
+  for (const ref of referenced) if (!live.has(ref.key) && (await store.head(ref.key)) === null) missing.push(ref.key);
+  return { referenced: referenced.length, missing };
+}
+
+async function rehearseOriginals(ctx: UpdateContext, database: string, store: ObjectStore, before: number, fullMedia: boolean): Promise<RehearsalCheck> {
+  const referenced = referencedBlobs(database, ctx.env.app.media);
+  const { missing } = await missingOriginals(ctx, database, store);
+  const present = referenced.filter((ref) => !missing.includes(ref.key));
+  const sample = fullMedia ? present : present.filter((_, i) => i % Math.max(1, Math.ceil(present.length / REHEARSAL_SAMPLE)) === 0);
+  const unreadable: string[] = [];
+  for (const ref of sample) {
+    const data = await store.get(ref.key);
+    if (data === null || (ref.sha256 !== null && sha256(data) !== ref.sha256)) unreadable.push(ref.key);
+  }
+  const lost = missing.length > before;
+  const problems = [...(lost ? [`${missing.length - before} referenced original(s) missing after the migrations, such as ${missing.slice(0, 10).join(", ")}`] : []), ...(unreadable.length > 0 ? [`${unreadable.length} original(s) unreadable or with another checksum than their row, such as ${unreadable.slice(0, 10).join(", ")}`] : [])];
+  const detail = problems.length > 0 ? problems.join("; ") : `${present.length} of ${referenced.length} referenced original(s) present, ${sample.length} read back${before > 0 ? `; ${before} row(s) referenced no original already before the update` : ""}`;
+  return { name: "originals", ok: problems.length === 0, detail, counts: { referenced: referenced.length, withoutBlob: missing.length, withoutBlobBefore: before, read: sample.length, unreadable: unreadable.length } };
 }
 
 async function rehearse(ctx: UpdateContext, plan: UpdatePlan, copy: string, options: PrepareOptions): Promise<Rehearsal> {
@@ -131,6 +165,8 @@ async function rehearse(ctx: UpdateContext, plan: UpdatePlan, copy: string, opti
   copyFileSync(copy, database);
   const timings: Record<string, number> = {};
   const checks: RehearsalCheck[] = [];
+  const store = overlayStore(ctx.app);
+  const before = (await missingOriginals(ctx, database, ctx.app)).missing.length;
   const timed = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
     const started = ctx.clock();
     try {
@@ -139,7 +175,7 @@ async function rehearse(ctx: UpdateContext, plan: UpdatePlan, copy: string, opti
       timings[name] = ctx.clock() - started;
     }
   };
-  checks.push(await timed("migrate", () => rehearseStorage(ctx, plan, database)).catch((cause: unknown): RehearsalCheck => ({ name: "storage-migrations", ok: false, detail: messageOf(cause) })));
+  checks.push(await timed("migrate", () => rehearseStorage(ctx, plan, database, store)).catch((cause: unknown): RehearsalCheck => ({ name: "storage-migrations", ok: false, detail: messageOf(cause) })));
   if (plan.content.length > 0) {
     const blobsDir = ctx.workspace.path("rehearsal-blobs");
     mkdirSync(blobsDir, { recursive: true });
@@ -154,7 +190,7 @@ async function rehearse(ctx: UpdateContext, plan: UpdatePlan, copy: string, opti
   }
   const integrity = integrityCheck(database);
   checks.push({ name: "integrity", ok: integrity === "ok", detail: integrity });
-  checks.push(await timed("originals", () => rehearseOriginals(ctx, database, options.fullMedia)));
+  checks.push(await timed("originals", () => rehearseOriginals(ctx, database, store, before, options.fullMedia)));
   return { ok: checks.every((c) => c.ok), checks, timings, peakRssBytes: null, fullMedia: options.fullMedia };
 }
 
@@ -171,8 +207,6 @@ async function preflightProblems(ctx: UpdateContext): Promise<{ problems: string
 
 async function failed(ctx: UpdateContext, step: string, message: string, exitCode: 1 | 2 = 1): Promise<never> {
   await record(ctx, step, "failed", { error: message }).catch(() => undefined);
-  await ctx.journal.finish(false, { phase: "prepare" }).catch(() => undefined);
-  ctx.out.error(message);
   throw new OpsError(message, exitCode, step);
 }
 
@@ -204,9 +238,7 @@ export async function prepare(ctx: UpdateContext, options: PrepareOptions): Prom
     const rehearsal = await rehearse(ctx, plan, copy, options);
     if (!rehearsal.ok) {
       await record(ctx, "rehearsal", "failed", { checks: rehearsal.checks, timings: rehearsal.timings });
-      await ctx.journal.finish(false, { phase: "prepare" });
       const message = `the rehearsal failed, no receipt was written: ${rehearsal.checks.filter((c) => !c.ok).map((c) => `${c.name}: ${c.detail}`).join("; ")}`;
-      ctx.out.error(message);
       throw new OpsError(message, 1, "rehearsal");
     }
     await record(ctx, "rehearsal", "done", { checks: rehearsal.checks, timings: rehearsal.timings });
@@ -217,7 +249,6 @@ export async function prepare(ctx: UpdateContext, options: PrepareOptions): Prom
     if ((await ctx.backups.head(ctx.location + key)) !== null) return await failed(ctx, "receipt", `refusing to overwrite ${key}`);
     await ctx.backups.put(ctx.location + key, jsonBytes(receipt), { contentType: "application/json" });
     await record(ctx, "receipt", "done", { planHash: hash, key });
-    await ctx.journal.finish(true, { phase: "prepare" });
     const outcome = await outcomeOf(ctx, UPDATE_EXIT.done, `receipt written (versions and plan ${hash.slice(0, 12)}). Next: commit the update and run the deploy pipeline`);
     return { receipt, outcome };
   } catch (error) {
