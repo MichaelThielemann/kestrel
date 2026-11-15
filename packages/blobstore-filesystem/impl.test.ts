@@ -335,6 +335,17 @@ describe("blobstore/filesystem list(prefix)", () => {
     expect((await listed(store, "a-")).map((info) => info.key)).toEqual(["a-link"]);
   });
 
+  it("is not failed by a dangling symlink outside the subtree it lists, and still fails on one inside it", async () => {
+    const { root, store } = await populated();
+    await symlink(join(root, "gone"), join(root, "b", "dangling"));
+    await symlink(join(root, "gone"), join(root, "a", "dangling"));
+    expect((await listed(store, "ab/")).map((info) => info.key)).toEqual(["ab/z.txt"]);
+    expect((await listed(store, "top")).map((info) => info.key)).toEqual(["top.txt"]);
+    await expect(store.list("a/")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(store.list("b/")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(store.list("")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("keeps rejecting a root that is a file, whatever the prefix", async () => {
     const root = await fresh();
     const file = join(root, "plain");

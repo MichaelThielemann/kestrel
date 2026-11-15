@@ -2229,7 +2229,8 @@ Net changes since 5.8.2.
   prefix, instead of walking and stating every file of the store and filtering afterwards. Its cost follows the
   number of matching keys rather than the size of the whole store, which shortens every caller that lists a narrow
   prefix, such as the replica listing in `replication-sqlite` on a store with many objects. The result and its
-  order are unchanged.
+  order are unchanged. A broken symlink or an unreadable directory outside that part of the tree no longer makes
+  the listing fail.
 
 ## 5.8.2 – 2026-09-27
 
