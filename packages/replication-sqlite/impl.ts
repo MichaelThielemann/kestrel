@@ -122,10 +122,12 @@ export interface Replication {
   sync(): Promise<Result<{ generation: string; shippedBytes: number; frames: number; checkpointed: boolean; pruned: number }, BlobstoreError>>;
   /**
    * Ships every committed frame the replica lacks, then writes `sealed.json` into the current generation, once; a
-   * later call answers the same seal. Takes no checkpoint, no periodic snapshot and prunes nothing. Without a
-   * generation yet, it takes the first snapshot when the WAL holds committed frames or another connection
-   * committed since the instance was created, and answers `null` without writing anything otherwise. After the
-   * seal it writes the `applied.json` files a sync would write.
+   * later call answers the same seal. With a generation, it takes no checkpoint and no periodic snapshot, and
+   * prunes nothing. Without a generation yet, it takes the first snapshot when the WAL holds committed frames or
+   * another connection committed since the instance was created, and answers `null` without writing anything
+   * otherwise; it runs a passive checkpoint to tell which, and the snapshot runs the passive checkpoint every
+   * snapshot runs before it reads, first on a worker thread when the WAL file is `checkpointBytes` or larger.
+   * After the seal it writes the `applied.json` files a sync would write.
    */
   seal(): Promise<Result<(Seal & { generation: string }) | null, BlobstoreError>>;
   snapshot(): Promise<Result<{ generation: string; bytes: number }, BlobstoreError>>;

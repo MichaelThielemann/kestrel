@@ -27,7 +27,7 @@ frames it applies have to continue the WAL's checksum chain up to the last commi
 header has to read the same before and after; otherwise the snapshot is read again, up to ten times, and
 the run fails with `TRANSIENT` after that. When another connection holds the checkpoint lock, as a blocking
 checkpoint on another thread or in another process does while it waits for the module's read transaction,
-the passive checkpoint cannot run; when that is still so at the third try, the snapshot reads the WAL twice
+the passive checkpoint cannot run; when that is still so at the fourth try, the snapshot reads the WAL twice
 instead, once along the checksum chain to find the last committed frame, and once to apply every frame up
 to it, from the first, to the whole database file. That gives the same image, since such a checkpoint
 copies back only frames the read transaction sees, and the snapshot applies each of them again. Frames
@@ -112,7 +112,9 @@ called later, it runs once more after it, so a sync ships every frame committed 
 `replication.snapshot`, `replication.prepareRestore`, the size-triggered checkpoint and teardown wait
 for each other. Teardown ships the frames committed since the last sync and then seals the generation
 (see [Replica layout](#replica-layout)); it takes no checkpoint and no periodic snapshot and prunes
-nothing, so the time between a stop signal and the kill goes to the frames.
+nothing, so the time between a stop signal and the kill goes to the frames. A teardown without a
+generation yet takes the first snapshot instead, and that runs the passive checkpoint every snapshot runs
+before it reads.
 
 The stop begins earlier, in the module's `quiesce`, at the start of `stop()`: the WAL is no longer
 checked between syncs, and a `replication.sync` that runs or starts from then on ships its frames but

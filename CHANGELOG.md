@@ -733,6 +733,8 @@ Net changes since 5.8.2.
   5.x releases restores its newest generation as before.
 - `replication-sqlite`: the `Replication` interface of `./impl` gains `seal()` and `restoreHandled()`;
   an implementation of it outside this package has to add both.
+- `replication-sqlite`: the `Replication` interface of `./impl` gains `settled()` and `quiesce()`; an
+  implementation of it outside this package has to add both.
 - `examples/nginx-njs` proxies to the origin over `https://` with certificate verification and passes
   `Host`, `X-Forwarded-For` and `X-Forwarded-Proto`; `ORIGIN_UPSTREAM` defaults to `origin` (port 443).
 - Forwarding headers count only from a trusted proxy. The new `http.trustedProxies` (also an option
@@ -2010,7 +2012,8 @@ Net changes since 5.8.2.
 - `replication-sqlite`: teardown ships the frames committed since the last sync and then seals the
   generation. It no longer checkpoints, takes a due snapshot or prunes, so the time between a stop
   signal and the kill goes to the frames. A process that never synced and committed nothing writes
-  nothing at teardown.
+  nothing at teardown; one that never synced but committed takes the first snapshot at teardown, and that
+  runs the passive checkpoint every snapshot runs before it reads.
 - `replication-sqlite` names a new generation after the newest one the replica lists, one millisecond
   later where its own clock is behind, so a generation placed by a process whose clock runs ahead never
   sorts after this process's data. The snapshot's restore point keeps the time it was taken, so a restore
@@ -2128,7 +2131,10 @@ Net changes since 5.8.2.
   process went on shipping frames into the one before it or uploaded a later snapshot.
 - `replication-sqlite`: a restore applies the WAL segments into one image that grows in place, instead of
   copying the image at every commit that changes the database size, so restoring a generation of a growing
-  database takes time in proportion to its segments.
+  database takes time in proportion to its segments. `applySegment` of `./wal` therefore writes into the
+  image it is given while that has room, also when a segment shrinks the database or grows it within that
+  room, and the image it returns can be a view on a larger buffer whose `buffer` holds bytes after the
+  database's end; to keep the image given, pass a copy of it.
 - `replication-sqlite`: the WAL grew without bound until the first generation of a process existed, because
   the module's read transaction kept SQLite from starting the WAL over, and the first snapshot then had to
   read it whole. The module now takes its read transaction when the first snapshot starts reading, so until
@@ -2138,7 +2144,7 @@ Net changes since 5.8.2.
   the WAL still holds `checkpointBytes` of frames after it. A WAL of `checkpointBytes` or more that a
   process left behind when it ended without closing the database is copied back on a worker thread when
   the module opens the file, and `setup()` returns once that is done, before `persistence-sqlite` opens the
-  file; the `Replication` interface of `./impl` gains `settled()`, which resolves then. A seal before the
+  file; `settled()` of the `Replication` interface of `./impl` resolves then. A seal before the
   first generation takes the first snapshot whenever another connection committed since the module opened
   the file, also when the WAL was truncated since.
 - `replication-sqlite`: `stop()` no longer waits for a periodic snapshot, a checkpoint or a prune that a
@@ -2149,8 +2155,7 @@ Net changes since 5.8.2.
   it, and a prune that is still listing the replica or removing a generation ends there. A checkpoint that
   is already running, between syncs or in a sync, ships the frames it has read and ends without copying
   anything back on the event loop's thread. The first snapshot of a process without a generation completes
-  before teardown seals it. The `Replication` interface of
-  `./impl` gains `quiesce()`.
+  before teardown seals it. `quiesce()` of the `Replication` interface of `./impl` begins that stop.
 - `blobstore-s3`: `put` hashes the body for the request signature itself, in slices of 1 MiB with the event
   loop running between them, and hands the SDK the hash; the SDK hashed it in one piece, which held the
   event loop for about 40 ms per 100 MB, and for about 140 ms on a CPU without SHA instructions. The

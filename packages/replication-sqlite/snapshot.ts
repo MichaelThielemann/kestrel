@@ -204,7 +204,7 @@ async function readImage(source: SnapshotSource, db: FileHandle, wal: FileHandle
  * tells how many frames the WAL holds and how many of them are copied back into the database file; the image is
  * the database file up to the size after the last copied frame, with the frames after it applied, which is what
  * the whole file with every committed frame applied holds. When another connection still holds the checkpoint lock
- * at the third try, the WAL is read twice instead: once to find its last committed frame along the checksum chain,
+ * at the fourth try, the WAL is read twice instead: once to find its last committed frame along the checksum chain,
  * then to apply every frame up to it, from the first, to the whole database file. Answers `"stopped"` once `source.stopped()` is true,
  * and `"unsettled"` when the WAL kept starting over while it was read.
  */

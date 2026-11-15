@@ -45,7 +45,9 @@ const GROWTH = 1.25;
  * and writes the pages of its transaction. Frames after the last commit frame, or from the first frame whose salts
  * differ from the header's, are left out. The image is written in place while it has room; when a segment needs
  * more, it moves once into a larger buffer, which later calls with the returned image grow into before they copy
- * it again, so a restore applying many segments to a growing database copies the image only a few times.
+ * it again, so a restore applying many segments to a growing database copies the image only a few times. The
+ * returned image can be a view on a larger buffer: its `byteLength` is the database size, and its `buffer` can
+ * hold bytes after that. To keep `image` as it is, pass a copy of it.
  */
 export function applySegment(image: Uint8Array, segment: Uint8Array): Uint8Array {
   const header = parseWalHeader(segment);
