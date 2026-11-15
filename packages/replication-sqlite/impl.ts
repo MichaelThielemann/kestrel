@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { endianness } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -224,6 +224,7 @@ export function restoreMarker(file: string): string {
 /** Moves a database rebuilt by `prepareRestore` into place; `beforeSwap` runs before the old file is removed, while the restore can still be applied again. */
 export function applyPendingRestore(file: string, beforeSwap: () => void = () => {}): boolean {
   const restored = restoreMarker(file);
+  removeImage(partFile(restored));
   if (!existsSync(restored)) return false;
   beforeSwap();
   for (const suffix of ["", "-wal", "-shm"]) rmSync(file + suffix, { force: true });
@@ -231,7 +232,7 @@ export function applyPendingRestore(file: string, beforeSwap: () => void = () =>
   return true;
 }
 
-/** Rebuilds the database at `target` into `outFile`: the newest generation with a snapshot at or before `target.at` unless `target.generation` names one. `listed` takes the points of a listing already made instead of listing again. */
+/** Rebuilds the database at `target` into `outFile`, written as `<outFile>.part` and renamed only after it passed `quick_check`: the newest generation with a snapshot at or before `target.at` unless `target.generation` names one. `listed` takes the points of a listing already made instead of listing again. */
 export async function restoreFromBlobs(blobs: Blobstore, prefix: string, target: { generation?: string; at?: number }, outFile: string, listed?: readonly Point[]): Promise<Result<{ generation: string; at: number }, KestrelError<"NOT_FOUND" | "TRANSIENT">>> {
   let points: readonly Point[];
   if (listed) points = listed;
@@ -258,13 +259,36 @@ export async function restoreFromBlobs(blobs: Blobstore, prefix: string, target:
     at = p.at;
   }
   mkdirSync(dirname(outFile), { recursive: true });
-  writeFileSync(outFile, image);
-  const verdict = checkImage(outFile);
-  if (verdict !== "ok") {
-    for (const suffix of ["", "-wal", "-shm"]) rmSync(outFile + suffix, { force: true });
-    return err(failure("TRANSIENT", `replication/sqlite: restored image of generation ${generation} (up to ${stamp(at)}) failed quick_check: ${verdict}`));
+  const part = partFile(outFile);
+  try {
+    writeDurably(part, image);
+    const verdict = checkImage(part);
+    if (verdict !== "ok") {
+      removeImage(part);
+      return err(failure("TRANSIENT", `replication/sqlite: restored image of generation ${generation} (up to ${stamp(at)}) failed quick_check: ${verdict}`));
+    }
+    renameSync(part, outFile);
+  } catch (e) {
+    removeImage(part);
+    throw e;
   }
   return ok({ generation, at });
+}
+
+const partFile = (file: string): string => `${file}.part`;
+
+function removeImage(file: string): void {
+  for (const suffix of ["", "-wal", "-shm"]) rmSync(file + suffix, { force: true });
+}
+
+function writeDurably(file: string, data: Uint8Array): void {
+  writeFileSync(file, data);
+  const fd = openSync(file, "r+");
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function checkImage(file: string): string {

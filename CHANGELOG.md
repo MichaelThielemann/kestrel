@@ -2139,6 +2139,11 @@ Net changes since 5.8.2.
 
 ### Fixed
 
+- `replication-sqlite`: `replication.prepareRestore` writes the rebuilt image to `<file>.restore.part`, syncs it
+  and renames it to `<file>.restore` only after it passed `quick_check`. A process killed, or a disk that filled,
+  while the image was written left a partial `<file>.restore`, and the next start swapped it over the live
+  database. A start removes a leftover `<file>.restore.part` without applying it. `restoreFromBlobs` of `./impl`
+  writes every image this way, so `outFile` exists only once it passed the check.
 - `blobstore-s3`: `timeoutMs` ends an attempt on a socket that stays idle that long. A store that accepted the
   connection and then sent nothing kept the call waiting until the operating system gave up on the connection,
   or forever behind a proxy that kept it open, so a replication sync and the seal at teardown hung without an

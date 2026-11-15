@@ -7,8 +7,11 @@ committed WAL frames applied on top, assembled under the module's read transacti
 layout. Frames the snapshot already contains are not shipped again; without a generation there is
 nowhere to ship frames to, so they wait. Point-in-time
 restore = snapshot + segments up to the requested time, applied page by page into one image that grows
-in place; the rebuilt file is opened and passes `PRAGMA quick_check` before it is handed over, otherwise
-the restore fails with `TRANSIENT` naming the generation.
+in place; the rebuilt image is written to `<name>.part`, synced to disk, opened and passes
+`PRAGMA quick_check` before it is renamed to its name, otherwise the restore fails with `TRANSIENT` naming
+the generation and removes the `.part` file. A rebuild that fails while it writes, for example on a full
+disk, removes it too, and one killed while it writes leaves only the `.part` file, which a start removes
+and never applies.
 
 A snapshot is read asynchronously in chunks of 1 MiB, with the event loop running between them, into one
 buffer of the database's size; no other copy of the database or the WAL is held. Before it reads, the
