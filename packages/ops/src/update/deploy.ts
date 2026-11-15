@@ -8,8 +8,8 @@ import { keys, unstamp } from "../layout.ts";
 import { recordPlacement } from "../placements.ts";
 import { fixedText, literal, type Redactor } from "../redact.ts";
 import { confirm } from "../questions.ts";
-import { promote, stableGenerations } from "../replica.ts";
-import { appClock, type ServerClock } from "../serverTime.ts";
+import { MAX_SKEW_MS, promote, stableGenerations } from "../replica.ts";
+import { appClock, checkClockForPromotion, isClockRefusal, type ServerClock } from "../serverTime.ts";
 import { sha256 } from "../sqlite.ts";
 import { releaseUpdatePin } from "./cleanup.ts";
 import { checkGate } from "./gate.ts";
@@ -97,7 +97,8 @@ function stopQuestion(ctx: UpdateContext, plan: UpdatePlan): string {
 }
 
 /**
- * Deploys the release in the order of `DEPLOY_STEPS`. While the old release serves: `gate`, `stage` (a staging
+ * Deploys the release in the order of `DEPLOY_STEPS`. While the old release serves: `gate` (with
+ * `checkClockForPromotion`, so a clock the promotion would refuse ends the run before the stop), `stage` (a staging
  * failure ends the run with exit 1 and the app was never stopped), `configuration` (recorded once into the backup
  * location; a plain variable whose value holds a secret of the tool is kept only as a fingerprint, while a start
  * command or health check endpoint that holds one ends the run with exit 2, since a rollback restores both verbatim), `precopy`. Then `stop` (after the `update-stop` answer), `seal` (waits for the seal after STOPPED, unless the running
@@ -117,6 +118,7 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
     await record(ctx, "gate", "started");
     const planned = await computePlan(ctx, await replicaCopy(ctx, ctx.workspace.path("plan.db")));
     const gate = await checkGate(ctx, planned, await earlierDeploys(ctx));
+    await checkClockForPromotion(ctx);
     const plan = withReceiptVersions(planned, gate.receipt);
     if (gate.accepts !== null) await acceptImplicitly(ctx, gate.accepts);
     await record(ctx, "gate", "done", { receipt: gate.receipt === null ? null : `${gate.planHash}/${gate.receipt.runId}`, versions: plan.versions, planHash: gate.planHash, ordinary: gate.ordinary, pin: pinsCutover(plan), releaseContent: releaseContentMigrations(ctx), configuration: gate.configuration });
@@ -253,7 +255,9 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     try {
       ended = (await ctx.steps.rollback(ctx, known(await readUpdateRun(ctx, ctx.run.id), flow), { kind: "automatic", failure })).ended;
     } catch (cause) {
-      return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`the deploy failed at ${failure}, and the automatic rollback did not finish: ${messageOf(cause)}; the app stays stopped; do not start it by hand; run update resume --env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}, which runs the rollback again`);
+      const scope = fixedText`--env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}`;
+      if (isClockRefusal(cause)) return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`the deploy failed at ${failure}, and the automatic rollback did not begin: ${messageOf(cause)}; the app stays stopped; do not start it by hand; run update resume ${scope} from a machine whose clock is within ${MAX_SKEW_MS / 1000} s of the store's, which rolls back${flow.promoted === null ? fixedText`, or update abort ${scope}, which starts the previous release on the unchanged replica` : literal("")}`);
+      return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`the deploy failed at ${failure}, and the automatic rollback did not finish: ${messageOf(cause)}; the app stays stopped; do not start it by hand; run update resume ${scope}, which runs the rollback again`);
     }
     if (ended === "stopped") return outcomeOf(ctx, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, fixedText`the deploy failed at ${failure}`, flow.from));
     return outcomeOf(ctx, UPDATE_EXIT.rolledBack, flow.cutoverBackup === null ? fixedText`the deploy failed at ${failure} before its cutover backup; nothing was promoted, and the previous release runs again on the unchanged replica` : fixedText`the deploy failed at ${failure}; rolled back to the cutover state`);

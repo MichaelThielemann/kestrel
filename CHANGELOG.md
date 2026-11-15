@@ -1865,7 +1865,10 @@ Net changes since 5.8.2.
   while the app runs that release, but waits for its readiness and verifies it again, and refuses with exit 1 and
   the release left running when that still fails; with the app stopped, and in `update rollback` and `update abort`
   of such a run, the stopped replica is compared with the generation that rollback promoted, and what the previous
-  release wrote since is shown and needs the environment's name before a safety backup and the next promotion; the saved code
+  release wrote since is shown and needs the environment's name before a safety backup and the next promotion; a
+  deploy (at its gate), `update rollback`, `update abort` and a resumed rollback refuse with exit 1 before they stop
+  the app when this machine's clock is more than 30 s off the store's or the newest generation is stamped more than
+  30 s ahead of it, since the promotion would refuse later; the saved code
   of the release before a major change stays until `update cleanup`, so such a run rolls back across the major
   also after a later verified deploy, which then reads rolled back, while an unpinned superseded run is refused. The migration of the cutover copy downloads the cutover database again on every run, so a kill inside
   a content migration that is not idempotent is resumed from the same state; it refuses a migration the plan does

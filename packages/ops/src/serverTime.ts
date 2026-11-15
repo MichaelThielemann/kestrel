@@ -3,7 +3,7 @@ import { OpsError } from "./errors.ts";
 import { Interrupted } from "./interrupt.ts";
 import { keys } from "./layout.ts";
 import type { Output } from "./output.ts";
-import type { PollOptions } from "./replica.ts";
+import { MAX_SKEW_MS, promotionName, stableGenerations, type PollOptions } from "./replica.ts";
 import type { ObjectStore } from "./store.ts";
 
 /** The store's clock relative to this machine's. */
@@ -68,4 +68,25 @@ export async function serverClock(store: ObjectStore, location: string, runId: s
 export function appClock(ctx: Pick<OpsContext, "app" | "env" | "location" | "runId" | "clock" | "poll" | "out">): Promise<ServerClock> {
   const location = ctx.env.backups.storage === undefined ? ctx.location : ctx.env.app.replicaPrefix;
   return serverClock(ctx.app, location, ctx.runId, ctx.clock, ctx.poll, ctx.out);
+}
+
+/** The text a refused clock check of {@link checkClockForPromotion} ends with. */
+export const CLOCK_ADVICE = `run it from a machine whose clock is within ${MAX_SKEW_MS / 1000} s of the store's`;
+
+/**
+ * Measures the clock of the app's store ({@link appClock}) and refuses with exit 1 what a promotion from this machine
+ * would refuse later: a clock more than {@link MAX_SKEW_MS} off the store's (element `clock`), or a newest replica
+ * generation stamped more than that after the store's time (element `gen/<name>`). An update runs it before it stops
+ * the app, so a refusal leaves production as it was. Resolves to the measured clock.
+ */
+export async function checkClockForPromotion(ctx: Pick<OpsContext, "app" | "env" | "location" | "runId" | "clock" | "poll" | "out">): Promise<ServerClock> {
+  const clock = await appClock(ctx);
+  if (Math.abs(clock.skewMs) > MAX_SKEW_MS) throw new OpsError(`this machine's clock is ${Math.round(Math.abs(clock.skewMs) / 1000)} s off the store's (limit ${MAX_SKEW_MS / 1000} s), so it cannot promote a generation; ${CLOCK_ADVICE}`, 1, "clock");
+  promotionName(await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll), clock.now());
+  return clock;
+}
+
+/** True for a refusal of {@link checkClockForPromotion}, or of a promotion for the same reasons. */
+export function isClockRefusal(error: unknown): boolean {
+  return error instanceof OpsError && (error.element === "clock" || error.element?.startsWith("gen/") === true);
 }

@@ -7,7 +7,7 @@ import { OpsError } from "../errors.ts";
 import { fromJsonl, hex, keys, parseJsonOrNull, type BlobEntry, type DerivedEntry, type Manifest, type SealState, type SiteEntry } from "../layout.ts";
 import { buildDatabase, completeGeneration, listGenerations, markerKey, promote, readAcknowledgement, stableGenerations, type Promoted } from "../replica.ts";
 import { downloadDb, restoreDelivery, restoreOriginals } from "../restore.ts";
-import { appClock, type ServerClock } from "../serverTime.ts";
+import { appClock, checkClockForPromotion, type ServerClock } from "../serverTime.ts";
 import { deleteSessions, hasAccessChanges, lossReport, sha256, type LossReport } from "../sqlite.ts";
 import { stableList, type ObjectInfo } from "../store.ts";
 import { releaseUpdatePin } from "./cleanup.ts";
@@ -263,7 +263,8 @@ async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Man
 
 /**
  * Brings back the cutover state of deploy run `run`, in the order of `ROLLBACK_STEPS`, opened by a `rollback`
- * started record and closed by `rollback` done: stops the app if it runs and waits for the seal after STOPPED;
+ * started record and closed by `rollback` done, after `checkClockForPromotion` let it through, so a machine whose
+ * clock a promotion would refuse changes nothing: stops the app if it runs and waits for the seal after STOPPED;
  * promotes the cutover backup's database again (before any old droplet can start); copies back originals whose
  * key holds other bytes; sets the delivery prefix to the backup's and lists it again until no key is newer than the
  * start of the replacement; checks the derived prefixes against the backup's ETag listing; restores the recorded
@@ -283,6 +284,7 @@ export async function rollback(ctx: UpdateContext, run: UpdateRun, reason: Rollb
   }
   const manifest = await readManifest(ctx, run.cutoverBackup);
   if (manifest === null) throw new OpsError(fixedText`the cutover backup ${literal(run.cutoverBackup)} of run ${literal(run.runId)} does not exist or is incomplete`, 1, run.cutoverBackup);
+  await checkClockForPromotion(ctx);
   await ctx.journal.record("rollback", "started", { phase: "rollback", reason: reason.kind, ...(reason.kind === "automatic" ? { failure: reason.failure } : {}), cutoverBackup: manifest.id });
   const progress = { started: false };
   try {
@@ -485,7 +487,8 @@ export type LossMode = "ask" | "backup";
 
 /**
  * Prepares the rollback of deploy run `run` once its new release started, the run was accepted, or its last rollback
- * attempt started the previous release ({@link startedPrevious}): stops the app and waits for the seal first, so nothing
+ * attempt started the previous release ({@link startedPrevious}): refuses, with the app untouched, when the clock of
+ * this machine would make the promotion refuse (`checkClockForPromotion`); stops the app and waits for the seal first, so nothing
  * is written between the report and the stop, then compares the sealed replica with the generation the release it
  * stops started on (the one that attempt promoted, else the one the deploy promoted; the cutover backup after
  * `accept`). When it differs in more than login sessions,
@@ -498,6 +501,7 @@ export async function guardRollback(ctx: UpdateContext, run: UpdateRun, manifest
   let stopped = false;
   const restart = async (): Promise<string> => (stopped ? ((await startTarget(ctx).then(() => true, () => false)) ? fixedText`; the app was started again` : fixedText`; the app stays stopped and starting it again failed`) : "");
   try {
+    await checkClockForPromotion(ctx);
     const stop = await stopTarget(ctx);
     stopped = stop.wasRunning;
     const seal = await ctx.steps.waitForSeal(ctx, stop.stoppedAt, stoppedVersions(run));

@@ -57,11 +57,19 @@ prefix its credentials need:
 | `app.derivedPrefixes` | yes | no | no |
 | `backups.prefix` | yes | every command but `backup list` and `update status`; `status` writes only short-lived probes under `probes/` and `.kestrel-clock/` | yes: `backup prune` removes the backups that are due (`backups/<id>/`) and the objects no backup refers to (`objects/`), and on every run without `--dry-run`, before its `prune-delete` question and also when nothing is due, the entries under `recent/<day>/` older than a day; `update cleanup` removes the code its run saved (`updates/<env>/runs/<run>/droplet-*`), and the `retire` step of a verified deploy the code saved for an earlier run that is closed and holds no pin; a deploy whose credentials may not delete there leaves that code, which no rollback needs any more, with one warning naming its keys and still ends verified with exit 0, `update status` lists it, and `backup prune` removes it once it is a day old; a copy into `objects/` that failed is removed again; the clock and protection probes under `.kestrel-clock/` and `probes/` are deleted again |
 
+A deploy, `update rollback`, `update abort` and an `update resume` that rolls back refuse with exit 1 before they
+stop the app, with production unchanged, when this machine's clock is more than 30 s off the store's or the newest
+replica generation is stamped more than 30 s after the store's time, since the promotion would refuse later with the
+app down; run them from a machine whose clock is within the limit. A deploy that the clock check refuses after its
+stop, such as one `update resume` continues on another machine, names that, and `update abort` while nothing was
+promoted, which starts the previous release on the unchanged replica.
+
 The store's clock is measured with a probe object that is written, listed and deleted again, under
 `.kestrel-clock/` on an S3-compatible store and `probes/` on any other. `update prepare` measures the clock of the
 backup location's store once, always below the backup location and with `backups.storage.credentials` when the
-backup location lies in a store of its own. `status` once, a deploy before its promotion, its swap and its start,
-and a rollback and a restore before their promotion measure the clock of the app's store: below the backup location
+backup location lies in a store of its own. `status` once, a deploy at its gate and before its promotion, its swap
+and its start, a rollback before it stops the app and before its promotion, and a restore before its promotion
+measure the clock of the app's store: below the backup location
 when it shares the app's store, otherwise below `app.replicaPrefix` with `storage.credentials`. Credentials that
 may not delete the probe still get the measurement: the command warns once and goes on, and the probe stays.
 `backup prune` removes probes older than an hour from both places where its credentials may delete them; a probe
@@ -180,7 +188,7 @@ two runs that start in the same moment.
 
 | Step | App | What happens |
 |---|---|---|
-| `gate` | serving | A target that can check readiness, a release configuration the target can apply with every source resolved, and `update.localBoot` when content migrations are pending (exit 2 otherwise), receipt, one instance, no active deployment, no earlier deploy run of this environment in an open state, also behind later runs the gate refused, and none whose older releases are not retired yet; the refusal names the command that finishes that run. The newest earlier run that got past its gate is accepted on the way when it is verified. A refusal ends with exit 1 before anything changed. |
+| `gate` | serving | A target that can check readiness, a release configuration the target can apply with every source resolved, and `update.localBoot` when content migrations are pending (exit 2 otherwise), receipt, one instance, no active deployment, no earlier deploy run of this environment in an open state, also behind later runs the gate refused, and none whose older releases are not retired yet; the refusal names the command that finishes that run. A clock of this machine within 30 s of the store's, and no replica generation stamped more than 30 s after the store's time. The newest earlier run that got past its gate is accepted on the way when it is verified. A refusal ends with exit 1 before anything changed. |
 | `stage` | serving | The release is uploaded and staged while the app keeps running. A staging failure ends the run with exit 1; the app was never stopped. |
 | `configuration` | serving | The app's configuration is recorded once: plain values verbatim, secret values only as salted fingerprints (also a plain value that contains one of the tool's own credentials of 16 or more characters, or a shorter one as a token of its own or as the user or password of a URL; a shorter credential stands as a token of its own where it is neither preceded nor followed by a letter, a digit, `_` or `-`, nor by a run of `.` and `/` with such a character beyond it, as in `minio:minioadmin`, `minioadmin.`, `minioadmin/`, `s3://minioadmin`, `Bearer <key>`, `--password <key>` or a JSON string; every other plain value is recorded verbatim, so a rollback restores it: for the access key `kestrel`, `kestrel-media`, `kestrel.example.net` and `https://kestrel.example.net/kestrel` stay verbatim, while `s3://kestrel` is a fingerprint), the health check, memory, disk, start command and instance count. A start command or health check endpoint that holds such a credential by the same rule ends the run with exit 2 before anything is recorded, since a rollback restores both verbatim and a fingerprint could not stand in for them; move the credential into an environment variable of the app. |
 | `precopy` | serving | Originals and the delivery prefix are copied into the backup location, so only the difference is copied after the stop. |
