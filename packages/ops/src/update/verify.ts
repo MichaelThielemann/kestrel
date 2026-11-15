@@ -85,12 +85,13 @@ export async function outcomeOf(ctx: UpdateContext, exitCode: UpdateExitCode, me
 /**
  * Records a verification of phase `phase` and acts on its verdict: `passed` retires the previous releases and ends
  * with exit 0, `failed` rolls back automatically and ends with exit 3 (1 when the rollback did not finish),
- * `unverifiable` halts with exit 1 and leaves the new release running.
+ * `unverifiable` halts with exit 1 and leaves the new release running. `known` fills in what the caller knows of the
+ * run and its journal listing may not show yet, such as the cutover backup and the promoted generation.
  */
-export async function concludeVerify(ctx: UpdateContext, phase: UpdatePhase, result: VerifyResult): Promise<UpdateOutcome> {
+export async function concludeVerify(ctx: UpdateContext, phase: UpdatePhase, result: VerifyResult, known: (run: UpdateRun) => UpdateRun = (run) => run): Promise<UpdateOutcome> {
   await ctx.journal.record("verify", "done", { phase, verdict: result.verdict, checks: result.checks, ownGeneration: result.ownGeneration });
   if (result.verdict === "unverifiable") return outcomeOf(ctx, UPDATE_EXIT.refused, `verification could not tell (${describeProbe(result.ready)}); the new release keeps running and nothing was rolled back. Once its readiness can be checked, run update resume --env ${ctx.envName} --run ${ctx.run.id}, or update rollback`);
-  const run = await readUpdateRun(ctx, ctx.run.id);
+  const run = known(await readUpdateRun(ctx, ctx.run.id));
   if (result.verdict === "failed") {
     const failure = result.checks.filter((c) => c.hard && !c.ok).map((c) => `${c.name}: ${c.detail}`).join("; ");
     try {
@@ -118,5 +119,6 @@ export async function verifyCommand(ctx: UpdateContext, run: UpdateRun): Promise
   const recorded: unknown = start?.data.startedAt;
   const startedAt = typeof recorded === "number" ? recorded : (start?.at ?? run.lastAt);
   await ctx.journal.record("verify", "started", { phase: "verify" });
-  return concludeVerify(ctx, "verify", await ctx.steps.verify(ctx, { promoted: run.promoted, startedAt }));
+  const promoted = run.promoted;
+  return concludeVerify(ctx, "verify", await ctx.steps.verify(ctx, { promoted, startedAt }), (read) => ({ ...read, stagedDroplet: read.stagedDroplet ?? run.stagedDroplet, cutoverBackup: read.cutoverBackup ?? run.cutoverBackup, promoted: read.promoted ?? promoted }));
 }

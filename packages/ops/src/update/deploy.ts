@@ -137,6 +137,11 @@ function interruptedAfterStop(ctx: UpdateContext, step: string): string {
   return `${state}; run update resume ${scope} to continue the run, or update abort ${scope} to end it`;
 }
 
+function known(run: UpdateRun, flow: Pick<Flow, "staged" | "cutoverBackup" | "promoted">): UpdateRun {
+  const promoted = flow.promoted === null ? run.promoted : { generation: flow.promoted.generation, nonce: flow.promoted.nonce };
+  return { ...run, stagedDroplet: run.stagedDroplet ?? flow.staged, cutoverBackup: run.cutoverBackup ?? flow.cutoverBackup, promoted: run.promoted ?? promoted };
+}
+
 async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<UpdateOutcome> {
   const order: Entry[] = ["seal", "cutover-backup", "migrate", "swap", "start", "verify"];
   const from = order.indexOf(entry);
@@ -203,14 +208,14 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     step = "verify";
     await record(ctx, "verify", "started");
     const result = await ctx.steps.verify(ctx, { promoted: { generation: promoted.generation, nonce: promoted.nonce }, startedAt: flow.startedAt ?? ctx.clock() });
-    return await concludeVerify(ctx, "deploy", result);
+    return await concludeVerify(ctx, "deploy", result, (run) => known(run, flow));
   } catch (error) {
     if (error instanceof Interrupted) throw new Interrupted(error.signal, interruptedAfterStop(ctx, step));
     const failure = `${step}: ${messageOf(error)}`;
     await record(ctx, step, "failed", { error: messageOf(error) }).catch(() => undefined);
     ctx.out.error(`the deploy failed after the stop at ${failure}; rolling back`);
     try {
-      await ctx.steps.rollback(ctx, await readUpdateRun(ctx, ctx.run.id), { kind: "automatic", failure });
+      await ctx.steps.rollback(ctx, known(await readUpdateRun(ctx, ctx.run.id), flow), { kind: "automatic", failure });
     } catch (cause) {
       return outcomeOf(ctx, UPDATE_EXIT.refused, `the deploy failed at ${failure}, and the automatic rollback did not finish: ${messageOf(cause)}; the app stays stopped; do not start it by hand; run update resume --env ${ctx.envName} --run ${ctx.run.id}, which runs the rollback again`);
     }

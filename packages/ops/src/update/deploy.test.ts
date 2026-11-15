@@ -1,13 +1,16 @@
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ok } from "@michaelthielemann/kestrel-contracts/errors";
 import type { ModuleStorage } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import { LOCATION, PREFIXES } from "../harness.fixture.ts";
 import { Interrupted } from "../interrupt.ts";
-import { jsonBytes, keys, stamp } from "../layout.ts";
+import { jsonBytes, keys, parseJsonOrNull, stamp } from "../layout.ts";
+import { MemoryBucket, memoryStore } from "../memoryStore.ts";
 import { listGenerations } from "../replica.ts";
 import { sha256File } from "../sqlite.ts";
+import type { ObjectStore } from "../store.ts";
 import { abort } from "./abort.ts";
 import { continueDeploy, deploy } from "./deploy.ts";
 import { createUpdateHarness, type UpdateHarness, type UpdateHarnessOptions } from "./harness.fixture.ts";
@@ -334,5 +337,66 @@ describe("the next command a failed deploy names", { timeout: 30_000 }, () => {
     expect(outcome.exitCode).toBe(1);
     expect(outcome.message).toContain(`update abort --env prod --run ${run.runId}`);
     expect(outcome.message).not.toContain("nothing changed yet");
+  });
+});
+
+describe("the automatic rollback of a deploy whose journal listing lags", { timeout: 30_000 }, () => {
+  function laggingJournal(store: ObjectStore): ObjectStore {
+    const hidden = new Set<string>();
+    let lagging = false;
+    return {
+      ...store,
+      id: store.id,
+      locate: (key) => store.locate(key),
+      head: (key) => store.head(key),
+      get: (key) => store.get(key),
+      read: (key, options) => store.read(key, options),
+      copy: (source, key, options) => store.copy(source, key, options),
+      delete: (key) => store.delete(key),
+      put: async (key, data, options) => {
+        if (key.startsWith(`${LOCATION}runs/`) && key.endsWith("-cutover-backup-done.json")) lagging = true;
+        if (lagging && key.startsWith(`${LOCATION}runs/`)) hidden.add(key);
+        await store.put(key, data, options);
+      },
+      list: async (prefix) => (await store.list(prefix)).filter((info) => !hidden.has(info.key)),
+    };
+  }
+
+  it("rolls a failed swap back to the cutover state it knows, so the previous release never starts on the promoted generation", async () => {
+    const h = createUpdateHarness({ store: laggingJournal(memoryStore(new MemoryBucket("kestrel-test"))) });
+    harnesses.push(h);
+    await h.target.start();
+    await h.target.app?.seed();
+    const steps = fakes();
+    steps.migrateCopy.mockImplementation(async (ctx, input) => {
+      const data = await ctx.backups.get(LOCATION + keys.db(input.cutoverBackup));
+      if (data === null) throw new Error("no cutover database");
+      writeFileSync(input.outFile, data);
+      const db = new DatabaseSync(input.outFile);
+      db.exec(`CREATE TABLE "converted_shape" ("version" INTEGER)`);
+      db.close();
+      return { sha256: sha256File(input.outFile), storage: [], content: [], changedTables: ["converted_shape"] };
+    });
+    const ctx = await h.context({ answers: ANSWERS, steps: { retire: steps.retire, migrateCopy: steps.migrateCopy } });
+    await receiptFor(ctx);
+    const setDroplet = h.target.setDroplet.bind(h.target);
+    h.target.setDroplet = async () => {
+      h.target.setDroplet = setDroplet;
+      throw new Error("platform error");
+    };
+    const violations: string[] = [];
+    const start = h.target.start.bind(h.target);
+    h.target.start = async () => {
+      const newest = (await listGenerations(h.store, PREFIXES.replica)).at(-1);
+      const origin = newest === undefined ? null : await h.store.get(`${PREFIXES.replica}gen/${newest.name}/origin.json`);
+      const value: unknown = origin === null ? null : parseJsonOrNull(origin);
+      if (h.target.release.runtime.startsWith("5.") && typeof value === "object" && value !== null && Reflect.get(value, "kind") === "upgrade") violations.push(`runtime ${h.target.release.runtime} started on ${newest?.name ?? ""}`);
+      return start();
+    };
+    const outcome = await deploy(ctx);
+    expect(outcome.exitCode, outcome.message).toBe(3);
+    expect(outcome.message).toContain("rolled back to the cutover state");
+    expect(violations).toEqual([]);
+    expect(() => h.target.app?.rows("converted_shape")).toThrow("no such table");
   });
 });

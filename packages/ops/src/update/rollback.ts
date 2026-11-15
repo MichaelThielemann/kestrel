@@ -5,7 +5,7 @@ import { acceptSeal, createBackup, readManifest, readSeal } from "../backup.ts";
 import { messageOf, recordQuietly, startTarget, stopTarget } from "../context.ts";
 import { OpsError } from "../errors.ts";
 import { fromJsonl, hex, keys, parseJsonOrNull, type BlobEntry, type DerivedEntry, type Manifest, type SealState, type SiteEntry } from "../layout.ts";
-import { acknowledgement, buildDatabase, completeGeneration, listGenerations, promote, stableGenerations, type Promoted } from "../replica.ts";
+import { acknowledgement, buildDatabase, completeGeneration, listGenerations, markerKey, promote, stableGenerations, type Promoted } from "../replica.ts";
 import { downloadDb, restoreDelivery, restoreOriginals } from "../restore.ts";
 import { appClock, type ServerClock } from "../serverTime.ts";
 import { deleteSessions, hasAccessChanges, lossReport, sha256, type LossReport } from "../sqlite.ts";
@@ -247,7 +247,8 @@ async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Man
  * through the marker row in the first snapshot of an older one. Without a previous droplet or its bits the rollback
  * ends with the app stopped on the cutover state (`ended: "stopped"`). A run that stopped the app but has no cutover
  * backup yet promoted nothing: its rollback makes the previous droplet current, starts it on the unchanged replica and
- * checks its readiness.
+ * checks its readiness. It refuses instead while the app's current droplet is the one the run staged, or while the
+ * newest generation carries an `origin.json` of kind `upgrade` that no `applied.json` acknowledges.
  */
 export async function rollback(ctx: UpdateContext, run: UpdateRun, reason: RollbackReason): Promise<RollbackResult> {
   if (run.cutoverBackup === null) {
@@ -266,9 +267,25 @@ export async function rollback(ctx: UpdateContext, run: UpdateRun, reason: Rollb
   }
 }
 
+async function promotedInPlace(ctx: UpdateContext, run: UpdateRun): Promise<string | null> {
+  if (run.stagedDroplet !== null && (await ctx.target.currentDroplet()) === run.stagedDroplet) return `the app's current droplet is ${run.stagedDroplet}, the one run ${run.runId} staged`;
+  const newest = (await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).at(-1);
+  if (newest === undefined) return null;
+  const read = async (marker: "origin" | "applied"): Promise<unknown> => {
+    const data = await ctx.app.get(markerKey(ctx.env.app.replicaPrefix, newest.name, marker));
+    return data === null ? null : parseJsonOrNull(data);
+  };
+  const origin = await read("origin");
+  const kind: unknown = typeof origin === "object" && origin !== null ? Reflect.get(origin, "kind") : null;
+  if (kind === "upgrade" && (await read("applied")) === null) return `the newest generation ${newest.name} was placed by an update and no release acknowledged it`;
+  return null;
+}
+
 async function restartPrevious(ctx: UpdateContext, run: UpdateRun, reason: RollbackReason): Promise<RollbackResult> {
   await ctx.journal.record("rollback", "started", { phase: "rollback", reason: reason.kind, ...(reason.kind === "automatic" ? { failure: reason.failure } : {}), cutoverBackup: null });
   try {
+    const promoted = await promotedInPlace(ctx, run);
+    if (promoted !== null) throw new OpsError(`run ${run.runId} shows no cutover backup, but ${promoted}; the previous release does not start on it. Once the journal lists the cutover backup, update resume --env ${ctx.envName} --run ${run.runId} rolls back to it`, 1, "rollback");
     const seal = await stopAndSeal(ctx);
     const generation = (await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).at(-1)?.name ?? "";
     const recorded = await recordedConfiguration(ctx, run.runId);

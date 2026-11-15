@@ -83,6 +83,17 @@ describe("rolling an update back", () => {
     expect(violations).toEqual([]);
   });
 
+  it.each(["promote", "swap"] as const)("refuses to start the previous release for a run whose journal shows no cutover backup while a generation it promoted is in place (after %s)", async (until) => {
+    const s = await scenario();
+    const violations = guardStarts(s);
+    const deployed = await deployUntil(s, until);
+    expect(deployed.end.failure).toBeNull();
+    const run = { ...(await runOf(s, deployed.runId)), cutoverBackup: null, promoted: null };
+    await expect(rollback(deployed.ctx, run, { kind: "automatic", failure: "swap: platform error" })).rejects.toThrow("update resume");
+    expect(s.h.target.actions.filter((a) => a === "start")).toHaveLength(1);
+    expect(violations).toEqual([]);
+  });
+
   it("brings back the cutover state: every table but the emptied sessions, the originals, the delivery prefix and the recorded configuration verbatim", async () => {
     const s = await scenario();
     const violations = guardStarts(s);
