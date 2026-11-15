@@ -147,8 +147,10 @@ export interface Replication {
    * Says that the process is stopping: the WAL is no longer checked between syncs, a snapshot that would start a
    * generation after the current one ends before it uploads anything, also while it still lists the replica, a
    * prune that is listing the replica or removing a generation ends there, and a sync ships the new frames and
-   * skips the checkpoint, the periodic snapshot and the prune. A first snapshot, without a generation yet, still
-   * completes, since teardown would have to take it anyway.
+   * skips the checkpoint, the periodic snapshot and the prune. A checkpoint already running, between syncs or in a
+   * sync, ships the frames it has read and ends without copying anything back on the event loop's thread, once the
+   * copy-back worker it started is done. A first snapshot, without a generation yet, still completes, since teardown
+   * would have to take it anyway.
    */
   quiesce(): void;
 }
@@ -623,10 +625,10 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     reading = true;
     let copyBack: CopyBack | null = null;
     try {
-      if (walBytes() >= config.checkpointBytes) copyBack = await prepareCopyBack(file);
+      if (!halted() && walBytes() >= config.checkpointBytes) copyBack = await prepareCopyBack(file);
       if (closed) return ok(null);
       if (!holding) holdRead();
-      if (copyBack !== null) {
+      if (copyBack !== null && !halted()) {
         copyBack.start();
         await copyBack.done;
       }
@@ -758,11 +760,12 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       if (isErr(flushed)) return flushed;
       return ok({ done, bytes, frames });
     };
-    for (let round = 0; round < COPY_BACK_ROUNDS && uncopiedBytes() >= copyBackBytes; round++) {
+    for (let round = 0; round < COPY_BACK_ROUNDS && !stopping && uncopiedBytes() >= copyBackBytes; round++) {
       const copyBack = await prepareCopyBack(file);
       if (copyBack === null) break;
       try {
         if (closed) return ok({ done: false, bytes, frames });
+        if (stopping) return ended(false);
         const tail = underWriteLock(() => {
           const read = readCommittedSync(continueFrom);
           release();
@@ -778,6 +781,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       }
       if (closed) return ok({ done: false, bytes, frames });
     }
+    if (stopping) return ended(false);
     const finished = underWriteLock(() => {
       const tail = readCommittedSync(continueFrom);
       release();
@@ -805,9 +809,9 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   };
 
   const maintain = async (): Promise<void> => {
-    if (closed) return;
+    if (closed || stopping) return;
     const shipped = await shipNewFrames();
-    if (isErr(shipped) || closed) return;
+    if (isErr(shipped) || closed || stopping) return;
     await checkpoint();
   };
   const checkpointBeforeGeneration = (): void => {

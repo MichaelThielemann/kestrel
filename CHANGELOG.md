@@ -2143,8 +2143,10 @@ Net changes since 5.8.2.
   its frames but skips the checkpoint, the periodic snapshot and the prune, a periodic snapshot or
   `replication.snapshot` that is still listing the replica or reading ends without uploading anything (the
   latter answers `TRANSIENT`), so teardown ships the last frames into the generation before it and seals
-  it, and a prune that is still listing the replica or removing a generation ends there. The first snapshot
-  of a process without a generation completes before teardown seals it. The `Replication` interface of
+  it, and a prune that is still listing the replica or removing a generation ends there. A checkpoint that
+  is already running, between syncs or in a sync, ships the frames it has read and ends without copying
+  anything back on the event loop's thread. The first snapshot of a process without a generation completes
+  before teardown seals it. The `Replication` interface of
   `./impl` gains `quiesce()`.
 - `blobstore-s3`: `put` hashes the body for the request signature itself, in slices of 1 MiB with the event
   loop running between them, and hands the SDK the hash; the SDK hashed it in one piece, which held the

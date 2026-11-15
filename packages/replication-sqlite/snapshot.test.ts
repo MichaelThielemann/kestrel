@@ -1060,6 +1060,93 @@ describe("replication/sqlite after quiesce", () => {
     const generation = expectOk(await repl.sync()).generation;
     expect(await restored(l.blobs, l.dir)).toMatchObject({ generation, ...fingerprint(l.app), check: "ok" });
   });
+
+  it("ends a size-triggered checkpoint between syncs that is still shipping frames when the stop begins, without copying anything back, and the seal holds every frame", async () => {
+    const l = live();
+    l.app.exec("PRAGMA wal_autocheckpoint = 0");
+    l.insert(50, 900);
+    const repl = l.start({ checkpointBytes: MB }, { checkIntervalMs: 20 });
+    expectOk(await repl.sync());
+    const checkpointedAt = (await repl.status()).lastCheckpointAt;
+    expect(checkpointedAt).not.toBeNull();
+    l.clock.advance(1_000);
+    const put = l.blobs.put.bind(l.blobs);
+    let shipping = false;
+    l.blobs.put = async (key, data, options) => {
+      if (key.includes("/wal/") && !shipping) {
+        shipping = true;
+        await sleep(300);
+      }
+      return put(key, data, options);
+    };
+    for (let i = 0; i < 40; i++) l.insert(125, 3800);
+    const index = walIndex(l.file);
+    while (!shipping) await sleep(5);
+    await sleep(50);
+    repl.quiesce();
+    const backfilled = index.backfilled();
+    const sealed = expectOk(await repl.seal());
+    if (sealed === null) throw new Error("expected a seal");
+    expect((await repl.status()).lastCheckpointAt).toBe(checkpointedAt);
+    expect(index.backfilled()).toBe(backfilled);
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation: sealed.generation, ...fingerprint(l.app), check: "ok" });
+  }, 30_000);
+
+  it("ends the checkpoint of a sync after the copy-back round during which the stop begins, without the copy on this thread", async () => {
+    const l = live();
+    l.app.exec("PRAGMA wal_autocheckpoint = 0");
+    l.insert(50, 900);
+    const copyBackBytes = MB;
+    const repl = l.start({ checkpointBytes: copyBackBytes }, { copyBackBytes });
+    expectOk(await repl.sync());
+    const checkpointedAt = (await repl.status()).lastCheckpointAt;
+    l.clock.advance(1_000);
+    for (let i = 0; i < 6; i++) l.insert(100, 3800);
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- called only through apply, with the connection as this
+    const exec = DatabaseSync.prototype.exec;
+    const locked = vi.spyOn(DatabaseSync.prototype, "exec").mockImplementation(function (this: DatabaseSync, ...args: Parameters<typeof exec>) {
+      exec.apply(this, args);
+      if (this !== l.app && args[0] === "BEGIN IMMEDIATE") repl.quiesce();
+    });
+    let synced: Awaited<ReturnType<Replication["sync"]>>;
+    try {
+      synced = await repl.sync();
+    } finally {
+      locked.mockRestore();
+    }
+    expect(expectOk(synced)).toMatchObject({ checkpointed: false });
+    expect((await repl.status()).lastCheckpointAt).toBe(checkpointedAt);
+    const sealed = expectOk(await repl.seal());
+    if (sealed === null) throw new Error("expected a seal");
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation: sealed.generation, ...fingerprint(l.app), check: "ok" });
+  }, 30_000);
+
+  it("runs no copy-back worker for a snapshot once the stop begins, so the frames another reader kept from being copied back stay in the WAL", async () => {
+    const l = live();
+    l.app.exec("PRAGMA wal_autocheckpoint = 0");
+    l.insert(50, 900);
+    const repl = l.start({ checkpointBytes: 64 * 1024 });
+    expectOk(await repl.sync());
+    const reader = new DatabaseSync(l.file);
+    apps.push(reader);
+    reader.exec("BEGIN");
+    reader.prepare("SELECT count(*) FROM t").get();
+    for (let i = 0; i < 4; i++) l.insert(100, 3800);
+    expect(expectOk(await repl.sync())).toMatchObject({ checkpointed: false });
+    reader.exec("COMMIT");
+    const index = walIndex(l.file);
+    const backfilled = index.backfilled();
+    expect(index.frames() - backfilled).toBeGreaterThan(300);
+    const list = l.blobs.list.bind(l.blobs);
+    l.blobs.list = async (prefix) => {
+      const listed = await list(prefix);
+      setTimeout(() => repl.quiesce(), 0);
+      return listed;
+    };
+    const refused = await repl.snapshot();
+    expect(refused.ok).toBe(false);
+    expect(index.backfilled()).toBe(backfilled);
+  }, 30_000);
 });
 
 describe("replication/sqlite failed snapshot upload", () => {
