@@ -11,9 +11,12 @@ in place; the rebuilt file is opened and passes `PRAGMA quick_check` before it i
 the restore fails with `TRANSIENT` naming the generation.
 
 A snapshot is read asynchronously in chunks of 1 MiB, with the event loop running between them, into one
-buffer of the database's size; no other copy of the database or the WAL is held. A passive checkpoint on
-the module's second connection tells how many frames the WAL holds and how many of them are already copied
-back into the database file. The snapshot is the database file up to the size after the last copied frame,
+buffer of the database's size; no other copy of the database or the WAL is held. Before it reads, the
+snapshot runs a passive checkpoint on the module's second connection: it copies back into the database file
+every committed frame the module's read transaction already sees, and answers how many frames the WAL holds
+and how many of them the database file now holds. When the WAL file is `checkpointBytes` or larger, a worker
+thread first runs the same checkpoint on a connection of its own, so the one on the event loop's thread finds
+next to nothing left to copy. The snapshot is the database file up to the size after the last copied frame,
 with the frames after it applied in order, which is byte for byte the whole file with every committed frame
 applied. The module's read transaction stays open while the snapshot is read: no checkpoint copies back a
 frame the read transaction does not see, so the pages the snapshot reads from the file change only where a
@@ -45,8 +48,8 @@ a run costs time and memory in proportion to the new frames, not to the WAL. A f
 when it belongs to a committed transaction and its salts and checksum continue the WAL's checksum
 chain; a partly written frame at the end of the file waits for the next run.
 
-The module holds a read transaction on the database, which keeps SQLite from resetting the WAL
-before its frames are shipped. A checkpoint first takes the database write lock on a second
+From its first snapshot on, the module holds a read transaction on the database, which keeps SQLite
+from resetting the WAL before its frames are shipped. A checkpoint first takes the database write lock on a second
 connection (`BEGIN IMMEDIATE`, without a busy timeout), so no connection in any thread or process
 can commit meanwhile; under that lock it reads the remaining committed frames, releases the read
 transaction, runs `wal_checkpoint(PASSIVE)` and takes the read transaction again, then releases the
@@ -62,13 +65,18 @@ rarely `replication.sync` runs. An older read snapshot on another connection can
 from copying every frame back; the WAL then keeps growing and the next check tries again.
 
 Before the process has a generation, nothing ships frames and the first snapshot holds every frame
-committed until it is read. The once-per-second check then checkpoints as soon as the WAL holds
-`checkpointBytes` of frames, without the write lock and without reading frames, also while the first
-`replication.sync` lists the replica: it releases the read transaction, runs `wal_checkpoint(PASSIVE)`
-and takes the read transaction again. The WAL therefore stays near `checkpointBytes` until the first
-snapshot, which then reads little more than the database file. The check pauses from the moment a
-snapshot starts reading until it is uploaded or given up, since the frames committed meanwhile belong
-to the generation it starts.
+committed until it is read, so the module holds no read transaction until that snapshot starts reading,
+and gives it up again when the snapshot fails. Until then the checkpoints SQLite runs by itself keep the
+WAL as short as without replication: once the WAL holds `wal_autocheckpoint` pages (1000 unless the
+writing connection sets another value), the connection that commits copies it back, and the next write
+transaction starts it over, also when write transactions stay open across awaits. The once-per-second check
+runs `wal_checkpoint(PASSIVE)` as well, for a writer that turned those checkpoints off, also while the first
+`replication.sync` lists the replica; it pauses from the moment a snapshot starts reading until it is
+uploaded or given up, since the frames committed meanwhile belong to the generation it starts. A WAL of
+`checkpointBytes` or more that the file already has when the module opens it, left behind by a process that
+ended without closing the database, is copied back on a worker thread with a connection of its own; the
+check, the first snapshot and a seal wait for it, and a checkpoint that SQLite starts after a commit on
+another connection meanwhile finds the WAL busy and leaves it to the worker.
 
 If an upload fails after a checkpoint, the frames stay in memory and go out first on the next run;
 a new snapshot supersedes them, as does the snapshot a restarted process takes on its first sync.

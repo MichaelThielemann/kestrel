@@ -1,9 +1,10 @@
+import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import type * as FsPromisesModule from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { endianness, tmpdir } from "node:os";
 import { join } from "node:path";
 import { monitorEventLoopDelay } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, StatementSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
@@ -184,6 +185,87 @@ function otherThreadWriter(file: string, ms: number): Promise<number> {
   });
 }
 
+const MB = 1024 * 1024;
+
+function killedWriter(file: string, imageMb: number, walMb: number): void {
+  const source = `
+    const { DatabaseSync } = require("node:sqlite");
+    const { statSync } = require("node:fs");
+    const [file, imageMb, walMb] = process.argv.slice(1);
+    const db = new DatabaseSync(file);
+    db.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT); CREATE TABLE counter (k TEXT PRIMARY KEY, n INTEGER); INSERT INTO counter VALUES ('main', 0), ('other', 0)");
+    const rows = Math.ceil((Number(imageMb) * 1024 * 1024) / 4096);
+    const insert = db.prepare("INSERT INTO t (v) VALUES (?)");
+    db.exec("BEGIN");
+    for (let i = 0; i < rows; i++) insert.run(String(i).padEnd(3800, "s"));
+    db.exec("COMMIT; PRAGMA wal_checkpoint(TRUNCATE); PRAGMA wal_autocheckpoint = 0");
+    const update = db.prepare("UPDATE t SET v = ? WHERE id = ?");
+    for (let round = 0; statSync(file + "-wal").size < Number(walMb) * 1024 * 1024; round++) {
+      db.exec("BEGIN");
+      for (let i = 0; i < 200; i++) update.run((round + "-" + i + "-").padEnd(3800, "u"), 1 + ((round * 200 + i) % rows));
+      db.exec("COMMIT");
+    }
+    process.kill(process.pid, "SIGKILL");
+  `;
+  const run = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "-e", source, file, String(imageMb), String(walMb)], { encoding: "utf8" });
+  if (run.signal !== "SIGKILL") throw new Error(`the writer was not killed: ${run.stderr}`);
+}
+
+function copiedBackOnThisThread(file: string): { frames: () => number; stop: () => void } {
+  const little = endianness() === "LE";
+  const backfilled = (): number => {
+    try {
+      const shm = readFileSync(`${file}-shm`);
+      return shm.byteLength < 100 ? 0 : new DataView(shm.buffer, shm.byteOffset, shm.byteLength).getUint32(96, little);
+    } catch {
+      return 0;
+    }
+  };
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- called only through apply, with the statement as this
+  const original = StatementSync.prototype.get;
+  let frames = 0;
+  const spy = vi.spyOn(StatementSync.prototype, "get").mockImplementation(function (this: StatementSync, ...args: Parameters<typeof original>) {
+    if (!this.sourceSQL.includes("wal_checkpoint")) return original.apply(this, args);
+    const before = backfilled();
+    const row = original.apply(this, args);
+    frames += Math.max(0, backfilled() - before);
+    return row;
+  });
+  return { frames: () => frames, stop: () => spy.mockRestore() };
+}
+
+async function measured<T>(task: () => Promise<T>): Promise<{ value: T; ms: number; longestMs: number; p99Ms: number; peakBuffers: number; peakRss: number }> {
+  const delay = monitorEventLoopDelay({ resolution: 5 });
+  const baseline = process.memoryUsage();
+  let peakBuffers = 0;
+  let peakRss = 0;
+  let lastTick = performance.now();
+  let longestGap = 0;
+  const sampler = setInterval(() => {
+    const tick = performance.now();
+    longestGap = Math.max(longestGap, tick - lastTick);
+    lastTick = tick;
+    const usage = process.memoryUsage();
+    peakBuffers = Math.max(peakBuffers, usage.arrayBuffers - baseline.arrayBuffers);
+    peakRss = Math.max(peakRss, usage.rss - baseline.rss);
+  }, 2);
+  delay.enable();
+  await sleep(50);
+  const started = performance.now();
+  const value = await task();
+  const ms = performance.now() - started;
+  await sleep(20);
+  delay.disable();
+  clearInterval(sampler);
+  return { value, ms, longestMs: Math.max(delay.max / 1e6, longestGap), p99Ms: delay.percentile(99) / 1e6, peakBuffers, peakRss };
+}
+
+function reportMeasurement(name: string, values: Record<string, number>): void {
+  const report = process.env.KESTREL_REPLICATION_SNAPSHOT_TEST_REPORT;
+  const rounded = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, Math.round(value * 10) / 10]));
+  if (report) appendFileSync(report, `${JSON.stringify({ test: name, ...rounded })}\n`);
+}
+
 describe("replication/sqlite snapshot image", () => {
   const states: Array<[string, (l: ReturnType<typeof live>) => Promise<Replication>]> = [
     [
@@ -195,7 +277,7 @@ describe("replication/sqlite snapshot image", () => {
       },
     ],
     [
-      "a WAL none of whose frames are copied back yet",
+      "a WAL written before the first snapshot, which the snapshot copies back before it reads the database file",
       async (l) => {
         l.insert(50, 900);
         l.app.exec("PRAGMA wal_checkpoint(TRUNCATE)");
@@ -205,13 +287,28 @@ describe("replication/sqlite snapshot image", () => {
       },
     ],
     [
-      "a WAL whose first frames another connection copied back",
+      "a WAL whose frames up to the snapshot's read transaction are copied back and whose frames after it are not",
       async (l) => {
         l.app.exec("PRAGMA wal_autocheckpoint = 0");
         for (let i = 0; i < 10; i++) l.insert(20, 1800);
         const repl = l.start();
-        l.app.exec("PRAGMA wal_checkpoint(PASSIVE)");
-        for (let i = 0; i < 10; i++) l.insert(20, 2600);
+        let committed = false;
+        io.beforeRead = (path) => {
+          if (committed || path !== `${l.file}-wal`) return;
+          committed = true;
+          for (let i = 0; i < 10; i++) l.insert(20, 2600);
+        };
+        return repl;
+      },
+    ],
+    [
+      "a WAL none of whose frames are copied back yet",
+      async (l) => {
+        l.insert(50, 900);
+        l.app.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+        const repl = l.start();
+        expectOk(await repl.sync());
+        for (let i = 0; i < 30; i++) l.insert(20, 1800);
         return repl;
       },
     ],
@@ -243,9 +340,9 @@ describe("replication/sqlite snapshot image", () => {
   it.each(states)("is the database file with every committed frame applied, byte for byte, for %s", async (_name, prepare) => {
     const l = live();
     const repl = await prepare(l);
-    const expected = referenceSnapshot(l.file);
     const generation = expectOk(await repl.snapshot()).generation;
-    expect(same(snapshotOf(l.blobs, generation), expected)).toBe(true);
+    io.beforeRead = null;
+    expect(same(snapshotOf(l.blobs, generation), referenceSnapshot(l.file))).toBe(true);
     expect(await restored(l.blobs, l.dir, { generation })).toMatchObject({ ...fingerprint(l.app), check: "ok" });
   });
 
@@ -254,14 +351,14 @@ describe("replication/sqlite snapshot image", () => {
     l.insert(100, 2000);
     l.app.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     const repl = l.start();
+    expectOk(await repl.sync());
     for (let i = 0; i < 10; i++) l.insert(30, 3000);
     l.app.exec("DELETE FROM t WHERE id % 3 <> 0; PRAGMA incremental_vacuum");
     for (let i = 0; i < 5; i++) l.insert(10, 4000);
     l.app.exec("DELETE FROM t WHERE id > 200; PRAGMA incremental_vacuum");
     l.insert(15, 1200);
-    const expected = referenceSnapshot(l.file);
     const generation = expectOk(await repl.snapshot()).generation;
-    expect(same(snapshotOf(l.blobs, generation), expected)).toBe(true);
+    expect(same(snapshotOf(l.blobs, generation), referenceSnapshot(l.file))).toBe(true);
     expect(await restored(l.blobs, l.dir, { generation })).toMatchObject({ ...fingerprint(l.app), check: "ok" });
   });
 });
@@ -270,51 +367,97 @@ const IMAGE_MB = Number(process.env.KESTREL_REPLICATION_SNAPSHOT_TEST_IMAGE_MB ?
 const WAL_MB = Number(process.env.KESTREL_REPLICATION_SNAPSHOT_TEST_WAL_MB ?? String(IMAGE_MB * 2));
 
 describe("replication/sqlite snapshot of a large database", () => {
-  it(`keeps every synchronous slice of the first snapshot under 250 ms and holds about one image in memory (${IMAGE_MB} MB image, ${WAL_MB} MB WAL)`, async () => {
+  function large(l: ReturnType<typeof live>) {
     const width = 3800;
-    const l = live();
-    const rows = Math.ceil((IMAGE_MB * 1024 * 1024) / 4096);
-    l.app.exec("BEGIN");
+    const rows = Math.ceil((IMAGE_MB * MB) / 4096);
     const insert = l.app.prepare("INSERT INTO t (v) VALUES (?)");
+    l.app.exec("BEGIN");
     for (let i = 0; i < rows; i++) insert.run(`${i}-`.padEnd(width, "s"));
     l.app.exec("COMMIT; PRAGMA wal_checkpoint(TRUNCATE)");
-    const repl = l.start();
     const update = l.app.prepare("UPDATE t SET v = ? WHERE id = ?");
-    for (let round = 0; l.walSize() < WAL_MB * 1024 * 1024; round++) {
-      l.app.exec("BEGIN");
-      for (let i = 0; i < 200; i++) update.run(`${round}-${i}-`.padEnd(width, "u"), 1 + ((round * 200 + i) % rows));
-      for (let i = 0; i < 2; i++) insert.run(`${round}-g-`.padEnd(width, "g"));
-      l.app.exec("COMMIT");
+    return () => {
+      for (let round = 0; l.walSize() < WAL_MB * MB; round++) {
+        l.app.exec("BEGIN");
+        for (let i = 0; i < 200; i++) update.run(`${round}-${i}-`.padEnd(width, "u"), 1 + ((round * 200 + i) % rows));
+        for (let i = 0; i < 2; i++) insert.run(`${round}-g-`.padEnd(width, "g"));
+        l.app.exec("COMMIT");
+      }
+    };
+  }
+
+  it(`keeps every synchronous slice of the first snapshot of a WAL its writer never checkpoints under 250 ms, copies it back off this thread and holds about one image in memory (${IMAGE_MB} MB image, ${WAL_MB} MB WAL)`, async () => {
+    const l = live();
+    const grow = large(l);
+    l.app.exec("PRAGMA wal_autocheckpoint = 0");
+    const repl = l.start({ checkpointBytes: 4 * MB });
+    grow();
+    const walBytes = l.walSize();
+    const copied = copiedBackOnThisThread(l.file);
+    let run: Awaited<ReturnType<typeof measured<Awaited<ReturnType<Replication["sync"]>>>>>;
+    try {
+      run = await measured(() => repl.sync());
+    } finally {
+      copied.stop();
     }
-    const image = statSync(l.file).size;
-    const delay = monitorEventLoopDelay({ resolution: 5 });
-    const baseline = process.memoryUsage();
-    let peakBuffers = 0;
-    let peakRss = 0;
-    let lastTick = performance.now();
-    let longestGap = 0;
-    const sampler = setInterval(() => {
-      const tick = performance.now();
-      longestGap = Math.max(longestGap, tick - lastTick);
-      lastTick = tick;
-      const usage = process.memoryUsage();
-      peakBuffers = Math.max(peakBuffers, usage.arrayBuffers - baseline.arrayBuffers);
-      peakRss = Math.max(peakRss, usage.rss - baseline.rss);
-    }, 2);
-    delay.enable();
-    await sleep(50);
-    const started = performance.now();
-    const generation = expectOk(await repl.sync()).generation;
-    const took = performance.now() - started;
-    await sleep(20);
-    delay.disable();
-    clearInterval(sampler);
-    const longest = Math.max(delay.max / 1e6, longestGap);
-    const report = process.env.KESTREL_REPLICATION_SNAPSHOT_TEST_REPORT;
-    if (report) appendFileSync(report, `${JSON.stringify({ imageBytes: image, walBytes: l.walSize(), snapshotBytes: snapshotOf(l.blobs, generation).byteLength, syncMs: Math.round(took), longestSliceMs: Math.round(longest * 10) / 10, p99SliceMs: Math.round((delay.percentile(99) / 1e6) * 10) / 10, peakArrayBuffersMb: Math.round(peakBuffers / 1048576), peakRssMb: Math.round(peakRss / 1048576) })}\n`);
-    expect(longest).toBeLessThan(250);
-    expect(peakBuffers).toBeLessThan(snapshotOf(l.blobs, generation).byteLength * 1.5 + 16 * 1024 * 1024);
-    expect(await restored(l.blobs, l.dir)).toMatchObject({ n: fingerprint(l.app).n, s: fingerprint(l.app).s, check: "ok" });
+    const generation = expectOk(run.value).generation;
+    const snapshotBytes = snapshotOf(l.blobs, generation).byteLength;
+    reportMeasurement("first snapshot", { imageBytes: statSync(l.file).size, walBytes, snapshotBytes, syncMs: run.ms, longestSliceMs: run.longestMs, p99SliceMs: run.p99Ms, framesCopiedOnThisThread: copied.frames(), peakArrayBuffersMb: run.peakBuffers / MB, peakRssMb: run.peakRss / MB });
+    expect(copied.frames()).toBe(0);
+    expect(run.longestMs).toBeLessThan(250);
+    expect(run.peakBuffers).toBeLessThan(snapshotBytes * 1.5 + 16 * MB);
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation, n: fingerprint(l.app).n, s: fingerprint(l.app).s, check: "ok" });
+  }, 600_000);
+
+  it(`keeps every synchronous slice of a periodic snapshot under 250 ms and holds about one image in memory while it applies the WAL frames written since the generation before it (${IMAGE_MB} MB image, ${WAL_MB} MB WAL)`, async () => {
+    const l = live();
+    const grow = large(l);
+    const repl = l.start({ snapshotSeconds: 60 });
+    const first = expectOk(await repl.sync()).generation;
+    grow();
+    expectOk(await repl.sync());
+    l.clock.advance(61_000);
+    const walBytes = l.walSize();
+    const run = await measured(() => repl.sync());
+    const generation = expectOk(run.value).generation;
+    expect(generation > first).toBe(true);
+    const snapshotBytes = snapshotOf(l.blobs, generation).byteLength;
+    reportMeasurement("periodic snapshot", { imageBytes: statSync(l.file).size, walBytes, snapshotBytes, syncMs: run.ms, longestSliceMs: run.longestMs, p99SliceMs: run.p99Ms, peakArrayBuffersMb: run.peakBuffers / MB, peakRssMb: run.peakRss / MB });
+    expect(run.longestMs).toBeLessThan(250);
+    expect(run.peakBuffers).toBeLessThan(snapshotBytes * 1.5 + 16 * MB);
+    expect(same(snapshotOf(l.blobs, generation), referenceSnapshot(l.file))).toBe(true);
+    expect(await restored(l.blobs, l.dir, { generation })).toMatchObject({ n: fingerprint(l.app).n, s: fingerprint(l.app).s, check: "ok" });
+  }, 600_000);
+});
+
+describe("replication/sqlite first sync after the process before it was killed", () => {
+  it(`copies the WAL that process left behind back into the database off this thread, keeps every synchronous slice of the first sync under 250 ms and holds about one image in memory (${IMAGE_MB} MB image, ${WAL_MB} MB WAL)`, async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-snap-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    killedWriter(file, IMAGE_MB, WAL_MB);
+    const walBytes = statSync(`${file}-wal`).size;
+    expect(walBytes).toBeGreaterThanOrEqual(WAL_MB * MB);
+    const blobs = memoryBlobs();
+    const copied = copiedBackOnThisThread(file);
+    const constructing = performance.now();
+    const repl = createReplicationSqlite({ file, prefix: "replica/", checkpointBytes: 4 * MB, checkpointSeconds: 300, snapshotSeconds: 24 * 3600, retentionSeconds: 48 * 3600, restoreOnStart: false }, blobs, () => Date.UTC(2026, 0, 1), { checkIntervalMs: 3_600_000 });
+    const constructMs = performance.now() - constructing;
+    open.push(repl);
+    let run: Awaited<ReturnType<typeof measured<Awaited<ReturnType<Replication["sync"]>>>>>;
+    try {
+      run = await measured(() => repl.sync());
+    } finally {
+      copied.stop();
+    }
+    const generation = expectOk(run.value).generation;
+    const snapshotBytes = snapshotOf(blobs, generation).byteLength;
+    reportMeasurement("first sync after a kill", { imageBytes: statSync(file).size, walBytes, snapshotBytes, constructMs, syncMs: run.ms, longestSliceMs: run.longestMs, p99SliceMs: run.p99Ms, framesCopiedOnThisThread: copied.frames(), peakArrayBuffersMb: run.peakBuffers / MB, peakRssMb: run.peakRss / MB });
+    expect(copied.frames()).toBe(0);
+    expect(run.longestMs).toBeLessThan(250);
+    expect(run.peakBuffers).toBeLessThan(snapshotBytes * 1.5 + 16 * MB);
+    const app = new DatabaseSync(file);
+    apps.push(app);
+    expect(await restored(blobs, dir)).toMatchObject({ generation, n: fingerprint(app).n, s: fingerprint(app).s, check: "ok" });
   }, 600_000);
 });
 
@@ -453,6 +596,56 @@ describe("replication/sqlite WAL before the first generation", () => {
       expect(await restored(l.blobs, l.dir)).toMatchObject({ ...fingerprint(l.app), check: "ok" });
     }
   }, 60_000);
+
+  it("keeps the WAL bounded before the first generation while write transactions stay open across turns of the event loop", async () => {
+    const l = live();
+    const width = 3800;
+    const rows = 2000;
+    const insert = l.app.prepare("INSERT INTO t (v) VALUES (?)");
+    l.app.exec("BEGIN");
+    for (let i = 0; i < rows; i++) insert.run(`${i}-`.padEnd(width, "r"));
+    l.app.exec("COMMIT; PRAGMA wal_checkpoint(TRUNCATE)");
+    const repl = l.start({ checkpointBytes: 256 * 1024 }, { checkIntervalMs: 20 });
+    const list = l.blobs.list.bind(l.blobs);
+    let writing = true;
+    l.blobs.list = async (prefix) => {
+      while (writing) await sleep(5);
+      return list(prefix);
+    };
+    const first = repl.sync();
+    const update = l.app.prepare("UPDATE t SET v = ? WHERE id = ?");
+    let maxWal = 0;
+    for (let round = 0, written = 0; written < 48 * MB; round++, written += 20 * 4096) {
+      l.app.exec("BEGIN IMMEDIATE");
+      for (let i = 0; i < 10; i++) update.run(`${round}-${i}-a`.padEnd(width, "a"), 1 + ((round * 20 + i) % rows));
+      await sleep(2);
+      for (let i = 0; i < 10; i++) update.run(`${round}-${i}-b`.padEnd(width, "b"), 1 + ((round * 20 + 10 + i) % rows));
+      l.app.exec("COMMIT");
+      maxWal = Math.max(maxWal, l.walSize());
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    writing = false;
+    expectOk(await first);
+    l.blobs.list = list;
+    reportMeasurement("WAL before the first generation", { maxWalMb: maxWal / MB });
+    expect(maxWal).toBeLessThan(8 * MB);
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ ...fingerprint(l.app), check: "ok" });
+    for (let i = 0; i < 30; i++) l.counted();
+    l.clock.advance(2_000);
+    expectOk(await repl.sync());
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ ...fingerprint(l.app), check: "ok" });
+  }, 60_000);
+
+  it("seals a first snapshot when another connection committed and then truncated the WAL before the first sync", async () => {
+    const l = live();
+    const repl = l.start();
+    l.insert(20, 900);
+    l.app.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    expect(l.walSize()).toBe(0);
+    const sealed = expectOk(await repl.seal());
+    if (sealed === null) throw new Error("expected a seal");
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation: sealed.generation, ...fingerprint(l.app), check: "ok" });
+  });
 
   it("seals a first snapshot of everything committed before the first sync after checkpoints copied it into the database file", async () => {
     const l = live();

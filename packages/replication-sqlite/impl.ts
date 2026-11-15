@@ -3,6 +3,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readSync, renameSync, rmSyn
 import { open } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { Worker } from "node:worker_threads";
 import type { Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { ModuleHealth } from "@michaelthielemann/kestrel/defineModule";
@@ -116,8 +117,9 @@ export interface Replication {
   /**
    * Ships every committed frame the replica lacks, then writes `sealed.json` into the current generation, once; a
    * later call answers the same seal. Takes no checkpoint, no periodic snapshot and prunes nothing. Without a
-   * generation yet, it takes the first snapshot when the WAL holds committed frames and answers `null` without
-   * writing anything when it holds none. After the seal it writes the `applied.json` files a sync would write.
+   * generation yet, it takes the first snapshot when the WAL holds committed frames or another connection
+   * committed since the instance was created, and answers `null` without writing anything otherwise. After the
+   * seal it writes the `applied.json` files a sync would write.
    */
   seal(): Promise<Result<(Seal & { generation: string }) | null, BlobstoreError>>;
   snapshot(): Promise<Result<{ generation: string; bytes: number }, BlobstoreError>>;
@@ -377,22 +379,53 @@ const STOPPING = failure("TRANSIENT", "replication/sqlite: the process is stoppi
 
 const chunkBytes = (header: WalHeader): number => Math.max(1, Math.floor(READ_CHUNK_BYTES / frameSize(header.pageSize))) * frameSize(header.pageSize);
 
+const COPY_BACK = `
+const { DatabaseSync } = require("node:sqlite");
+const { parentPort, workerData } = require("node:worker_threads");
+const db = new DatabaseSync(workerData.file);
+try {
+  db.prepare("PRAGMA wal_checkpoint(PASSIVE)").get();
+} finally {
+  db.close();
+}
+parentPort.postMessage(true);
+`;
+
+function copyBackOnWorker(file: string): Promise<void> | null {
+  let worker: Worker;
+  try {
+    worker = new Worker(COPY_BACK, { eval: true, workerData: { file }, execArgv: ["--disable-warning=ExperimentalWarning"] });
+  } catch {
+    return null;
+  }
+  worker.unref();
+  return new Promise<void>((resolve) => {
+    worker.once("message", () => resolve());
+    worker.once("error", () => resolve());
+    worker.once("exit", () => resolve());
+  });
+}
+
 export function createReplicationSqlite(config: Config, blobs: Blobstore, now: () => number = Date.now, options: ReplicationOptions = {}): Replication {
   const file = resolve(config.file);
   const walFile = `${file}-wal`;
   mkdirSync(dirname(file), { recursive: true });
   const conn = new DatabaseSync(file);
   conn.exec("PRAGMA journal_mode = WAL");
+  let holding = false;
   const holdRead = (): void => {
     conn.exec("BEGIN");
     conn.prepare("SELECT count(*) FROM sqlite_master").get();
+    holding = true;
   };
   const release = (): void => {
+    holding = false;
     conn.exec("COMMIT");
   };
-  holdRead();
   const writeLock = new DatabaseSync(file);
   const pageSize = boundaryCast<{ page_size: number }>(writeLock.prepare("PRAGMA page_size").get(), "host").page_size;
+  const dataVersion = (): number => boundaryCast<{ data_version: number }>(writeLock.prepare("PRAGMA data_version").get(), "host").data_version;
+  const openedVersion = dataVersion();
 
   let generation: string | null = null;
   let lineage = 0;
@@ -405,7 +438,6 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   let closed = false;
   let stopping = false;
   let reading = false;
-  let copiedBeforeGeneration = false;
   let pending: Array<{ key: string; data: Uint8Array }> = [];
   let orphan: { snapshot: string; origin: string | null } | null = null;
   const onStop = new Set<() => void>();
@@ -422,6 +454,10 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   const unacknowledged: string[] = placedRestore ? [placedRestore.applied.generation] : [];
 
   const walBytes = (): number => (existsSync(walFile) ? statSync(walFile).size : 0);
+  let settling = walBytes() >= config.checkpointBytes ? copyBackOnWorker(file) : null;
+  void settling?.then(() => {
+    settling = null;
+  });
   const walState = (): WalState => boundaryCast<WalState | undefined>(writeLock.prepare("PRAGMA wal_checkpoint(PASSIVE)").get(), "host") ?? { busy: 1, log: -1, checkpointed: -1 };
   const walContentBytes = (): number => {
     const { log } = walState();
@@ -525,8 +561,12 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       if (isErr(listing)) return listing;
       observe(listing.value);
     }
+    if (settling) await settling;
+    if (closed) return ok(null);
     reading = true;
     try {
+      if (!holding) holdRead();
+      if (walBytes() >= config.checkpointBytes) await copyBackOnWorker(file);
       const read = await readSnapshot({ file, walFile, probe: walState, now, stopped: () => closed || (stopping && generation !== null) });
       if (read === "stopped") return ok(null);
       if (read === "unsettled") return err(failure("TRANSIENT", "replication/sqlite: the WAL kept starting over while the snapshot read it; the next run tries again"));
@@ -556,6 +596,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       return ok({ generation: gen, bytes: image.byteLength });
     } finally {
       reading = false;
+      if (generation === null && holding && !closed) release();
     }
   };
 
@@ -663,21 +704,14 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     await checkpoint();
   };
   const checkpointBeforeGeneration = (): void => {
-    if (walContentBytes() < config.checkpointBytes) return;
-    release();
-    let row: { busy: number; log: number; checkpointed: number } | undefined;
-    try {
-      row = boundaryCast<{ busy: number; log: number; checkpointed: number } | undefined>(conn.prepare("PRAGMA wal_checkpoint(PASSIVE)").get(), "host");
-    } finally {
-      holdRead();
-    }
-    copiedBeforeGeneration = true;
-    if (row !== undefined && row.busy === 0 && row.log === row.checkpointed) lastCheckpointAt = now();
+    const state = walState();
+    if (state.log <= 0 || WAL_HEADER_SIZE + state.log * frameSize(pageSize) < config.checkpointBytes) return;
+    if (state.busy === 0 && state.log === state.checkpointed) lastCheckpointAt = now();
   };
   const timer = setInterval(() => {
     if (closed || stopping || sealedAs !== null) return;
     if (generation === null) {
-      if (!reading) checkpointBeforeGeneration();
+      if (!reading && settling === null) checkpointBeforeGeneration();
       return;
     }
     if (queued > 0) return;
@@ -822,7 +856,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
         if (sealedAs !== null) return ok(sealedAs);
         const acknowledging = placedRestore !== null && handled;
         if (generation === null) {
-          if (walState().log === 0 && !copiedBeforeGeneration) return ok(null);
+          if (settling) await settling;
+          if (walState().log === 0 && dataVersion() === openedVersion) return ok(null);
           const snap = await takeSnapshot();
           if (isErr(snap)) return snap;
           if (snap.value === null) return err(CLOSED);
@@ -869,11 +904,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       closed = true;
       clearInterval(timer);
       signalStop();
-      try {
-        release();
-        // eslint-disable-next-line no-empty -- release() on an already released lock throws; nothing is left to do
-      } catch {
-      }
+      if (holding) release();
       conn.close();
       writeLock.close();
     },

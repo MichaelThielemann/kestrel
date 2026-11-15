@@ -2109,18 +2109,25 @@ Net changes since 5.8.2.
   100 MB the event loop stood still for seconds and the process grew by several times the database's size.
   The snapshot is now read asynchronously in chunks of 1 MiB into one buffer of the database's size, and
   only the frames that are not yet copied back into the database file are applied, under the module's read
-  transaction as before. The image is byte for byte the one written before, so the replica format is
-  unchanged: earlier releases restore what this one writes, and the other way round. When a snapshot upload
-  fails, its key is removed again, and while that removal fails, every later sync, checkpoint and seal tries
-  it again first and fails with `TRANSIENT` before it uploads anything, so a restore never picks a generation
-  whose process went on shipping frames into the one before it.
+  transaction as before; when the WAL file is `checkpointBytes` or larger, a worker thread copies the frames
+  that read transaction sees back into the database file first, so the checkpoint the snapshot runs on the
+  event loop's thread has next to nothing left to copy. The image is byte for byte the one written before,
+  so the replica format is unchanged: earlier releases restore what this one writes, and the other way
+  round. When a snapshot upload fails, its key is removed again, and while that removal fails, every later
+  sync, checkpoint and seal tries it again first and fails with `TRANSIENT` before it uploads anything, so a
+  restore never picks a generation whose process went on shipping frames into the one before it.
 - `replication-sqlite`: a restore applies the WAL segments into one image that grows in place, instead of
   copying the image at every commit that changes the database size, so restoring a generation of a growing
   database takes time in proportion to its segments.
 - `replication-sqlite`: the WAL grew without bound until the first generation of a process existed, because
-  the module's read transaction kept every checkpoint from copying frames back, and the first snapshot then
-  had to read it whole. Before the first generation, the once-per-second check now checkpoints as soon as
-  the WAL holds `checkpointBytes` of frames, also while the first `replication.sync` lists the replica.
+  the module's read transaction kept SQLite from starting the WAL over, and the first snapshot then had to
+  read it whole. The module now takes its read transaction when the first snapshot starts reading, so until
+  then the checkpoints SQLite runs after a commit keep the WAL as short as without replication, also while
+  write transactions stay open across awaits; the once-per-second check runs a passive checkpoint as well,
+  for a writer that turned those off. A WAL of `checkpointBytes` or more that a process left behind when it
+  ended without closing the database is copied back on a worker thread when the module opens the file, and
+  the first snapshot waits for it. A seal before the first generation takes the first snapshot whenever
+  another connection committed since the module opened the file, also when the WAL was truncated since.
 - `replication-sqlite`: `stop()` no longer waits for a periodic snapshot, a checkpoint or a prune that a
   running sync has still to do. The module now declares `quiesce`: from the start of `stop()` a sync ships
   its frames but skips the checkpoint, the periodic snapshot and the prune, a periodic snapshot or

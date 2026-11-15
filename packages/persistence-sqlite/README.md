@@ -24,8 +24,8 @@ fails to boot with `instance-locked`, naming the host and PID of the process tha
 for a readable lock (an unreadable lock file is named instead), and leaves the file as it is. Writes are only serialised inside one process, and restores swap the
 file before it is opened, so point each process at its own file, or route all writes through one
 of them. `replication/sqlite` and `backup/blobstore` on the same file in the same process share the
-lock; `replication/sqlite` also opens a second connection to the file (it holds a read transaction
-and runs its own checkpoints), which is supported. Teardown closes the connection and gives the
+lock; `replication/sqlite` also opens a second connection to the file (from its first snapshot on it
+holds a read transaction, and it runs its own checkpoints), which is supported. Teardown closes the connection and gives the
 lock up; the lock file goes with the last module of the process that holds it. `:memory:` takes no
 lock. `health()` reports `ok: false` with `restartRequired: true` once another instance took the
 lock over. To share the file between processes on purpose, set `allowConcurrentProcesses: true`
