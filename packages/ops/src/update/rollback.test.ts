@@ -64,6 +64,25 @@ async function expectCutoverState(s: Scenario, backupId: string): Promise<void> 
 const journalSteps = async (s: Scenario, runId: string): Promise<string[]> => (await runOf(s, runId)).records.map((r) => `${r.step} ${r.state}`);
 
 describe("rolling an update back", () => {
+  it("starts the previous release again on the unchanged replica when the run stopped the app but has no cutover backup", async () => {
+    const s = await scenario();
+    const violations = guardStarts(s);
+    const before = s.h.target.app?.rows("pages");
+    const deployed = await deployUntil(s, "seal");
+    expect(deployed.end).toMatchObject({ last: "seal", failure: null });
+    const generations = (await listGenerations(s.h.store, PREFIXES.replica)).map((g) => g.name);
+    const run = await runOf(s, deployed.runId);
+    expect(run.cutoverBackup).toBeNull();
+    const result = await rollback(deployed.ctx, run, { kind: "automatic", failure: "cutover-backup: socket hang up" });
+    expect(result).toMatchObject({ ended: "previous-release", originalsRestored: [], derivedChanged: [] });
+    expect((await runOf(s, deployed.runId)).state).toBe("rolled-back");
+    expect(s.h.target.current).toBe(s.previousDroplet);
+    expect(s.h.target.app?.rows("pages")).toEqual(before);
+    expect((await listGenerations(s.h.store, PREFIXES.replica)).map((g) => g.name).slice(0, generations.length)).toEqual(generations);
+    expect(await journalSteps(s, deployed.runId)).toEqual(expect.arrayContaining(["rollback started", "start done", "rollback-verify done", "rollback done"]));
+    expect(violations).toEqual([]);
+  });
+
   it("brings back the cutover state: every table but the emptied sessions, the originals, the delivery prefix and the recorded configuration verbatim", async () => {
     const s = await scenario();
     const violations = guardStarts(s);

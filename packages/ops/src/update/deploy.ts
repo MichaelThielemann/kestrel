@@ -13,13 +13,14 @@ import { checkGate } from "./gate.ts";
 import { continueJournal, listUpdateRuns, readUpdateRun } from "./journal.ts";
 import { UPDATE_PIN_PREFIX, updateKeys } from "./layout.ts";
 import { computePlan, planHash, replicaCopy } from "./plan.ts";
-import { UPDATE_EXIT, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateRun } from "./types.ts";
+import { UPDATE_EXIT, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateRun, type VersionSet } from "./types.ts";
 import { concludeVerify, outcomeOf } from "./verify.ts";
 
 type Entry = "seal" | "cutover-backup" | "migrate" | "swap" | "start" | "verify";
 
 interface Flow {
   plan: UpdatePlan | null;
+  from: VersionSet | null;
   staged: string;
   stoppedAt: number;
   cutoverBackup: string | null;
@@ -108,11 +109,10 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
     await confirm(ctx.answers, "update-stop", stopQuestion(ctx, plan));
     await record(ctx, "stop", "started");
     const { stoppedAt } = await stopTarget(ctx);
-    flow = { plan, staged: staged.droplet, stoppedAt, cutoverBackup: null, promoted: null, startedAt: null };
+    flow = { plan, from: plan.versions.from, staged: staged.droplet, stoppedAt, cutoverBackup: null, promoted: null, startedAt: null };
   } catch (error) {
     if (error instanceof Interrupted) throw error;
     await record(ctx, step, "failed", { error: messageOf(error) }).catch(() => undefined);
-    await ctx.journal.finish(false, { phase: "deploy" }).catch(() => undefined);
     const exitCode = error instanceof OpsError && error.exitCode === 2 ? UPDATE_EXIT.usage : UPDATE_EXIT.refused;
     return outcomeOf(ctx, exitCode, `the deploy stopped at ${step} before the app was stopped; production is unchanged: ${messageOf(error)}`);
   }
@@ -133,7 +133,8 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
       await record(ctx, "seal", "done", { state: seal.state, generation: seal.generation });
       step = "cutover-backup";
       await record(ctx, "cutover-backup", "started");
-      const backup = await createBackup(ctx, { kind: "cutover", mode: { kind: "stopped", seal, stoppedAt: flow.stoppedAt }, pinFor: UPDATE_PIN_PREFIX + ctx.run.id });
+      const running = { ...ctx, project: { versions: flow.from ?? {}, lockfileSha256: null } };
+      const backup = await createBackup(running, { kind: "cutover", mode: { kind: "stopped", seal, stoppedAt: flow.stoppedAt }, pinFor: UPDATE_PIN_PREFIX + ctx.run.id });
       flow.cutoverBackup = backup.id;
       await record(ctx, "cutover-backup", "done", { backupId: backup.id });
       ctx.out.info(`cutover backup ${backup.id} written, verified and pinned`);
@@ -195,7 +196,7 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     } catch (cause) {
       return outcomeOf(ctx, UPDATE_EXIT.refused, `the deploy failed at ${failure}, and the automatic rollback did not finish: ${messageOf(cause)}; the app stays stopped; run update rollback --env ${ctx.envName} --run ${ctx.run.id}`);
     }
-    return outcomeOf(ctx, UPDATE_EXIT.rolledBack, `the deploy failed at ${failure}; rolled back to the cutover state`);
+    return outcomeOf(ctx, UPDATE_EXIT.rolledBack, flow.cutoverBackup === null ? `the deploy failed at ${failure} before its cutover backup; nothing was promoted, and the previous release runs again on the unchanged replica` : `the deploy failed at ${failure}; rolled back to the cutover state`);
   }
 }
 
@@ -214,7 +215,7 @@ export async function continueDeploy(ctx: UpdateContext, run: UpdateRun): Promis
   if (run.stagedDroplet === null || typeof stoppedAt !== "number") return outcomeOf(ctx, UPDATE_EXIT.refused, `update run ${run.runId} records no staged droplet or stop; run update rollback --run ${run.runId}`);
   const startRecord = [...run.records].reverse().find((r) => r.phase === "deploy" && r.step === "start");
   const recordedStart = startRecord?.data.startedAt;
-  const flow: Flow = { plan: null, staged: run.stagedDroplet, stoppedAt, cutoverBackup: run.cutoverBackup, promoted: run.promoted === null ? null : { ...run.promoted, at: unstamp(run.promoted.generation) }, startedAt: typeof recordedStart === "number" ? recordedStart : null };
+  const flow: Flow = { plan: null, from: run.versions?.from ?? null, staged: run.stagedDroplet, stoppedAt, cutoverBackup: run.cutoverBackup, promoted: run.promoted === null ? null : { ...run.promoted, at: unstamp(run.promoted.generation) }, startedAt: typeof recordedStart === "number" ? recordedStart : null };
   if (flow.promoted !== null) {
     if (!startedStep(run, "start")) {
       const newest = (await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).at(-1);
