@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Journal } from "../journal.ts";
 import { MemoryBucket, memoryStore } from "../memoryStore.ts";
 import { Redactor } from "../redact.ts";
+import type { ObjectStore } from "../store.ts";
 import { continueJournal, latestDeployRun, listUpdateRuns, readUpdateRun, reportOf, RUN_STEP } from "./journal.ts";
 import { OPEN_STATES } from "./types.ts";
 
@@ -92,7 +93,7 @@ describe("update run journal", () => {
     await first.record("verify", "done", { verdict: "failed" });
     const before = await readUpdateRun(ctxOf(bucket), "run2");
     expect(before.state).toBe("rolling-back");
-    const later = continueJournal({ ...ctxOf(bucket), redactor: new Redactor(), clock: () => 2, workspace: { dir: "", path: () => "/dev/null", dispose: () => undefined } }, before);
+    const later = continueJournal({ journal: journalOn(bucket, "other", () => 2) }, before);
     await later.record(RUN_STEP, "started", { command: "update rollback", env: "prod", phase: "rollback" });
     await later.record("rollback", "started", { phase: "rollback" });
     await later.record("stop", "done", {});
@@ -119,6 +120,73 @@ describe("update run journal", () => {
     const journal = journalOn(bucket, "gap", () => 1, 1);
     await journal.record(RUN_STEP, "started", { command: "update deploy", env: "prod" });
     await expect(readUpdateRun(ctxOf(bucket), "gap")).rejects.toThrow("lacks entries below 2");
+  });
+
+  it("gives a record whose write failed no sequence number, so the next record takes it and the run stays readable", async () => {
+    const bucket = new MemoryBucket("journal-failed-write");
+    const plain = memoryStore(bucket);
+    let failNext = false;
+    const flaky: ObjectStore = {
+      ...plain,
+      put: async (key, data, options) => {
+        if (failNext) {
+          failNext = false;
+          throw new Error("socket hang up");
+        }
+        return plain.put(key, data, options);
+      },
+    };
+    const journal = new Journal("flaky", flaky, LOCATION, new Redactor(), () => 1, null);
+    await journal.record(RUN_STEP, "started", { command: "update deploy", env: "prod", phase: "deploy" });
+    await journal.record("promote", "started", { phase: "deploy" });
+    failNext = true;
+    await expect(journal.record("promote", "done", { phase: "deploy" })).rejects.toThrow("socket hang up");
+    await journal.record("promote", "failed", { phase: "deploy", error: "socket hang up" });
+    await journal.finish(false, {});
+    const run = await readUpdateRun(ctxOf(bucket), "flaky");
+    expect(run.records.map((r) => `${r.seq} ${r.step}:${r.state}`)).toEqual(["1 run:started", "2 promote:started", "3 promote:failed", "4 run-failed:failed"]);
+  });
+
+  it("counts a record as written when its write reported a failure but the entry landed", async () => {
+    const bucket = new MemoryBucket("journal-landed-write");
+    const plain = memoryStore(bucket);
+    let failNext = false;
+    const landing: ObjectStore = {
+      ...plain,
+      put: async (key, data, options) => {
+        await plain.put(key, data, options);
+        if (failNext) {
+          failNext = false;
+          throw new Error("socket hang up");
+        }
+      },
+    };
+    const journal = new Journal("landed", landing, LOCATION, new Redactor(), () => 1, null);
+    await journal.record(RUN_STEP, "started", { command: "update deploy", env: "prod", phase: "deploy" });
+    failNext = true;
+    await journal.record("stop", "done", { phase: "deploy" });
+    await journal.record("seal", "started", { phase: "deploy" });
+    const run = await readUpdateRun(ctxOf(bucket), "landed");
+    expect(run.records.map((r) => `${r.seq} ${r.step}:${r.state}`)).toEqual(["1 run:started", "2 stop:done", "3 seal:started"]);
+  });
+
+  it("continues a run through the store of the context's own journal, so a store that refuses after a signal does not leave a gap", async () => {
+    const bucket = new MemoryBucket("journal-continued");
+    const first = journalOn(bucket, "run3", () => 1);
+    await first.record(RUN_STEP, "started", { command: "update deploy", env: "prod" });
+    await first.record("stop", "done", {});
+    const before = await readUpdateRun(ctxOf(bucket), "run3");
+    const refusing: ObjectStore = {
+      ...memoryStore(bucket),
+      put: async () => {
+        throw new Error("interrupted");
+      },
+    };
+    const own = journalOn(bucket, "own", () => 2);
+    const ctx = { journal: own, backups: refusing };
+    const later = continueJournal(ctx, before);
+    await later.record(RUN_STEP, "started", { command: "update abort", env: "prod", phase: "abort" });
+    expect((await readUpdateRun(ctxOf(bucket), "run3")).records.map((r) => r.seq)).toEqual([1, 2, 3]);
   });
 
   it("lists the update runs of one environment and finds the newest deploy", async () => {

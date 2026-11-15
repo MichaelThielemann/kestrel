@@ -35,12 +35,28 @@ export class Journal {
     this.#seq = startSeq;
   }
 
+  /**
+   * Writes one entry. The entry takes the next sequence number only once its write succeeded, or once its key reads back
+   * after a write that reported a failure; a write that failed leaves the number to the next record, so the journal
+   * never has a gap.
+   */
   async record(step: string, state: JournalEntry["state"], data: Record<string, unknown> = {}): Promise<void> {
-    this.#seq += 1;
-    const entry: JournalEntry = { runId: this.runId, seq: this.#seq, step, state, at: this.clock(), data };
+    const seq = this.#seq + 1;
+    const entry: JournalEntry = { runId: this.runId, seq, step, state, at: this.clock(), data };
     const text = this.redactor.json(entry, 2);
-    await this.store.put(this.location + keys.journal(this.runId, this.#seq, step, state), new TextEncoder().encode(text + "\n"), { contentType: "application/json" });
+    const key = this.location + keys.journal(this.runId, seq, step, state);
+    try {
+      await this.store.put(key, new TextEncoder().encode(text + "\n"), { contentType: "application/json" });
+    } catch (error) {
+      if ((await this.store.head(key).catch(() => null)) === null) throw error;
+    }
+    this.#seq = seq;
     if (this.mirror !== null) appendFileSync(this.mirror, this.redactor.json(entry) + "\n", { mode: 0o600 });
+  }
+
+  /** A journal of run `runId` after its entry `lastSeq`, written through this journal's store, location, redactor, clock and mirror. */
+  continueRun(runId: string, lastSeq: number): Journal {
+    return new Journal(runId, this.store, this.location, this.redactor, this.clock, this.mirror, lastSeq);
   }
 
   /** Ends the run; a run without this entry counts as open. */

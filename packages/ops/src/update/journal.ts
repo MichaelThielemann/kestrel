@@ -1,6 +1,6 @@
 import type { OpsContext } from "../context.ts";
 import { OpsError } from "../errors.ts";
-import { Journal } from "../journal.ts";
+import type { Journal } from "../journal.ts";
 import { parseJsonOrNull } from "../layout.ts";
 import { stableList } from "../store.ts";
 import { UPDATE_PHASES, type DerivedReport, type StepTiming, type UpdatePhase, type UpdateRecord, type UpdateReport, type UpdateRun, type UpdateRunState, type VersionChange } from "./types.ts";
@@ -175,9 +175,13 @@ export async function latestDeployRun(ctx: Pick<OpsContext, "backups" | "locatio
   return newest === undefined ? null : readUpdateRun(ctx, newest.runId);
 }
 
-/** A journal that appends to update run `run`, continuing after its last entry; every record of it goes through the redactor. */
-export function continueJournal(ctx: Pick<OpsContext, "backups" | "location" | "redactor" | "clock" | "workspace">, run: Pick<UpdateRun, "runId" | "lastSeq">): Journal {
-  return new Journal(run.runId, ctx.backups, ctx.location, ctx.redactor, ctx.clock, ctx.workspace.path("journal.jsonl"), run.lastSeq);
+/**
+ * A journal that appends to update run `run`, continuing after its last entry. It writes through the store of
+ * `ctx.journal`, which the interrupt of a command does not guard, so a signal never leaves a gap in the run; every record
+ * goes through the redactor.
+ */
+export function continueJournal(ctx: Pick<OpsContext, "journal">, run: Pick<UpdateRun, "runId" | "lastSeq">): Journal {
+  return ctx.journal.continueRun(run.runId, run.lastSeq);
 }
 
 const isKeyList = (value: unknown): value is string[] => Array.isArray(value) && value.every((key) => typeof key === "string");

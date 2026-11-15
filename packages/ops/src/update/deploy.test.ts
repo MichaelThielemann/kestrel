@@ -475,3 +475,42 @@ describe("the automatic rollback of a deploy whose journal listing lags", { time
     expect(() => h.target.app?.rows("converted_shape")).toThrow("no such table");
   });
 });
+
+describe("a deploy whose journal write fails once after the promotion", { timeout: 30_000 }, () => {
+  it("rolls back automatically, starts the previous release on the cutover state and leaves the run readable for status and the next deploy", async () => {
+    const plain = memoryStore(new MemoryBucket("kestrel-test"));
+    let refused = 0;
+    const store: ObjectStore = {
+      ...plain,
+      put: async (key, data, options) => {
+        if (refused === 0 && key.startsWith(`${LOCATION}runs/`) && key.endsWith("-promote-done.json")) {
+          refused += 1;
+          throw new Error("socket hang up");
+        }
+        await plain.put(key, data, options);
+      },
+    };
+    const h = createUpdateHarness({ store });
+    harnesses.push(h);
+    await h.target.start();
+    await h.target.app?.seed();
+    const steps = fakes();
+    const ctx = await h.context({ answers: ANSWERS, steps: { retire: steps.retire, migrateCopy: steps.migrateCopy } });
+    await receiptFor(ctx);
+    const outcome = await deploy(ctx);
+    expect(refused).toBe(1);
+    expect(outcome.exitCode, outcome.message).toBe(3);
+    expect(outcome.state).toBe("rolled-back");
+    expect((await h.target.status()).state).toBe("started");
+    expect(h.target.release.runtime).toBe("5.8.1");
+    const run = await readUpdateRun(ctx, ctx.run.id);
+    expect(run.records.map((r) => r.seq)).toEqual(run.records.map((_, i) => i + 1));
+    expect(run.records.find((r) => r.step === "promote" && r.state === "failed")?.data.error).toBe("socket hang up");
+    const report = await updateStatus(ctx, ctx.run.id);
+    expect(report.run?.state).toBe("rolled-back");
+    expect(report.open).toEqual([]);
+    const next = await h.context({ answers: ANSWERS, steps: { retire: steps.retire, migrateCopy: steps.migrateCopy } });
+    const again = await deploy(next);
+    expect(again.exitCode, again.message).toBe(0);
+  });
+});
