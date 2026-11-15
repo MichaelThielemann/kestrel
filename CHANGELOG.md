@@ -2102,6 +2102,16 @@ Net changes since 5.8.2.
 
 ### Fixed
 
+- `replication-sqlite`: a snapshot no longer stops the process. The snapshot that starts a generation (the
+  first sync of a process, `replication.snapshot`, the periodic snapshot after `snapshotSeconds` and the
+  first snapshot at teardown) read the database file and the whole WAL synchronously, held the WAL twice
+  in memory and copied the image on every commit that changed the database size, so at a database of about
+  100 MB the event loop stood still for seconds and the process grew by several times the database's size.
+  The snapshot is now read asynchronously in chunks of 1 MiB into one buffer of the database's size, and
+  only the frames that are not yet copied back into the database file are applied, under the module's read
+  transaction as before. The image is byte for byte the one written before, so the replica format is
+  unchanged: earlier releases restore what this one writes, and the other way round. When a snapshot upload
+  fails, its key is removed again, so a restore never picks a generation the process did not continue.
 - `replication-sqlite`: a restore applies the WAL segments into one image that grows in place, instead of
   copying the image at every commit that changes the database size, so restoring a generation of a growing
   database takes time in proportion to its segments.

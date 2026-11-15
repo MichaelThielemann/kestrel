@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -9,6 +9,7 @@ import type { ModuleHealth } from "@michaelthielemann/kestrel/defineModule";
 import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import { logWarn, silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
+import { readSnapshot, type WalState } from "./snapshot.ts";
 import { applySegment, FRAME_HEADER_SIZE, FrameScanner, frameSize, parseWalHeader, WAL_HEADER_SIZE, walHeaderChecksum, type WalChecksum, type WalHeader } from "./wal.ts";
 import { emptyWalHeader } from "./walHeader.ts";
 
@@ -363,6 +364,8 @@ function readHead(bytes: Uint8Array, length: number): WalHead | null {
 
 const isBusy = (e: unknown): boolean => typeof e === "object" && e !== null && "errcode" in e && typeof e.errcode === "number" && (e.errcode & 0xff) === 5;
 
+const CLOSED = failure("TRANSIENT", "replication/sqlite: the replication was closed while it read the snapshot");
+
 const chunkBytes = (header: WalHeader): number => Math.max(1, Math.floor(READ_CHUNK_BYTES / frameSize(header.pageSize))) * frameSize(header.pageSize);
 
 export function createReplicationSqlite(config: Config, blobs: Blobstore, now: () => number = Date.now, options: ReplicationOptions = {}): Replication {
@@ -405,9 +408,10 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   const unacknowledged: string[] = placedRestore ? [placedRestore.applied.generation] : [];
 
   const walBytes = (): number => (existsSync(walFile) ? statSync(walFile).size : 0);
+  const walState = (): WalState => boundaryCast<WalState | undefined>(writeLock.prepare("PRAGMA wal_checkpoint(PASSIVE)").get(), "host") ?? { busy: 1, log: -1, checkpointed: -1 };
   const walContentBytes = (): number => {
-    const row = boundaryCast<{ log: number } | undefined>(writeLock.prepare("PRAGMA wal_checkpoint(PASSIVE)").get(), "host");
-    return row === undefined || row.log <= 0 ? 0 : WAL_HEADER_SIZE + row.log * frameSize(pageSize);
+    const { log } = walState();
+    return log <= 0 ? 0 : WAL_HEADER_SIZE + log * frameSize(pageSize);
   };
   const segmentKey = (currentGeneration: string, at: number): string => `${config.prefix}gen/${currentGeneration}/wal/${pad(lineage, 6)}-${pad(seq, 6)}-${stamp(at)}.wal`;
 
@@ -418,7 +422,6 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     }
     return cursor;
   };
-  const fromStart = (head: WalHead): WalCursor => ({ ...head, frame: 0 });
 
   const readCommittedSync = (locate: (head: WalHead) => WalCursor): { at: WalCursor; segment: Uint8Array; frames: number; checksum: WalChecksum } | null => {
     if (!existsSync(walFile)) return null;
@@ -466,17 +469,17 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   };
 
   let snapshotOrder = 0;
-  const takeSnapshot = async (listed?: ReplicaListing): Promise<Result<{ generation: string; bytes: number }, BlobstoreError>> => {
+  const takeSnapshot = async (listed?: ReplicaListing): Promise<Result<{ generation: string; bytes: number } | null, BlobstoreError>> => {
     if (listed) observe(listed);
     else {
       const listing = await listReplica(blobs, config.prefix);
       if (isErr(listing)) return listing;
       observe(listing.value);
     }
-    const at = now();
-    let data: Uint8Array = new Uint8Array(readFileSync(file));
-    const wal = readCommittedSync(fromStart);
-    if (wal && wal.frames > 0) data = applySegment(data, wal.segment);
+    const read = await readSnapshot({ file, walFile, probe: walState, now, stopped: () => closed });
+    if (read === "stopped") return ok(null);
+    if (read === "unsettled") return err(failure("TRANSIENT", "replication/sqlite: the WAL kept starting over while the snapshot read it; the next run tries again"));
+    const { image, position, at } = read;
     snapshotOrder = Math.max(at, newestListed + 1, snapshotOrder + 1);
     const gen = `${stamp(snapshotOrder)}-${orderKey(snapshotOrder)}${orderKey(at)}${randomBytes(10).toString("hex")}`;
     own.add(gen);
@@ -484,18 +487,20 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       const carried = await blobs.put(markerKey(config.prefix, gen, "origin"), new TextEncoder().encode(placedRestore.origin), { contentType: "application/json" });
       if (isErr(carried)) return carried;
     }
-    const put = await blobs.put(`${config.prefix}gen/${gen}/snapshot.db`, data, { contentType: "application/vnd.sqlite3" });
+    const snapshotKey = `${config.prefix}gen/${gen}/snapshot.db`;
+    const put = await blobs.put(snapshotKey, image, { contentType: "application/vnd.sqlite3" });
     if (isErr(put)) {
+      await blobs.remove(snapshotKey);
       if (placedRestore) await blobs.remove(markerKey(config.prefix, gen, "origin"));
       return put;
     }
     if (placedRestore) unacknowledged.push(gen);
     generation = gen;
     seq = 0;
-    cursor = wal ? { ...wal.at, frame: wal.frames, checksum: wal.checksum } : null;
+    cursor = position === null ? null : { ...position };
     pending = [];
     lastSnapshotAt = at;
-    return ok({ generation: gen, bytes: data.byteLength });
+    return ok({ generation: gen, bytes: image.byteLength });
   };
 
   const shipNewFrames = async (): Promise<Result<{ bytes: number; frames: number }, BlobstoreError>> => {
@@ -677,6 +682,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       if (isErr(listing)) return listing;
       const snap = await takeSnapshot(listing.value);
       if (isErr(snap)) return snap;
+      if (snap.value === null) return err(CLOSED);
     }
     const t = now();
     const shipped = await shipNewFrames();
@@ -729,20 +735,22 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       return next;
     },
     snapshot: () =>
-      exclusive(async () => {
+      exclusive(async (): Promise<Result<{ generation: string; bytes: number }, BlobstoreError>> => {
         const shipped = await shipNewFrames();
         if (isErr(shipped)) return shipped;
-        return takeSnapshot();
+        const snap = await takeSnapshot();
+        if (isErr(snap)) return snap;
+        return snap.value === null ? err(CLOSED) : ok(snap.value);
       }),
     seal: () =>
       exclusive(async (): Promise<Result<(Seal & { generation: string }) | null, BlobstoreError>> => {
         if (sealedAs !== null) return ok(sealedAs);
         const acknowledging = placedRestore !== null && handled;
         if (generation === null) {
-          const wal = readCommittedSync(fromStart);
-          if (!wal || wal.frames === 0) return ok(null);
+          if (walState().log === 0) return ok(null);
           const snap = await takeSnapshot();
           if (isErr(snap)) return snap;
+          if (snap.value === null) return err(CLOSED);
         }
         const shipped = await shipNewFrames();
         if (isErr(shipped)) return shipped;

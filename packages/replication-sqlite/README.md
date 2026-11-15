@@ -10,6 +10,21 @@ restore = snapshot + segments up to the requested time, applied page by page int
 in place; the rebuilt file is opened and passes `PRAGMA quick_check` before it is handed over, otherwise
 the restore fails with `TRANSIENT` naming the generation.
 
+A snapshot is read asynchronously in chunks of 1 MiB, with the event loop running between them, into one
+buffer of the database's size; no other copy of the database or the WAL is held. A passive checkpoint on
+the module's second connection tells how many frames the WAL holds and how many of them are already copied
+back into the database file. The snapshot is the database file up to the size after the last copied frame,
+with the frames after it applied in order, which is byte for byte the whole file with every committed frame
+applied. The module's read transaction stays open while the snapshot is read: no checkpoint copies back a
+frame the read transaction does not see, so the pages the snapshot reads from the file change only where a
+frame it applies overwrites them, and the WAL cannot start over beneath frames it still has to read. The
+frames it applies have to continue the WAL's checksum chain up to the last committed frame, and the WAL
+header has to read the same before and after; otherwise the snapshot is read again, up to ten times, and
+the run fails with `TRANSIENT` after that. Frames committed while the snapshot is read are not in it and
+are shipped after it. When the upload of a snapshot fails, the module removes its key again, so that a
+restore never picks a generation whose process went on shipping into the one before it. A process killed
+while it reads or uploads a snapshot leaves the replica as its last sync left it.
+
 A generation is named by a time, then 12 hex digits of the same time in milliseconds, 12 hex digits of
 the time the snapshot was taken in milliseconds and 20 random hex digits (`20260927T101500Z-0192…9f…`),
 and every key of it lives under `<prefix>gen/<generation>/`, so a snapshot key cannot be derived from
