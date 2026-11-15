@@ -274,7 +274,10 @@ export class CloudFoundryRun {
     const app = new FakeApp({ store: this.store, dir: join(this.root, "disk"), prefixes: RUN_PREFIXES, runtime: release.runtime });
     await app.start();
     this.app = app;
-    if (release.renders) await app.export();
+    if (release.renders) {
+      await app.export();
+      await app.sync();
+    }
   }
 
   private async stopApp(): Promise<void> {

@@ -163,7 +163,10 @@ export class FakeUpdateTarget implements UpdateTarget {
     const app = new FakeApp({ store: this.options.store, dir: this.options.dir, prefixes: this.options.prefixes, runtime: release.runtime });
     await app.start();
     this.app = app;
-    if (release.renders) await app.export();
+    if (release.renders) {
+      await app.export();
+      await app.sync();
+    }
   }
 
   async waitReady(): Promise<boolean> {

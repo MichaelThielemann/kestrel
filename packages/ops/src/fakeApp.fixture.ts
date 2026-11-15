@@ -52,6 +52,7 @@ const TABLES = [
   `CREATE TABLE IF NOT EXISTS authn_sessions ("id" TEXT PRIMARY KEY, "userId" TEXT, "expiresAt" REAL, "authTime" REAL)`,
   `CREATE TABLE IF NOT EXISTS audit_entries ("id" TEXT PRIMARY KEY, "eventId" TEXT, "event" TEXT, "at" REAL, "identityId" TEXT, "ip" TEXT, "params" TEXT)`,
   `CREATE TABLE IF NOT EXISTS mfa_factors ("id" TEXT PRIMARY KEY, "userId" TEXT UNIQUE, "secret" TEXT, "confirmed" INTEGER)`,
+  `CREATE TABLE IF NOT EXISTS render_status ("id" TEXT PRIMARY KEY, "key" TEXT, "sha256" TEXT)`,
 ];
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
@@ -293,7 +294,10 @@ export class FakeApp implements Target {
     this.run(`DELETE FROM media_items WHERE "id" = ?`, id);
   }
 
-  /** Renders every page to the delivery prefix and removes outputs of pages that are gone, as a full export does. */
+  /**
+   * Renders every page to the delivery prefix and removes outputs of pages that are gone, as a full export does, and
+   * records each output in `render_status` of the database, as the delivery's status rows do.
+   */
   async export(): Promise<void> {
     const { store, prefixes } = this.options;
     const pages = boundaryCast<Array<{ id: string; title: string; body: string }>>(this.rows("pages"), "host");
@@ -301,7 +305,9 @@ export class FakeApp implements Target {
     for (const page of pages) {
       const key = `${prefixes.delivery}${page.id}/index.html`;
       wanted.add(key);
-      await store.put(key, encode(`<h1>${page.title}</h1><p>${page.body}</p>`), { contentType: "text/html; charset=utf-8" });
+      const html = `<h1>${page.title}</h1><p>${page.body}</p>`;
+      await store.put(key, encode(html), { contentType: "text/html; charset=utf-8" });
+      this.run(`INSERT OR REPLACE INTO render_status VALUES (?, ?, ?)`, page.id, key, createHash("sha256").update(html).digest("hex"));
     }
     await store.put(`${prefixes.delivery}sitemap.xml`, encode(pages.map((p) => `/${p.id}/`).join("\n")), { contentType: "application/xml" });
     wanted.add(`${prefixes.delivery}sitemap.xml`);

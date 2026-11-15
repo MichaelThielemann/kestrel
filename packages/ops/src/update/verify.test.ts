@@ -91,9 +91,12 @@ describe("verifying a started release", { timeout: 20_000 }, () => {
     expect(result.ownGeneration).toBeNull();
   });
 
-  it("fails when nothing reaches the own generation after its first snapshot", async () => {
+  it("fails when no segment reaches the own generation after its first snapshot, whatever marker files it holds", async () => {
     const s = await startOnPromoted();
-    for (const key of await ownKeys(s)) if (!key.endsWith("/snapshot.db")) await s.h.store.delete(key);
+    for (const key of await ownKeys(s)) if (!key.endsWith("/snapshot.db") && !key.endsWith(".json")) await s.h.store.delete(key);
+    const own = (await listGenerations(s.h.store, PREFIXES.replica)).find((g) => g.name > s.promoted.generation);
+    expect(own?.segments).toEqual([]);
+    expect(Object.keys(own?.files ?? {}).length).toBeGreaterThan(0);
     const result = await verify(s);
     expect(result.verdict).toBe("failed");
     expect(failed(result)).toEqual(["sync-advances"]);
@@ -102,7 +105,7 @@ describe("verifying a started release", { timeout: 20_000 }, () => {
   it("fails when the release does not render again", async () => {
     const result = await verify(await startOnPromoted({ renders: false }));
     expect(result.verdict).toBe("failed");
-    expect(failed(result)).toEqual(["render-started"]);
+    expect(failed(result)).toContain("render-started");
   });
 
   it("cannot tell, instead of failing, when the store cannot be read during a check", async () => {

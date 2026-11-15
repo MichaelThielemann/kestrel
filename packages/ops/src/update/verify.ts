@@ -23,7 +23,7 @@ function advanced(gens: readonly Generation[], first: Generation): boolean {
   const since = first.snapshot?.lastModified ?? Number.POSITIVE_INFINITY;
   const current = gens.find((g) => g.name === first.name);
   if (current === undefined) return false;
-  const later = [...current.segments, ...Object.values(current.files)].some((info) => info.lastModified >= since);
+  const later = current.segments.some((info) => info.lastModified >= since);
   return later || gens.some((g) => g.name > first.name && g.snapshot !== null);
 }
 
@@ -35,7 +35,8 @@ const describeProbe = (probe: ReadyProbe): string => (probe.outcome === "unverif
  * Verifies a started release. Hard checks: an instance runs and the platform recorded no crash since the start;
  * readiness in three outcomes (ready; not-ready fails; unverifiable halts); `applied.json` of the promoted generation
  * names it and the nonce of its `origin.json`; the release's own generation, sorting after the promoted one, shows its
- * first snapshot; the newest object of that generation advances within `update.syncWindowSeconds`; a key under the
+ * first snapshot; within `update.syncWindowSeconds` a WAL segment written after that snapshot, or a later generation
+ * with a snapshot, shows that the sync advances (`origin.json`, `applied.json` and `sealed.json` do not count); a key under the
  * delivery prefix newer than the start shows that a render began within `update.renderTimeoutSeconds`. The soft
  * check `pages` (the delivery prefix holds keys) only warns. When reading the store or the target throws during a
  * check, the check `readable` fails and the verdict is `unverifiable`: a check that cannot be read halts, it does not
