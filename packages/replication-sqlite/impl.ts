@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
+import { endianness } from "node:os";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
@@ -411,6 +412,8 @@ try {
     Atomics.store(signal, 1, 1);
     Atomics.notify(signal, 1);
     checkpoint.get();
+    Atomics.store(signal, 1, 2);
+    Atomics.notify(signal, 1);
   }
 } finally {
   db.close();
@@ -419,7 +422,32 @@ try {
 
 const RUN = 1;
 const CANCEL = 2;
+const CHECKPOINTING = 1;
+const RETURNED = 2;
 const START_WAIT_MS = 50;
+const START_POLL_MS = 0.05;
+const SHM_BACKFILL_ATTEMPTED = 128;
+
+function backfillAttempted(file: string): { read: () => number | null; close: () => void } | null {
+  let fd: number;
+  try {
+    fd = openSync(`${file}-shm`, "r");
+  } catch {
+    return null;
+  }
+  const bytes = new Uint8Array(4);
+  const little = endianness() === "LE";
+  return {
+    read: () => {
+      try {
+        return readSync(fd, bytes, 0, 4, SHM_BACKFILL_ATTEMPTED) === 4 ? new DataView(bytes.buffer).getUint32(0, little) : null;
+      } catch {
+        return null;
+      }
+    },
+    close: () => closeSync(fd),
+  };
+}
 
 interface CopyBack {
   start(): void;
@@ -447,7 +475,18 @@ function prepareCopyBack(file: string): Promise<CopyBack | null> {
   };
   const copyBack: CopyBack = {
     start: () => {
-      if (wake(RUN)) Atomics.wait(signal, 1, 0, START_WAIT_MS);
+      const attempted = backfillAttempted(file);
+      try {
+        const before = attempted?.read() ?? null;
+        if (!wake(RUN)) return;
+        const deadline = performance.now() + START_WAIT_MS;
+        for (let state = Atomics.load(signal, 1); state !== RETURNED && performance.now() < deadline; state = Atomics.load(signal, 1)) {
+          if (state === CHECKPOINTING && (before === null || attempted?.read() !== before)) return;
+          Atomics.wait(signal, 1, state, state === CHECKPOINTING ? START_POLL_MS : Math.max(0, deadline - performance.now()));
+        }
+      } finally {
+        attempted?.close();
+      }
     },
     cancel: () => {
       wake(CANCEL);

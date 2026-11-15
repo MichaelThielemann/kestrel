@@ -230,7 +230,7 @@ async function whileCheckpointLockIsHeld<T>(task: () => Promise<T>): Promise<T> 
   }
 }
 
-function walIndex(file: string): { frames: () => number; backfilled: () => number } {
+function walIndex(file: string): { frames: () => number; backfilled: () => number; attempted: () => number } {
   const little = endianness() === "LE";
   const read = (offset: number): number => {
     try {
@@ -240,7 +240,7 @@ function walIndex(file: string): { frames: () => number; backfilled: () => numbe
       return 0;
     }
   };
-  return { frames: () => read(16), backfilled: () => read(96) };
+  return { frames: () => read(16), backfilled: () => read(96), attempted: () => read(128) };
 }
 
 function copiedBackOnThisThread(file: string): { frames: () => number; largest: () => number; stop: () => void } {
@@ -708,7 +708,7 @@ describe("replication/sqlite checkpoint after a snapshot while another thread wr
 
 describe("replication/sqlite copy-back beside a writer on the event loop's thread with SQLite's own checkpoints", () => {
   function writerOnThisThread(l: ReturnType<typeof live>): { stop: () => Promise<{ commits: number; largestFramesCopiedBack: number; longestCommitMs: number }> } {
-    const { backfilled } = walIndex(l.file);
+    const { attempted } = walIndex(l.file);
     const insert = l.app.prepare("INSERT INTO t (v) VALUES (?)");
     let writing = true;
     let commits = 0;
@@ -717,11 +717,11 @@ describe("replication/sqlite copy-back beside a writer on the event loop's threa
     const loop = (async () => {
       while (writing) {
         await sleep(2);
-        const before = backfilled();
+        const before = attempted();
         const started = performance.now();
         insert.run("app-".padEnd(600, "a"));
         longestMs = Math.max(longestMs, performance.now() - started);
-        largest = Math.max(largest, backfilled() - before);
+        largest = Math.max(largest, attempted() - before);
         commits += 1;
       }
     })();

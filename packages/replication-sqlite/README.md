@@ -16,9 +16,10 @@ snapshot runs a passive checkpoint on the module's second connection: it copies 
 every committed frame the module's read transaction already sees, and answers how many frames the WAL holds
 and how many of them the database file now holds. When the WAL file is `checkpointBytes` or larger, a worker
 thread first runs the same checkpoint on a connection of its own, so the one on the event loop's thread finds
-next to nothing left to copy. The worker opens its connection before the module takes its read transaction
-and takes the checkpoint lock before the event loop runs again, so the checkpoint SQLite runs by itself after
-a commit on the event loop's thread finds the lock taken and leaves the copy to the worker. The snapshot is the database file up to the size after the last copied frame,
+next to nothing left to copy. The worker opens its connection before the module takes its read transaction,
+and the module waits, up to 50 ms, until the worker's checkpoint has begun before the event loop runs again,
+so the checkpoint SQLite runs by itself after a commit on the event loop's thread finds the checkpoint lock
+taken and leaves the copy to the worker. The snapshot is the database file up to the size after the last copied frame,
 with the frames after it applied in order, which is byte for byte the whole file with every committed frame
 applied. The module's read transaction stays open while the snapshot is read: no checkpoint copies back a
 frame the read transaction does not see, so the pages the snapshot reads from the file change only where a
@@ -73,10 +74,10 @@ are not in the database file yet. When a checkpoint finds 8 MiB or more of such 
 in the options of `createReplicationSqlite` of `./impl`), it starts a worker thread with a connection of
 its own, then reads the remaining committed frames under the write lock, as above, and takes the read
 transaction again at the end of the WAL without copying anything; the worker copies back every frame up to
-there, which the WAL cannot start over beneath, since the read transaction holds it. The worker takes the
-checkpoint lock before the write lock is released, so no commit on any connection lands before it, and the
-checkpoint SQLite runs by itself after a commit, also on the event loop's thread, finds the lock taken and
-copies nothing. It repeats that, up to four times, while 8 MiB or more accumulate meanwhile, and only then
+there, which the WAL cannot start over beneath, since the read transaction holds it. The module waits, up
+to 50 ms, until the worker's checkpoint has begun before it releases the write lock, so no commit on any
+connection lands before it, and the checkpoint SQLite runs by itself after a commit, also on the event
+loop's thread, finds the checkpoint lock taken and copies nothing. It repeats that, up to four times, while 8 MiB or more accumulate meanwhile, and only then
 copies back the rest on the event loop's thread as above: what was committed while the last worker ran.
 
 A checkpoint runs from `replication.sync` when the WAL holds `checkpointBytes` of frames or
