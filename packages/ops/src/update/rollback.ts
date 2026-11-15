@@ -444,7 +444,7 @@ export async function guardRollback(ctx: UpdateContext, run: UpdateRun, manifest
         }
       }
     }
-    const safety = await createBackup(ctx, { kind: "pre-restore", mode: { kind: "stopped", seal, stoppedAt: stop.stoppedAt }, pinFor: ctx.runId });
+    const safety = await createBackup(ctx, { kind: "pre-restore", mode: { kind: "stopped", seal, stoppedAt: stop.stoppedAt }, pinFor: ctx.run.id });
     ctx.out.info(`pre-restore backup ${safety.id} written and verified`);
     return { ok: true };
   } catch (error) {

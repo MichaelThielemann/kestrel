@@ -178,7 +178,8 @@ nothing is written between the report and the stop. It then compares the stopped
 generation, after `accept` with the cutover backup. When the new release wrote more than login sessions, or after
 `accept` always, it shows what would be lost and needs the environment's name as the answer to
 `rollback-accepted`; without it the app is started again and the run stays as it was. Every such rollback takes a
-verified `pre-restore` backup of the stopped app before it changes the store. `kestrel update abort` of a run
+verified `pre-restore` backup of the stopped app before it changes the store; once the command ended, its retention
+keeps it like any other `pre-restore` backup. `kestrel update abort` of a run
 whose new release started goes through the same steps. A halted run whose verification fails again, and a deploy
 that `update resume` continues after a start an earlier process began whose verification or start then fails, is
 rolled back automatically only when its release wrote nothing since its start, after the stop and a `pre-restore`

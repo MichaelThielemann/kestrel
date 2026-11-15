@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createBackup, listBackups, prune } from "../backup.ts";
 import { cleanup } from "./cleanup.ts";
+import { rollbackCommand } from "./rollback.ts";
 import { UPDATE_PIN_PREFIX } from "./layout.ts";
 import { acceptRun, continueRun, createScenario, deployUntil, runOf, type Scenario } from "./scenario.fixture.ts";
 import { UPDATE_EXIT, type UpdateContext } from "./types.ts";
@@ -51,4 +52,29 @@ describe("the update pin on a cutover backup", () => {
     expect(removed.backups).toContain(cutover);
     expect((await listBackups(second)).some((b) => b.id === cutover)).toBe(false);
   });
+
+  it("lets prune remove the safety backup of an update rollback once the run that took it ended", async () => {
+    const s = await createScenario({ from: { renders: false } });
+    scenarios.push(s);
+    const safety: string[] = [];
+    let lastRun = "";
+    for (let i = 0; i < 2; i++) {
+      const deployed = await deployUntil(s, "verify");
+      await deployed.ctx.journal.finish(true);
+      const { ctx, run } = await continueRun(s, deployed.runId, "update rollback", { yes: false });
+      expect(await rollbackCommand(ctx, run)).toMatchObject({ exitCode: UPDATE_EXIT.done, state: "rolled-back" });
+      await ctx.journal.finish(true);
+      const backup = (await listBackups(ctx)).filter((b) => b.kind === "pre-restore" && !safety.includes(b.id));
+      expect(backup.map((b) => b.pinnedBy)).toEqual([[deployed.runId]]);
+      safety.push(backup[0]?.id ?? "");
+      lastRun = deployed.runId;
+    }
+    const { ctx } = await continueRun(s, lastRun, "backup prune");
+    ctx.clock = () => Date.now() + 3 * DAY;
+    ctx.env.backups.retention["pre-restore"] = 1;
+    await ctx.journal.finish(true);
+    const pruned = await prune(ctx, false);
+    expect(pruned.backups).toContain(safety[0]);
+    expect(pruned.backups).not.toContain(safety[1]);
+  }, 30_000);
 });
