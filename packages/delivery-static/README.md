@@ -189,7 +189,8 @@ change marks each dependent output once and a cycle of pages that show each othe
 
 **Moved paths.** `delivery.markMoved` runs on `site.pathsMoved` and takes `{ type, id, locale, from, to }` entries
 from the payload's `moves`. It marks the moved documents' own `live` or `error` outputs in those locales, which a
-change of their own document would not mark, and then every output that linked to one of them at a path that is
+change of their own document would not mark, looking their status rows up by type, document and locale, so a row a
+5.x release created under a random id is marked as well, and then every output that linked to one of them at a path that is
 no longer current. The re-render stores each output at its new path and removes the old path's files unless
 another output owns them, so two pages that swapped slugs each end up at their new path.
 

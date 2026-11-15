@@ -1358,12 +1358,23 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   };
 
   const markMoved: Delivery["markMoved"] = async (moves) => {
-    const own = moves.filter((m) => deliveredTypes.includes(m.type)).map((m) => statusIdOf(m.type, m.id, m.locale));
+    const byType = new Map<string, Set<string>>();
+    for (const move of moves) byType.set(move.type, (byType.get(move.type) ?? new Set<string>()).add(move.id));
+    const wanted = new Set(moves.map((m) => `${m.type}\u0000${m.id}\u0000${m.locale}`));
+    const own: string[] = [];
+    for (const [type, ids] of byType) {
+      if (!deliveredTypes.includes(type)) continue;
+      for (const chunk of chunks([...ids], MARK_CHUNK)) {
+        const listed = await pagedRows({ type, docId: { in: chunk } }, (rows) => {
+          for (const row of rows) if (wanted.has(`${row.type}\u0000${row.docId}\u0000${row.locale}`)) own.push(row.id);
+          return ok();
+        });
+        if (isErr(listed)) return listed;
+      }
+    }
     const marked = await markRows(own, MARKABLE);
     if (isErr(marked)) return marked;
     let total = marked.value;
-    const byType = new Map<string, Set<string>>();
-    for (const move of moves) byType.set(move.type, (byType.get(move.type) ?? new Set<string>()).add(move.id));
     for (const [type, ids] of byType) {
       const dependents = await markDependents(type, [...ids]);
       if (isErr(dependents)) return dependents;

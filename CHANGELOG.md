@@ -1565,7 +1565,9 @@ Net changes since 5.8.2.
   redirect stays removed when the move that created it is replayed).
 - `delivery-static`: `delivery.markMoved` runs on `site.pathsMoved` and marks the moved documents'
   own outputs and every output linking to one of them at an old path; the re-render stores each at
-  its new path and removes the old files. `site-default`'s `./impl` exports `createSitePaths`.
+  its new path and removes the old files. A moved document's own outputs are found by their stored
+  status rows, so the pages a 5.x release delivered move with a renamed parent or mount as well.
+  `site-default`'s `./impl` exports `createSitePaths`.
 - `examples/minimal` routes its pages through `site-default`: page writes end their atomic group with
   `site.indexPath:pages` followed by `site.announcePaths`, `site.pathsMoved` feeds automatic
   redirects and re-renders, `resumePaths` runs every minute, and `rebuildPathsAfterMigrations` runs

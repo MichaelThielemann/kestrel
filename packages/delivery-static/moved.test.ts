@@ -123,7 +123,7 @@ async function routedDelivery() {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
   };
-  return { delivery, moves, create, update, html, marked, settle };
+  return { db, delivery, moves, create, update, html, marked, settle };
 }
 
 describe("delivery/static: re-rendering moved outputs", () => {
@@ -159,6 +159,32 @@ describe("delivery/static: re-rendering moved outputs", () => {
     h.moves.length = 0;
     await h.update(parent, { slug: "familie" });
     expectOk(await h.delivery.markMoved(h.moves));
+    await h.settle();
+    expect(h.html("/eltern/kind")).toBeNull();
+    expect(h.html("/familie/kind")).toContain("<h1>Kind</h1>");
+  });
+
+  it("renaming a parent re-renders subpages whose status rows carry ids of an earlier release, after they were rendered again", async () => {
+    const h = await routedDelivery();
+    const parent = await h.create({ slug: "eltern", title: "Eltern", status: "published" });
+    const child = await h.create({ slug: "kind", title: "Kind", status: "published", parent });
+    expectOk(await h.delivery.publish("pages", parent));
+    const legacyIds: string[] = [];
+    for (const locale of ["de", "en"]) {
+      const id = randomUUID();
+      legacyIds.push(id);
+      expectOk(await h.db.createOne<StatusRow>(STATUS, { id, type: "pages", docId: child, locale, state: locale === "de" ? "live" : "draft", path: locale === "de" ? "/eltern/kind" : null, writtenKeys: {}, error: null, publishedAt: locale === "de" ? 1 : null, updatedAt: 1, version: 1, depSet: null, depCount: null, staleAt: null, staleToken: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null }));
+    }
+    expectOk(await h.delivery.publish("pages", child));
+    const rows = expectOk(await h.db.findMany<StatusRow>(STATUS, { docId: child }, { sort: { locale: "asc" } })).items;
+    expect(rows.map((r) => r.id)).toEqual(legacyIds);
+    expect(rows.find((r) => r.locale === "de")?.depSet).not.toBeNull();
+    expect(h.html("/eltern/kind")).toContain("<h1>Kind</h1>");
+    h.moves.length = 0;
+
+    await h.update(parent, { slug: "familie" });
+    expectOk(await h.delivery.markMoved(h.moves));
+    expect(await h.marked()).toContain(`${child}/de`);
     await h.settle();
     expect(h.html("/eltern/kind")).toBeNull();
     expect(h.html("/familie/kind")).toContain("<h1>Kind</h1>");
