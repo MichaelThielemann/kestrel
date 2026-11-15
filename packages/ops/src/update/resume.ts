@@ -1,7 +1,7 @@
 import { readManifest } from "../backup.ts";
 import { messageOf } from "../context.ts";
 import { readUpdateRun, reportOf, retirePending, RUN_STEP } from "./journal.ts";
-import { guardRollback } from "./rollback.ts";
+import { finishStartedRollback, guardRollback, startedPrevious, type StartedPrevious } from "./rollback.ts";
 import { stoppedAfterRollback } from "./status.ts";
 import { retireStep, verifyCommand } from "./verify.ts";
 import { UPDATE_EXIT, type RollbackReason, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRecord, type UpdateRun, type UpdateRunState } from "./types.ts";
@@ -35,6 +35,22 @@ async function rollBackAgain(ctx: UpdateContext, run: UpdateRun, reason: Rollbac
   }
 }
 
+async function finishOrGuard(ctx: UpdateContext, run: UpdateRun, started: StartedPrevious, reason: RollbackReason): Promise<UpdateOutcome> {
+  const scope = fixedText`--env ${literal(ctx.envName)} --run ${literal(run.runId)}`;
+  try {
+    const finished = await finishStartedRollback(ctx, run, started);
+    if (finished !== null) {
+      if (reason.kind === "abort") await ctx.journal.record("abort", "done", { phase: "abort", promoted: true, ended: finished.ended });
+      return outcome(ctx, run.runId, reason.kind === "automatic" ? UPDATE_EXIT.rolledBack : UPDATE_EXIT.done, fixedText`rolled back: the previous release runs verified on generation ${literal(finished.generation)}`, "rolled-back");
+    }
+  } catch (error) {
+    return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`the previous release runs on generation ${literal(started.generation)} since the rollback started it, but it could not be verified: ${messageOf(error)}; update resume ${scope} verifies it again, update rollback ${scope} rolls back again and asks before it discards what the previous release wrote`, "rolling-back");
+  }
+  const refused = await guardAgain(ctx, run);
+  if (refused !== null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`not rolled back again: ${refused}; run update resume ${scope} again with the answer`, run.state);
+  return rollBackAgain(ctx, run, reason);
+}
+
 function failedAfterStop(run: UpdateRun): string | null {
   if (run.state !== "down" && run.state !== "verifying") return null;
   const last = run.records.filter((r) => r.phase === "deploy" && r.step !== RUN_STEP && r.step !== "run-done" && r.step !== "run-failed").at(-1);
@@ -53,7 +69,10 @@ async function guardAgain(ctx: UpdateContext, run: UpdateRun): Promise<string | 
 /**
  * `update resume`: continues an interrupted run where its journal ended, after a `resume` record. A deploy continues
  * through `continueDeploy`; a rollback that did not finish runs again from its first step (every rollback step can be
- * repeated); a run whose verification failed before its rollback began is rolled back through `guardRollback` in mode
+ * repeated) unless it already started the previous release on the generation it promoted: while the app runs that
+ * release's droplet, only its verification runs again (`finishStartedRollback`), and a failed verification refuses with
+ * the release left running; otherwise the rollback runs again through `guardRollback` in mode `ask`, which compares
+ * the stopped replica with that generation. A run whose verification failed before its rollback began is rolled back through `guardRollback` in mode
  * `ask`, since its new release may have served since: the stop first, the `rollback-accepted` question when it wrote,
  * and a `pre-restore` backup; so is a deploy whose last step after the stop failed before its automatic rollback
  * began; a halted run is verified again. The ending is that of
@@ -71,8 +90,11 @@ export async function resume(ctx: UpdateContext, run: UpdateRun): Promise<Update
   if (action === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`run ${literal(run.runId)} is ${literal(run.state)}; there is nothing to resume${run.state === "rolling-back" ? literal(" (no rollback began; update rollback starts one)") : literal("")}`, run.state);
   await ctx.journal.record("resume", "started", { phase: "resume", state: run.state, lastDone: run.lastDone });
   switch (action) {
-    case "rollback":
-      return rollBackAgain(ctx, run, begun === undefined ? { kind: "automatic", failure: "verification failed" } : reasonOf(begun));
+    case "rollback": {
+      const reason: RollbackReason = begun === undefined ? { kind: "automatic", failure: "verification failed" } : reasonOf(begun);
+      const started = startedPrevious(run);
+      return started === null ? rollBackAgain(ctx, run, reason) : finishOrGuard(ctx, run, started, reason);
+    }
     case "rollback-failed-verify":
     case "rollback-failed-step": {
       const refused = await guardAgain(ctx, run);

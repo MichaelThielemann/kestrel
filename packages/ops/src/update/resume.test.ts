@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { listBackups } from "../backup.ts";
+import { abort } from "./abort.ts";
 import { resume } from "./resume.ts";
+import { rollbackCommand } from "./rollback.ts";
 import { waitForSeal } from "./seal.ts";
 import { continueRun, createScenario, deployUntil, guardStarts, rowsOf, runOf, scenarioContinue, type Scenario } from "./scenario.fixture.ts";
 import { nextCommand } from "./status.ts";
@@ -26,6 +28,24 @@ async function writeRow(s: Scenario, id: string): Promise<void> {
 }
 
 const verdict = (value: VerifyVerdict): (() => Promise<VerifyResult>) => async () => ({ verdict: value, checks: [], ready: value === "unverifiable" ? { outcome: "unverifiable", status: 403, reason: "forbidden" } : { outcome: value === "passed" ? "ready" : "not-ready", status: value === "passed" ? 200 : 503 }, ownGeneration: null });
+
+async function previousReleaseStarted(): Promise<{ s: Scenario; runId: string }> {
+  const s = await createScenario({ from: { renders: false, ready: "forbidden" } });
+  scenarios.push(s);
+  const deployed = await deployUntil(s, "start");
+  const first = await continueRun(s, deployed.runId, "update rollback");
+  const failed = await rollbackCommand(first.ctx, first.run);
+  expect(failed, failed.message).toMatchObject({ exitCode: UPDATE_EXIT.refused, state: "rolling-back" });
+  expect(s.h.target.release.runtime).toBe("5.8.1");
+  expect((await s.h.target.status()).state).toBe("started");
+  expect(s.h.output.error.join("\n")).toContain("update resume verifies the started previous release again");
+  const app = s.h.target.app;
+  if (app === null) throw new Error("the previous release does not run");
+  app.run(`INSERT INTO pages VALUES ('editor', 'Written on the previous release', 'Kept')`);
+  await app.export();
+  await app.sync();
+  return { s, runId: deployed.runId };
+}
 
 describe("update resume", () => {
   for (const step of ["gate", "stage", "configuration", "precopy", "stop", "seal", "cutover-backup", "migrate", "promote", "swap", "start"] as const satisfies readonly DeployStep[]) {
@@ -249,6 +269,55 @@ describe("update resume", () => {
     expect(steps.filter((x) => x === "re-promote done")).toHaveLength(2);
   });
 
+  it("verifies the previous release again instead of promoting once more when the rollback already started it, and keeps what it wrote", async () => {
+    const { s, runId } = await previousReleaseStarted();
+    s.h.target.release.ready = "ready";
+    const { ctx, run } = await continueRun(s, runId, "update resume");
+    const backups = (await listBackups(ctx)).length;
+    expect(run.state).toBe("rolling-back");
+    const outcome = await resume(ctx, run);
+    expect(outcome, outcome.message).toMatchObject({ exitCode: UPDATE_EXIT.done, state: "rolled-back" });
+    expect(s.h.target.release.runtime).toBe("5.8.1");
+    expect((await s.h.target.status()).state).toBe("started");
+    expect(JSON.stringify(rowsOf(s.h.target.app?.file ?? ""))).toContain("Written on the previous release");
+    const records = (await runOf(s, runId)).records.map((r) => `${r.step} ${r.state}`);
+    expect(records.filter((x) => x === "re-promote done")).toHaveLength(1);
+    expect(records.slice(-3)).toEqual(["rollback-verify done", "unpin done", "rollback done"]);
+    expect(await listBackups(ctx)).toHaveLength(backups);
+    expect(nextCommand(await runOf(s, runId), "update deploy")).toBeNull();
+  });
+
+  it("keeps the previous release running and refuses when a resumed rollback still cannot verify it", async () => {
+    const { s, runId } = await previousReleaseStarted();
+    const { ctx, run } = await continueRun(s, runId, "update resume");
+    const outcome = await resume(ctx, run);
+    expect(outcome, outcome.message).toMatchObject({ exitCode: UPDATE_EXIT.refused, state: "rolling-back" });
+    expect(outcome.message).toContain(`update rollback --env prod --run ${runId}`);
+    expect((await s.h.target.status()).state).toBe("started");
+    expect(JSON.stringify(rowsOf(s.h.target.app?.file ?? ""))).toContain("Written on the previous release");
+    expect((await runOf(s, runId)).records.filter((r) => r.step === "re-promote" && r.state === "done")).toHaveLength(1);
+  });
+
+  it("asks before a resumed rollback promotes the cutover state again over what the previous release wrote once the app is stopped", async () => {
+    const { s, runId } = await previousReleaseStarted();
+    await s.h.target.stop();
+    await s.h.target.idle();
+    s.h.target.release.ready = "ready";
+    const first = await continueRun(s, runId, "update resume");
+    const refused = await resume(first.ctx, first.run);
+    expect(refused, refused.message).toMatchObject({ exitCode: UPDATE_EXIT.refused, state: "rolling-back" });
+    expect(refused.message).toContain("rollback-accepted");
+    expect(s.h.output.info.join("\n")).toContain("the previous release has run since");
+    expect((await runOf(s, runId)).records.filter((r) => r.step === "re-promote" && r.state === "done")).toHaveLength(1);
+    const pre = (await listBackups(first.ctx)).filter((b) => b.kind === "pre-restore").length;
+
+    const { ctx, run } = await continueRun(s, runId, "update resume", { answers: { "unsealed-stop": "accept", "rollback-accepted": "prod" } });
+    const outcome = await resume(ctx, run);
+    expect(outcome, outcome.message).toMatchObject({ exitCode: UPDATE_EXIT.done, state: "rolled-back" });
+    expect(JSON.stringify(rowsOf(s.h.target.app?.file ?? ""))).not.toContain("Written on the previous release");
+    expect((await listBackups(ctx)).filter((b) => b.kind === "pre-restore" && b.verified)).toHaveLength(pre + 1);
+  });
+
   it("does not roll back a run whose rollback after accept was refused", async () => {
     const s = await scenario();
     const deployed = await deployUntil(s, "retire");
@@ -265,5 +334,34 @@ describe("update resume", () => {
     const deployed = await deployUntil(s, "retire");
     const { ctx, run } = await continueRun(s, deployed.runId, "update resume");
     expect(await resume(ctx, run)).toMatchObject({ exitCode: UPDATE_EXIT.refused, state: "verified" });
+  });
+});
+
+describe("a rollback that already started the previous release, entered again", () => {
+  it("reports what the previous release wrote since the rollback started it when update rollback runs it again", async () => {
+    const { s, runId } = await previousReleaseStarted();
+    s.h.target.release.ready = "ready";
+    const { ctx, run } = await continueRun(s, runId, "update rollback");
+    const refused = await rollbackCommand(ctx, run);
+    expect(refused, refused.message).toMatchObject({ exitCode: UPDATE_EXIT.refused });
+    expect(refused.message).toContain("rollback-accepted");
+    const report = s.h.output.info.join("\n");
+    expect(report).toContain("the previous release has run since");
+    expect(report).toMatch(/pages: 1 newer row\(s\) dropped/);
+    expect((await s.h.target.status()).state).toBe("started");
+    expect(JSON.stringify(rowsOf(s.h.target.app?.file ?? ""))).toContain("Written on the previous release");
+  });
+
+  it("reports what the previous release wrote since the rollback started it when update abort rolls back again", async () => {
+    const { s, runId } = await previousReleaseStarted();
+    s.h.target.release.ready = "ready";
+    const { ctx, run } = await continueRun(s, runId, "update abort");
+    const refused = await abort(ctx, run);
+    expect(refused, refused.message).toMatchObject({ exitCode: UPDATE_EXIT.refused, state: "rolling-back" });
+    expect(refused.message).toContain("rollback-accepted");
+    const report = s.h.output.info.join("\n");
+    expect(report).toContain("the previous release has run since");
+    expect(report).toMatch(/pages: 1 newer row\(s\) dropped/);
+    expect(JSON.stringify(rowsOf(s.h.target.app?.file ?? ""))).toContain("Written on the previous release");
   });
 });

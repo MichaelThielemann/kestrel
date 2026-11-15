@@ -190,7 +190,7 @@ async function firstSnapshotMarker(ctx: UpdateContext, promoted: string, nonce: 
   return { generation: own.name, holds: holdsMarker(file, nonce) };
 }
 
-async function verifyPrevious(ctx: UpdateContext, promoted: Promoted, marker: string): Promise<Record<string, unknown>> {
+async function verifyPrevious(ctx: UpdateContext, promoted: Pick<Promoted, "generation" | "nonce">, marker: string): Promise<Record<string, unknown>> {
   const ready = await ctx.target.probeReady();
   if (ready.outcome !== "ready") throw new OpsError(`the previous release started but its readiness answers ${ready.outcome}${ready.status === null ? "" : ` (${ready.status})`}`, 1, "target");
   const sleep = sleepOf(ctx);
@@ -206,7 +206,7 @@ async function verifyPrevious(ctx: UpdateContext, promoted: Promoted, marker: st
   throw new OpsError(fixedText`the previous release neither acknowledged generation ${literal(promoted.generation)} in applied.json nor wrote a first snapshot after it within ${ctx.update.syncWindowSeconds} s`, 1, ctx.env.app.replicaPrefix);
 }
 
-async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Manifest): Promise<RollbackResult> {
+async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Manifest, progress: { started: boolean }): Promise<RollbackResult> {
   const seal = await stopAndSeal(ctx, run);
 
   const dbFile = ctx.workspace.path(`rollback-${hex(4)}.db`);
@@ -248,6 +248,7 @@ async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Man
 
   await waitUntilStartable(ctx, promoted.at, clock);
   await ctx.journal.record("start", "started", { generation: promoted.generation });
+  progress.started = true;
   await startTarget(ctx);
   try {
     await ctx.journal.record("rollback-verify", "done", await verifyPrevious(ctx, promoted, marker));
@@ -283,13 +284,69 @@ export async function rollback(ctx: UpdateContext, run: UpdateRun, reason: Rollb
   const manifest = await readManifest(ctx, run.cutoverBackup);
   if (manifest === null) throw new OpsError(fixedText`the cutover backup ${literal(run.cutoverBackup)} of run ${literal(run.runId)} does not exist or is incomplete`, 1, run.cutoverBackup);
   await ctx.journal.record("rollback", "started", { phase: "rollback", reason: reason.kind, ...(reason.kind === "automatic" ? { failure: reason.failure } : {}), cutoverBackup: manifest.id });
+  const progress = { started: false };
   try {
-    return await rollBackStopped(ctx, run, manifest);
+    return await rollBackStopped(ctx, run, manifest, progress);
   } catch (error) {
     await recordQuietly(ctx, "rollback", "failed", { message: messageOf(error) });
-    ctx.out.error(fixedText`the rollback of run ${literal(run.runId)} did not finish: ${messageOf(error)}; update resume runs it again from its first step`);
+    ctx.out.error(fixedText`the rollback of run ${literal(run.runId)} did not finish: ${messageOf(error)}; ${progress.started ? literal("update resume verifies the started previous release again") : literal("update resume runs it again from its first step")}`);
     throw error;
   }
+}
+
+/** The previous release the last rollback attempt of a run started on the generation it promoted again. */
+export interface StartedPrevious {
+  /** The generation the attempt promoted from the cutover backup, with the nonce of its `origin.json`. */
+  generation: string;
+  nonce: string;
+  /** The marker row the attempt wrote into the promoted database. */
+  marker: string;
+  /** The droplet the attempt made current, or null when it recorded none. */
+  droplet: string | null;
+  /** When the attempt recorded the start, by the journal's clock. */
+  startedAt: number;
+}
+
+/**
+ * The previous release the last rollback attempt of `run` started after it promoted the cutover state again: the
+ * records after its newest `rollback` started record hold a `re-promote` done record and a `start` started record after
+ * it. Null when that attempt did not get that far, or restarted the previous release without a promotion.
+ */
+export function startedPrevious(run: Pick<UpdateRun, "records">): StartedPrevious | null {
+  const begun = run.records.map((r) => r.step === "rollback" && r.state === "started").lastIndexOf(true);
+  if (begun < 0) return null;
+  const attempt = run.records.slice(begun + 1);
+  const promotedAt = attempt.findIndex((r) => r.step === "re-promote" && r.state === "done");
+  const promoted = attempt[promotedAt];
+  if (promoted === undefined) return null;
+  const later = attempt.slice(promotedAt + 1);
+  const start = later.find((r) => r.step === "start" && r.state === "started");
+  const { generation, nonce, marker } = promoted.data;
+  if (start === undefined || typeof generation !== "string" || typeof nonce !== "string" || typeof marker !== "string") return null;
+  const droplet = later.filter((r) => r.step === "restore-droplet" && (r.state === "done" || r.state === "skipped")).at(-1)?.data.droplet;
+  return { generation, nonce, marker, droplet: typeof droplet === "string" ? droplet : null, startedAt: start.at };
+}
+
+/**
+ * Finishes the rollback of deploy run `run` whose last attempt already started the previous release (`started`) on
+ * the generation it promoted, without promoting again: once the app runs that attempt's droplet, it waits for the
+ * readiness check and verifies the release as the rollback does, then releases the run's update pin on the cutover
+ * backup and records `rollback` done. Resolves to null, before it changes anything, when the app does not run that
+ * droplet; throws when the verification fails.
+ */
+export async function finishStartedRollback(ctx: UpdateContext, run: UpdateRun, started: StartedPrevious): Promise<Pick<RollbackResult, "ended" | "generation"> | null> {
+  const status = await ctx.target.status();
+  if (status.state !== "started" || status.instances === 0 || started.droplet === null || (await ctx.target.currentDroplet()) !== started.droplet) return null;
+  try {
+    if (!(await ctx.target.waitReady(ctx.readyTimeoutMs))) throw new OpsError(`the previous release did not become ready within ${Math.round(ctx.readyTimeoutMs / 1000)} s`, 1, "target");
+    await ctx.journal.record("rollback-verify", "done", { phase: "rollback", ...(await verifyPrevious(ctx, started, started.marker)) });
+  } catch (error) {
+    await recordQuietly(ctx, "rollback-verify", "failed", { phase: "rollback", message: messageOf(error) });
+    throw error;
+  }
+  if (run.cutoverBackup !== null && (await releaseUpdatePin(ctx, run.cutoverBackup, run.runId))) await ctx.journal.record("unpin", "done", { backupId: run.cutoverBackup });
+  await ctx.journal.record("rollback", "done", { ended: "previous-release", generation: started.generation });
+  return { ended: "previous-release", generation: started.generation };
 }
 
 async function promotedInPlace(ctx: UpdateContext, run: UpdateRun): Promise<string | null> {
@@ -392,10 +449,16 @@ async function typedName(ctx: UpdateContext, text: string): Promise<string | nul
   return (await ctx.answers.prompt(fixedText`${text}\nType the environment's name to roll back (rollback-accepted): `)).trim();
 }
 
-const startedRelease = (run: UpdateRun): boolean => run.records.some((r) => r.step === "accept" && r.state === "done") || (run.promoted !== null && run.records.some((r) => r.phase === "deploy" && r.step === "start"));
+const startedRelease = (run: UpdateRun): boolean => run.records.some((r) => r.step === "accept" && r.state === "done") || (run.promoted !== null && run.records.some((r) => r.phase === "deploy" && r.step === "start")) || startedPrevious(run) !== null;
 
 async function lossAfterStop(ctx: UpdateContext, run: UpdateRun, manifest: Manifest): Promise<string[] | null> {
   const sessions = fixedText`every login session ends; everyone signs in again`;
+  const previous = startedPrevious(run);
+  if (previous !== null) {
+    const loss = await writesSinceStart(ctx, previous.generation, previous.startedAt);
+    if (loss?.identical === true) return null;
+    return [fixedText`the previous release has run since ${literal(new Date(previous.startedAt).toISOString())} on generation ${literal(previous.generation)}, which the rollback of run ${literal(run.runId)} promoted; rolling back again discards what it wrote since then`, ...lossLines(loss, previous.startedAt), sessions];
+  }
   const acceptRecord = run.records.filter((r) => r.step === "accept" && r.state === "done").at(-1);
   if (acceptRecord !== undefined) return [fixedText`run ${literal(run.runId)} was accepted ${literal(new Date(acceptRecord.at).toISOString())}; rolling back discards everything written since the cutover backup ${literal(manifest.id)}`, ...lossLines(await liveLoss(ctx, manifest), manifest.source.lastFrameAt ?? manifest.createdAt), sessions];
   const start = run.records.find((r) => r.phase === "deploy" && r.step === "start");
@@ -421,9 +484,11 @@ export async function wroteSinceStart(ctx: UpdateContext, run: UpdateRun): Promi
 export type LossMode = "ask" | "backup";
 
 /**
- * Prepares the rollback of deploy run `run` once its new release started or the run was accepted: stops the app and
- * waits for the seal first, so nothing is written between the report and the stop, then compares the sealed replica
- * with the promoted generation (with the cutover backup after `accept`). When it differs in more than login sessions,
+ * Prepares the rollback of deploy run `run` once its new release started, the run was accepted, or its last rollback
+ * attempt started the previous release ({@link startedPrevious}): stops the app and waits for the seal first, so nothing
+ * is written between the report and the stop, then compares the sealed replica with the generation the release it
+ * stops started on (the one that attempt promoted, else the one the deploy promoted; the cutover backup after
+ * `accept`). When it differs in more than login sessions,
  * it prints what the rollback discards and, in mode `ask`, needs the environment's name as the answer to
  * `rollback-accepted`; without it the app is started again and the result names why. It always ends with a verified
  * `pre-restore` backup of the stopped app. A run whose new release never started needs none of this.
