@@ -147,6 +147,13 @@ clears them for you on the next restart, a persistent volume does not, so move t
 a stale file left over from an earlier, unrelated failure predates this boot, so this check stays
 quiet about it and the file still has to be moved aside as instructed above. Run `replication.sync`
 from a cron trigger (`* * * * *` → RPO ≤ 60 s).
+
+`health()` stays `ok: true` and adds a note when no sync has succeeded for three times the longest gap
+between the last five calls of `replication.sync` (three minutes for a sync every minute): it names the last
+successful sync, or the start of the process when there was none, says whether a sync is still running and
+gives the error of the last failed one. A restart in that state on a fresh disk restores the replica as of the
+last successful sync, so alert on the note or on failed runs of the sync pipeline. The note goes once a sync
+succeeds again. Before the second call there is no gap to compare with, and no note.
 Every step returns a `Result`. A blobstore `Err` (`Err(TRANSIENT)`, 503, `retryable`) passes
 through unchanged; `replication.prepareRestore` for a point with no snapshot before it, or an
 unknown `generation`, is `Err(NOT_FOUND)`; an unparsable `at` in the payload is `Err(VALIDATION)`.

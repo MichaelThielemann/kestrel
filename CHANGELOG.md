@@ -903,6 +903,9 @@ Net changes since 5.8.2.
 
 ### Added
 
+- `replication-sqlite`: `health()` adds a note, still `ok: true`, when no `replication.sync` has succeeded for
+  three times the longest recent gap between sync calls. The note names the last successful sync, whether a sync
+  is still running and the error of the last failed one, and goes once a sync succeeds again.
 - `kestrel upgrade` checks the stricter request and permission rules of 6.0.0 (the manual steps are in
   `docs/upgrading.md` § Rule reference):
   - `authz/anonymous-read-only` (error, manual) names every entry of `authz-roles`' `anonymous` that is not a

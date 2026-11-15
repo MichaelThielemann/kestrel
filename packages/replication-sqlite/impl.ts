@@ -217,6 +217,9 @@ export async function readOriginNonce(blobs: Blobstore, prefix: string, generati
   return isErr(origin) ? origin : ok(origin.value.nonce);
 }
 
+const SYNC_INTERVALS_BEHIND = 3;
+const SYNC_CALLS_KEPT = 5;
+
 export function restoreMarker(file: string): string {
   return `${file}.restore`;
 }
@@ -558,6 +561,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   let cursor: WalCursor | null = null;
   let seq = 0;
   let lastSyncAt: number | null = null;
+  let lastSyncError: string | null = null;
+  const syncCalls: number[] = [];
   let lastSnapshotAt: number | null = null;
   let lastCheckpointAt: number | null = null;
   let restorePrepared = false;
@@ -1007,15 +1012,41 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   let followUp: ReturnType<typeof runSync> | null = null;
   const startSync = (): ReturnType<typeof runSync> => {
     const run = { started: false };
-    const result = exclusive(() => runSync(run)).finally(() => {
-      if (current?.run === run) current = null;
-    });
+    const result = exclusive(() => runSync(run))
+      .then(
+        (outcome) => {
+          lastSyncError = isErr(outcome) ? outcome.error.message : null;
+          return outcome;
+        },
+        (cause: unknown) => {
+          lastSyncError = cause instanceof Error ? cause.message : String(cause);
+          throw cause;
+        },
+      )
+      .finally(() => {
+        if (current?.run === run) current = null;
+      });
     current = { run, result };
     return result;
   };
 
+  const syncBehind = (): string | null => {
+    if (syncCalls.length < 2) return null;
+    let interval = 0;
+    for (let i = 1; i < syncCalls.length; i++) interval = Math.max(interval, (syncCalls[i] ?? 0) - (syncCalls[i - 1] ?? 0));
+    const since = lastSyncAt ?? startedAt;
+    if (interval <= 0 || now() - since < SYNC_INTERVALS_BEHIND * interval) return null;
+    const parts = [lastSyncAt === null ? `replication/sqlite: no sync has succeeded since this process started at ${new Date(since).toISOString()}` : `replication/sqlite: no sync has succeeded since ${new Date(since).toISOString()}`, `syncs are called about every ${Math.round(interval / 1000)} s`];
+    if (current?.run.started === true) parts.push("a sync is still running");
+    if (lastSyncError !== null) parts.push(`the last one failed: ${lastSyncError}`);
+    parts.push("a start on a fresh disk restores the replica as of the last successful sync");
+    return parts.join("; ");
+  };
+
   return {
     sync() {
+      syncCalls.push(now());
+      if (syncCalls.length > SYNC_CALLS_KEPT) syncCalls.shift();
       if (current && !current.run.started) return current.result;
       if (followUp) return followUp;
       if (!current) return startSync();
@@ -1075,6 +1106,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     health(): ModuleHealth {
       const notes: string[] = [];
       if (restorePrepared) notes.push("replication/sqlite: a restore is prepared; restart the process to apply it");
+      const behind = syncBehind();
+      if (behind !== null) notes.push(behind);
       if (otherWriter !== null) notes.push(`replication/sqlite: another process writes to this replica (${otherWriter.key}, seen ${new Date(otherWriter.seenAt).toISOString()}); stop it, then run replication.snapshot here so the next restore starts from this process's data`);
       return notes.length === 0 ? { ok: true } : { ok: true, note: notes.join("; ") };
     },
