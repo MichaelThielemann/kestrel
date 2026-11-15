@@ -5,8 +5,6 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { effectiveModuleConfig } from "@michaelthielemann/kestrel";
-import { loadConfig } from "@michaelthielemann/kestrel/load";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { isErr } from "@michaelthielemann/kestrel/result";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
@@ -23,8 +21,7 @@ import { loadIssuesAsFindings } from "./project.ts";
 import type { Finding, UpgradeReport } from "./report.ts";
 import { summarize } from "./report.ts";
 import { hookFailedFinding, upgradingDocs } from "./ruleHelpers.ts";
-import { useToken } from "./useToken.ts";
-import { projectStorages } from "./storages.ts";
+import { loadModuleConfigs, projectStorages, type ModuleConfigs } from "./storages.ts";
 import { toolVersion } from "./versions.ts";
 
 export interface DataStepResult {
@@ -169,54 +166,45 @@ function siteDefaultRoutes(config: unknown): Pick<DataContentModel, "routes" | "
   return { routes, ...(isRecord(mounts) && typeof mounts.type === "string" && typeof mounts.field === "string" ? { mounts: { type: mounts.type, field: mounts.field, ...target } } : {}) };
 }
 
-function configLoadFailedFinding(err: unknown, pluginKind: string | undefined): Finding {
-  const detail = err instanceof Error ? err.message : String(err);
-  if (pluginKind !== undefined) {
-    return {
-      id: "data/config-load-failed",
-      rule: "data/config-load-failed",
-      severity: "warning",
-      tier: "data",
-      where: {},
-      message: `the "${pluginKind}" plugin provides no dataModel hook, and kestrel.config.ts could not be loaded without it: ${detail}`,
-      suggestion: `implement dataModel(root) on the "${pluginKind}" plugin, or count again with --data-report`,
-      fix: { kind: "manual" },
-      docs: upgradingDocs("data-config-load-failed"),
-    };
-  }
+const CONFIG_CHECKS: ReadonlyArray<{ rule: string; modules: readonly string[] }> = [
+  { rule: "data/redirect-reserved-paths", modules: ["redirects-default"] },
+  { rule: "data/site-media-leftovers", modules: ["blobstore-filesystem", "delivery-static"] },
+  { rule: "data/blobstore-tmp-suffix", modules: ["blobstore-filesystem"] },
+];
+
+const MODEL_CHECKS: ReadonlyArray<{ rule: string; modules: readonly string[] }> = [
+  { rule: "data/underscore-field-stored", modules: ["content-default"] },
+  { rule: "data/translation-slug", modules: ["content-default", "site-default"] },
+];
+
+function configLoadFailedFinding(problem: string, plugin: UpgradePlugin | undefined): Finding {
+  const builtInModel = plugin?.dataModel === undefined;
+  const skipped = [...(builtInModel ? MODEL_CHECKS : []), ...CONFIG_CHECKS].map((check) => `${check.rule} (${check.modules.join(", ")})`).join(", ");
+  const hookless = plugin !== undefined && builtInModel ? `, and the "${plugin.kind}" plugin provides no dataModel hook` : "";
   return {
     id: "data/config-load-failed",
     rule: "data/config-load-failed",
-    severity: "error",
+    severity: plugin === undefined ? "error" : "warning",
     tier: "data",
     where: {},
-    message: `kestrel.config.ts could not be loaded: ${detail}`,
-    suggestion: "fix the config so it loads, then run data again to check underscore fields",
+    message: `the module configs could not be loaded: ${problem}${hookless}; these checks read a module config and did not run: ${skipped}`,
+    suggestion:
+      plugin === undefined
+        ? "fix kestrel.config.ts so it loads (with the environment it reads), then run data again"
+        : `make kestrel.config.ts or the "${plugin.kind}" plugin load the project, then run data again${builtInModel ? `; implementing dataModel(root) on the plugin, or counting with --data-report, covers the content model` : ""}`,
     fix: { kind: "manual" },
     docs: upgradingDocs("data-config-load-failed"),
   };
 }
 
-async function builtInDataModel(root: string, pluginKind: string | undefined): Promise<{ model?: DataContentModel | undefined; issue?: Finding }> {
-  const configFile = join(root, "kestrel.config.ts");
-  if (!existsSync(configFile)) return {};
-  try {
-    const config = await loadConfig(configFile);
-    const entry = config.modules.find((m) => useToken(m.use) === "content-default");
-    const model = contentDefaultModel(entry === undefined ? undefined : effectiveModuleConfig(entry));
-    const site = config.modules.find((m) => useToken(m.use) === "site-default");
-    const routes = site === undefined ? undefined : siteDefaultRoutes(effectiveModuleConfig(site));
-    return { model: model === undefined || routes === undefined ? model : { ...model, ...routes } };
-  } catch (err) {
-    return { issue: configLoadFailedFinding(err, pluginKind) };
-  }
+function builtInDataModel(configs: ModuleConfigs): DataContentModel | undefined {
+  const model = contentDefaultModel(configs.configs.get("content-default"));
+  const routes = configs.configs.has("site-default") ? siteDefaultRoutes(configs.configs.get("site-default")) : undefined;
+  return model === undefined || routes === undefined ? model : { ...model, ...routes };
 }
 
-async function activeDataModel(root: string, plugin: UpgradePlugin | undefined): Promise<{ model?: DataContentModel | undefined; issues: Finding[] }> {
-  if (plugin?.dataModel === undefined) {
-    const { model, issue } = await builtInDataModel(root, plugin?.kind);
-    return { model, issues: issue ? [issue] : [] };
-  }
+async function activeDataModel(root: string, configs: ModuleConfigs, plugin: UpgradePlugin | undefined): Promise<{ model?: DataContentModel | undefined; issues: Finding[] }> {
+  if (plugin?.dataModel === undefined) return { model: builtInDataModel(configs), issues: [] };
   try {
     return { model: await plugin.dataModel(root), issues: [] };
   } catch (err) {
@@ -492,16 +480,6 @@ function underscoreFieldFindings(counts: Record<string, Record<string, number | 
   return findings;
 }
 
-async function moduleConfigOf(root: string, token: string): Promise<unknown> {
-  try {
-    const config = await loadConfig(join(root, "kestrel.config.ts"));
-    const entry = config.modules.find((m) => useToken(m.use) === token);
-    return entry === undefined ? undefined : effectiveModuleConfig(entry);
-  } catch {
-    return undefined;
-  }
-}
-
 const NO_BLOBS: Blobstore = {
   put: async () => err(failure("TRANSIENT", "the data command reads no blob store")),
   get: async () => err(failure("TRANSIENT", "the data command reads no blob store")),
@@ -518,13 +496,14 @@ function storageFinding(id: string, severity: Finding["severity"], module: strin
  * `data/media-layout`: runs the `detect` of every storage migration of the modules whose collections
  * `file` holds, taken from each module's own `./storage` export as the project at `root` has it
  * installed, against `db` (a verified copy of `file`); nothing is applied and no version row is
- * written. The module configs come from `kestrel.config.ts`, or through the host plugin among
- * `plugins` when that file does not load by itself; when neither loads, a warning says the check ran
- * with the defaults. A module with data in an older shape, or with a stored version this release does
- * not read, is an error naming the migration and the command that runs it.
+ * written. The module configs are `moduleConfigs` when given, and otherwise come from
+ * `kestrel.config.ts`, or through the host plugin among `plugins` when that file does not load by
+ * itself; when neither loads, a warning says the check ran with the defaults. A module with data in
+ * an older shape, or with a stored version this release does not read, is an error naming the
+ * migration and the command that runs it.
  */
-export async function storageFindings(root: string, file: string, db: Persistence, plugins: readonly UpgradePlugin[] = []): Promise<Finding[]> {
-  const { storages, unresolved, configProblem } = await projectStorages(root, file, { plugins });
+export async function storageFindings(root: string, file: string, db: Persistence, plugins: readonly UpgradePlugin[] = [], moduleConfigs?: ModuleConfigs): Promise<Finding[]> {
+  const { storages, unresolved, configProblem } = await projectStorages(root, file, moduleConfigs === undefined ? { plugins } : { moduleConfigs });
   const findings: Finding[] = unresolved.map((u) =>
     storageFinding(u.package, "warning", u.package, `the database holds ${u.collections.join(", ")}, but the installed ${u.package} has no ./storage export, so the storage shape of its data was not checked`, "install the 6.0.0 packages, then run data again"),
   );
@@ -546,8 +525,8 @@ interface BlobstoreFilesystemInfo {
   root: string;
 }
 
-async function blobstoreFilesystemConfig(root: string): Promise<BlobstoreFilesystemInfo | undefined> {
-  const config = await moduleConfigOf(root, "blobstore-filesystem");
+function blobstoreFilesystemConfig(configs: ModuleConfigs): BlobstoreFilesystemInfo | undefined {
+  const config = configs.configs.get("blobstore-filesystem");
   return isRecord(config) && typeof config.root === "string" ? { root: config.root } : undefined;
 }
 
@@ -572,10 +551,10 @@ async function mediaIdsOf(db: Persistence): Promise<Set<string>> {
   }
 }
 
-async function siteMediaLeftoversFindings(root: string, mediaIds: ReadonlySet<string>): Promise<Finding[]> {
-  const blobstore = await blobstoreFilesystemConfig(root);
+async function siteMediaLeftoversFindings(root: string, configs: ModuleConfigs, mediaIds: ReadonlySet<string>): Promise<Finding[]> {
+  const blobstore = blobstoreFilesystemConfig(configs);
   if (blobstore === undefined) return [];
-  const deliveryConfig = await moduleConfigOf(root, "delivery-static");
+  const deliveryConfig = configs.configs.get("delivery-static");
   if (!isRecord(deliveryConfig)) return [];
   const deliveryPrefix = typeof deliveryConfig.prefix === "string" ? deliveryConfig.prefix : "";
   const media = deliveryConfig.media;
@@ -625,8 +604,8 @@ async function collectTmpSuffixedFiles(dir: string, depth: number, visited: { co
   }
 }
 
-async function blobstoreTmpSuffixFindings(root: string): Promise<Finding[]> {
-  const blobstore = await blobstoreFilesystemConfig(root);
+async function blobstoreTmpSuffixFindings(root: string, configs: ModuleConfigs): Promise<Finding[]> {
+  const blobstore = blobstoreFilesystemConfig(configs);
   if (blobstore === undefined) return [];
   const storeRoot = resolve(root, blobstore.root);
   const found: string[] = [];
@@ -672,22 +651,24 @@ export async function runDataStep(dbFile: string, root: string, plugins: readonl
     let translationSlugs: Finding[];
     let redirectRules: Finding[];
     let mediaIds: Set<string>;
+    let configs: ModuleConfigs;
     try {
       queued = await queueFindings(db);
       if (queued.error !== undefined) return { exitCode: 2, error: queued.error };
       const { plugin, issues: detectIssues } = await detectPlugin(plugins, root);
-      const { model: contentModel, issues } = await activeDataModel(root, plugin);
-      dataModelIssues = [...loadIssuesAsFindings(detectIssues), ...issues];
+      configs = await loadModuleConfigs(root, plugin);
+      const { model: contentModel, issues } = await activeDataModel(root, configs, plugin);
+      dataModelIssues = [...loadIssuesAsFindings(detectIssues), ...(configs.problem === undefined ? [] : [configLoadFailedFinding(configs.problem, plugin)]), ...issues];
       counts = contentModel === undefined ? {} : await underscoreFieldCounts(copy, db, contentModel);
-      mediaLayout = await storageFindings(root, copy, db, plugins);
+      mediaLayout = await storageFindings(root, copy, db, plugins, configs);
       translationSlugs = await translationSlugFindings(db, contentModel);
-      redirectRules = await redirectReservedPathFindings(db, await moduleConfigOf(root, "redirects-default"));
+      redirectRules = await redirectReservedPathFindings(db, configs.configs.get("redirects-default"));
       fromPlugin = await pluginDataFindings(db, root, plugin, contentModel);
       mediaIds = await mediaIdsOf(db);
     } finally {
       db.close();
     }
-    const [siteMediaLeftovers, blobstoreTmpSuffix] = await Promise.all([siteMediaLeftoversFindings(root, mediaIds), blobstoreTmpSuffixFindings(root)]);
+    const [siteMediaLeftovers, blobstoreTmpSuffix] = await Promise.all([siteMediaLeftoversFindings(root, configs, mediaIds), blobstoreTmpSuffixFindings(root, configs)]);
     const findings = [...queued.findings, ...underscoreFieldFindings(counts), ...mediaLayout, ...translationSlugs, ...redirectRules, ...siteMediaLeftovers, ...blobstoreTmpSuffix, ...dataModelIssues, ...fromPlugin];
     const report: UpgradeReport = {
       schema: 1,

@@ -1976,6 +1976,13 @@ Net changes since 5.8.2.
 
 ### Fixed
 
+- `kestrel upgrade data` loads the module configs through the project's host plugin when
+  `kestrel.config.ts` does not load by itself, the way `migrate` does, and loads the project once for
+  all its checks, so `data/redirect-reserved-paths`, `data/site-media-leftovers`,
+  `data/blobstore-tmp-suffix`, the underscore-field count and `data/translation-slug` also run in a project
+  whose config imports what only the host resolves. When the configs load neither way, `data/config-load-failed` names the cause and each
+  check that did not run with the modules whose config it reads, instead of those checks reporting
+  nothing.
 - `content/default` looks up type names, fields in a filter, a sort and written data by their own name, so
   `?sort=constructor` and `toString` answer `400` (unknown sort field) and a written field named like an
   `Object.prototype` member is reported as an unknown field instead of passing the check.

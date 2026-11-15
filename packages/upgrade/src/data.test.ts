@@ -10,7 +10,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createPersistenceSqlite } from "@michaelthielemann/kestrel-persistence-sqlite/impl";
 import { runDataStep, storageFindings } from "./data.ts";
 import { runUpgradeCli } from "./plugin.ts";
-import type { LoadedProject, UpgradePlugin } from "./plugin.ts";
+import type { LoadedProject, LoadResult, UpgradePlugin } from "./plugin.ts";
 import type { Finding, UpgradeReport } from "./report.ts";
 
 const createdCopyDirs: string[] = [];
@@ -89,6 +89,11 @@ async function pluginProjectRoot(): Promise<string> {
   projectRoots.push(root);
   await writeFile(join(root, "package.json"), JSON.stringify({ name: "tmp", type: "module" }));
   return root;
+}
+
+function emptyProject(root: string): LoadResult {
+  const project = { kind: "test-plugin", configFile: join(root, "kestrel.config.ts"), moduleFiles: new Map(), pipelineFiles: [], input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [], root } };
+  return { project: boundaryCast<LoadedProject>(project, "host"), issues: [] };
 }
 
 async function makeDb(file: string, rows: Array<{ id: string; name: string; pipeline: string | null; state: string }>): Promise<void> {
@@ -308,7 +313,7 @@ describe("runDataStep: underscore-field counts for a plugin project", () => {
     const plugin: UpgradePlugin = {
       kind: "test-plugin",
       detect: (candidate) => candidate === root,
-      load: () => Promise.resolve({ issues: [] }),
+      load: () => Promise.resolve(emptyProject(root)),
       dataModel: () => Promise.resolve({ types: { page: { fields: { _hint: {} } } } }),
     };
     const result = await runDataStep(file, root, [plugin]);
@@ -660,7 +665,7 @@ describe("runDataStep: findings a plugin reads from stored data", () => {
     const plugin: UpgradePlugin = {
       kind: "test-plugin",
       detect: (candidate) => candidate === root,
-      load: () => Promise.resolve({ issues: [] }),
+      load: () => Promise.resolve(emptyProject(root)),
       dataModel: () => Promise.resolve({ types: { page: { fields: { note: {} } } } }),
       async dataFindings(copy, projectRoot, model) {
         await copy.ensureCollection("page", { note: "string" });
@@ -681,7 +686,7 @@ describe("runDataStep: findings a plugin reads from stored data", () => {
     const plugin: UpgradePlugin = {
       kind: "test-plugin",
       detect: (candidate) => candidate === root,
-      load: () => Promise.resolve({ issues: [] }),
+      load: () => Promise.resolve(emptyProject(root)),
       dataFindings: () => Promise.reject(new Error("broken hook")),
     };
     const result = await runDataStep(file, root, [plugin]);

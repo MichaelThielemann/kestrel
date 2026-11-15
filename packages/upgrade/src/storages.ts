@@ -56,6 +56,8 @@ export interface ProjectStorages {
 export interface ProjectStoragesOptions {
   /** The host plugins to load the module configs through when `kestrel.config.ts` does not load by itself. */
   plugins?: readonly UpgradePlugin[];
+  /** Module configs {@link loadModuleConfigs} already loaded; `plugins` is not consulted when these are given. */
+  moduleConfigs?: ModuleConfigs;
   /** A media key prefix that replaces the one of `media-default`'s config. */
   mediaPrefix?: string;
   /** Gives the media storage the project's `sanitize.svg` step, set up offline, to clean the 5.x SVGs with. */
@@ -74,7 +76,13 @@ function tablesOf(file: string): Set<string> {
   }
 }
 
-interface ModuleConfigs {
+/**
+ * The project's module configs as {@link loadModuleConfigs} found them. `configs` holds the effective
+ * config of the first entry per module token; `from` names where they came from; `problem` is set when
+ * neither `kestrel.config.ts` nor the host plugin loaded although at least one of the two is there;
+ * `missing` is set when there is no `kestrel.config.ts` and no host plugin.
+ */
+export interface ModuleConfigs {
   configs: Map<string, unknown>;
   modules: ConfiguredModule[];
   from: string;
@@ -121,7 +129,11 @@ async function pluginConfigs(root: string, plugin: UpgradePlugin): Promise<Modul
   }
 }
 
-async function moduleConfigs(root: string, plugins: readonly UpgradePlugin[]): Promise<ModuleConfigs> {
+/**
+ * Loads the module configs of the project at `root` from `kestrel.config.ts`, and through `plugin`, the
+ * project's detected host plugin, when that file does not load by itself or is absent.
+ */
+export async function loadModuleConfigs(root: string, plugin: UpgradePlugin | undefined): Promise<ModuleConfigs> {
   const file = join(root, "kestrel.config.ts");
   const problems: string[] = [];
   if (existsSync(file)) {
@@ -133,7 +145,6 @@ async function moduleConfigs(root: string, plugins: readonly UpgradePlugin[]): P
       problems.push(`kestrel.config.ts could not be loaded: ${messageOf(thrown)}`);
     }
   }
-  const { plugin } = await detectPlugin(plugins, root);
   if (plugin !== undefined) {
     const fromPlugin = await pluginConfigs(root, plugin);
     if (typeof fromPlugin !== "string") return fromPlugin;
@@ -156,7 +167,7 @@ function storageFactory(mod: unknown): ((config: unknown, deps?: unknown) => Mod
  */
 export async function projectStorages(root: string, dbFile: string, options: ProjectStoragesOptions = {}): Promise<ProjectStorages> {
   const tables = tablesOf(dbFile);
-  const { configs, modules, from, problem, missing } = await moduleConfigs(root, options.plugins ?? []);
+  const { configs, modules, from, problem, missing } = options.moduleConfigs ?? (await loadModuleConfigs(root, (await detectPlugin(options.plugins ?? [], root)).plugin));
   const storages: ModuleStorage[] = [];
   const unresolved: UnresolvedStorage[] = [];
   let mediaPrefix: string | undefined;

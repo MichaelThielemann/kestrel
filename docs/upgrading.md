@@ -419,7 +419,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`sandbox/unmatched-entry`](#sandbox-unmatched-entry) | boot | manual (warning) | a plugin's sandbox key that matches no module-list entry |
 | [`plugin/hook-failed`](#plugin-hook-failed) | source | manual | a plugin hook (`dataModel`) or a rule's own `check()` threw instead of returning |
 | [`preview/edit-refused`](#preview-edit-refused) | boot | none (warning) | a boot-preview edit could not be verified (its target escaped the preview copy, or the copy could not reload) |
-| [`data/config-load-failed`](#data-config-load-failed) | data | manual | `kestrel.config.ts` exists but could not be loaded, so the `data` command's underscore-field count was skipped |
+| [`data/config-load-failed`](#data-config-load-failed) | data | manual | the module configs could be loaded neither from `kestrel.config.ts` nor through the host plugin, so the `data` command's checks that read them did not run |
 
 #### modules-event-delivery
 An event trigger or `events.emit` needs exactly one delivery module (`events-direct` or
@@ -1274,12 +1274,16 @@ could not be reloaded after applying every edit. The affected rule's own finding
 unverified rather than clean; this finding names the specific path and the reason.
 
 #### data-config-load-failed
-`kestrel.config.ts` exists at the project root but threw while loading; the `data` command's
-underscore-field counter has no content model to count against, so it reports nothing rather than
-guessing. A project with no `kestrel.config.ts` at all is unaffected — the counter simply has nothing
-to read. Error severity, unless a detected plugin provides no `dataModel` hook and needs its own
-aliases to load the config — then it is a warning naming the plugin, since the config itself is not
-the problem.
+The `data` command reads the module configs from `kestrel.config.ts`, and through the project's host
+plugin when that file does not load by itself (it reads environment variables that are not set, or an
+import only a host package resolves) or is absent. When neither loads, the checks that read a module
+config do not run, and this finding names the cause and each check with the modules whose config it
+reads: `data/redirect-reserved-paths` (`redirects-default`), `data/site-media-leftovers`
+(`blobstore-filesystem`, `delivery-static`), `data/blobstore-tmp-suffix` (`blobstore-filesystem`) and,
+unless the host plugin provides a `dataModel` hook, the underscore-field count and
+`data/translation-slug` (`content-default`, `site-default`). A project with no `kestrel.config.ts` and
+no host plugin is unaffected; those checks simply have nothing to read. Error severity without a host
+plugin; a warning naming the plugin when one was detected.
 
 #### plugin-api
 A `plugin.rules` id that collides with a built-in one is a load error, naming the id and the plugin;
