@@ -1803,6 +1803,22 @@ Net changes since 5.8.2.
   scales the web process to another count than 1, ends with exit 2 before cf runs. cf runs with colored and
   trace output switched off.
 
+- `redirects-default`: a rejected redirect rule carries a stable reason, so a client can show its own message.
+  The `400` of `redirects.validate` (`PUT /redirects`) keeps its message, status and `code`, and its `details`
+  become `{ row, field, reason, path? }`: `field` is `from`, `to` or `status`, `path` is the reserved prefix for
+  `reserved-path` (for instance `/admin`) and the target for `automatic-redirect-loop`. `reason` is one of
+  `blank`, `too-long`, `scheme-or-host`, `query-or-fragment`, `control-characters`, `backslash`,
+  `dot-segments`, `adjacent-double-wildcards`, `too-many-wildcards`, `reserved-path` (all `from`);
+  `blank`, `control-characters`, `backslash`, `protocol-relative`, `unsupported-scheme`, `invalid-url`,
+  `embedded-credentials`, `placeholder-in-host`, `placeholder-out-of-range`, `placeholder-syntax`,
+  `automatic-redirect-loop` (all `to`); `invalid-status` (`status`). A list that is not a list (`not-a-list`)
+  or holds more than 1000 rules (`too-many-rules`) is rejected without `row` and `field`. Duplicate rules are
+  not rejected. `redirects.export` and `POST /admin/publish-all/pages` report `redirects.skippedRules` next to
+  `redirects.skipped`: the same rows, in the same order, as `{ row, field?, reason, path? }`, where each row
+  beyond the 1000-rule limit is `{ row, reason: "too-many-rules" }`. The types `RedirectRuleReason`,
+  `RedirectRuleField` and `RedirectRuleDetails` and the class `RedirectRuleError` are exported from
+  `@michaelthielemann/kestrel-redirects-default/impl`.
+
 ### Changed
 
 - `contracts`: the testing fake `fakePersistence` compares two strings without converting them to

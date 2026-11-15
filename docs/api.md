@@ -426,7 +426,7 @@ non-empty strings, no other fields — otherwise 400 with path and reason
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/redirects` | – | document; as long as it was never set: 200 with an empty document (`redirects.read`) |
-| PUT | `/redirects` | `{ rules: [{ from, to, status? }] }` | document, writes `redirects.json` to the blob store (`redirects.write`); 400 `redirects: Row N: …` on an invalid rule, also on a `from` that can match a reserved path (`/admin`, `/api` and `/media` by default, `reservedPaths` of `redirects-default`) |
+| PUT | `/redirects` | `{ rules: [{ from, to, status? }] }` | document, writes `redirects.json` to the blob store (`redirects.write`); 400 `redirects: Row N: …` on an invalid rule, also on a `from` that can match a reserved path (`/admin`, `/api` and `/media` by default, `reservedPaths` of `redirects-default`); `details` is `{ row, field, reason, path? }` with `field` one of `from`, `to`, `status` and `reason` a stable code (for a reserved path `reserved-path` with `path` the reserved prefix, e.g. `/admin`), a rejected list as a whole carries `{ reason }` only; the codes are listed in the `redirects-default` README |
 | GET | `/redirects.json` | – | `[{ from, pattern, target, status }]` – public, same content as the file in the blob store; editor rules first, then the automatic redirects of moved pages |
 | GET | `/admin/redirects/auto` | – | `[{ from, to, type, docId, locale, seq }]` – automatic redirects in effect, sorted by `from` (`redirects.read`) |
 | DELETE | `/admin/redirects/auto/*path` | – | removes the automatic redirect at that path (a later move of a page away from that path creates a new one) and rewrites `redirects.json` (`redirects.write`); 404 when there is none |
@@ -746,7 +746,7 @@ language), `site/en/<slug>/index.html`, home page (`slug = home`) → `site/inde
 | Method | Path | Response |
 |---|---|---|
 | GET | `/admin/publish-status/pages/:id` | `[{ locale, state: live \| error \| draft, path, error, publishedAt, updatedAt, stale, staleSince, staleFailed, staleError, dependencies }]` (`pages.manage`) |
-| POST | `/admin/publish-all/pages` | `{ documents, live, errors, redirects: { rules, skipped } }` – re-render everything, and afterwards also rewrite `redirects.json` and ask for an export of `sitemap.xml`, `robots.txt` and `llms.txt` (the pipeline chains `redirects.export` and `delivery.requestIndexes` onto `delivery.publishAll:pages`) (`pages.manage`) |
+| POST | `/admin/publish-all/pages` | `{ documents, live, errors, redirects: { rules, skipped, skippedRules } }` – re-render everything, and afterwards also rewrite `redirects.json` and ask for an export of `sitemap.xml`, `robots.txt` and `llms.txt` (the pipeline chains `redirects.export` and `delivery.requestIndexes` onto `delivery.publishAll:pages`) (`pages.manage`) |
 
 `state`: `live` = delivered, `draft` = not published in that language, `error` = rendering or saving
 failed (`error` names the cause; the last `live` output stays in place).

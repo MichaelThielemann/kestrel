@@ -5,7 +5,7 @@ Admin-managed redirects, plus automatic redirects for documents that moved: the 
 301 (default) | 302 | 307 | 308. Config: `type` (`redirects`), `field` (`rules`), `prefix` (blobstore prefix,
 same as delivery-static), `key` (`redirects.json`), `reservedPaths` (see below). Requires `content@1`, `blobstore@1` and `persistence@1`
 (own collections, reached through no other module's contract).
-Steps: `redirects.validate` before `content.set` (`VALIDATION`, `details.row`, message `Row N: …`, also for
+Steps: `redirects.validate` before `content.set` (`VALIDATION`, `details { row, field, reason, path? }`, message `Row N: …`, also for
 an editor rule that would redirect into an existing automatic redirect); `redirects.recordMoves` applies
 `site.pathsMoved` moves to the automatic-redirect state; `redirects.lookup` in the site pipeline before
 `site.resolve` – on a hit (editor or automatic) the pipeline ends with `{ redirect: { to, status } }`;
@@ -26,6 +26,49 @@ is the same rule as an anchored regex source, for consumers that match with a re
 A `from` holds at most 8 wildcards and 512 characters; a longer one is rejected with the row number.
 A list holds at most 1000 rules (`MAX_RULES`): saving more fails with `VALIDATION`, and publishing a
 stored longer list keeps the first 1000 and logs the rest as skipped.
+
+## Rejection reasons
+
+A rejected rule is answered with `400`, `code: "VALIDATION"` and the English message
+`redirects: Row N: …`. `details` repeats the facts in a form a client can switch on, so it can show a
+localized message: `{ row, field, reason, path? }`. `row` is the 1-based position in the list, `field` is
+`from`, `to` or `status`, `reason` is one of the values below and `path` the offending path where there is one.
+
+| Field | `reason` | Rejected when | `path` |
+|---|---|---|---|
+| `from` | `blank` | empty, or not a string | |
+| `from` | `too-long` | longer than 512 characters | |
+| `from` | `scheme-or-host` | starts with a scheme or `//` | |
+| `from` | `query-or-fragment` | contains `?` or `#` | |
+| `from` | `control-characters` | contains a control character | |
+| `from` | `backslash` | contains a backslash | |
+| `from` | `dot-segments` | has a `..` segment | |
+| `from` | `adjacent-double-wildcards` | two `**` with only a separator between them | |
+| `from` | `too-many-wildcards` | more than 8 wildcards | |
+| `from` | `reserved-path` | can match a path of `reservedPaths` | the reserved prefix, e.g. `/admin` |
+| `to` | `blank` | empty, or not a string | |
+| `to` | `control-characters` | contains a control character | |
+| `to` | `backslash` | contains a backslash | |
+| `to` | `protocol-relative` | starts with `//` | |
+| `to` | `unsupported-scheme` | a scheme other than `http` or `https` | |
+| `to` | `invalid-url` | an `http(s)` URL that does not parse | |
+| `to` | `embedded-credentials` | an URL with a user name or password | |
+| `to` | `placeholder-in-host` | `$1`, `$2`, … in the host of an absolute URL | |
+| `to` | `placeholder-out-of-range` | `$n` with `n` beyond the wildcards of `from` | |
+| `to` | `placeholder-syntax` | a placeholder written as `${1}` | |
+| `to` | `automatic-redirect-loop` | points at the source of an automatic redirect | the target |
+| `status` | `invalid-status` | not 301, 302, 307 or 308 | |
+
+A list that is not a list (`not-a-list`) or holds more than 1000 rules (`too-many-rules`) is rejected as
+a whole: `details` is `{ reason }` without `row` and `field`. Duplicate rules are not rejected: the first
+match wins. A row is checked in the order `from`, `to`, status, and the first failing check is reported.
+
+`redirects.export` reports each row it leaves out when publishing: as a line in `skipped` and as an
+entry of `skippedRules` with the same `{ row, field?, reason, path? }` structure, in the same order. A row
+beyond the 1000-rule limit is `{ row, reason: "too-many-rules" }` there.
+
+The types `RedirectRuleReason`, `RedirectRuleField` and `RedirectRuleDetails` and the class
+`RedirectRuleError` are exported from `@michaelthielemann/kestrel-redirects-default/impl`.
 
 ## Reserved paths
 
@@ -124,10 +167,10 @@ on every request.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `redirects.validate` | Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect | – | – | { rules?: object[] } | – | 400 Row N: <reason> | – | no |
+| `redirects.validate` | Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect | – | – | { rules?: object[] } | – | 400 Row N: <reason>; details carries { row, field, reason, path? } | – | no |
 | `redirects.recordMoves` | Apply site.pathsMoved moves to the automatic-redirect state: per document the highest seq wins, a tie inside one run favours the destination path | `payload` | `result.autoRedirects` | { moves?: object[], … } | { autoRedirects: object, … } | 400 payload.moves is missing or malformed | – | no |
 | `redirects.lookup` | End the pipeline with { redirect: { to, status } } on an editor rule or an automatic redirect (a moved document's old path); pass through otherwise | `params.path` | `result?` | – | – (ends: { redirect: object }) | – | – | no |
-| `redirects.export` | Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result) | – | `result.redirects` | – | { redirects: object, … } | – | – | no |
+| `redirects.export` | Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped, skippedRules }` to the result) | – | `result.redirects` | – | { redirects: object, … } | – | – | no |
 | `redirects.render` | The compiled redirect list (same content as redirects.json) | – | `result` | – | object[] | – | – | no |
 | `redirects.listAuto` | Effective automatic redirects (a moved document's old path, sorted by from) | – | `result` | – | object[] | – | – | no |
 | `redirects.removeAuto` | Turn the automatic redirect at params.path into a removed tombstone; a replay of the move that created it cannot restore it | `params.path` | – | – | – | 400 missing path; 404 no automatic redirect at that path | – | no |
