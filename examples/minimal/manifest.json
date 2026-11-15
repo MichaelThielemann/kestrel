@@ -12684,13 +12684,37 @@
                         ]
                       },
                       "reason": {
-                        "type": "string"
+                        "type": "string",
+                        "enum": [
+                          "blank",
+                          "too-long",
+                          "scheme-or-host",
+                          "query-or-fragment",
+                          "control-characters",
+                          "backslash",
+                          "dot-segments",
+                          "adjacent-double-wildcards",
+                          "too-many-wildcards",
+                          "reserved-path",
+                          "protocol-relative",
+                          "unsupported-scheme",
+                          "invalid-url",
+                          "embedded-credentials",
+                          "placeholder-in-host",
+                          "placeholder-out-of-range",
+                          "placeholder-syntax",
+                          "automatic-redirect-loop",
+                          "invalid-status",
+                          "not-a-list",
+                          "too-many-rules"
+                        ]
                       },
                       "path": {
                         "type": "string"
                       }
                     },
                     "required": [
+                      "row",
                       "reason"
                     ]
                   }
@@ -23919,13 +23943,37 @@
                             ]
                           },
                           "reason": {
-                            "type": "string"
+                            "type": "string",
+                            "enum": [
+                              "blank",
+                              "too-long",
+                              "scheme-or-host",
+                              "query-or-fragment",
+                              "control-characters",
+                              "backslash",
+                              "dot-segments",
+                              "adjacent-double-wildcards",
+                              "too-many-wildcards",
+                              "reserved-path",
+                              "protocol-relative",
+                              "unsupported-scheme",
+                              "invalid-url",
+                              "embedded-credentials",
+                              "placeholder-in-host",
+                              "placeholder-out-of-range",
+                              "placeholder-syntax",
+                              "automatic-redirect-loop",
+                              "invalid-status",
+                              "not-a-list",
+                              "too-many-rules"
+                            ]
                           },
                           "path": {
                             "type": "string"
                           }
                         },
                         "required": [
+                          "row",
                           "reason"
                         ]
                       }
@@ -24440,13 +24488,37 @@
                             ]
                           },
                           "reason": {
-                            "type": "string"
+                            "type": "string",
+                            "enum": [
+                              "blank",
+                              "too-long",
+                              "scheme-or-host",
+                              "query-or-fragment",
+                              "control-characters",
+                              "backslash",
+                              "dot-segments",
+                              "adjacent-double-wildcards",
+                              "too-many-wildcards",
+                              "reserved-path",
+                              "protocol-relative",
+                              "unsupported-scheme",
+                              "invalid-url",
+                              "embedded-credentials",
+                              "placeholder-in-host",
+                              "placeholder-out-of-range",
+                              "placeholder-syntax",
+                              "automatic-redirect-loop",
+                              "invalid-status",
+                              "not-a-list",
+                              "too-many-rules"
+                            ]
                           },
                           "path": {
                             "type": "string"
                           }
                         },
                         "required": [
+                          "row",
                           "reason"
                         ]
                       }
@@ -26549,13 +26621,37 @@
                             ]
                           },
                           "reason": {
-                            "type": "string"
+                            "type": "string",
+                            "enum": [
+                              "blank",
+                              "too-long",
+                              "scheme-or-host",
+                              "query-or-fragment",
+                              "control-characters",
+                              "backslash",
+                              "dot-segments",
+                              "adjacent-double-wildcards",
+                              "too-many-wildcards",
+                              "reserved-path",
+                              "protocol-relative",
+                              "unsupported-scheme",
+                              "invalid-url",
+                              "embedded-credentials",
+                              "placeholder-in-host",
+                              "placeholder-out-of-range",
+                              "placeholder-syntax",
+                              "automatic-redirect-loop",
+                              "invalid-status",
+                              "not-a-list",
+                              "too-many-rules"
+                            ]
                           },
                           "path": {
                             "type": "string"
                           }
                         },
                         "required": [
+                          "row",
                           "reason"
                         ]
                       }
@@ -30893,13 +30989,37 @@
                             ]
                           },
                           "reason": {
-                            "type": "string"
+                            "type": "string",
+                            "enum": [
+                              "blank",
+                              "too-long",
+                              "scheme-or-host",
+                              "query-or-fragment",
+                              "control-characters",
+                              "backslash",
+                              "dot-segments",
+                              "adjacent-double-wildcards",
+                              "too-many-wildcards",
+                              "reserved-path",
+                              "protocol-relative",
+                              "unsupported-scheme",
+                              "invalid-url",
+                              "embedded-credentials",
+                              "placeholder-in-host",
+                              "placeholder-out-of-range",
+                              "placeholder-syntax",
+                              "automatic-redirect-loop",
+                              "invalid-status",
+                              "not-a-list",
+                              "too-many-rules"
+                            ]
                           },
                           "path": {
                             "type": "string"
                           }
                         },
                         "required": [
+                          "row",
                           "reason"
                         ]
                       }

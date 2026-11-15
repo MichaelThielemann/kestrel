@@ -1816,8 +1816,11 @@ Net changes since 5.8.2.
   not rejected. `redirects.export` and `POST /admin/publish-all/pages` report `redirects.skippedRules` next to
   `redirects.skipped`: the same rows, in the same order, as `{ row, field?, reason, path? }`, where each row
   beyond the 1000-rule limit is `{ row, reason: "too-many-rules" }`. The types `RedirectRuleReason`,
-  `RedirectRuleField` and `RedirectRuleDetails` and the class `RedirectRuleError` are exported from
-  `@michaelthielemann/kestrel-redirects-default/impl`.
+  `RedirectRuleField` and `RedirectRuleDetails`, the list `REDIRECT_RULE_REASONS` of every reason and the class
+  `RedirectRuleError` are exported from `@michaelthielemann/kestrel-redirects-default/impl`. The `reason` of a
+  `skippedRules` entry is declared as an enumeration of these values and `row` is required, in the manifest and
+  in the OpenAPI description. A stored row whose `status` is neither text nor a number is skipped as
+  `invalid-status` instead of making the list unreadable.
 
 ### Changed
 

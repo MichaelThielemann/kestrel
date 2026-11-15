@@ -8,7 +8,7 @@ import { matchWildcardPath } from "./match.ts";
 import { compilePublishableRedirects, compileRedirects, exactPathPatternSource, matchRedirect, reservedPathOf, serializeRedirects, RedirectRuleError, type RedirectRule, type RedirectRuleDetails } from "./rules.ts";
 
 export type { RedirectRuleDetails, RedirectRuleField, RedirectRuleReason } from "./rules.ts";
-export { RedirectRuleError } from "./rules.ts";
+export { REDIRECT_RULE_REASONS, RedirectRuleError } from "./rules.ts";
 
 export interface Config {
   type: string;

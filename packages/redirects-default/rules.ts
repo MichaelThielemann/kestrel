@@ -42,6 +42,31 @@ export interface CompileOptions {
 /** The field of a rule row a rejection is about. */
 export type RedirectRuleField = "from" | "to" | "status";
 
+/** Every `RedirectRuleReason`, in the order of the documentation; the closed set a client can switch on. */
+export const REDIRECT_RULE_REASONS = [
+  "blank",
+  "too-long",
+  "scheme-or-host",
+  "query-or-fragment",
+  "control-characters",
+  "backslash",
+  "dot-segments",
+  "adjacent-double-wildcards",
+  "too-many-wildcards",
+  "reserved-path",
+  "protocol-relative",
+  "unsupported-scheme",
+  "invalid-url",
+  "embedded-credentials",
+  "placeholder-in-host",
+  "placeholder-out-of-range",
+  "placeholder-syntax",
+  "automatic-redirect-loop",
+  "invalid-status",
+  "not-a-list",
+  "too-many-rules",
+] as const;
+
 /**
  * Why a rule or a rule list was rejected. The value is stable: a client can switch on it to show a
  * localized message instead of the English one.
@@ -53,28 +78,7 @@ export type RedirectRuleField = "from" | "to" | "status";
  * `placeholder-syntax`, `automatic-redirect-loop`. Status: `invalid-status`. Whole list: `not-a-list`,
  * `too-many-rules`, which is also the reason of each row beyond the limit when a list is published.
  */
-export type RedirectRuleReason =
-  | "blank"
-  | "too-long"
-  | "scheme-or-host"
-  | "query-or-fragment"
-  | "control-characters"
-  | "backslash"
-  | "dot-segments"
-  | "adjacent-double-wildcards"
-  | "too-many-wildcards"
-  | "reserved-path"
-  | "protocol-relative"
-  | "unsupported-scheme"
-  | "invalid-url"
-  | "embedded-credentials"
-  | "placeholder-in-host"
-  | "placeholder-out-of-range"
-  | "placeholder-syntax"
-  | "automatic-redirect-loop"
-  | "invalid-status"
-  | "not-a-list"
-  | "too-many-rules";
+export type RedirectRuleReason = (typeof REDIRECT_RULE_REASONS)[number];
 
 /**
  * The structured form of a rejection, as clients receive it in `details` and in the skipped rows of an export.

@@ -7,7 +7,7 @@ import type { Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { COLLECTIONS, createRedirects, requestPath, type Move, type Redirects } from "./impl.ts";
-import { DEFAULT_RESERVED_PATHS, RedirectRuleError } from "./rules.ts";
+import { DEFAULT_RESERVED_PATHS, REDIRECT_RULE_REASONS, RedirectRuleError } from "./rules.ts";
 
 export const configSchema = z
   .object({
@@ -24,7 +24,7 @@ export const configSchema = z
 
 const RULE_SCHEMA = { type: "object", properties: { from: { type: "string" }, pattern: { type: "string" }, target: { type: "string" }, status: { type: "integer", enum: [301, 302, 307, 308] } }, required: ["from", "pattern", "target", "status"] };
 const ROW_SCHEMA = { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, status: { type: ["string", "number"] } } };
-const SKIPPED_RULE_SCHEMA = { type: "object", properties: { row: { type: "integer" }, field: { type: "string", enum: ["from", "to", "status"] }, reason: { type: "string" }, path: { type: "string" } }, required: ["reason"] };
+const SKIPPED_RULE_SCHEMA = { type: "object", properties: { row: { type: "integer" }, field: { type: "string", enum: ["from", "to", "status"] }, reason: { type: "string", enum: [...REDIRECT_RULE_REASONS] }, path: { type: "string" } }, required: ["row", "reason"] };
 const MOVE_SCHEMA = { type: "object", properties: { type: { type: "string" }, id: { type: "string" }, locale: { type: "string" }, from: { type: ["string", "null"] }, to: { type: ["string", "null"] }, seq: { type: "number" } }, required: ["type", "id", "locale", "from", "to", "seq"] };
 const AUTO_REDIRECT_SCHEMA = { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, type: { type: "string" }, docId: { type: "string" }, locale: { type: "string" }, seq: { type: "number" } }, required: ["from", "to", "type", "docId", "locale", "seq"] };
 

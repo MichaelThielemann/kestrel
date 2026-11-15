@@ -15,6 +15,7 @@ import type { RunResult } from "@michaelthielemann/kestrel/runner";
 import { validateSchema } from "@michaelthielemann/kestrel/schema";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import module, { configSchema } from "./module.ts";
+import { REDIRECT_RULE_REASONS } from "./rules.ts";
 
 const rules = [{ from: "/blog/*", to: "/artikel/$1" }, { from: "/event", to: "/aktion", status: "302" }];
 
@@ -139,6 +140,17 @@ describe("redirects/default module steps", () => {
     expect(schema).toBeDefined();
     expect(validateSchema(schema ?? {}, { redirect: { to: "/artikel/x", status: 303 } })).not.toEqual([]);
     expect(validateSchema(schema ?? {}, { redirect: { to: "/artikel/x", status: 301 } })).toEqual([]);
+  });
+
+  it("declares every skipped rule with a required row and a reason from the closed list", async () => {
+    const { instance } = await boot(rules);
+    const schema = module.describe!(instance).export.extendsOutput ?? {};
+    const output = (skippedRules: unknown[]) => ({ redirects: { rules: 0, skipped: [], skippedRules } });
+    expect(validateSchema(schema, output([{ row: 2, field: "from", reason: "reserved-path", path: "/admin" }]))).toEqual([]);
+    expect(validateSchema(schema, output([{ row: 1001, reason: "too-many-rules" }]))).toEqual([]);
+    expect(validateSchema(schema, output([{ row: 2, reason: "something-else" }]))).not.toEqual([]);
+    expect(validateSchema(schema, output([{ reason: "blank" }]))).not.toEqual([]);
+    for (const reason of REDIRECT_RULE_REASONS) expect(validateSchema(schema, output([{ row: 1, reason }]))).toEqual([]);
   });
 
   it("export writes the compiled list and reports the summary", async () => {
