@@ -136,10 +136,11 @@ the run stops at that question. `deploy-answers.json` answers the stop:
 
 The deploy from a release before 6 also needs `unsealed-stop`, since that release leaves no seal. When the
 running versions name that release, or, with the running versions unknown, the stored data the pending storage
-migrations convert was written by a release before 6, the deploy asks at once after the stop. Otherwise it warns that the running runtime is
-unknown and waits the whole `update.sealTimeoutSeconds` for a seal first; pointing the target's `dir` at an
-installation of the running release before `update prepare` names the running versions, and a lower
-`sealTimeoutSeconds` for that one deploy shortens the wait. Give that one
+migrations convert was written by a release before 6, the deploy asks at once after the stop. Otherwise the
+deploy waits the whole `update.sealTimeoutSeconds` for a seal first, and `update prepare` already warns that the
+running runtime is unknown: pointing the target's `dir` at an installation of the running release and running
+`update prepare` again names the running versions, and a lower `sealTimeoutSeconds` for that one deploy shortens
+the wait. Give that one
 deploy a file of its own and remove it once the deploy has run: a standing answer would also accept a later stop
 of a 6.x release that went without its teardown, and its cutover backup would then lack the frames that stop did
 not ship.

@@ -4,14 +4,14 @@ import { runShapeMigrations, type BlobOps } from "@michaelthielemann/kestrel-con
 import { messageOf } from "../context.ts";
 import { OpsError } from "../errors.ts";
 import { MemoryBucket, memoryStore } from "../memoryStore.ts";
-import { blobstoreOf, MAX_SKEW_MS } from "../replica.ts";
+import { blobstoreOf, MAX_SKEW_MS, SEALING_MAJOR } from "../replica.ts";
 import { serverClock } from "../serverTime.ts";
 import { integrityCheck, referencedBlobs, sha256 } from "../sqlite.ts";
 import { listMap, type ObjectInfo, type ObjectStore } from "../store.ts";
 import { runContentMigrations } from "./contentMigrations.ts";
 import { updateKeys } from "./layout.ts";
 import { UNCHECKED_READINESS } from "./gate.ts";
-import { computePlan, openDatabase, pendingStorage, planHash, replicaCopy } from "./plan.ts";
+import { computePlan, openDatabase, pendingStorage, planHash, replicaCopy, sourceMajor } from "./plan.ts";
 import { releaseStorages } from "./storages.ts";
 import { UPDATE_EXIT, type Rehearsal, type RehearsalCheck, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateReceipt } from "./types.ts";
 import { outcomeOf } from "./verify.ts";
@@ -206,6 +206,13 @@ async function preflightProblems(ctx: UpdateContext): Promise<{ problems: string
   return { problems, data: { instances: pre.instances, running: pre.running, activeDeployment: pre.activeDeployment, healthCheck: pre.healthCheck, readinessChecked: pre.readinessChecked !== false, skewMs: clock.skewMs } };
 }
 
+async function warnUnknownRuntime(ctx: UpdateContext, plan: UpdatePlan): Promise<void> {
+  if (plan.versions.from !== null) return;
+  const major = plan.storage.length > 0 ? sourceMajor(plan, await releaseStorages(ctx)) : null;
+  if (major !== null && major < SEALING_MAJOR) return;
+  ctx.out.warn(fixedText`the running replication runtime version is unknown: neither an earlier deploy nor the target outside the release's own installation names it, so the deploy's stop waits up to ${ctx.update.sealTimeoutSeconds} s for a seal, which a runtime before ${SEALING_MAJOR} never writes; to name it, point the target's dir at an installation of the running release and run update prepare again, or lower update.sealTimeoutSeconds for that one deploy`);
+}
+
 async function failed(ctx: UpdateContext, step: string, message: string, exitCode: 1 | 2 = 1): Promise<never> {
   await record(ctx, step, "failed", { error: message }).catch(() => undefined);
   throw new OpsError(message, exitCode, step);
@@ -218,7 +225,9 @@ async function failed(ctx: UpdateContext, step: string, message: string, exitCod
  * exist only in the deploy job), the health check's type, and the clock skew against the store, measured with a probe written into the backup
  * location), plan on a copy of the newest replica generation, rehearsal of the migrations on that copy (with a local
  * start of the release when content migrations are pending), and the receipt with the version change
- * and the plan hash, written once into the backup location. Journal steps: `preflight`, `plan`, `rehearsal`,
+ * and the plan hash, written once into the backup location. With the running versions unknown, the plan step warns that
+ * the deploy's stop waits the whole `update.sealTimeoutSeconds` for a seal, unless the stored data the pending storage
+ * migrations convert was written by a release before the sealing major (`sourceMajor`). Journal steps: `preflight`, `plan`, `rehearsal`,
  * `receipt`. A failed rehearsal check writes no receipt and ends with exit 1.
  */
 export async function prepare(ctx: UpdateContext, options: PrepareOptions): Promise<PrepareResult> {
@@ -242,6 +251,7 @@ export async function prepare(ctx: UpdateContext, options: PrepareOptions): Prom
     const hash = planHash(plan);
     await record(ctx, "plan", "done", { planHash: hash, storage: plan.storage.map((m) => m.id), content: plan.content, questions: plan.questions });
     ctx.out.info(fixedText`plan ${literal(hash.slice(0, 12))}: ${plan.storage.length} storage migration(s), ${plan.content.length} content migration(s)`);
+    await warnUnknownRuntime(ctx, plan);
 
     step = "rehearsal";
     await record(ctx, "rehearsal", "started", { fullMedia: options.fullMedia });

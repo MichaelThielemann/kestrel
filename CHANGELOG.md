@@ -1852,7 +1852,9 @@ Net changes since 5.8.2.
   `versions.from` of the receipt its gate matched; a target's report never counts when it read the packages
   installed in the project the command runs from or inside a release directory of its own (`TargetFacts.packagesFrom`
   names the directory a target read them from), so `prepare` with the new release installed records them as
-  unknown instead of as the new release's.
+  unknown instead of as the new release's. With the running versions unknown, `prepare` warns that the deploy's stop
+  will wait the whole `update.sealTimeoutSeconds` for a seal and names how to make the running runtime known,
+  unless the stored data tells a release before 6.
   `kestrel.environments.json` takes an optional `update` block (`release.dir`, `localBoot`, the waits and
   `cleanupAfterDays`). `update bundle` writes `.kestrel-ops/` with the release's versions, the host facts, every
   target manifest the environments name and the module packages whose storage migrations a deploy runs;

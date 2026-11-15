@@ -126,3 +126,33 @@ describe("preparing an update", { timeout: 30_000 }, () => {
     expect(run.records.find((r) => r.step === "rehearsal" && r.state === "failed")).toBeDefined();
   });
 });
+
+describe("the warning prepare gives about an unknown running runtime", { timeout: 30_000 }, () => {
+  const warned = (h: UpdateHarness): string => h.output.warn.join("\n");
+
+  it("names before the deploy that its stop waits the whole seal timeout, and how to make the runtime known", async () => {
+    const { h } = await seeded();
+    h.target.reported = {};
+    const { outcome } = await prepare(await h.context({ command: "update prepare" }), { fullMedia: false });
+    expect(outcome.exitCode, outcome.message).toBe(0);
+    expect(warned(h)).toContain("the running replication runtime version is unknown");
+    expect(warned(h)).toMatch(/the deploy.s stop waits up to \d+ s for a seal/);
+    expect(warned(h)).toContain("point the target's dir at an installation of the running release");
+    expect(warned(h)).toContain("update.sealTimeoutSeconds");
+  });
+
+  it("is not given when the target names the running versions", async () => {
+    const { h } = await seeded();
+    await prepare(await h.context({ command: "update prepare" }), { fullMedia: false });
+    expect(warned(h)).not.toContain("runtime version is unknown");
+  });
+
+  it("is not given when the stored data the pending storage migrations convert was written by a release before 6", async () => {
+    const { h } = await seeded();
+    h.target.reported = {};
+    storages.list = [movingOriginals(false)];
+    const { outcome } = await prepare(await h.context({ command: "update prepare" }), { fullMedia: false });
+    expect(outcome.exitCode, outcome.message).toBe(0);
+    expect(warned(h)).not.toContain("runtime version is unknown");
+  });
+});
