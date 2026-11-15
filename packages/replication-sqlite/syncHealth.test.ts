@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import type { ModuleHealth } from "@michaelthielemann/kestrel/defineModule";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok, type Result } from "@michaelthielemann/kestrel/result";
 import { createReplicationSqlite, type Replication } from "./impl.ts";
@@ -66,6 +67,11 @@ function setup() {
 
 const MINUTE = 60_000;
 
+function noteOf(health: ModuleHealth): string {
+  if (!health.ok) throw new Error(`expected ok health, got ${health.reason}`);
+  return health.note ?? "";
+}
+
 describe("replication/sqlite health while syncs do not succeed", () => {
   it("adds a note once no sync has succeeded for a few sync intervals, names the last error and stays ok", async () => {
     const { repl, blobs, insert, advance } = setup();
@@ -83,10 +89,9 @@ describe("replication/sqlite health while syncs do not succeed", () => {
     expect(repl.health()).toEqual({ ok: true });
     advance(MINUTE);
     expectErr(await repl.sync(), "TRANSIENT");
-    const health = repl.health();
-    expect(health.ok).toBe(true);
-    expect(health.note).toContain("no sync has succeeded since 2026-01-01T00:01:00.000Z");
-    expect(health.note).toContain("503 Slow Down");
+    const note = noteOf(repl.health());
+    expect(note).toContain("no sync has succeeded since 2026-01-01T00:01:00.000Z");
+    expect(note).toContain("503 Slow Down");
     blobs.mode = "working";
     advance(MINUTE);
     expectOk(await repl.sync());
@@ -106,10 +111,9 @@ describe("replication/sqlite health while syncs do not succeed", () => {
       void repl.sync();
       await new Promise((resolve) => setImmediate(resolve));
     }
-    const health = repl.health();
-    expect(health.ok).toBe(true);
-    expect(health.note).toContain("no sync has succeeded since 2026-01-01T00:01:00.000Z");
-    expect(health.note).toContain("a sync is still running");
+    const note = noteOf(repl.health());
+    expect(note).toContain("no sync has succeeded since 2026-01-01T00:01:00.000Z");
+    expect(note).toContain("a sync is still running");
   });
 
   it("adds no note before the first two syncs show how often syncs run", async () => {
