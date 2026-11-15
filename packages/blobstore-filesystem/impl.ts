@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { BlobInfo, Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { failure } from "@michaelthielemann/kestrel/errors";
@@ -41,8 +41,7 @@ async function walkFiles(dir: string, visit: (path: string, name: string) => Pro
   try {
     entries = await readdir(dir, { withFileTypes: true });
   } catch (cause) {
-    const code = errno(cause);
-    if (code === "ENOENT" || code === "ENOTDIR") return;
+    if (errno(cause) === "ENOENT") return;
     throw cause;
   }
   for (const entry of entries) {
@@ -54,10 +53,26 @@ async function walkFiles(dir: string, visit: (path: string, name: string) => Pro
 }
 
 function splitPrefix(prefix: string): { directories: string[]; partial: string } | null {
+  if (prefix.includes("\0")) return null;
   const cut = prefix.lastIndexOf("/");
   const directories = cut === -1 ? [] : prefix.slice(0, cut).split("/");
   if (directories.some((part) => part === "" || part === "." || part === "..")) return null;
   return { directories, partial: prefix.slice(cut + 1) };
+}
+
+async function isRealDirectoryChain(root: string, directories: string[]): Promise<boolean> {
+  let current = root;
+  for (const [index, name] of directories.entries()) {
+    current = join(current, name);
+    try {
+      if (!(await lstat(current)).isDirectory()) return false;
+    } catch (cause) {
+      const code = errno(cause);
+      if (code === "ENOENT" || (code === "ENOTDIR" && index > 0)) return false;
+      throw cause;
+    }
+  }
+  return true;
 }
 
 export function createBlobstoreFilesystem(config: Config): Blobstore {
@@ -137,10 +152,13 @@ export function createBlobstoreFilesystem(config: Config): Blobstore {
     async list(prefix) {
       const parts = splitPrefix(prefix);
       if (parts === null) return ok([]);
+      const start = resolve(root, ...parts.directories);
+      if (relative(root, start).split(sep).join("/") !== parts.directories.join("/")) return ok([]);
       try {
+        if (!(await isRealDirectoryChain(root, parts.directories))) return ok([]);
         const out: BlobInfo[] = [];
         await walkFiles(
-          resolve(root, ...parts.directories),
+          start,
           async (path, name) => {
             if (name.endsWith(LEGACY_META) || name.endsWith(TMP_SUFFIX)) return;
             out.push({ key: relative(root, path).split(sep).join("/"), size: (await stat(path)).size });

@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import type * as FsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
@@ -9,7 +9,7 @@ import { assertKey, createBlobstoreFilesystem } from "./impl.ts";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof FsPromises>();
-  return { ...actual, writeFile: vi.fn(actual.writeFile), readdir: vi.fn(actual.readdir), stat: vi.fn(actual.stat) };
+  return { ...actual, writeFile: vi.fn(actual.writeFile), readdir: vi.fn(actual.readdir), stat: vi.fn(actual.stat), lstat: vi.fn(actual.lstat) };
 });
 
 const roots: string[] = [];
@@ -25,6 +25,7 @@ afterEach(() => {
   vi.mocked(writeFile).mockClear();
   vi.mocked(readdir).mockClear();
   vi.mocked(stat).mockClear();
+  vi.mocked(lstat).mockClear();
 });
 
 blobstoreContractTests(async () => createBlobstoreFilesystem({ root: await fresh() }));
@@ -265,11 +266,12 @@ describe("blobstore/filesystem list(prefix)", () => {
     const { store } = await populated();
     vi.mocked(readdir).mockClear();
     vi.mocked(stat).mockClear();
-    for (const prefix of ["/", "/a", "a//", "../", "a/../", "a/./b", "../x"]) {
+    for (const prefix of ["/", "/a", "a//", "../", "a/../", "a/./b", "../x", "a\u0000/", "a/\u0000/b", "\u0000/"]) {
       expect(await listed(store, prefix)).toEqual([]);
     }
     expect(vi.mocked(readdir)).not.toHaveBeenCalled();
     expect(vi.mocked(stat)).not.toHaveBeenCalled();
+    expect(vi.mocked(lstat)).not.toHaveBeenCalled();
   });
 
   it("reads only the directory named by the prefix and stats only the files below it", async () => {
@@ -299,13 +301,54 @@ describe("blobstore/filesystem list(prefix)", () => {
     for (const prefix of ["a/", "a/x", "ab/", "b/q", "a/b/d/"]) {
       vi.mocked(readdir).mockClear();
       vi.mocked(stat).mockClear();
+      vi.mocked(lstat).mockClear();
       await listed(store, prefix);
       const dir = prefix.endsWith("/") ? prefix.slice(0, -1) : prefix.includes("/") ? prefix.slice(0, prefix.lastIndexOf("/")) : "";
       const base = join(root, ...dir.split("/").filter(Boolean));
       const touched = [...vi.mocked(readdir).mock.calls, ...vi.mocked(stat).mock.calls].map(([path]) => String(path));
       expect(touched.length).toBeGreaterThan(0);
       for (const path of touched) expect(path === base || path.startsWith(base + sep)).toBe(true);
+      for (const [path] of vi.mocked(lstat).mock.calls) expect(base === String(path) || base.startsWith(String(path) + sep)).toBe(true);
     }
+  });
+
+  it("treats a symlink in the directory part of the prefix like the full listing does", async () => {
+    const { root, store } = await populated();
+    const outside = await fresh();
+    await mkdir(join(outside, "secret"), { recursive: true });
+    await writeFile(join(outside, "secret", "s.txt"), "s");
+    await symlink(join(root, "a"), join(root, "link"));
+    await symlink(outside, join(root, "out"));
+    await symlink(join(root, "a", "x.txt"), join(root, "flink"));
+    const everything = await listed(store, "");
+    expect(everything.map((info) => info.key)).toEqual(expect.arrayContaining(["link", "out", "flink"]));
+    for (const prefix of ["link", "link/", "link/x", "link/b/", "out", "out/", "out/secret/", "out/secret/s", "flink", "flink/", "fl", "o"]) {
+      expect(await listed(store, prefix), prefix).toEqual(everything.filter((info) => info.key.startsWith(prefix)));
+    }
+    expect(await listed(store, "link/")).toEqual([]);
+    expect(await listed(store, "out/secret/")).toEqual([]);
+  });
+
+  it("does not follow a symlinked directory that stands in for the last prefix segment", async () => {
+    const { root, store } = await populated();
+    await symlink(join(root, "a"), join(root, "a-link"));
+    expect((await listed(store, "a-")).map((info) => info.key)).toEqual(["a-link"]);
+  });
+
+  it("keeps rejecting a root that is a file, whatever the prefix", async () => {
+    const root = await fresh();
+    const file = join(root, "plain");
+    await writeFile(file, "x");
+    const store = createBlobstoreFilesystem({ root: file });
+    for (const prefix of ["", "a", "a/", "a/b/"]) {
+      await expect(store.list(prefix), prefix).rejects.toMatchObject({ code: "ENOTDIR" });
+    }
+  });
+
+  it("returns nothing for a missing root", async () => {
+    const root = await fresh();
+    const store = createBlobstoreFilesystem({ root: join(root, "missing") });
+    for (const prefix of ["", "a/", "a/b/c"]) expect(await listed(store, prefix)).toEqual([]);
   });
 
   it.skipIf(typeof process.getuid === "function" && process.getuid() === 0)(
