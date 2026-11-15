@@ -173,7 +173,7 @@ describe("authn/multi module steps via runPipeline", () => {
     expect(gone).toMatchObject({ status: 404, code: "NOT_FOUND" });
   });
 
-  it("deleteUser reports the reassign target it resolved, and none without one", async () => {
+  it("deleteUser reports the deleted login name and the reassign target it resolved, and none without one", async () => {
     const { instance } = await boot();
     const carol = await runPipeline(createUserPipeline, { body: { username: "carol", password: "long-enough" } }, { modules: [{ module, instance }] });
     const carolId = boundaryCast<{ id: string }>(carol.result, "json").id;
@@ -184,10 +184,10 @@ describe("authn/multi module steps via runPipeline", () => {
 
     const reassigned = await runPipeline(deleteUserAsAdminPipeline, { params: { id: carolId }, body: { reassignTo: doraId } }, { modules: [{ module, instance }] });
     expect(reassigned.status).toBe(200);
-    expect(reassigned.result).toEqual({ ok: true, reassignTo: { id: doraId, name: "dora" } });
+    expect(reassigned.result).toEqual({ ok: true, username: "carol", reassignTo: { id: doraId, name: "dora" } });
 
     const anonymised = await runPipeline(deleteUserAsAdminPipeline, { params: { id: erinId } }, { modules: [{ module, instance }] });
-    expect(anonymised.result).toEqual({ ok: true, reassignTo: null });
+    expect(anonymised.result).toEqual({ ok: true, username: "erin", reassignTo: null });
   });
 
   it("deleteUser keeps the user when the reassign target is unknown, inactive, themselves or not an id", async () => {

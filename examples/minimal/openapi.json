@@ -7276,7 +7276,7 @@
     "/admin/users/{id}/audit/anonymize": {
       "post": {
         "operationId": "retryAnonymizeAuditUser",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission users.manage → Require that params.id is the id of no user, active or not; the guard of the routes that clean up after a deleted user. An id that is not a UUID, the form of every user id, is refused → Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param holding it go, the event, its time and the other params stay → Emit event \"user.auditAnonymizeRetried\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission users.manage → Require that params.id is the id of no user, active or not; the guard of the routes that clean up after a deleted user. An id that is not a UUID, the form of every user id, is refused → Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param holding it go, and in a run started by an event also the login name in `payload.result.username` from sign-in entries; the event, its time and the other params stay → Emit event \"user.auditAnonymizeRetried\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "admin"
         ],
@@ -15472,6 +15472,9 @@
                     "ok": {
                       "type": "boolean"
                     },
+                    "username": {
+                      "type": "string"
+                    },
                     "reassignTo": {
                       "type": [
                         "object",
@@ -15555,7 +15558,8 @@
                   "required": [
                     "_events",
                     "ok",
-                    "reassignTo"
+                    "reassignTo",
+                    "username"
                   ]
                 }
               }

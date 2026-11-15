@@ -1350,6 +1350,32 @@ describe("the last-admin guard holds under concurrent requests", () => {
   });
 });
 
+describe("deleting a user and the audit log", () => {
+  it("removes the deleted user's login name from the logged sign-in attempts and keeps the attempts of others", async () => {
+    const capture: { persistence?: Persistence } = {};
+    const { kestrel, dispose } = await bootIsolated(undefined, capture);
+    const signIns = async (): Promise<Array<string | undefined>> => {
+      const found = await capture.persistence!.findMany<Document & { event: string; params: Record<string, string> }>("audit_entries", { event: "auth.failed" }, { sort: { at: "asc" } });
+      return found.ok ? found.value.items.map((row) => row.params.username) : [];
+    };
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const editor = await createEditor(kestrel, admin, "nora");
+      for (const username of ["nora", "nobody"]) {
+        const failed = await kestrel.run("login", { trigger, payload: { username, password: "wrong-password" } });
+        expect(failed.status).toBe(401);
+      }
+      await vi.waitFor(async () => expect(await signIns()).toEqual(["nora", "nobody"]));
+
+      const deleted = await kestrel.run("deleteUser", { trigger, headers: bearer(admin.token), params: { id: editor.id } });
+      expect(deleted).toMatchObject({ status: 200, result: { ok: true, username: "nora", reassignTo: null } });
+      await vi.waitFor(async () => expect(await signIns()).toEqual([undefined, "nobody"]));
+    } finally {
+      await dispose();
+    }
+  });
+});
+
 describe("the retry routes act only on the id of a deleted user", () => {
   interface AuditRow {
     event: string;

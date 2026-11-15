@@ -171,9 +171,11 @@ export default defineModule({
         if (!target.value.active) return ctx.fail("VALIDATION", "reassignTo must be an active user");
         reassignTo = { id: target.value.id, name: target.value.username };
       }
+      const deleting = await authn.getUser(id);
+      if (isErr(deleting)) return ctx.fail(deleting.error);
       const result = await authn.deleteUser(id);
       if (isErr(result)) return ctx.fail(result.error);
-      return ok({ ...ctx, result: { ok: true, reassignTo } });
+      return ok({ ...ctx, result: { ok: true, username: deleting.value?.username ?? "", reassignTo } });
     },
     setPassword: async (ctx: Context) => {
       const id = ctx.params.id;
@@ -313,8 +315,8 @@ export default defineModule({
       input: { type: "object", properties: { reassignTo: { type: ["string", "null"] } }, additionalProperties: false },
       output: {
         type: "object",
-        properties: { ok: { type: "boolean" }, reassignTo: { type: ["object", "null"], properties: { id: { type: "string" }, name: { type: "string" } }, required: ["id", "name"] } },
-        required: ["ok", "reassignTo"],
+        properties: { ok: { type: "boolean" }, username: { type: "string" }, reassignTo: { type: ["object", "null"], properties: { id: { type: "string" }, name: { type: "string" } }, required: ["id", "name"] } },
+        required: ["ok", "username", "reassignTo"],
       },
       errors: {
         400: "cannot delete yourself, or a `reassignTo` that is the deleted user, inactive or not a user id",

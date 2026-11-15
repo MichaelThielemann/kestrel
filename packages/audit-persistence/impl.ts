@@ -31,16 +31,17 @@ export interface Audit {
   record(entry: AuditEntry): Promise<Result<void, PersistenceError>>;
   /**
    * Clears the identity id and every param that holds that user's id, so only the event, its time and
-   * the other params remain; an entry never takes on a different user. Returns how many entries
-   * changed; a second call for the same user changes nothing and returns 0.
+   * the other params remain; an entry never takes on a different user. With `username`, the login name
+   * the user had, a `username` param that holds that name as a sign-in entry keeps it goes as well.
+   * Returns how many entries changed; a second call for the same user changes nothing and returns 0.
    */
-  anonymize(identityId: string): Promise<Result<number, PersistenceError>>;
+  anonymize(identityId: string, username?: string): Promise<Result<number, PersistenceError>>;
   /** Removes every entry older than `retentionDays` days and returns how many were removed. */
   prune(retentionDays: number): Promise<Result<number, PersistenceError>>;
 }
 
-function withoutUser(params: Record<string, string>, identityId: string): Record<string, string> {
-  const kept = Object.entries(params).filter(([, value]) => value !== identityId);
+function withoutUser(params: Record<string, string>, identityId: string, username: string | undefined): Record<string, string> {
+  const kept = Object.entries(params).filter(([key, value]) => value !== identityId && !(key === "username" && value === username));
   return kept.length === Object.keys(params).length ? params : Object.fromEntries(kept);
 }
 
@@ -59,13 +60,14 @@ export async function createAuditPersistence(db: Persistence, now: () => number 
       return ok();
     },
 
-    async anonymize(identityId) {
+    async anonymize(identityId, username) {
+      const name = username === undefined || username === "" ? undefined : loggable(username);
       let changed = 0;
       for (let offset = 0; ; offset += CHUNK) {
         const page = await db.findMany<EntryRow>(COLLECTION, {}, { sort: { at: "asc" }, limit: CHUNK, offset });
         if (isErr(page)) return page;
         for (const row of page.value.items) {
-          const params = withoutUser(row.params, identityId);
+          const params = withoutUser(row.params, identityId, name);
           const clearIdentity = row.identityId === identityId;
           if (!clearIdentity && params === row.params) continue;
           const updated = await db.updateOne<EntryRow>(COLLECTION, row.id, { ...(clearIdentity ? { identityId: null } : {}), ...(params === row.params ? {} : { params }) });

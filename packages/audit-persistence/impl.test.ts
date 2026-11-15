@@ -70,6 +70,33 @@ describe("audit/persistence", () => {
     expect(expectOk(await db.findOne<{ id: string; params: Record<string, string> }>(COLLECTION, { at: 2 }))?.params).toEqual({ uid: other, pipeline: "update" });
   });
 
+  it("drops the login name of the deleted user from sign-in entries and keeps other names", async () => {
+    const db = createFakePersistence();
+    const audit = await createAuditPersistence(db);
+    const signIn = { pipeline: "login", step: "authn.login", code: "UNAUTHENTICATED" };
+    expectOk(await audit.record({ eventId: null, event: "auth.failed", at: 1, identityId: null, params: { ...signIn, username: "m.example" } }));
+    expectOk(await audit.record({ eventId: null, event: "auth.secondFactorRequested", at: 2, identityId: null, params: { ...signIn, code: "SECOND_FACTOR_REQUIRED", username: "m.example" } }));
+    expectOk(await audit.record({ eventId: null, event: "auth.failed", at: 3, identityId: null, params: { ...signIn, username: "M.Example" } }));
+    expectOk(await audit.record({ eventId: null, event: "auth.failed", at: 4, identityId: null, params: { ...signIn, username: "someone-else" } }));
+
+    expect(expectOk(await audit.anonymize("u1", "m.example"))).toBe(2);
+    const rows = expectOk(await db.findMany<{ id: string; at: number; params: Record<string, string> }>(COLLECTION, {}, { sort: { at: "asc" } })).items;
+    expect(rows.map((row) => row.params.username)).toEqual([undefined, undefined, "M.Example", "someone-else"]);
+    expect(rows[0]?.params).toEqual(signIn);
+    expect(expectOk(await audit.anonymize("u1", "m.example"))).toBe(0);
+    expect(expectOk(await audit.anonymize("u2"))).toBe(0);
+  });
+
+  it("matches the login name as the sign-in entry kept it, shortened and with control characters replaced", async () => {
+    const db = createFakePersistence();
+    const audit = await createAuditPersistence(db);
+    const long = `${"n".repeat(300)}\u0007`;
+    expectOk(await audit.record({ eventId: null, event: "auth.failed", at: 1, identityId: null, params: { username: "n".repeat(256) } }));
+    expectOk(await audit.record({ eventId: null, event: "auth.failed", at: 2, identityId: null, params: { username: "tab name" } }));
+    expect(expectOk(await audit.anonymize("u1", long))).toBe(1);
+    expect(expectOk(await audit.anonymize("u2", "tab\tname"))).toBe(1);
+  });
+
   it("changes nothing on a second anonymise of the same user", async () => {
     const db = createFakePersistence();
     const audit = await createAuditPersistence(db);

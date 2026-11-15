@@ -8892,6 +8892,9 @@
             "ok": {
               "type": "boolean"
             },
+            "username": {
+              "type": "string"
+            },
             "reassignTo": {
               "type": [
                 "object",
@@ -8913,6 +8916,7 @@
           },
           "required": [
             "ok",
+            "username",
             "reassignTo"
           ]
         },
@@ -12883,7 +12887,7 @@
       "module": "audit/persistence",
       "factory": false,
       "description": {
-        "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param holding it go, the event, its time and the other params stay",
+        "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param holding it go, and in a run started by an event also the login name in `payload.result.username` from sign-in entries; the event, its time and the other params stay",
         "reads": [
           "params.id",
           "payload"
@@ -13920,7 +13924,7 @@
           "name": "audit.anonymize",
           "module": "audit/persistence",
           "description": {
-            "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param holding it go, the event, its time and the other params stay",
+            "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param holding it go, and in a run started by an event also the login name in `payload.result.username` from sign-in entries; the event, its time and the other params stay",
             "reads": [
               "params.id",
               "payload"
@@ -16916,6 +16920,9 @@
                 "ok": {
                   "type": "boolean"
                 },
+                "username": {
+                  "type": "string"
+                },
                 "reassignTo": {
                   "type": [
                     "object",
@@ -16937,6 +16944,7 @@
               },
               "required": [
                 "ok",
+                "username",
                 "reassignTo"
               ]
             },
@@ -28879,7 +28887,7 @@
           "name": "audit.anonymize",
           "module": "audit/persistence",
           "description": {
-            "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param holding it go, the event, its time and the other params stay",
+            "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param holding it go, and in a run started by an event also the login name in `payload.result.username` from sign-in entries; the event, its time and the other params stay",
             "reads": [
               "params.id",
               "payload"

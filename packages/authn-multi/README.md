@@ -83,9 +83,9 @@ one's own password changes only through `changePassword`, which needs the curren
 **Deleting and the authored history.** `authn.deleteUser` takes an optional `reassignTo` in the
 body: the id of an existing, active user who is not the one being deleted. An unknown id is 404, an
 inactive one, the deleted user themselves or a value that is not a string is 400 — and in each case
-the user stays. On success the step answers `{ ok: true, reassignTo: { id, name } | null }`, `name`
-being the target's username at that moment. Emit the event with `events.emit:user.deleted?with=result`
-so the target travels in the payload, and let the pipelines behind that event decide what happens to
+the user stays. On success the step answers `{ ok: true, username, reassignTo: { id, name } | null }`,
+`username` being the deleted user's login name and `name` the target's username at that moment. Emit the
+event with `events.emit:user.deleted?with=result` so both travel in the payload, and let the pipelines behind that event decide what happens to
 what the user wrote: `revisions.reassignAuthor` moves or anonymises their revisions,
 `audit.anonymize` strips them from the audit log. The module itself deletes only the user row and
 their sessions; it knows nothing about revisions or audit entries.
@@ -122,7 +122,7 @@ concerns), an e-mail field.
 | `authn.listUsers` | List users | – | `result` | – | object[] | – | beside | no |
 | `authn.getUser` | One user | `params.id` | `result` | – | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 404 user not found | beside | no |
 | `authn.updateUser` | Rename a user or set their roles (a role change ends their sessions) | `params.id` | `result` | { username?: string, roles?: string[] } | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 400 neither username nor roles given, or an empty one; 404 user not found; 409 username already exists (`CONFLICT`), or the last active admin would lose the admin permission (`LAST_ADMIN`) | beside | yes |
-| `authn.deleteUser` | Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised | `identity`, `params.id`, `payload.reassignTo` | `result` | { reassignTo?: string \| null } | { ok: boolean, reassignTo: object \| null, … } | 400 cannot delete yourself, or a `reassignTo` that is the deleted user, inactive or not a user id; 404 user not found, or `reassignTo` names no user; 409 the last active admin cannot be deleted (`LAST_ADMIN`) | beside | yes |
+| `authn.deleteUser` | Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised | `identity`, `params.id`, `payload.reassignTo` | `result` | { reassignTo?: string \| null } | { ok: boolean, username: string, reassignTo: object \| null, … } | 400 cannot delete yourself, or a `reassignTo` that is the deleted user, inactive or not a user id; 404 user not found, or `reassignTo` names no user; 409 the last active admin cannot be deleted (`LAST_ADMIN`) | beside | yes |
 | `authn.setPassword` | Set another user's password (ends their sessions); one's own password changes only through changePassword | `identity?`, `params.id` | `result` | { password: string } | { ok: boolean, … } | 400 password missing or too short, or the caller's own account; 404 user not found | beside | no |
 | `authn.changePassword` | Change own password | `identity` | `result` | { currentPassword: string, newPassword: string } | { ok: boolean, … } | 400 wrong current password, missing fields, or new one too short; 401 not authenticated | beside | no |
 | `authn.deactivateUser` | Deactivate a user (ends their sessions) | `params.id` | `result` | – | { ok: boolean, … } | 400 cannot deactivate yourself; 404 user not found; 409 the last active admin cannot be deactivated (`LAST_ADMIN`) | beside | yes |

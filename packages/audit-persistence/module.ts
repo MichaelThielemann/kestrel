@@ -23,6 +23,13 @@ function userIdOf(ctx: Context): string | null {
   return typeof ctx.payload.id === "string" ? ctx.payload.id : null;
 }
 
+function deletedUsernameOf(ctx: Context): string | undefined {
+  if (ctx.trigger.kind !== "event") return undefined;
+  const result = ctx.payload.result;
+  if (typeof result !== "object" || result === null || !("username" in result)) return undefined;
+  return typeof result.username === "string" ? result.username : undefined;
+}
+
 export default defineModule({
   name: "audit/persistence",
   provides: [],
@@ -63,7 +70,7 @@ export default defineModule({
       const id = userIdOf(ctx);
       if (id === null) return ctx.fail("VALIDATION", "audit.anonymize: no user id in params.id or the event payload");
       if (!USER_ID.test(id)) return ctx.fail("VALIDATION", "audit.anonymize: the user id is not a UUID");
-      const changed = await audit.anonymize(id);
+      const changed = await audit.anonymize(id, deletedUsernameOf(ctx));
       if (isErr(changed)) return ctx.fail(changed.error);
       return ok({ ...ctx, result: { entries: changed.value } });
     },
@@ -79,7 +86,7 @@ export default defineModule({
     record: { summary: "Persist an audit log entry for an emitted event", reads: ["payload"], writes: [], input: { type: "object", additionalProperties: true } },
     recordActor: { summary: "Persist an audit log entry for an emitted event with its caller and address but without its params and id, so it names no one the event was about", reads: ["payload"], writes: [], input: { type: "object", additionalProperties: true } },
     anonymize: {
-      summary: "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param holding it go, the event, its time and the other params stay",
+      summary: "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param holding it go, and in a run started by an event also the login name in `payload.result.username` from sign-in entries; the event, its time and the other params stay",
       reads: ["params.id", "payload"],
       writes: ["result"],
       input: { type: "object", additionalProperties: true },

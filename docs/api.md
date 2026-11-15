@@ -204,9 +204,9 @@ never relies on that.
 | PUT | `/users/:id/password` | `{ password }` | `{ ok: true }`; ends that user's sessions |
 | POST | `/users/:id/deactivate` | – | `{ ok: true }`; ends that user's sessions; 400 for self, 409 (`LAST_ADMIN`) for the last admin |
 | POST | `/users/:id/activate` | – | `{ ok: true }` |
-| DELETE | `/users/:id` | `{ reassignTo? }` | deletes the user and their sessions (`{ ok: true, reassignTo: { id, name } \| null }`); 400 for self or an unusable target, 404 for an unknown target, 409 (`LAST_ADMIN`) for the last admin |
+| DELETE | `/users/:id` | `{ reassignTo? }` | deletes the user and their sessions (`{ ok: true, username, reassignTo: { id, name } \| null }`, `username` being the deleted user's login name); 400 for self or an unusable target, 404 for an unknown target, 409 (`LAST_ADMIN`) for the last admin |
 | POST | `/admin/users/:id/revisions/reassign` | `{ reassignTo: string \| { id } \| null }` | re-runs the author reassignment for a deleted user: `{ from, to, revisions }`; 400 (`VALIDATION`) when `:id` is not a user id (a UUID); 409 (`CONFLICT`) when `:id` still names a user, active or not; a successful run is recorded as the audit entry `user.revisionsReassignRetried`; `reassignTo` names the target's id only — it is looked up and must be an existing, active user (400/404 otherwise); a name is never sent or trusted, the response and the stored author always carry the target's current username |
-| POST | `/admin/users/:id/audit/anonymize` | – | re-runs the audit anonymisation for a deleted user: `{ entries }`; 400 (`VALIDATION`) when `:id` is not a user id (a UUID); 409 (`CONFLICT`) when `:id` still names a user, active or not; a successful run is recorded as the audit entry `user.auditAnonymizeRetried` |
+| POST | `/admin/users/:id/audit/anonymize` | – | re-runs the audit anonymisation for a deleted user by id: `{ entries }` (the login name in logged sign-in attempts goes only with the `user.deleted` event); 400 (`VALIDATION`) when `:id` is not a user id (a UUID); 409 (`CONFLICT`) when `:id` still names a user, active or not; a successful run is recorded as the audit entry `user.auditAnonymizeRetried` |
 
 The username is the identity — a user has no e-mail field. Roles are free strings; which ones
 exist is the authz configuration's business (`authz.roles` in `kestrel.config.ts`). `LAST_ADMIN`
@@ -1029,7 +1029,7 @@ the *reference*: who wrote something and who was logged in when.
 | `authn_users` | username, scrypt password hash, roles, active, createdAt | `DELETE /users/:id` removes the row for good |
 | `authn_sessions` | session token, user id, expiry | deleted with the user, on logout, on a role or password change, and by the hourly cleanup cron |
 | `revisions_entries` | `author: { id, name }` per revision — the username as a snapshot of that moment | the `user.deleted` event moves every revision to `reassignTo` or anonymises it to `{ id: null, name: null }`; snapshots, count and order stay untouched |
-| `audit_entries` | `identityId` (who acted) and route params (which may carry a user id) per login and logout | the same event anonymises them — `identityId` becomes `null`, params naming that user are dropped, event and time remain — and `audit.prune` deletes everything older than `retentionDays` (365 in this instance) via the nightly cron |
+| `audit_entries` | `identityId` (who acted) and route params (which may carry a user id) per login and logout; the attempted username of a failed sign-in | the same event anonymises them — `identityId` becomes `null`, params naming that user are dropped, and so is the username of a sign-in attempt that names the deleted user's login name; event and time remain — and `audit.prune` deletes everything older than `retentionDays` (365 in this instance) via the nightly cron |
 | Log lines | run id, pipeline, step, duration, status | the process's logs, never stored by Kestrel itself |
 
 Nothing else carries a user reference: page documents, media items, the reference and link indexes,
@@ -1037,11 +1037,14 @@ delivery status and revision *snapshots* hold no user id. Tokens and password ha
 backend, and neither ever appears in an event payload.
 
 **How a deletion runs.** `DELETE /users/:id` deletes the user and their sessions and emits
-`user.deleted` with `{ eventId, event, at, runId, identity, params, id, result: { ok: true,
-reassignTo: { id, name } | null } }` — ids and the target's username snapshot, no secrets. Two
+`user.deleted` with `{ eventId, event, at, runId, identity, params, id, result: { ok: true, username,
+reassignTo: { id, name } | null } }` — ids, the deleted user's login name and the target's username
+snapshot, no secrets. With `events-queue` that payload stays in its table until `events.purgeDone` removes
+the delivered event after `retentionDays`. Two
 pipelines listen to it: one runs `authn.verifyUser:result.reassignTo` then
-`revisions.reassignAuthor`, the other `audit.anonymize`. The audit log is only ever anonymised,
-never reassigned: a login belongs to nobody else.
+`revisions.reassignAuthor`, the other `audit.anonymize`, which also drops `result.username` from the
+sign-in entries that name it. The audit log is only ever anonymised, never reassigned: a login belongs to
+nobody else.
 
 **Both reassignment routes run `authn.verifyUser` first, each reading its own path.**
 `authn.verifyUser` is a factory step: `authn.verifyUser:reassignTo` reads `payload.reassignTo` (the

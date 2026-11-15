@@ -2440,6 +2440,14 @@ Net changes since 5.8.2.
   `HTTPS://Example.org/x` answers `https://Example.org/x` in `redirects.lookup`, `redirects.render` and
   `redirects.json`; host and path stay as written, and so does the stored list. A consumer that tells an
   absolute target by `http:` or `https:` recognises it, where it treated it as a path before.
+- `audit-persistence`, `authn-multi`: deleting a user removes their login name from the logged sign-in
+  attempts. `authn.deleteUser` answers `{ ok: true, username, reassignTo }`, `username` being the deleted
+  user's login name, so `events.emit:user.deleted?with=result` carries it as `result.username`; in a run
+  started by an event, `audit.anonymize` drops the `username` param of every entry that holds that name
+  (`auth.failed`, `auth.secondFactorRequested`), compared in the form the entry keeps, besides the identity
+  id and the params holding the user id. `Audit.anonymize` takes the name as an optional second argument.
+  Those entries kept the name until retention removed them. A run from an HTTP route, such as the repair
+  route behind `authn.requireAbsentUser`, still works by id only.
 
 ## 5.8.2 – 2026-09-27
 

@@ -67,6 +67,21 @@ describe("audit/persistence module steps via runPipeline", () => {
     expect(again.result).toEqual({ entries: 0 });
   });
 
+  it("anonymize drops the deleted user's login name that the user.deleted event carries in result.username", async () => {
+    const { instance, db } = await boot();
+    const signIn = { pipeline: "login", step: "authn.login", code: "UNAUTHENTICATED" };
+    expectOk(await instance.record({ eventId: null, event: "auth.failed", at: 1, identityId: null, params: { ...signIn, username: "nora" } }));
+    const payload = { id: USER, event: "user.deleted", at: 2, identity: null, params: { id: USER }, result: { ok: true, username: "nora", reassignTo: null } };
+
+    const fromRoute = await runPipeline(anonymizePipeline, { params: { id: USER }, payload, body: payload }, { modules: [{ module, instance }] });
+    expect(fromRoute.result).toEqual({ entries: 0 });
+    expect(expectOk(await db.findOne<{ id: string; params: Record<string, string> }>(COLLECTION, { at: 1 }))?.params.username).toBe("nora");
+
+    const fromEvent = await runPipeline(anonymizePipeline, { trigger: { kind: "event", name: "user.deleted" }, payload }, { modules: [{ module, instance }] });
+    expect(fromEvent.result).toEqual({ entries: 1 });
+    expect(expectOk(await db.findOne<{ id: string; params: Record<string, string> }>(COLLECTION, { at: 1 }))?.params).toEqual(signIn);
+  });
+
   it("anonymize answers 400 without a user id", async () => {
     const { instance } = await boot();
     const res = await runPipeline(anonymizePipeline, {}, { modules: [{ module, instance }] });
