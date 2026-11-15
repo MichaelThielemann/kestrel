@@ -388,7 +388,9 @@ async function typedName(ctx: UpdateContext, text: string): Promise<string | nul
   return (await ctx.answers.prompt(`${text}\nType the environment's name to roll back (rollback-accepted): `)).trim();
 }
 
-async function lossToConfirm(ctx: UpdateContext, run: UpdateRun, manifest: Manifest): Promise<string[] | null> {
+const startedRelease = (run: UpdateRun): boolean => run.records.some((r) => r.step === "accept" && r.state === "done") || (run.promoted !== null && run.records.some((r) => r.phase === "deploy" && r.step === "start"));
+
+async function lossAfterStop(ctx: UpdateContext, run: UpdateRun, manifest: Manifest): Promise<string[] | null> {
   const sessions = "every login session ends; everyone signs in again";
   const acceptRecord = run.records.filter((r) => r.step === "accept" && r.state === "done").at(-1);
   if (acceptRecord !== undefined) return [`run ${run.runId} was accepted ${new Date(acceptRecord.at).toISOString()}; rolling back discards everything written since the cutover backup ${manifest.id}`, ...lossLines(await liveLoss(ctx, manifest), manifest.source.lastFrameAt ?? manifest.createdAt), sessions];
@@ -398,6 +400,56 @@ async function lossToConfirm(ctx: UpdateContext, run: UpdateRun, manifest: Manif
   const loss = await writesSinceStart(ctx, run.promoted.generation, since);
   if (loss?.identical === true) return null;
   return [`the new release of run ${run.runId} has run since ${new Date(since).toISOString()} and is not accepted; rolling back discards what it wrote since then`, ...lossLines(loss, since), sessions];
+}
+
+/**
+ * True when the new release of deploy run `run`, which started, wrote more than login sessions since its start, or
+ * when that cannot be read; the replica as it is now is compared with the promoted generation.
+ */
+export async function wroteSinceStart(ctx: UpdateContext, run: UpdateRun): Promise<boolean> {
+  const start = run.records.find((r) => r.phase === "deploy" && r.step === "start");
+  if (start === undefined || run.promoted === null) return false;
+  const since = typeof start.data.startedAt === "number" ? start.data.startedAt : start.at;
+  return (await writesSinceStart(ctx, run.promoted.generation, since))?.identical !== true;
+}
+
+/** How {@link guardRollback} treats a loss: `ask` needs the environment's name as the answer to `rollback-accepted`, `backup` only reports it. */
+export type LossMode = "ask" | "backup";
+
+/**
+ * Prepares the rollback of deploy run `run` once its new release started or the run was accepted: stops the app and
+ * waits for the seal first, so nothing is written between the report and the stop, then compares the sealed replica
+ * with the promoted generation (with the cutover backup after `accept`). When it differs in more than login sessions,
+ * it prints what the rollback discards and, in mode `ask`, needs the environment's name as the answer to
+ * `rollback-accepted`; without it the app is started again and the result names why. It always ends with a verified
+ * `pre-restore` backup of the stopped app. A run whose new release never started needs none of this.
+ */
+export async function guardRollback(ctx: UpdateContext, run: UpdateRun, manifest: Manifest, mode: LossMode): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (!startedRelease(run)) return { ok: true };
+  let stopped = false;
+  const restart = async (): Promise<string> => (stopped ? ((await startTarget(ctx).then(() => true, () => false)) ? "; the app was started again" : "; the app stays stopped and starting it again failed") : "");
+  try {
+    const stop = await stopTarget(ctx);
+    stopped = stop.wasRunning;
+    const seal = await ctx.steps.waitForSeal(ctx, stop.stoppedAt);
+    await acceptSeal(ctx, seal, stop.stoppedAt);
+    const lines = await lossAfterStop(ctx, run, manifest);
+    if (lines !== null) {
+      for (const line of lines) ctx.out.info(line);
+      if (mode === "ask") {
+        const name = await typedName(ctx, lines.join("\n"));
+        if (name !== ctx.envName) {
+          const why = name === null ? `stopped: "rollback-accepted" needs the environment's name ${ctx.envName} as its answer ("rollback-accepted": "${ctx.envName}" in --answers; --yes does not answer it)` : `stopped: "rollback-accepted" was answered with "${name}", not the environment's name`;
+          return { ok: false, message: `${why}${await restart()}` };
+        }
+      }
+    }
+    const safety = await createBackup(ctx, { kind: "pre-restore", mode: { kind: "stopped", seal, stoppedAt: stop.stoppedAt }, pinFor: ctx.runId });
+    ctx.out.info(`pre-restore backup ${safety.id} written and verified`);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: `the rollback stopped before it changed the store: ${messageOf(error)}${await restart()}` };
+  }
 }
 
 async function laterDeploys(ctx: UpdateContext, run: UpdateRun): Promise<UpdateRun[]> {
@@ -421,10 +473,9 @@ async function supersededRefusal(ctx: UpdateContext, run: UpdateRun, later: read
 }
 
 /**
- * `update rollback`: rolls deploy run `run` back on request. Before `accept` it asks nothing more while the new release
- * never started or wrote nothing but login sessions since its start. After `accept`, or once the new release wrote
- * since its start, it shows the loss report, needs the environment's name as the answer to `rollback-accepted` and
- * takes a verified `pre-restore` backup of the stopped app first. A run that later deploys of the environment
+ * `update rollback`: rolls deploy run `run` back on request, through {@link guardRollback} in mode `ask`: once the
+ * new release started it stops the app first, asks for the environment's name when the stopped state holds more than
+ * the promoted generation and login sessions (always after `accept`), and takes a verified `pre-restore` backup. A run that later deploys of the environment
  * superseded is rolled back only while it holds the update pin on its cutover backup (the way back across a major),
  * and never while one of them is open; each superseding run is then recorded as `superseded`, so it reads
  * `rolled-back`. Exit 0 once the previous release runs verified, 1 when the rollback could not finish or was refused.
@@ -436,28 +487,8 @@ export async function rollbackCommand(ctx: UpdateContext, run: UpdateRun): Promi
   const later = await laterDeploys(ctx, run);
   const superseded = await supersededRefusal(ctx, run, later);
   if (superseded !== null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `refusing to roll back run ${run.runId}: ${superseded}`, run.state);
-  const lines = await lossToConfirm(ctx, run, manifest);
-  if (lines !== null) {
-    for (const line of lines) ctx.out.info(line);
-    const name = await typedName(ctx, lines.join("\n"));
-    if (name !== ctx.envName) {
-      const message = name === null ? `stopped: "rollback-accepted" needs the environment's name ${ctx.envName} as its answer ("rollback-accepted": "${ctx.envName}" in --answers; --yes does not answer it)` : `stopped: "rollback-accepted" was answered with "${name}", not the environment's name`;
-      return outcome(ctx, run.runId, UPDATE_EXIT.refused, message, run.state);
-    }
-    let stopped = false;
-    try {
-      const stop = await stopTarget(ctx);
-      stopped = stop.wasRunning;
-      const seal = await ctx.steps.waitForSeal(ctx, stop.stoppedAt);
-      await acceptSeal(ctx, seal, stop.stoppedAt);
-      const safety = await createBackup(ctx, { kind: "pre-restore", mode: { kind: "stopped", seal, stoppedAt: stop.stoppedAt }, pinFor: ctx.runId });
-      ctx.out.info(`pre-restore backup ${safety.id} written and verified`);
-    } catch (error) {
-      const restarted = stopped ? await startTarget(ctx).then(() => true, () => false) : false;
-      const message = `the rollback stopped before it changed the store: ${messageOf(error)}${stopped ? (restarted ? "; the app was started again" : "; the app stays stopped and starting it again failed") : ""}`;
-      return outcome(ctx, run.runId, UPDATE_EXIT.refused, message, run.state);
-    }
-  }
+  const guarded = await guardRollback(ctx, run, manifest, "ask");
+  if (!guarded.ok) return outcome(ctx, run.runId, UPDATE_EXIT.refused, guarded.message, run.state);
   for (const other of later) await continueJournal(ctx, other).record("superseded", "done", { phase: "rollback", by: run.runId, cutoverBackup: manifest.id });
   try {
     const result = await ctx.steps.rollback(ctx, run, { kind: "requested" });

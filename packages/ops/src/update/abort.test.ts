@@ -4,7 +4,7 @@ import { PREFIXES } from "../harness.fixture.ts";
 import { listGenerations, promote } from "../replica.ts";
 import { appClock } from "../serverTime.ts";
 import { abort } from "./abort.ts";
-import { continueRun, createScenario, deployUntil, guardStarts, newestOrigin, runOf, type Scenario } from "./scenario.fixture.ts";
+import { continueRun, createScenario, deployUntil, guardStarts, newestOrigin, rowsOf, runOf, type Scenario } from "./scenario.fixture.ts";
 import { UPDATE_EXIT, type DeployStep } from "./types.ts";
 
 const scenarios: Scenario[] = [];
@@ -90,5 +90,32 @@ describe("update abort", () => {
     expect(run.state).toBe("verified");
     expect(await abort(ctx, run)).toMatchObject({ exitCode: UPDATE_EXIT.refused, state: "verified" });
     expect(s.h.target.release.runtime).toBe("6.0.0");
+  });
+
+  it("refuses with exit 1 to abort a halted run whose new release wrote since its start without the environment's name, and with it reports the loss and takes a safety backup", async () => {
+    const s = await scenario();
+    const deployed = await deployUntil(s, "start");
+    await deployed.ctx.journal.record("verify", "done", { phase: "deploy", verdict: "unverifiable" });
+    expect((await runOf(s, deployed.runId)).state).toBe("halted");
+    const app = s.h.target.app;
+    if (app === null) throw new Error("the new release does not run");
+    app.run(`INSERT INTO pages VALUES ('halted', 'Written while halted', 'Kept')`);
+    await app.export();
+    await app.sync();
+
+    const first = await continueRun(s, deployed.runId, "update abort");
+    const refused = await abort(first.ctx, first.run);
+    expect(refused.exitCode, refused.message).toBe(UPDATE_EXIT.refused);
+    expect(refused.message).toContain("rollback-accepted");
+    expect(s.h.target.release.runtime).toBe("6.0.0");
+    expect((await s.h.target.status()).state).toBe("started");
+    expect(JSON.stringify(rowsOf(s.h.target.app?.file ?? ""))).toContain("Written while halted");
+    expect((await listBackups(first.ctx)).filter((b) => b.kind === "pre-restore")).toEqual([]);
+
+    const { ctx, run } = await continueRun(s, deployed.runId, "update abort", { answers: { "unsealed-stop": "accept", "rollback-accepted": "prod" } });
+    const outcome = await abort(ctx, run);
+    expect(outcome.exitCode, outcome.message).toBe(UPDATE_EXIT.done);
+    expect(s.h.output.info.join("\n")).toContain("pages: 1 newer row(s) dropped");
+    expect((await listBackups(ctx)).filter((b) => b.kind === "pre-restore" && b.verified)).toHaveLength(1);
   });
 });

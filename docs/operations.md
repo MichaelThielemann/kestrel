@@ -171,11 +171,15 @@ its `applied.json` names the generation and its nonce, or the first snapshot it 
 the marker row the rollback put into the promoted database. Releases before 6 write no `applied.json`, so the
 marker row proves it for them; it stays in the table `kestrel_ops_provenance`, one row per rollback.
 
-`kestrel update rollback` before `accept` asks nothing more while the new release never started or wrote
-nothing but login sessions since its start. After `accept`, or once the new release wrote since its start
-(compared with the promoted generation, also while the run is halted), it shows what would be lost, needs the
-environment's name as the answer to `rollback-accepted` and takes a verified `pre-restore` backup of the stopped
-app before it changes the store.
+`kestrel update rollback` of a run whose new release started stops the app first and waits for the seal, so
+nothing is written between the report and the stop. It then compares the stopped state with the promoted
+generation, after `accept` with the cutover backup. When the new release wrote more than login sessions, or after
+`accept` always, it shows what would be lost and needs the environment's name as the answer to
+`rollback-accepted`; without it the app is started again and the run stays as it was. Every such rollback takes a
+verified `pre-restore` backup of the stopped app before it changes the store. `kestrel update abort` of a run
+whose new release started goes through the same steps. A halted run whose verification fails again is rolled
+back automatically only when its release wrote nothing since its start, after the stop and a `pre-restore`
+backup; otherwise it stays halted with exit 1 and `update status` names `update rollback`.
 
 ### Migrating the cutover copy
 

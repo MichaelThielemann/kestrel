@@ -242,14 +242,44 @@ describe("update rollback", () => {
     expect(s.h.output.warn.join("\n")).toContain("SITE_NAME holds another value than when the update began");
   });
 
-  it("rolls back before accept without a question and exits 0", async () => {
+  it("rolls back before accept without a question once the stopped release wrote nothing, takes a safety backup after the stop and exits 0", async () => {
     const s = await scenario();
     const deployed = await deployUntil(s, "verify");
     const { ctx, run } = await continueRun(s, deployed.runId, "update rollback", { yes: false });
     const outcome = await rollbackCommand(ctx, run);
     expect(outcome).toMatchObject({ exitCode: UPDATE_EXIT.done, state: "rolled-back" });
-    expect((await listBackups(ctx)).filter((b) => b.kind === "pre-restore")).toEqual([]);
+    const safety = (await listBackups(ctx)).filter((b) => b.kind === "pre-restore");
+    expect(safety).toHaveLength(1);
+    expect(safety[0]?.verified).toBe(true);
     expect((await listBackups(ctx)).find((b) => b.id === run.cutoverBackup)?.pinnedBy).toEqual([]);
+  });
+
+  it("before accept stops the release first, so a write it has not synced yet is asked about and kept in the safety backup, and starts it again without an answer", async () => {
+    const s = await scenario();
+    const deployed = await deployUntil(s, "verify");
+    const app = s.h.target.app;
+    if (app === null) throw new Error("the new release does not run");
+    app.run(`INSERT INTO pages VALUES ('unsynced', 'Unsynced', 'Written just before the rollback')`);
+
+    const first = await continueRun(s, deployed.runId, "update rollback", { yes: false });
+    const refused = await rollbackCommand(first.ctx, first.run);
+    expect(refused.exitCode, refused.message).toBe(UPDATE_EXIT.refused);
+    expect(refused.message).toContain("rollback-accepted");
+    expect(refused.message).toContain("started again");
+    expect(s.h.output.info.join("\n")).toContain("pages: 1 newer row(s) dropped");
+    expect((await s.h.target.status()).state).toBe("started");
+    expect(s.h.target.release.runtime).toBe("6.0.0");
+    expect(JSON.stringify(rowsOf(s.h.target.app?.file ?? ""))).toContain("unsynced");
+
+    const { ctx, run } = await continueRun(s, deployed.runId, "update rollback", { answers: { "rollback-accepted": "prod" }, yes: false });
+    const outcome = await rollbackCommand(ctx, run);
+    expect(outcome).toMatchObject({ exitCode: UPDATE_EXIT.done, state: "rolled-back" });
+    const safety = (await listBackups(ctx)).filter((b) => b.kind === "pre-restore");
+    expect(safety.length).toBeGreaterThanOrEqual(1);
+    const kept = safety.at(-1)?.id ?? "";
+    const file = `${s.h.root}/safety.db`;
+    writeFileSync(file, (await s.h.store.get(LOCATION + keys.db(kept))) ?? new Uint8Array());
+    expect(JSON.stringify(rowsOf(file))).toContain("unsynced");
   });
 
   it("before accept asks like after accept once the new release wrote since its start, reports what it wrote and takes a safety backup", async () => {

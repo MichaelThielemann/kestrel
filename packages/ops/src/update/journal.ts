@@ -126,7 +126,7 @@ function summarize(runId: string, env: string, firstCommand: string | null, reco
         break;
       case "verify": {
         const verdict = field(r.data, "verdict");
-        if (r.phase === "deploy" || r.phase === "verify") state = verdict === "passed" ? "verified" : verdict === "unverifiable" ? "halted" : "rolling-back";
+        if (r.phase === "deploy" || r.phase === "verify") state = verdict === "passed" ? "verified" : verdict === "unverifiable" || field(r.data, "held") === true ? "halted" : "rolling-back";
         break;
       }
       case "rollback":

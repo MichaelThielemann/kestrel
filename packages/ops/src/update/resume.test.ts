@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { resume } from "./resume.ts";
-import { continueRun, createScenario, deployUntil, guardStarts, runOf, scenarioContinue, type Scenario } from "./scenario.fixture.ts";
+import { continueRun, createScenario, deployUntil, guardStarts, rowsOf, runOf, scenarioContinue, type Scenario } from "./scenario.fixture.ts";
+import { nextCommand } from "./status.ts";
 import { UPDATE_EXIT, type DeployStep, type VerifyResult, type VerifyVerdict } from "./types.ts";
 
 const scenarios: Scenario[] = [];
@@ -59,6 +60,25 @@ describe("update resume", () => {
     expect(await resume(failed.ctx, failed.run)).toMatchObject({ exitCode: UPDATE_EXIT.rolledBack, state: "rolled-back" });
     expect(s.h.target.release.runtime).toBe("5.8.1");
     expect(s.h.target.droplets.has(s.previousDroplet)).toBe(true);
+  });
+
+  it("holds a halted run whose new release wrote since its start when verification fails again, keeps the release running and names update rollback", async () => {
+    const s = await scenario();
+    const deployed = await deployUntil(s, "start");
+    await deployed.ctx.journal.record("verify", "done", { phase: "deploy", verdict: "unverifiable" });
+    const app = s.h.target.app;
+    if (app === null) throw new Error("the new release does not run");
+    app.run(`INSERT INTO pages VALUES ('halted', 'Written while halted', 'Kept')`);
+    await app.export();
+    await app.sync();
+    const failed = await continueRun(s, deployed.runId, "update resume", { steps: { verify: verdict("failed") } });
+    const outcome = await resume(failed.ctx, failed.run);
+    expect(outcome, outcome.message).toMatchObject({ exitCode: UPDATE_EXIT.refused, state: "halted" });
+    expect(outcome.message).toContain(`update rollback --env prod --run ${deployed.runId}`);
+    expect(s.h.target.release.runtime).toBe("6.0.0");
+    expect((await s.h.target.status()).state).toBe("started");
+    expect(JSON.stringify(rowsOf(s.h.target.app?.file ?? ""))).toContain("Written while halted");
+    expect(nextCommand(await runOf(s, deployed.runId), "update deploy")).toBe(`kestrel update rollback --env prod --run ${deployed.runId}`);
   });
 
   it("rolls back a run whose verification failed before its rollback began", async () => {

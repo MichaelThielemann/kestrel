@@ -1,7 +1,9 @@
 import { messageOf, recordQuietly } from "../context.ts";
 import { Interrupted } from "../interrupt.ts";
 import { acknowledgement, listGenerations, type Generation } from "../replica.ts";
+import { readManifest } from "../backup.ts";
 import { readUpdateRun, reportOf } from "./journal.ts";
+import { guardRollback, wroteSinceStart } from "./rollback.ts";
 import { previousReleaseDeploy } from "./status.ts";
 import type { ReadyProbe } from "./target.ts";
 import { UPDATE_EXIT, type RollbackResult, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdatePhase, type UpdateRun, type VerifyCheck, type VerifyInput, type VerifyResult, type VerifyVerdict, type VersionSet } from "./types.ts";
@@ -124,11 +126,18 @@ export function stoppedAfterRollback(ctx: Pick<UpdateContext, "envName">, failur
  * run and its journal listing may not show yet, such as the cutover backup and the promoted generation.
  */
 export async function concludeVerify(ctx: UpdateContext, phase: UpdatePhase, result: VerifyResult, known: (run: UpdateRun) => UpdateRun = (run) => run): Promise<UpdateOutcome> {
-  await ctx.journal.record("verify", "done", { phase, verdict: result.verdict, checks: result.checks, ownGeneration: result.ownGeneration });
+  const held = result.verdict === "failed" && phase === "verify" && (await wroteSinceStart(ctx, known(await readUpdateRun(ctx, ctx.run.id))));
+  await ctx.journal.record("verify", "done", { phase, verdict: result.verdict, checks: result.checks, ownGeneration: result.ownGeneration, ...(held ? { held: true } : {}) });
+  if (held) return outcomeOf(ctx, UPDATE_EXIT.refused, `verification failed (${result.checks.filter((c) => c.hard && !c.ok).map((c) => `${c.name}: ${c.detail}`).join("; ")}), but the new release wrote since its start, so nothing was rolled back automatically and it keeps running; run update rollback --env ${ctx.envName} --run ${ctx.run.id}, which reports what it discards, asks and takes a safety backup first`);
   if (result.verdict === "unverifiable") return outcomeOf(ctx, UPDATE_EXIT.refused, `verification could not tell (${describeProbe(result.ready)}); the new release keeps running and nothing was rolled back. Once its readiness can be checked, run update resume --env ${ctx.envName} --run ${ctx.run.id}, or update rollback`);
   const run = known(await readUpdateRun(ctx, ctx.run.id));
   if (result.verdict === "failed") {
     const failure = result.checks.filter((c) => c.hard && !c.ok).map((c) => `${c.name}: ${c.detail}`).join("; ");
+    if (phase === "verify" && run.cutoverBackup !== null) {
+      const manifest = await readManifest(ctx, run.cutoverBackup);
+      const guarded = manifest === null ? { ok: false as const, message: `the cutover backup ${run.cutoverBackup} does not exist or is incomplete` } : await guardRollback(ctx, run, manifest, "backup");
+      if (!guarded.ok) return outcomeOf(ctx, UPDATE_EXIT.refused, `verification failed (${failure}) and the automatic rollback did not begin: ${guarded.message}; run update rollback --env ${ctx.envName} --run ${ctx.run.id}`);
+    }
     let ended: RollbackResult["ended"];
     try {
       ended = (await ctx.steps.rollback(ctx, run, { kind: "automatic", failure })).ended;

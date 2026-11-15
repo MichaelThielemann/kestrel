@@ -71,7 +71,7 @@ export function nextCommand(run: UpdateRun, command: string): string | null {
     case "rolling-back":
       return `kestrel update resume ${scope}`;
     case "halted":
-      return `kestrel update resume ${scope}`;
+      return run.records.filter((r) => r.step === "verify" && r.state === "done").at(-1)?.data.held === true ? `kestrel update rollback ${scope}` : `kestrel update resume ${scope}`;
     case "verified":
       return `kestrel update accept ${scope}`;
     case "accepted":

@@ -1794,7 +1794,7 @@ Net changes since 5.8.2.
   without resolving the sources), and pending content migrations without `update.localBoot`; stages the release while the old one serves (a staging failure never stops the app); records
   the app's configuration, secret values only as salted fingerprints; stops the app and waits for the seal; takes
   a verified cutover backup that records the running versions, pinned until `update cleanup` for a change of the
-  major or a pending storage migration, so no migration starts without one; migrates a copy
+  major, unknown running versions or a pending storage migration, so no migration starts without one; migrates a copy
   of its database; promotes it, swaps the code and starts the release as one step; and verifies it with three
   outcomes, reading the instance and the crash events again once its waits ended: passed, failed (an automatic
   rollback to the cutover state, exit 3, or exit 1 when no previous release was left to start) or unverifiable (403, no
@@ -1808,8 +1808,11 @@ Net changes since 5.8.2.
   originals, replaces the delivery prefix and lists it again, restores the recorded configuration verbatim, starts
   the previous release and proves through `applied.json` or a marker row in its first snapshot (table
   `kestrel_ops_provenance`) that it restored the cutover state; it reports the derived keys that differ from the
-  cutover backup and releases the pin on it. `update rollback` shows what would be lost, needs the environment's
-  name and takes a safety backup first after `accept`, or once the new release wrote since its start; the saved code
+  cutover backup and releases the pin on it. `update rollback`, and `update abort` of a run whose new release
+  started, stop the app first and take a verified safety backup of the stopped state; after `accept`, or once the
+  stopped state holds what the new release wrote since its start, they show what would be lost and need the
+  environment's name, and without it start the release again. A halted run whose verification fails again after
+  its release wrote is held instead of rolled back automatically; the saved code
   of the release before a major change stays until `update cleanup`, so such a run rolls back across the major
   also after a later verified deploy, which then reads rolled back, while an unpinned superseded run is refused. The migration of the cutover copy downloads the cutover database again on every run, so a kill inside
   a content migration that is not idempotent is resumed from the same state; it refuses a migration the plan does

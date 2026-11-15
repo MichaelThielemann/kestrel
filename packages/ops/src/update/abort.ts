@@ -2,6 +2,7 @@ import { readManifest } from "../backup.ts";
 import { messageOf, recordQuietly, startTarget } from "../context.ts";
 import { stableGenerations } from "../replica.ts";
 import { releaseUpdatePin } from "./cleanup.ts";
+import { guardRollback } from "./rollback.ts";
 import { readUpdateRun, reportOf } from "./journal.ts";
 import { OPEN_STATES, UPDATE_EXIT, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
 
@@ -21,13 +22,21 @@ async function placedAfterCutover(ctx: UpdateContext, run: UpdateRun): Promise<b
 /**
  * `update abort`: ends an open run without finishing it. Before the promotion it starts the previous release again on
  * the unchanged replica, releases the run's update pin on its cutover backup and records `abort` with `promoted: false`; after the promotion it rolls back first
- * (`RollbackReason` `abort`), so the old droplet never starts on a converted generation. A generation newer than the
+ * (`RollbackReason` `abort`), so the old droplet never starts on a converted generation; once the new release started,
+ * that rollback goes through `guardRollback` like `update rollback`: the stop first, the question when the new release
+ * wrote since its start, and a verified `pre-restore` backup. A generation newer than the
  * cutover backup's source counts as promoted even when the journal did not record the promotion.
  */
 export async function abort(ctx: UpdateContext, run: UpdateRun): Promise<UpdateOutcome> {
   if (!OPEN_STATES.has(run.state)) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is ${run.state}, not open; there is nothing to abort`, run.state);
-  await ctx.journal.record("abort", "started", { phase: "abort", state: run.state });
   const promoted = run.promoted !== null || (await placedAfterCutover(ctx, run));
+  if (promoted && run.cutoverBackup !== null) {
+    const manifest = await readManifest(ctx, run.cutoverBackup);
+    if (manifest === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the cutover backup ${run.cutoverBackup} of run ${run.runId} does not exist or is incomplete`, run.state);
+    const guarded = await guardRollback(ctx, run, manifest, "ask");
+    if (!guarded.ok) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `not aborted: ${guarded.message}`, run.state);
+  }
+  await ctx.journal.record("abort", "started", { phase: "abort", state: run.state });
   if (promoted) {
     try {
       const result = await ctx.steps.rollback(ctx, run, { kind: "abort" });

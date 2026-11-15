@@ -298,7 +298,7 @@ names every generation after the ones it listed, so the restore does not wait fo
 | `verify` | Verifies the running release of a halted run again. |
 | `update accept`, `rollback`, `resume`, `abort` | Close, roll back, continue or end the newest deploy run, or the one `--run <id>` names. |
 | `update status` | Every update run of the environment from the backup location, with its hosts, state, next command and the time and downtime of each step. Takes no lock. |
-| `update cleanup [--dry-run]` | After `cleanupAfterDays`: removes the originals only the cutover backup still references and releases its pin. A deploy pins its cutover backup only for a change of the major or a pending storage migration; a rollback or an abort that brought the previous release back releases the pin as well. |
+| `update cleanup [--dry-run]` | After `cleanupAfterDays`: removes the originals only the cutover backup still references and releases its pin. A deploy pins its cutover backup only for a change of the major, unknown running versions or a pending storage migration; a rollback or an abort that brought the previous release back releases the pin as well. |
 | `update bundle [--out <dir>]` | Writes `.kestrel-ops/` with the release's versions, the target manifests, the module packages whose storage migrations a deploy runs and the host facts `RunOptions.host` passes. |
 
 `runUpdate` takes the same `RunOptions` as `runOps`, plus `releaseRoot` (the directory `update.release.dir` is
@@ -320,7 +320,7 @@ through `update.localBoot` with an environment of exactly its configured values.
 | `prune-delete` | before prune deletes | answers yes |
 | `break-lock` | `--break-lock` finds a lock another run holds | never |
 | `update-stop` | before a deploy stops the app | answers yes |
-| `rollback-accepted` | `update rollback` of an accepted run; the answer is the environment's name | never |
+| `rollback-accepted` | `update rollback` or `update abort` after accept, or before it once the stopped new release holds what it wrote since its start; the answer is the environment's name | never |
 | `cleanup-delete` | before `update cleanup` removes originals | never |
 
 `--answers <file>` is a JSON object from id to answer (`"yes"` or `"accept"`); a relative path is read from
