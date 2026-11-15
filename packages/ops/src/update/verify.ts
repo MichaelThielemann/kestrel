@@ -2,8 +2,9 @@ import { messageOf, recordQuietly } from "../context.ts";
 import { Interrupted } from "../interrupt.ts";
 import { acknowledgement, listGenerations, type Generation } from "../replica.ts";
 import { readUpdateRun, reportOf } from "./journal.ts";
+import { previousReleaseDeploy } from "./status.ts";
 import type { ReadyProbe } from "./target.ts";
-import { UPDATE_EXIT, type RollbackResult, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdatePhase, type UpdateRun, type VerifyCheck, type VerifyInput, type VerifyResult, type VerifyVerdict } from "./types.ts";
+import { UPDATE_EXIT, type RollbackResult, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdatePhase, type UpdateRun, type VerifyCheck, type VerifyInput, type VerifyResult, type VerifyVerdict, type VersionSet } from "./types.ts";
 
 const sleeper = (ctx: UpdateContext) => ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
 
@@ -110,8 +111,9 @@ export async function outcomeOf(ctx: UpdateContext, exitCode: UpdateExitCode, me
 }
 
 /** The message of an automatic rollback that brought back the cutover state but had no previous droplet to start. */
-export function stoppedAfterRollback(ctx: Pick<UpdateContext, "envName">, failure: string): string {
-  return `${failure}; the cutover state is back, but no previous droplet was left to start, so the app stays stopped: deploy the previous release again with node .kestrel-ops/run.mjs deploy --env ${ctx.envName}`;
+export function stoppedAfterRollback(ctx: Pick<UpdateContext, "envName">, failure: string, from: VersionSet | null): string {
+  const again = previousReleaseDeploy({ env: ctx.envName, versions: { from, to: {} } });
+  return `${failure}; the cutover state is back, but no previous droplet was left to start, so the app stays stopped: ${again.startsWith("node ") ? `deploy the previous release again with ${again}` : again}`;
 }
 
 /**
@@ -133,7 +135,7 @@ export async function concludeVerify(ctx: UpdateContext, phase: UpdatePhase, res
     } catch (cause) {
       return outcomeOf(ctx, UPDATE_EXIT.refused, `verification failed (${failure}) and the automatic rollback did not finish: ${messageOf(cause)}; run update resume --env ${ctx.envName} --run ${ctx.run.id}, which runs the rollback again`);
     }
-    if (ended === "stopped") return outcomeOf(ctx, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, `verification failed (${failure})`));
+    if (ended === "stopped") return outcomeOf(ctx, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, `verification failed (${failure})`, run.versions?.from ?? null));
     return outcomeOf(ctx, UPDATE_EXIT.rolledBack, `verification failed (${failure}); rolled back to the cutover state`);
   }
   const retired = await retireStep(ctx, run);

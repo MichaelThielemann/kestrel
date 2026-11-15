@@ -241,7 +241,7 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     } catch (cause) {
       return outcomeOf(ctx, UPDATE_EXIT.refused, `the deploy failed at ${failure}, and the automatic rollback did not finish: ${messageOf(cause)}; the app stays stopped; do not start it by hand; run update resume --env ${ctx.envName} --run ${ctx.run.id}, which runs the rollback again`);
     }
-    if (ended === "stopped") return outcomeOf(ctx, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, `the deploy failed at ${failure}`));
+    if (ended === "stopped") return outcomeOf(ctx, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, `the deploy failed at ${failure}`, flow.from));
     return outcomeOf(ctx, UPDATE_EXIT.rolledBack, flow.cutoverBackup === null ? `the deploy failed at ${failure} before its cutover backup; nothing was promoted, and the previous release runs again on the unchanged replica` : `the deploy failed at ${failure}; rolled back to the cutover state`);
   }
   return concludeVerify(ctx, "deploy", result, (run) => known(run, flow));

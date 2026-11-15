@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { messageOf } from "../context.ts";
 import { OpsError } from "../errors.ts";
-import { removeSavedDroplets } from "./cleanup.ts";
+import { holdsUpdatePin, removeSavedDroplets } from "./cleanup.ts";
 import { listUpdateRuns, readUpdateRun } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
 import { OPEN_STATES, type RetireResult, type UpdateContext, type UpdateRun } from "./types.ts";
@@ -26,7 +26,7 @@ async function otherDeploys(ctx: UpdateContext, run: UpdateRun): Promise<{ neede
     if (entry.command !== "update deploy" || entry.runId === run.runId) continue;
     const other = await readUpdateRun(ctx, entry.runId);
     if (!OPEN_STATES.has(other.state)) {
-      closed.push(other.runId);
+      if (!(await holdsUpdatePin(ctx, other))) closed.push(other.runId);
       continue;
     }
     for (const droplet of [other.previousDroplet, other.stagedDroplet]) if (droplet !== null) needed.set(droplet, other);
@@ -42,7 +42,8 @@ async function otherDeploys(ctx: UpdateContext, run: UpdateRun): Promise<{ neede
  * Refuses unless the run's journal shows `verify` done with verdict `passed`, and while the app runs another droplet
  * than the one the run deployed. A droplet that another open deploy run of the environment recorded as its previous or
  * staged droplet stays. The droplet bits that earlier deploy runs of the environment saved are deleted once those runs
- * are no longer open.
+ * are no longer open and hold no update pin on their cutover backup; a pinned run keeps them until `update cleanup`,
+ * so its rollback can start the release before it.
  */
 export async function retire(ctx: UpdateContext, run: UpdateRun): Promise<RetireResult> {
   if (!verifiedPassed(run)) throw new OpsError(`refusing to retire the previous releases of run ${run.runId}: its verification has not passed (the run is ${run.state}); a rollback still needs them`, 1, "retire");

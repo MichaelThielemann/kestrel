@@ -251,8 +251,14 @@ cutover backup stays pinned. `kestrel update cleanup [--dry-run]`, at least `upd
 after the accept, removes the originals under the media prefix that no row of the current replica references and
 that the cutover backup holds, after the `cleanup-delete` answer, releases the pin, so prune treats the
 cutover backup like any other, and deletes the replaced release's code the run saved. A later deploy that passes
-verification deletes the saved code of every earlier deploy run that is no longer open as well, so the backup
-location holds the code of at most the open runs and the newest verified one.
+verification deletes the saved code of every earlier deploy run that is no longer open and holds no pin on its
+cutover backup as well, so the code of the release before a major change stays until that run's cleanup.
+
+`kestrel update rollback` of a run that a later verified deploy superseded rolls back only while the run holds
+the pin on its cutover backup, the way back across a major change, and never while a later deploy is open. The
+later runs then read `rolled-back`, and what they wrote is part of the loss the rollback reports. When the app
+stays stopped because no previous release was left to start, the next command is a deploy of that release with
+its bundle when it brings kestrel-ops, and otherwise a deploy the way it was deployed before the update.
 
 ### Exit codes and questions
 

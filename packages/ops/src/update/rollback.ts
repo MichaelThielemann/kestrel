@@ -11,11 +11,11 @@ import { downloadDb, restoreDelivery, restoreOriginals } from "../restore.ts";
 import { appClock, type ServerClock } from "../serverTime.ts";
 import { deleteSessions, hasAccessChanges, lossReport, sha256, type LossReport } from "../sqlite.ts";
 import { stableList, type ObjectInfo } from "../store.ts";
-import { releaseUpdatePin } from "./cleanup.ts";
-import { readUpdateRun, reportOf } from "./journal.ts";
+import { holdsUpdatePin, releaseUpdatePin } from "./cleanup.ts";
+import { continueJournal, listUpdateRuns, readUpdateRun, reportOf } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
 import type { ConfigurationRestore, RecordedConfiguration } from "./target.ts";
-import { UPDATE_EXIT, type DerivedReport, type RollbackReason, type RollbackResult, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
+import { OPEN_STATES, UPDATE_EXIT, type DerivedReport, type RollbackReason, type RollbackResult, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
 
 /** The table a rollback adds to the database it promotes for a release before 6, holding one marker row per rollback. */
 export const PROVENANCE_TABLE = "kestrel_ops_provenance";
@@ -400,17 +400,42 @@ async function lossToConfirm(ctx: UpdateContext, run: UpdateRun, manifest: Manif
   return [`the new release of run ${run.runId} has run since ${new Date(since).toISOString()} and is not accepted; rolling back discards what it wrote since then`, ...lossLines(loss, since), sessions];
 }
 
+async function laterDeploys(ctx: UpdateContext, run: UpdateRun): Promise<UpdateRun[]> {
+  const listed = await listUpdateRuns(ctx, ctx.envName);
+  const at = listed.findIndex((entry) => entry.runId === run.runId);
+  const later: UpdateRun[] = [];
+  for (const entry of listed.slice(at + 1)) {
+    if (entry.command !== "update deploy") continue;
+    const other = await readUpdateRun(ctx, entry.runId);
+    if (other.state !== "untouched" && other.state !== "rolled-back" && other.state !== "aborted") later.push(other);
+  }
+  return later;
+}
+
+async function supersededRefusal(ctx: UpdateContext, run: UpdateRun, later: readonly UpdateRun[]): Promise<string | null> {
+  const open = later.find((other) => OPEN_STATES.has(other.state));
+  if (open !== undefined) return `update run ${open.runId}, a later deploy, is ${open.state}; finish it first`;
+  const newest = later.at(-1);
+  if (newest === undefined || (await holdsUpdatePin(ctx, run))) return null;
+  return `update run ${newest.runId}, a later deploy, superseded run ${run.runId}, which holds no pin on its cutover backup any more; roll back ${newest.runId} instead`;
+}
+
 /**
  * `update rollback`: rolls deploy run `run` back on request. Before `accept` it asks nothing more while the new release
  * never started or wrote nothing but login sessions since its start. After `accept`, or once the new release wrote
  * since its start, it shows the loss report, needs the environment's name as the answer to `rollback-accepted` and
- * takes a verified `pre-restore` backup of the stopped app first. Exit 0 once the previous release runs verified, 1
- * when the rollback could not finish.
+ * takes a verified `pre-restore` backup of the stopped app first. A run that later deploys of the environment
+ * superseded is rolled back only while it holds the update pin on its cutover backup (the way back across a major),
+ * and never while one of them is open; each superseding run is then recorded as `superseded`, so it reads
+ * `rolled-back`. Exit 0 once the previous release runs verified, 1 when the rollback could not finish or was refused.
  */
 export async function rollbackCommand(ctx: UpdateContext, run: UpdateRun): Promise<UpdateOutcome> {
   if (!ROLLBACK_FROM.has(run.state) || run.cutoverBackup === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is ${run.state}${run.cutoverBackup === null ? " without a cutover backup" : ""}; there is nothing to roll back${run.state === "deploying" || run.state === "down" ? " (update abort ends a run before its cutover backup)" : ""}`, run.state);
   const manifest = await readManifest(ctx, run.cutoverBackup);
   if (manifest === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the cutover backup ${run.cutoverBackup} of run ${run.runId} does not exist or is incomplete`, run.state);
+  const later = await laterDeploys(ctx, run);
+  const superseded = await supersededRefusal(ctx, run, later);
+  if (superseded !== null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `refusing to roll back run ${run.runId}: ${superseded}`, run.state);
   const lines = await lossToConfirm(ctx, run, manifest);
   if (lines !== null) {
     for (const line of lines) ctx.out.info(line);
@@ -433,6 +458,7 @@ export async function rollbackCommand(ctx: UpdateContext, run: UpdateRun): Promi
       return outcome(ctx, run.runId, UPDATE_EXIT.refused, message, run.state);
     }
   }
+  for (const other of later) await continueJournal(ctx, other).record("superseded", "done", { phase: "rollback", by: run.runId, cutoverBackup: manifest.id });
   try {
     const result = await ctx.steps.rollback(ctx, run, { kind: "requested" });
     if (result.ended === "stopped") return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the cutover state is back, but no previous droplet was left to start; the app stays stopped`, "rolled-back");

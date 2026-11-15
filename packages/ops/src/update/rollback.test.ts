@@ -298,4 +298,33 @@ describe("update rollback", () => {
     expect(safety[0]?.verified).toBe(true);
     await expectCutoverState(s, run.cutoverBackup ?? "");
   });
+
+  it("rolls an accepted major hop back to the release before it while it holds its pin, also after a later verified deploy, which then reads rolled back", async () => {
+    const s = await scenario();
+    const first = await deployUntil(s, "retire");
+    await acceptRun(s, first.runId);
+    const second = await deployUntil(s, "retire");
+    expect((await runOf(s, second.runId)).state).toBe("verified");
+    const { ctx, run } = await continueRun(s, first.runId, "update rollback", { answers: { "unsealed-stop": "accept", "rollback-accepted": "prod" } });
+    const outcome = await rollbackCommand(ctx, run);
+    expect(outcome.exitCode, outcome.message).toBe(UPDATE_EXIT.done);
+    expect(s.h.target.release.runtime).toBe("5.8.1");
+    expect((await runOf(s, second.runId)).state).toBe("rolled-back");
+  });
+
+  it("refuses to roll back a run a later verified deploy superseded once the run holds no pin, and names the later run", async () => {
+    const s = await scenario();
+    const first = await deployUntil(s, "retire");
+    await acceptRun(s, first.runId);
+    const unpinned = await runOf(s, first.runId);
+    const { ctx: releasing } = await continueRun(s, first.runId, "update cleanup");
+    const { releaseUpdatePin } = await import("./cleanup.ts");
+    await releaseUpdatePin(releasing, unpinned.cutoverBackup ?? "", first.runId);
+    const second = await deployUntil(s, "retire");
+    const { ctx, run } = await continueRun(s, first.runId, "update rollback", { answers: { "unsealed-stop": "accept", "rollback-accepted": "prod" } });
+    const outcome = await rollbackCommand(ctx, run);
+    expect(outcome.exitCode).toBe(UPDATE_EXIT.refused);
+    expect(outcome.message).toContain(second.runId);
+    expect(s.h.target.release.runtime).toBe("6.0.0");
+  });
 });

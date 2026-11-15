@@ -190,6 +190,22 @@ describe("deploying 5.8.1 to 6.0 on the stand-in target", { timeout: 30_000 }, (
     expect(outcome.state).toBe("rolled-back");
     expect(outcome.message).toContain("stays stopped");
     expect(outcome.message).not.toContain("rolled back to the cutover state");
+    expect(outcome.message).not.toContain(".kestrel-ops");
+    expect(outcome.message).toContain("the way it was deployed before the update");
+    expect((await updateStatus(s.ctx, s.ctx.run.id)).run?.next).toBe("deploy the previous release of prod again the way it was deployed before the update; it brings no kestrel-ops");
+  });
+
+  it("names a deploy of the previous release through its bundle when that release brings kestrel-ops", async () => {
+    const s = await scenario({ from: { runtime: "6.0.0", versions: { "@michaelthielemann/kestrel": "6.0.0", "@michaelthielemann/kestrel-ops": "6.0.0" } }, to: { runtime: "6.0.1", ready: "not-ready" } });
+    s.steps.rollback.mockImplementation(async (ctx: UpdateContext): Promise<RollbackResult> => {
+      await ctx.journal.record("rollback", "started", { phase: "rollback", reason: "automatic" });
+      await ctx.journal.record("rollback", "done", { phase: "rollback", ended: "stopped" });
+      return { ended: "stopped", generation: "", seal: "sealed", delivery: { written: [], removed: [], relisted: 0 }, originalsRestored: [], configuration: { set: [], removed: [], unrestorable: [] }, derived: { added: [], changed: [], missing: [] } };
+    });
+    await receiptFor(s.ctx);
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode, outcome.message).toBe(1);
+    expect(outcome.message).toContain("node .kestrel-ops/run.mjs deploy --env prod");
     expect((await updateStatus(s.ctx, s.ctx.run.id)).run?.next).toBe("node .kestrel-ops/run.mjs deploy --env prod");
   });
 

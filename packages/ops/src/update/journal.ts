@@ -131,6 +131,7 @@ function summarize(runId: string, env: string, firstCommand: string | null, reco
       }
       case "rollback":
       case "rollback-verify":
+      case "superseded":
         state = "rolled-back";
         break;
       case "abort":

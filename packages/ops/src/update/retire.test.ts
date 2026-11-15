@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { LOCATION } from "../harness.fixture.ts";
 import { updateKeys } from "./layout.ts";
 import { retire } from "./retire.ts";
-import { continueRun, createScenario, deployUntil, runOf, type Scenario } from "./scenario.fixture.ts";
+import { releaseUpdatePin } from "./cleanup.ts";
+import { acceptRun, continueRun, createScenario, deployUntil, runOf, type Scenario } from "./scenario.fixture.ts";
 import { fakeRelease } from "./fakeUpdateTarget.fixture.ts";
 
 const scenarios: Scenario[] = [];
@@ -106,11 +107,24 @@ describe("retiring the previous releases after an update", () => {
     expect(s.h.target.droplets.size).toBe(2);
   });
 
-  it("removes the droplet bits of earlier deploy runs that are no longer open once a later deploy passed verification", async () => {
+  it("keeps the droplet bits of an earlier deploy run while it holds the pin on its cutover backup, also once it is accepted and a later deploy passed verification", async () => {
     const s = await scenario();
     const first = await deployUntil(s, "retire");
     const bits = LOCATION + updateKeys.droplet("prod", first.runId, s.previousDroplet);
     expect(await s.h.store.head(bits)).not.toBeNull();
+    await acceptRun(s, first.runId);
+    const second = await deployUntil(s, "verify");
+    expect(second.end.verdict).toBe("passed");
+    await retire(second.ctx, await runOf(s, second.runId));
+    expect(await s.h.store.head(bits)).not.toBeNull();
+  });
+
+  it("removes the droplet bits of earlier deploy runs that are no longer open and hold no pin once a later deploy passed verification", async () => {
+    const s = await scenario();
+    const first = await deployUntil(s, "retire");
+    const bits = LOCATION + updateKeys.droplet("prod", first.runId, s.previousDroplet);
+    expect(await s.h.store.head(bits)).not.toBeNull();
+    await releaseUpdatePin(first.ctx, (await runOf(s, first.runId)).cutoverBackup ?? "", first.runId);
     const second = await deployUntil(s, "verify");
     expect(second.end.verdict).toBe("passed");
     await retire(second.ctx, await runOf(s, second.runId));

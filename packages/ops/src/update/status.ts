@@ -43,9 +43,19 @@ async function lockHosts(ctx: UpdateContext): Promise<Map<string, string>> {
   return hosts;
 }
 
+const OPS_PACKAGE = "@michaelthielemann/kestrel-ops";
+
+/**
+ * How to deploy the release that ran before deploy run `run` again: through its bundle when it brings kestrel-ops,
+ * otherwise the way it was deployed before the update.
+ */
+export function previousReleaseDeploy(run: Pick<UpdateRun, "env" | "versions">): string {
+  return run.versions?.from?.[OPS_PACKAGE] !== undefined ? `node .kestrel-ops/run.mjs deploy --env ${run.env}` : `deploy the previous release of ${run.env} again the way it was deployed before the update; it brings no kestrel-ops`;
+}
+
 /**
  * The command run `run`, opened by `command`, needs next, or null when it needs nothing; for a run whose rollback left
- * the app stopped, a deploy of the previous release; for a verified or accepted run whose retire of the previous
+ * the app stopped, a deploy of the previous release ({@link previousReleaseDeploy}); for a verified or accepted run whose retire of the previous
  * releases did not end, `update resume`.
  */
 export function nextCommand(run: UpdateRun, command: string): string | null {
@@ -67,7 +77,7 @@ export function nextCommand(run: UpdateRun, command: string): string | null {
     case "accepted":
       return `kestrel update cleanup ${scope}`;
     case "rolled-back":
-      return run.records.filter((r) => r.step === "rollback" && r.state === "done").at(-1)?.data.ended === "stopped" ? `node .kestrel-ops/run.mjs deploy --env ${run.env}` : null;
+      return run.records.filter((r) => r.step === "rollback" && r.state === "done").at(-1)?.data.ended === "stopped" ? previousReleaseDeploy(run) : null;
     default:
       return null;
   }

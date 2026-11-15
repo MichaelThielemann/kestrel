@@ -57,6 +57,13 @@ export async function releaseUpdatePin(ctx: Pick<UpdateContext, "backups" | "loc
   return true;
 }
 
+/** True while run `run` holds an update pin on its cutover backup that no release record cancels. */
+export async function holdsUpdatePin(ctx: Pick<UpdateContext, "backups" | "location">, run: Pick<UpdateRun, "runId" | "cutoverBackup">): Promise<boolean> {
+  if (run.cutoverBackup === null) return false;
+  if ((await ctx.backups.head(ctx.location + updateKeys.pin(run.cutoverBackup, run.runId))) === null) return false;
+  return (await ctx.backups.head(ctx.location + updateKeys.unpin(run.cutoverBackup, run.runId))) === null;
+}
+
 /**
  * `update cleanup`: ends an accepted deploy run at least `update.cleanupAfterDays` after its `accept`. Steps
  * `cleanup-check` (refuses before that, or for a run that is not accepted), `cleanup-delete` (originals under the media
