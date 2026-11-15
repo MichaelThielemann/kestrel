@@ -27,11 +27,12 @@ kestrel manifest [--json] [--root <dir>] [--run-setup <use>]... [--no-plugins]
 kestrel openapi  [--out <file>] [--title <t>] [--version <v>] [--server <url>] [--mount <path>]
                  [--root <dir>] [--run-setup <use>]... [--no-plugins]
 kestrel upgrade  check|fix|data [options]
+kestrel upgrade  migrate --db <copy> --blobs-dir <dir> [--root <dir>] [--plan] [--answers <file>] [--json]
 kestrel status   [--env <name>] [--json]
 kestrel backup   create [--freeze] [--kind manual|scheduled|cutover] | list | verify <id> | prune [--dry-run]
 kestrel restore  --backup <id> [--no-safety-backup]
 kestrel restore  --to local <dir> (--backup <id> | --latest) [--with-media] [--keep-sessions]
-kestrel update   prepare|accept|rollback|status|resume|abort|cleanup
+kestrel update   prepare [--full-media] | accept | rollback | status | resume | abort | cleanup [--dry-run]
 kestrel help [<command>] | kestrel --help | kestrel --version
 ```
 
@@ -54,12 +55,17 @@ kestrel help [<command>] | kestrel --help | kestrel --version
   document to stdout or `--out`. A module the sandbox does not know stops it (exit `2`) unless
   `--run-setup` names it, so it never opens the project's own database or files.
 - `upgrade` runs the upgrade assistant of `@michaelthielemann/kestrel-upgrade` with the rest of
-  the arguments unchanged; see the repository's `docs/upgrading.md`.
+  the arguments unchanged; see the repository's `docs/upgrading.md`. `upgrade migrate` converts the
+  storage shape of a copy of the database and the blob store offline.
 - `status`, `backup`, `restore` and `update` work on the environments `kestrel.environments.json`
   describes, through `@michaelthielemann/kestrel-ops`: the state of the app, its replica and its
   backups; verified backups of the database, the originals and the public output; a restore of one
   of them, or of the database into a local directory; and the update assistant of the installed
-  kestrel-ops (exit `2` when it brings none, `3` when an update was rolled back). The CLI does not
+  kestrel-ops (exit `2` when it brings none, `3` when an update was rolled back). `update --help`
+  lists the seven commands an operator runs; `update prepare` and `update bundle` (which writes the
+  `.kestrel-ops/` directory a deploy job runs) pass the facts the project's host plugin contributes,
+  such as its readiness path, to kestrel-ops. The repository's `docs/operations.md` describes an
+  update from `prepare` to `cleanup`. The CLI does not
   depend on kestrel-ops, so installing the CLI brings no S3 client, and loads it only when one of
   these commands runs. Add it, and the target package for where the app runs, to the project:
 

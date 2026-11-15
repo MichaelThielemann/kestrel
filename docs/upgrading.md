@@ -299,6 +299,15 @@ reaches the browser. Devices get their cookie at their next successful sign-in.
 
 ## Cutover
 
+A deployed environment that `@michaelthielemann/kestrel-ops` manages moves to the new major through its update
+assistant rather than by hand. `kestrel update prepare` plans the update on a copy of the newest replica
+generation, rehearses it and writes a receipt; the deploy job (`node .kestrel-ops/run.mjs deploy`) stages the
+new release while the old one serves, stops the app, takes a verified cutover backup, converts a copy of its
+database with the same storage migrations `kestrel upgrade migrate` runs, writing blobs only to new keys,
+promotes it, starts the new release and verifies it, and rolls back to the cutover state on a hard failure.
+Old releases of the app are deleted only after the new one passed verification. [`operations.md`](operations.md)
+describes each step, the rollback and what to do with an interrupted run.
+
 Switching an already-running project's event delivery to `events-queue`, or draining it before a
 later switch back, moves stored events through the queue rather than losing them. The order is:
 stop writes, drain, stop the 5.8 process, deploy 6.0.

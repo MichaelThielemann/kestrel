@@ -1,6 +1,7 @@
 # kestrel-target-cloudfoundry
-A target for `kestrel-ops` (and so for `kestrel status`, `kestrel backup` and `kestrel restore`) that stops,
-starts and describes one app in a Cloud Foundry space through the `cf` CLI. Besides `cf`, the target starts
+A target for `kestrel-ops` (and so for `kestrel status`, `kestrel backup`, `kestrel restore` and
+`kestrel update`) that stops, starts, describes and updates one app in a Cloud Foundry space through the `cf`
+CLI. Besides `cf`, the target starts
 only the commands of `{ "command": [...] }` sources in `vars`; `cf` must be on `PATH` and logged in.
 
 ```
@@ -93,6 +94,26 @@ target never runs `cf set-env`. A placeholder without a source in `vars`, a plac
 its `web` process, to anything but 1, or a manifest without the app ends with exit 2 before cf runs.
 `setDroplet(guid)` makes a staged droplet current, also only while the app is stopped.
 
+## Updates
+The target implements the update interface of `kestrel-ops`, which `kestrel update` and the deploy job's
+`node .kestrel-ops/run.mjs deploy` drive (see the repository's `docs/operations.md`):
+
+- **Preflight** reports the desired and running instances, an active deployment and the health check type
+  without refusing, so the update's gate can name what is wrong.
+- **Staging** uploads the release directory (`update.release.dir`) as a package of the app and stages it into a
+  droplet while the app keeps running; a staging failure leaves the app as it was.
+- **Configuration**: the app's variables, health check, memory, disk, start command and instance count are read
+  before the update changes them, the values of secret variables (those the host names and those `vars` fills)
+  only as salted fingerprints. The release's configuration is applied from `manifest` while the app is stopped,
+  and a rollback puts the recorded configuration back verbatim.
+- **Swap**: `setDroplet()` makes the staged droplet current, only while the app is stopped; promotion of the
+  migrated database, the swap and the start run as one step of the update.
+- **Verification** probes the readiness of the app in three outcomes (200 ready; 503 or another 5xx not ready;
+  401, 403, 404, a timeout or no connection unverifiable) and reads the crash events since the start.
+- **Retiring** lists the app's droplets and revisions and deletes every droplet but the current one once the new
+  release passed verification, after its bits were saved into the backup location where the platform hands
+  them out, so neither `cf rollback` nor an old pipeline run can start an old release on converted data.
+
 ## API
 `createTarget(config, { root, clock })` is the factory `kestrel-ops` imports. `cloudFoundryTarget(config, deps,
 options)` builds the same target with another environment for cf (`env`) and other waiting intervals
@@ -102,4 +123,4 @@ options)` builds the same target with another environment for cf (`env`) and oth
 The package's tests put a stub `cf` first on `PATH` that hands each call to a fake space in the test process,
 and run backup and restore end to end through `kestrel` against MinIO (`pnpm test:s3`).
 
-Not included: staging a new droplet, apps with more than one instance, other process types than `web`.
+Not included: apps with more than one instance, rolling or canary deployments, other process types than `web`.

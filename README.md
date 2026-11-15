@@ -127,6 +127,7 @@ only where a hidden constraint is not obvious from the code.
 | [`docs/submodule-template.md`](docs/submodule-template.md) | Shipping a submodule as a package: file layout, `module.ts`/`impl.ts` shape, checklist before "done". |
 | [`docs/api.md`](docs/api.md) | The HTTP API of the example instance — read before touching a route or a response shape. |
 | [`docs/upgrading.md`](docs/upgrading.md) | Moving a 5.8 project to 6.0.0 with `kestrel upgrade`: what it finds, what it fixes, the data check, converting the stored media of a copy with `migrate`, CI use, and how a host package registers its plugin. |
+| [`docs/operations.md`](docs/operations.md) | Running a deployed instance with `kestrel-ops`: verified backups, restore, and the update assistant from `update prepare` through the deploy job, verification, rollback and resume to `cleanup`. |
 | [`examples/minimal`](examples/minimal) | Every shipped module wired up in one instance; the reference `docs/api.md` describes. |
 | [`RELEASING.md`](RELEASING.md) | Version bump, smoke test and publish steps. |
 | [`CHANGELOG.md`](CHANGELOG.md) | Every behaviour change visible to a consumer, newest first under `## Unreleased`. |

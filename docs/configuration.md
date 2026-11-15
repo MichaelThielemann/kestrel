@@ -215,11 +215,15 @@ kestrel manifest [--json] [--root <dir>] [--run-setup <use>]... [--no-plugins]
 kestrel openapi  [--out <file>] [--title <t>] [--version <v>] [--server <url>] [--mount <path>]
                  [--root <dir>] [--run-setup <use>]... [--no-plugins]
 kestrel upgrade  check|fix|data [options]
+kestrel upgrade  migrate --db <copy> --blobs-dir <dir> [--root <dir>] [--plan] [--answers <file>]
+                 [--media-prefix <prefix>] [--originals-gone] [--json]
 kestrel status   [--env <name>] [--json]
 kestrel backup   create [--freeze] [--kind manual|scheduled|cutover] | list | verify <id> | prune [--dry-run]
 kestrel restore  --backup <id> [--no-safety-backup]
 kestrel restore  --to local <dir> (--backup <id> | --latest) [--with-media] [--keep-sessions]
-kestrel update   prepare|accept|rollback|status|resume|abort|cleanup
+kestrel update   prepare [--full-media]
+kestrel update   accept | rollback | status | resume | abort [--run <id>]
+kestrel update   cleanup [--run <id>] [--dry-run]
 kestrel help [<command>] | kestrel --help | -h | kestrel --version | -v
 ```
 
@@ -271,7 +275,13 @@ checked.
   project's own database or files. A boot failure exits 1.
 
 **`upgrade`** hands the rest of its arguments unchanged to `@michaelthielemann/kestrel-upgrade`; see
-[`upgrading.md`](upgrading.md).
+[`upgrading.md`](upgrading.md). `upgrade migrate` brings the storage shape of a copy of the database and of
+the filesystem blob store to the installed release, in place and offline: it runs the storage migrations of the
+module packages the project at `--root` has installed, writes new blobs before rows switch to them, never removes
+the blobs it converted from, and continues where it stopped after an abort. `--plan` only counts. It neither takes
+nor honours the instance lock of the copy. Exit `0` when every module is in the release's shape, `1` while a
+migration is still pending, `2` when it could not start or a migration failed; see
+[`upgrading.md`](upgrading.md) § 7.
 
 **`status`, `backup`, `restore`, `update`** work on a deployed environment, described in
 `kestrel.environments.json` in the current directory: its target (where the app runs), the bucket with its
@@ -298,7 +308,15 @@ documents each option, the questions a run asks and the `--json` documents. Ever
   and `prune` read, check again and remove backups.
 - `restore --backup <id>` restores a backup over the environment after a backup of the state it replaces;
   `--to local <dir>` writes a backup's database, or the newest replica generation, into a directory.
-- `update` runs the update assistant of the installed kestrel-ops; one that has none answers with exit 2.
+- `update prepare` checks the environment without changing it, plans and rehearses the update on a copy of
+  the newest replica generation and writes the receipt a deploy needs; `accept` closes a verified run,
+  `rollback` brings back its cutover state, `status` shows every update run of the environment with the
+  downtime of each step, `resume` and `abort` continue or end an interrupted run, and `cleanup` retires what an
+  accepted update left behind. Every command but `prepare` works on the newest deploy run unless `--run <id>`
+  names one. The deploy itself runs in the pipeline from the bundle that `kestrel update bundle` writes:
+  `node .kestrel-ops/run.mjs deploy --env <name>`. `prepare` and `bundle` hand the facts the project's host
+  plugin returns from `ops()` to kestrel-ops. A kestrel-ops without an update assistant answers with exit 2.
+  [`operations.md`](operations.md) describes an update step by step.
 
 **Host packages.** A project a host package loads in its own shape is inspected through that
 package's plugin. The package declares it in its own `package.json`:
@@ -327,7 +345,8 @@ declares one. [`upgrading.md`](upgrading.md) § Registering a plugin has the det
 | `status` | no problem found | a problem found, such as a target with more than one instance | kestrel-ops missing, bad arguments, invalid `kestrel.environments.json` | — |
 | `backup` | done | a check failed or a step was refused | kestrel-ops missing, bad arguments or configuration, a missing credential | — |
 | `restore` | done, or nothing to do | a check failed or a step was refused | kestrel-ops missing, bad arguments or configuration, a missing credential | — |
-| `update` | done | a check failed or a step was refused | kestrel-ops missing or without an update assistant, bad arguments or configuration | the update failed and was rolled back |
+| `upgrade migrate` | every module in the release's shape | a migration still pending, data too old or too new | could not start, a missing original without an answer, a migration failed | — |
+| `update` | done; `deploy` and `resume` with the new release verified | a check failed, a step was refused or the run halted | kestrel-ops missing or without an update assistant, bad arguments or configuration, a target that cannot run an update | a hard failure after the stop, rolled back and verified |
 
 "Could not run" means bad arguments, no `kestrel.config.ts` and no plugin that detects the project,
 the project's core missing or of another major, a refused plugin, or more than one detecting plugin.

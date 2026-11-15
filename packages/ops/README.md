@@ -1,22 +1,25 @@
 # kestrel-ops
-Verified backups and restore for a Kestrel instance that keeps its SQLite database in a
+Verified backups, restore and updates for a Kestrel instance that keeps its SQLite database in a
 `replication-sqlite` replica and its media in an S3-compatible bucket. A backup holds the database, every
 original the media rows reference and the public output of the delivery prefix; a restore brings all three
-back in one run, after a backup of the state it replaces.
+back in one run, after a backup of the state it replaces; an update moves the instance to a new release with a
+verified cutover backup, a migrated copy of its database and an automatic rollback.
 
-The package is a library and a runner. `runOps(argv)` from `@michaelthielemann/kestrel-ops/run` takes a
-command line and returns its exit code; `writeBundle()` writes a self-contained `.kestrel-ops/` directory that
-a deploy job runs with nothing but Node:
+The package is a library and a runner. `runOps(argv)` and `runUpdate(argv)` from
+`@michaelthielemann/kestrel-ops/run` take a command line and return its exit code; `writeBundle()` writes a
+self-contained `.kestrel-ops/` directory that a deploy job runs with nothing but Node and the platform's client:
 
 ```
 node .kestrel-ops/run.mjs status --env prod
 node .kestrel-ops/run.mjs backup create --kind scheduled --env prod
+node .kestrel-ops/run.mjs deploy --env prod
+node .kestrel-ops/run.mjs update status --env prod
 ```
 
 Requires Node 22.18 or later. The only external programs it starts are the app command of a `local`
-target, `ps` where `/proc` cannot tell a local app's start time, and the commands of `{ "command": [...] }`
-credential sources, each without a shell; other targets
-come as their own packages.
+target, `ps` where `/proc` cannot tell a local app's start time, the commands of `{ "command": [...] }`
+credential sources and the local start of a release that `update.localBoot` configures, each without a shell;
+other targets come as their own packages.
 
 ## Commands
 
@@ -96,6 +99,13 @@ from.
   error stops the run with exit 2, naming which of these happened but never what it printed. Values stay in
   memory; every line the tool writes, to the terminal (questions included), the journal or a manifest,
   passes a redactor that masks them.
+
+- `update` (optional) configures updates: `release.dir` (default `.`), the directory a target stages as the new
+  release, relative to the environments file; `localBoot`, the start of a release on this machine that applies
+  content migrations to a database copy (`command`, `dir`, `env` with the placeholders `{database}`, `{blobs}`,
+  `{port}` and `{build}`, `readyPath`, `timeoutSeconds`); and the waits `sealTimeoutSeconds` (60),
+  `syncWindowSeconds` (120), `renderTimeoutSeconds` (600), `readyTimeoutSeconds` (300) and `cleanupAfterDays`
+  (14). See [Update](#update).
 
 ## Targets
 A target stops, starts and describes the app. `local` runs it on this machine: `command` is started in `dir`
@@ -280,6 +290,26 @@ not the promoted generation. A signal during the wait ends the restore with exit
 and its output says both that the app was started again and that the order is unconfirmed. A runtime from 6 on
 names every generation after the ones it listed, so the restore does not wait for it.
 
+## Update
+| Command | What it does |
+|---|---|
+| `update prepare [--full-media]` | Preflight, plan and rehearsal on a copy of the newest replica generation; writes the receipt a deploy with a version change or a pending storage migration needs. |
+| `deploy` | In the deploy job: gate, staging while the app runs, recorded configuration, precopy, stop, seal, verified cutover backup, migration of a copy of its database, promotion, swap and start as one step, verification; after a passed verification the older releases are deleted, after a failed one the cutover state comes back. |
+| `verify` | Verifies the running release of a halted run again. |
+| `update accept`, `rollback`, `resume`, `abort` | Close, roll back, continue or end the newest deploy run, or the one `--run <id>` names. |
+| `update status` | Every update run of the environment from the backup location, with its hosts, state, next command and the time and downtime of each step. Takes no lock. |
+| `update cleanup [--dry-run]` | After `cleanupAfterDays`: removes the originals only the cutover backup still references and releases its pin. |
+| `update bundle [--out <dir>]` | Writes `.kestrel-ops/` with the release's versions, the target manifests, the module packages whose storage migrations a deploy runs and the host facts `RunOptions.host` passes. |
+
+`runUpdate` takes the same `RunOptions` as `runOps`, plus `releaseRoot` (the directory `update.release.dir` is
+relative to), `host` (the facts a host plugin contributes) and, for tests, `updateSteps` and `updateCommands`. It
+refuses a target that does not implement `UpdateTarget` with exit 2, takes the lock for every command but `status`,
+writes into the journal of the deploy run it continues, and exits 0, 1, 2 or 3 (rolled back); with `--json` it
+prints `kestrel-ops/update-<command>@1`. The migration of the cutover copy downloads its database again on every
+run, writes blobs to the app's store only as server-side copies or new keys, and applies content migrations
+through `update.localBoot` with an environment of exactly its configured values. The repository's
+`docs/operations.md` describes an update step by step.
+
 ## Questions
 | Id | Asked | `--yes` |
 |---|---|---|
@@ -289,6 +319,9 @@ names every generation after the ones it listed, so the restore does not wait fo
 | `unreadable-current` | a restore over a replica without a generation or with one that cannot be rebuilt | never |
 | `prune-delete` | before prune deletes | answers yes |
 | `break-lock` | `--break-lock` finds a lock another run holds | never |
+| `update-stop` | before a deploy stops the app | answers yes |
+| `rollback-accepted` | `update rollback` of an accepted run; the answer is the environment's name | never |
+| `cleanup-delete` | before `update cleanup` removes originals | never |
 
 `--answers <file>` is a JSON object from id to answer (`"yes"` or `"accept"`); a relative path is read from
 the directory the tool is called in, and a file that is missing or not JSON stops the run with exit 2. Without a terminal and
