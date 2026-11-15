@@ -220,8 +220,7 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     }
     if (at("start")) {
       step = "start";
-      const clock = await appClock(ctx);
-      const startedAt = clock.now();
+      const startedAt = flow.startedAt ?? (await appClock(ctx)).now();
       flow.startedAt = startedAt;
       await record(ctx, "start", "started", { startedAt });
       if ((await ctx.target.status()).state !== "started") await ctx.target.start();
@@ -252,7 +251,8 @@ const startedStep = (run: UpdateRun, step: string): boolean => run.records.some(
 /**
  * Continues deploy run `run` after its last done step (see `UpdateRun.lastDone`), checking that step's postcondition
  * first: a migration that did not finish starts again from the cutover backup's database; a promotion whose generation
- * is not the newest any more is refused; after `promote` it swaps and starts; after `start` it verifies.
+ * is not the newest any more is refused; after `promote` it swaps and starts; after `start` it verifies. A run whose
+ * `start` began keeps its recorded start time, so verification counts the render and every crash since that start.
  */
 export async function continueDeploy(ctx: UpdateContext, run: UpdateRun): Promise<UpdateOutcome> {
   if (run.state !== "down" && run.state !== "verifying") return outcomeOf(ctx, UPDATE_EXIT.refused, `update run ${run.runId} is ${run.state}; only a deploy that stopped the app and has not concluded can be continued${run.state === "deploying" ? `; ${startedStep(run, "stop") ? "its stop began, so the app may be stopped" : "nothing changed yet"}: run update abort --env ${ctx.envName} --run ${run.runId} and deploy again` : ""}`);

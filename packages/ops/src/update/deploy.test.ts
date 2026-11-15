@@ -350,6 +350,27 @@ describe("continuing an interrupted deploy", { timeout: 30_000 }, () => {
     expect(s.steps.retire).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the recorded start time of a run killed while it waited for readiness, so the render of that start counts and the release is verified", async () => {
+    const s = await scenario();
+    const waitReady = s.h.target.waitReady.bind(s.h.target);
+    s.h.target.waitReady = async () => {
+      s.h.target.waitReady = waitReady;
+      throw new Interrupted("SIGTERM");
+    };
+    await expect(deploy(s.ctx)).rejects.toBeInstanceOf(Interrupted);
+    const run = await readUpdateRun(s.ctx, s.ctx.run.id);
+    expect(run.state).toBe("verifying");
+    expect((await s.h.target.status()).state).toBe("started");
+    await new Promise((done) => setTimeout(done, 1500));
+    const ctx = await s.h.context({ run, answers: ANSWERS, steps: { rollback: s.steps.rollback, retire: s.steps.retire } });
+    const outcome = await continueDeploy(ctx, run);
+    expect(outcome.exitCode, outcome.message).toBe(0);
+    expect(outcome.state).toBe("verified");
+    expect(s.steps.rollback).not.toHaveBeenCalled();
+    const starts = (await readUpdateRun(ctx, run.runId)).records.filter((r) => r.phase === "deploy" && r.step === "start").map((r) => r.data.startedAt);
+    expect(new Set(starts).size).toBe(1);
+  });
+
   it("refuses when the promoted generation is not the newest any more", async () => {
     const { s, run } = await killedAfterPromote();
     const promoted = run.promoted?.generation ?? "";
