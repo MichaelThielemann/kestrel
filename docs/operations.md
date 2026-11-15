@@ -179,9 +179,12 @@ generation, after `accept` with the cutover backup. When the new release wrote m
 `accept` always, it shows what would be lost and needs the environment's name as the answer to
 `rollback-accepted`; without it the app is started again and the run stays as it was. Every such rollback takes a
 verified `pre-restore` backup of the stopped app before it changes the store. `kestrel update abort` of a run
-whose new release started goes through the same steps. A halted run whose verification fails again is rolled
-back automatically only when its release wrote nothing since its start, after the stop and a `pre-restore`
-backup; otherwise it stays halted with exit 1 and `update status` names `update rollback`.
+whose new release started goes through the same steps. A halted run whose verification fails again, and a deploy
+that `update resume` continues after a start an earlier process began whose verification or start then fails, is
+rolled back automatically only when its release wrote nothing since its start, after the stop and a `pre-restore`
+backup; otherwise it stays halted with exit 1 and `update status` names `update rollback`. When that stop or backup
+fails, the app is started again and `update resume` rolls back the way a run whose failed verification is recorded
+does: the stop, the `rollback-accepted` question when the release wrote, and a `pre-restore` backup.
 
 ### Migrating the cutover copy
 
@@ -232,7 +235,9 @@ release than the run: other versions of the kestrel packages, or other content m
 then checks the last finished step and continues after it: a plan of the cutover database that differs from the
 receipt or from the plan the gate recorded is refused, an unfinished migration starts again from the cutover
 backup, a promotion whose generation is no longer the newest is refused, after `promote` it swaps and starts,
-after `start` it verifies; an unfinished rollback runs again from its first step, a halted run is verified again,
+after `start` it verifies; an unfinished rollback runs again from its first step, a run whose failed verification
+is recorded but whose rollback did not begin goes through the same stop, question and `pre-restore` backup as
+`update rollback`, a halted run is verified again,
 and a verified run whose retire did not finish retires the older releases. A run that has not finished its stop is
 not resumed; `update abort` ends it. `kestrel update abort` ends an open run: before the promotion it starts the
 previous release on the unchanged replica and releases the pin on the cutover backup, after it it rolls back

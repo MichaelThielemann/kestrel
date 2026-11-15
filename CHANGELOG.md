@@ -1813,7 +1813,9 @@ Net changes since 5.8.2.
   started, stop the app first and take a verified safety backup of the stopped state; after `accept`, or once the
   stopped state holds what the new release wrote since its start, they show what would be lost and need the
   environment's name, and without it start the release again. A halted run whose verification fails again after
-  its release wrote is held instead of rolled back automatically; the saved code
+  its release wrote is held instead of rolled back automatically, and so is a deploy that `update resume` continues
+  after a start an earlier process began; `update resume` of a run whose failed verification is recorded before its
+  rollback began stops the app, asks when the release wrote and takes the safety backup as well; the saved code
   of the release before a major change stays until `update cleanup`, so such a run rolls back across the major
   also after a later verified deploy, which then reads rolled back, while an unpinned superseded run is refused. The migration of the cutover copy downloads the cutover database again on every run, so a kill inside
   a content migration that is not idempotent is resumed from the same state; it refuses a migration the plan does

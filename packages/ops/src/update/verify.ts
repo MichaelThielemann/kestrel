@@ -123,20 +123,24 @@ export function stoppedAfterRollback(ctx: Pick<UpdateContext, "envName">, failur
  * with exit 0 (1 when the retire failed, so the old droplets can still start until `update resume` retires them), `failed` rolls back automatically and ends with exit 3 (1 when the rollback did not finish or had no
  * previous droplet to start, so the app stays stopped),
  * `unverifiable` halts with exit 1 and leaves the new release running. `known` fills in what the caller knows of the
- * run and its journal listing may not show yet, such as the cutover backup and the promoted generation.
+ * run and its journal listing may not show yet, such as the cutover backup and the promoted generation. When
+ * `guarded` is set (by default for phase `verify`; a deploy continued after a start an earlier process began sets
+ * it too), a failed verification rolls back only when the new release wrote nothing since its start, and only after
+ * `guardRollback` stopped the app and took a `pre-restore` backup; otherwise the run is held: it reads `halted`, the
+ * release keeps running and the outcome names `update rollback`.
  */
-export async function concludeVerify(ctx: UpdateContext, phase: UpdatePhase, result: VerifyResult, known: (run: UpdateRun) => UpdateRun = (run) => run): Promise<UpdateOutcome> {
-  const held = result.verdict === "failed" && phase === "verify" && (await wroteSinceStart(ctx, known(await readUpdateRun(ctx, ctx.run.id))));
+export async function concludeVerify(ctx: UpdateContext, phase: UpdatePhase, result: VerifyResult, known: (run: UpdateRun) => UpdateRun = (run) => run, guarded = phase === "verify"): Promise<UpdateOutcome> {
+  const held = result.verdict === "failed" && guarded && (await wroteSinceStart(ctx, known(await readUpdateRun(ctx, ctx.run.id))));
   await ctx.journal.record("verify", "done", { phase, verdict: result.verdict, checks: result.checks, ownGeneration: result.ownGeneration, ...(held ? { held: true } : {}) });
   if (held) return outcomeOf(ctx, UPDATE_EXIT.refused, `verification failed (${result.checks.filter((c) => c.hard && !c.ok).map((c) => `${c.name}: ${c.detail}`).join("; ")}), but the new release wrote since its start, so nothing was rolled back automatically and it keeps running; run update rollback --env ${ctx.envName} --run ${ctx.run.id}, which reports what it discards, asks and takes a safety backup first`);
   if (result.verdict === "unverifiable") return outcomeOf(ctx, UPDATE_EXIT.refused, `verification could not tell (${describeProbe(result.ready)}); the new release keeps running and nothing was rolled back. Once its readiness can be checked, run update resume --env ${ctx.envName} --run ${ctx.run.id}, or update rollback`);
   const run = known(await readUpdateRun(ctx, ctx.run.id));
   if (result.verdict === "failed") {
     const failure = result.checks.filter((c) => c.hard && !c.ok).map((c) => `${c.name}: ${c.detail}`).join("; ");
-    if (phase === "verify" && run.cutoverBackup !== null) {
+    if (guarded && run.cutoverBackup !== null) {
       const manifest = await readManifest(ctx, run.cutoverBackup);
-      const guarded = manifest === null ? { ok: false as const, message: `the cutover backup ${run.cutoverBackup} does not exist or is incomplete` } : await guardRollback(ctx, run, manifest, "backup");
-      if (!guarded.ok) return outcomeOf(ctx, UPDATE_EXIT.refused, `verification failed (${failure}) and the automatic rollback did not begin: ${guarded.message}; run update rollback --env ${ctx.envName} --run ${ctx.run.id}`);
+      const guard = manifest === null ? { ok: false as const, message: `the cutover backup ${run.cutoverBackup} does not exist or is incomplete` } : await guardRollback(ctx, run, manifest, "backup");
+      if (!guard.ok) return outcomeOf(ctx, UPDATE_EXIT.refused, `verification failed (${failure}) and the automatic rollback did not begin: ${guard.message}; run update resume --env ${ctx.envName} --run ${ctx.run.id}, which stops the app again, asks before it discards what the release wrote and takes a safety backup first`);
     }
     let ended: RollbackResult["ended"];
     try {

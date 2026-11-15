@@ -1,5 +1,7 @@
+import { readManifest } from "../backup.ts";
 import { messageOf } from "../context.ts";
 import { readUpdateRun, reportOf, retirePending } from "./journal.ts";
+import { guardRollback } from "./rollback.ts";
 import { retireStep, verifyCommand } from "./verify.ts";
 import { UPDATE_EXIT, type RollbackReason, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRecord, type UpdateRun, type UpdateRunState } from "./types.ts";
 
@@ -31,10 +33,20 @@ async function rollBackAgain(ctx: UpdateContext, run: UpdateRun, reason: Rollbac
   }
 }
 
+async function guardAgain(ctx: UpdateContext, run: UpdateRun): Promise<string | null> {
+  if (run.cutoverBackup === null) return null;
+  const manifest = await readManifest(ctx, run.cutoverBackup);
+  if (manifest === null) return `the cutover backup ${run.cutoverBackup} does not exist or is incomplete`;
+  const guarded = await guardRollback(ctx, run, manifest, "ask");
+  return guarded.ok ? null : guarded.message;
+}
+
 /**
  * `update resume`: continues an interrupted run where its journal ended, after a `resume` record. A deploy continues
  * through `continueDeploy`; a rollback that did not finish runs again from its first step (every rollback step can be
- * repeated); a run whose verification failed is rolled back; a halted run is verified again. The ending is that of
+ * repeated); a run whose verification failed before its rollback began is rolled back through `guardRollback` in mode
+ * `ask`, since its new release may have served since: the stop first, the `rollback-accepted` question when it wrote,
+ * and a `pre-restore` backup; a halted run is verified again. The ending is that of
  * the step it continued: exit 0 verified, 3 rolled back, 1 halted or refused. A verified or accepted run whose retire
  * of the previous releases did not end (`retirePending`) retires them again: exit 0 once they are, 1 otherwise. A rollback that began only as a command
  * refused after `accept` is not resumed.
@@ -50,8 +62,11 @@ export async function resume(ctx: UpdateContext, run: UpdateRun): Promise<Update
   switch (action) {
     case "rollback":
       return rollBackAgain(ctx, run, begun === undefined ? { kind: "automatic", failure: "verification failed" } : reasonOf(begun));
-    case "rollback-failed-verify":
+    case "rollback-failed-verify": {
+      const refused = await guardAgain(ctx, run);
+      if (refused !== null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `not rolled back: ${refused}; run update resume --env ${ctx.envName} --run ${run.runId} again with the answer`, run.state);
       return rollBackAgain(ctx, run, { kind: "automatic", failure: "verification failed" });
+    }
     case "verify":
       if (run.promoted === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is halted without a recorded promotion; run update rollback or update abort`, run.state);
       return verifyCommand(ctx, run);

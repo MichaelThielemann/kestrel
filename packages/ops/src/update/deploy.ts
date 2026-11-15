@@ -31,6 +31,7 @@ interface Flow {
   cutoverBackup: string | null;
   promoted: { generation: string; nonce: string; at: number } | null;
   startedAt: number | null;
+  startedBefore: boolean;
 }
 
 const record = (ctx: UpdateContext, step: string, state: "started" | "done" | "failed" | "skipped", data: Record<string, unknown> = {}): Promise<void> => ctx.journal.record(step, state, { phase: "deploy", ...data });
@@ -132,7 +133,7 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
     await record(ctx, "stop", "started");
     stopBegun = true;
     const { stoppedAt } = await stopTarget(ctx);
-    flow = { plan, from: plan.versions.from, pin: pinsCutover(plan), staged: staged.droplet, stoppedAt, cutoverBackup: null, promoted: null, startedAt: null };
+    flow = { plan, from: plan.versions.from, pin: pinsCutover(plan), staged: staged.droplet, stoppedAt, cutoverBackup: null, promoted: null, startedAt: null, startedBefore: false };
   } catch (error) {
     if (error instanceof Interrupted) throw stopBegun ? new Interrupted(error.signal, `the stop began, so the app may be stopped; do not start it by hand; run update abort --env ${ctx.envName} --run ${ctx.run.id}`) : error;
     if (stopBegun) return failedStop(ctx, error);
@@ -234,6 +235,7 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     if (error instanceof Interrupted) throw new Interrupted(error.signal, interruptedAfterStop(ctx, step));
     const failure = `${step}: ${messageOf(error)}`;
     await record(ctx, step, "failed", { error: messageOf(error) }).catch(() => undefined);
+    if (flow.startedBefore) return concludeVerify(ctx, "deploy", failedStart(failure), (run) => known(run, flow), true);
     ctx.out.error(`the deploy failed after the stop at ${failure}; rolling back`);
     let ended: RollbackResult["ended"];
     try {
@@ -244,7 +246,11 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     if (ended === "stopped") return outcomeOf(ctx, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, `the deploy failed at ${failure}`, flow.from));
     return outcomeOf(ctx, UPDATE_EXIT.rolledBack, flow.cutoverBackup === null ? `the deploy failed at ${failure} before its cutover backup; nothing was promoted, and the previous release runs again on the unchanged replica` : `the deploy failed at ${failure}; rolled back to the cutover state`);
   }
-  return concludeVerify(ctx, "deploy", result, (run) => known(run, flow));
+  return concludeVerify(ctx, "deploy", result, (run) => known(run, flow), flow.startedBefore);
+}
+
+function failedStart(failure: string): VerifyResult {
+  return { verdict: "failed", checks: [{ name: "instance", hard: true, ok: false, detail: failure }], ready: { outcome: "not-ready", status: 0 }, ownGeneration: null };
 }
 
 const isTextList = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
@@ -282,7 +288,10 @@ const startedStep = (run: UpdateRun, step: string): boolean => run.records.some(
  * (`UpdateTarget.checkReleaseConfiguration`); and checks the last step's postcondition first: a plan of the cutover database that
  * differs from the receipt or from the plan the gate recorded is refused; a migration that did not finish starts again from the cutover backup's database; a promotion whose generation
  * is not the newest any more is refused; after `promote` it swaps and starts; after `start` it verifies. A run whose
- * `start` began keeps its recorded start time, so verification counts the render and every crash since that start.
+ * `start` began keeps its recorded start time, so verification counts the render and every crash since that start;
+ * since its new release may have served from then on, a failed verification or a failure of the start ends through the
+ * guarded `concludeVerify`: held when the release wrote, otherwise rolled back after the stop and a `pre-restore`
+ * backup.
  */
 export async function continueDeploy(ctx: UpdateContext, run: UpdateRun): Promise<UpdateOutcome> {
   if (run.state !== "down" && run.state !== "verifying") return outcomeOf(ctx, UPDATE_EXIT.refused, `update run ${run.runId} is ${run.state}; only a deploy that stopped the app and has not concluded can be continued${run.state === "deploying" ? `; ${startedStep(run, "stop") ? "its stop began, so the app may be stopped" : "nothing changed yet"}: run update abort --env ${ctx.envName} --run ${run.runId} and deploy again` : ""}`);
@@ -295,7 +304,7 @@ export async function continueDeploy(ctx: UpdateContext, run: UpdateRun): Promis
   const mismatch = releaseMismatch(ctx, run, gate) ?? (doneStep(run, "swap") ? null : await configurationMismatch(ctx, gate));
   if (mismatch !== null) return outcomeOf(ctx, UPDATE_EXIT.usage, `refusing to continue update run ${run.runId}: ${mismatch}; continue it with the bundle or checkout that started it (node .kestrel-ops/run.mjs update resume --env ${ctx.envName} --run ${run.runId}), or roll it back`);
   const pin = gate?.data.pin;
-  const flow: Flow = { plan: null, from: run.versions?.from ?? null, pin: pin !== false, staged: run.stagedDroplet, stoppedAt, cutoverBackup: run.cutoverBackup, promoted: run.promoted === null ? null : { ...run.promoted, at: unstamp(run.promoted.generation) }, startedAt: typeof recordedStart === "number" ? recordedStart : null };
+  const flow: Flow = { plan: null, from: run.versions?.from ?? null, pin: pin !== false, staged: run.stagedDroplet, stoppedAt, cutoverBackup: run.cutoverBackup, promoted: run.promoted === null ? null : { ...run.promoted, at: unstamp(run.promoted.generation) }, startedAt: typeof recordedStart === "number" ? recordedStart : null, startedBefore: startedStep(run, "start") };
   if (flow.promoted !== null) {
     if (!startedStep(run, "start")) {
       const newest = (await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).at(-1);
