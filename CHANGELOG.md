@@ -1782,9 +1782,10 @@ Net changes since 5.8.2.
 - The update assistant of `@michaelthielemann/kestrel-ops` (`runUpdate` from `./run`, `kestrel update`, and
   `node .kestrel-ops/run.mjs deploy` in a deploy job) moves a deployed environment with one instance to a new
   release. `update prepare` checks the environment read-only, plans the update on a copy of the newest replica
-  generation (storage migrations of the release's module packages, pending content migrations, their
-  questions), rehearses it on that copy with a local start of the release and writes a receipt with the version
-  change and the plan hash into the backup location. `deploy` refuses a version change or a pending storage
+  generation (storage migrations of the release's module packages, the pending content migrations the host
+  facts list in `contentMigrations`, their questions), rehearses the migrations on that copy without writing to
+  the app's store, content migrations through a local start of the release, checks that no referenced original
+  went missing, and writes a receipt with the version change and the plan hash into the backup location. `deploy` refuses a version change or a pending storage
   migration without a matching receipt, more than one instance and an active deployment with exit 1 before
   anything changes; stages the release while the old one serves (a staging failure never stops the app); records
   the app's configuration, secret values only as salted fingerprints; stops the app and waits for the seal; takes
@@ -1793,9 +1794,11 @@ Net changes since 5.8.2.
   outcomes: passed, failed (an automatic rollback to the cutover state, exit 3) or unverifiable (403 or no
   connection: the run halts with exit 1). Only after a passed verification are the older releases of the app
   deleted, the replaced one's code saved into the backup location first where the platform hands it out. A
-  rollback promotes the cutover database again before any old release starts, copies back originals, replaces
-  the delivery prefix and lists it again, restores the recorded configuration verbatim and starts the previous
-  release. The migration of the cutover copy downloads the cutover database again on every run, so a kill inside
+  hard failure after the stop and before the cutover backup is written starts the previous release again on the
+  unchanged replica. A rollback promotes the cutover database again before any old release starts, copies back
+  originals, replaces the delivery prefix and lists it again, restores the recorded configuration verbatim, starts
+  the previous release and proves through `applied.json` or a marker row in its first snapshot (table
+  `kestrel_ops_provenance`) that it restored the cutover state. The migration of the cutover copy downloads the cutover database again on every run, so a kill inside
   a content migration that is not idempotent is resumed from the same state; it refuses a migration the plan does
   not name, writes blobs to the app's store only as server-side copies or new keys and never over, or instead of,
   an existing key, cleans stored SVGs with the release's sanitize package, and applies content migrations through

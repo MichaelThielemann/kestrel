@@ -47,7 +47,9 @@ only new code. It runs in two places:
 
 A deploy that changes package versions or finds a storage migration pending needs a receipt of this
 environment with the same target versions and the same plan. An ordinary deploy, with neither, runs without a
-receipt and still takes a verified cutover backup first; no migration starts without one.
+receipt and still takes a verified cutover backup first; no migration starts without one. The versions the app
+runs are those the newest verified deploy of the environment put there; before the first one, those the target
+reports, and when it reports none, the deploy counts as a version change.
 
 ### prepare
 
@@ -57,11 +59,15 @@ receipt and still takes a verified cutover backup first; no migration starts wit
   backup location, the clock skew against the store.
 - **Plan** on a copy of the newest replica generation: the storage migrations of the release's module packages
   that find their old form (detected and planned, nothing written), the content migrations the release brings
-  that the copy's ledger does not hold, and the questions they ask. The plan hash covers the ids only, so an
-  upload between prepare and deploy does not invalidate the receipt.
-- **Rehearsal** on that copy: the migrations, a local start of the release and its checks, with the time each
-  step took and the peak memory of the start. The originals the migrations touch and a sample are downloaded;
-  `--full-media` downloads every original.
+  that the copy's ledger does not hold, and the questions they ask. The release's content migrations are the ids
+  the host facts list in `contentMigrations`. The plan hash covers the ids only, so an upload between prepare and
+  deploy does not invalidate the receipt.
+- **Rehearsal** on that copy: the storage migrations, whose blob writes stay in memory and whose copies only
+  point at the source, so no key of the app's store changes; the content migrations through a local start of the
+  release when any are pending; an integrity check; and the referenced originals, every one of which must still
+  be there after the migrations unless its row referenced no original already before. A sample of them is read
+  back and compared with the checksum of its row; `--full-media` reads every one. The time each step took is
+  recorded.
 - **Receipt**: the version change and the plan hash, written once into the backup location. A receipt does not
   expire; a failed rehearsal check writes none and ends with exit 1.
 
@@ -97,7 +103,7 @@ that start in the same moment.
 | `stage` | serving | The release is uploaded and staged while the app keeps running. A staging failure ends the run with exit 1; the app was never stopped. |
 | `configuration` | serving | The app's configuration is recorded once: plain values verbatim, secret values only as salted fingerprints, the health check, memory, disk, start command and instance count. |
 | `precopy` | serving | Originals and the delivery prefix are copied into the backup location, so only the difference is copied after the stop. |
-| `stop` | **down** | After the `update-stop` answer. From here on the run is never cancelled, only resumed or aborted. |
+| `stop` | **down** | After the `update-stop` answer. From here on the run is never cancelled, only resumed or aborted. A hard failure before the cutover backup is written makes the previous release current again and starts it on the unchanged replica; exit 3. |
 | `seal` | down | Waits until the stopped replica's newest generation shows its seal, at most `update.sealTimeoutSeconds`; a runtime before 6 writes none. |
 | `cutover-backup` | down | A verified backup of the stopped state, pinned for this run until `update cleanup`. |
 | `migrate` | down | The migration of a copy of the cutover database, see below. |
@@ -127,6 +133,11 @@ backup's and lists it again until no key is newer than the start of the replacem
 prefixes with the backup's listing, restores the recorded configuration verbatim without a question, makes the
 previous release current again (uploading its saved code when it was deleted), starts it and verifies it. Without
 a previous release or its saved code it ends with the app stopped on the cutover state.
+
+The verification after a rollback proves that the started release restored the promoted cutover state: either
+its `applied.json` names the generation and its nonce, or the first snapshot it wrote after that generation holds
+the marker row the rollback put into the promoted database. Releases before 6 write no `applied.json`, so the
+marker row proves it for them; it stays in the table `kestrel_ops_provenance`, one row per rollback.
 
 `kestrel update rollback` before `accept` loses nothing and asks nothing more. After `accept` it shows what would
 be lost since and needs the environment's name as the answer to `rollback-accepted`.
