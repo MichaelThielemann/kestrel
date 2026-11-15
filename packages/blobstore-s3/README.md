@@ -2,9 +2,12 @@
 `blobstore@1` on Amazon S3 or any S3-compatible store (MinIO, Cloud Foundry object storage)
 via `@aws-sdk/client-s3`. Config: `bucket`, optional `prefix` (a key prefix for everything this store
 holds, such as `"kestrel/"`), `region`, `endpoint`, `allowInsecureEndpoint`, `forcePathStyle`, `accessKeyId`/`secretAccessKey` (omit to use the SDK's default credential chain:
-environment, profile, instance role), `timeoutMs` (default 10000, used for both the connection and
-the request timeout, so a silent socket never hangs a pipeline step) and `maxAttempts` (default 3,
-the SDK's retry limit including the first try). `put` stores the `contentType` hint as the object's
+environment, profile, instance role), `timeoutMs` (default 10000: how long a connection may take to
+open and how long a socket may stay idle, nothing sent and nothing received, before the attempt fails) and
+`maxAttempts` (default 3, the SDK's retry limit including the first try). A store that accepts the connection
+and never answers fails the attempt after about `timeoutMs`, and the call answers `TRANSIENT` once the attempts
+are spent, so a silent socket does not hang a pipeline step. A transfer that keeps moving has no overall limit:
+a large upload, such as a database snapshot, may take longer than `timeoutMs` as long as data flows. `put` stores the `contentType` hint as the object's
 `Content-Type`, so a public copy served straight from the bucket answers with the right type (serve
 only the public tree, `site/*`, see the key table in `media-default`'s README; the rest of the bucket
 holds originals, database replicas and backups); `get` returns bytes only

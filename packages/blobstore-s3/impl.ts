@@ -16,6 +16,7 @@ export interface Config {
   forcePathStyle?: boolean | undefined;
   accessKeyId?: string | undefined;
   secretAccessKey?: string | undefined;
+  /** Milliseconds a connection may take to open and a socket may stay idle before the attempt fails; a transfer that keeps moving has no overall limit. */
   timeoutMs?: number | undefined;
   maxAttempts?: number | undefined;
   /** `"WHEN_REQUIRED"` stops the SDK from adding a checksum trailer to uploads; some S3-compatible stores reject or ignore it. */
@@ -30,7 +31,7 @@ export function clientOptions(config: Config): S3ClientConfig {
   const timeout = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const options: S3ClientConfig = {
     maxAttempts: config.maxAttempts ?? DEFAULT_MAX_ATTEMPTS,
-    requestHandler: { connectionTimeout: timeout, requestTimeout: timeout },
+    requestHandler: { connectionTimeout: timeout, socketTimeout: timeout },
   };
   if (config.region !== undefined) options.region = config.region;
   if (config.endpoint !== undefined) options.endpoint = config.endpoint;

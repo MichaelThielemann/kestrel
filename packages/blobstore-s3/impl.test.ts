@@ -89,9 +89,10 @@ describe("blobstore/s3", () => {
     await expect(store.get("/x")).rejects.toThrow(/invalid key/);
   });
 
-  it("sets connect/request timeouts and a retry limit on the client", () => {
-    expect(clientOptions({ bucket: "b", prefix: "", timeoutMs: 1234, maxAttempts: 7 })).toMatchObject({ maxAttempts: 7, requestHandler: { connectionTimeout: 1234, requestTimeout: 1234 } });
-    expect(clientOptions({ bucket: "b", prefix: "" })).toMatchObject({ maxAttempts: DEFAULT_MAX_ATTEMPTS, requestHandler: { connectionTimeout: DEFAULT_TIMEOUT_MS, requestTimeout: DEFAULT_TIMEOUT_MS } });
+  it("sets a connect timeout, an idle socket timeout and a retry limit on the client", () => {
+    expect(clientOptions({ bucket: "b", prefix: "", timeoutMs: 1234, maxAttempts: 7 })).toMatchObject({ maxAttempts: 7, requestHandler: { connectionTimeout: 1234, socketTimeout: 1234 } });
+    expect(clientOptions({ bucket: "b", prefix: "" }).requestHandler).not.toHaveProperty("requestTimeout");
+    expect(clientOptions({ bucket: "b", prefix: "" })).toMatchObject({ maxAttempts: DEFAULT_MAX_ATTEMPTS, requestHandler: { connectionTimeout: DEFAULT_TIMEOUT_MS, socketTimeout: DEFAULT_TIMEOUT_MS } });
   });
 
   it("leaves the SDK's request checksum behaviour alone unless asked", () => {
