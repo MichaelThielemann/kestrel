@@ -9,6 +9,7 @@ import type { Persistence } from "@michaelthielemann/kestrel-contracts/persisten
 import { PERSISTENCE_PACKAGE, SANITIZE_SVG_PACKAGE } from "../bundle.ts";
 import { REPLICATION_PACKAGE } from "../context.ts";
 import { OpsError } from "../errors.ts";
+import { fixedText } from "../redact.ts";
 import { refuseUnfinishedPlacement } from "../placements.ts";
 import { blobstoreOf, buildDatabase, completeGeneration, stableGenerations } from "../replica.ts";
 import type { ObjectStore } from "../store.ts";
@@ -183,6 +184,16 @@ export async function refuseUnsanitizedSvgs(ctx: Pick<UpdateContext, "release">,
   }
 }
 
+const TYPE_DEMOTED_NOTE = / is stored as .+, a type media\/default does not publish as itself: /;
+
+function warnDemotedTypes(ctx: Pick<UpdateContext, "out">, modules: readonly ModuleRun[]): void {
+  const runs = modules.flatMap((m) => m.migrations).filter((r) => (r.plan?.counts.typeDemoted ?? 0) > 0);
+  const demoted = runs.reduce((n, r) => n + (r.plan?.counts.typeDemoted ?? 0), 0);
+  if (demoted === 0) return;
+  const items = runs.flatMap((r) => r.plan?.notes ?? []).filter((n) => TYPE_DEMOTED_NOTE.test(n.reason)).map((n) => n.item);
+  ctx.out.warn(fixedText`${demoted} stored item(s) of a type media/default does not publish as itself would be kept as .bin downloads and served as application/octet-stream: ${items.join(", ")}; upload them again as a listed type after the update to serve them as their own type`);
+}
+
 function questionsOf(storages: readonly ModuleStorage[], planned: readonly PlannedStorageMigration[]): string[] {
   const ids = new Set(planned.map((m) => m.id));
   return storages.flatMap((s) => s.migrations.filter((m) => ids.has(m.id)).flatMap((m) => (m.questions ?? []).map((q) => q.id))).sort();
@@ -208,6 +219,7 @@ export async function computePlan(ctx: UpdateContext, database: string): Promise
       const refused = report.value.modules.find((m) => m.state === "too-old" || m.state === "too-new");
       if (refused !== undefined) throw new OpsError(`the stored data of ${refused.module} is ${refused.state === "too-old" ? "older" : "newer"} than this release converts (stored ${refused.stored ?? "none"}, release ${refused.version})`, 1, refused.module);
       await refuseUnsanitizedSvgs(ctx, storages, report.value.modules);
+      warnDemotedTypes(ctx, report.value.modules);
       storage = pendingStorage(report.value.modules);
     } finally {
       db.close();

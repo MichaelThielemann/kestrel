@@ -137,6 +137,29 @@ describe("planning an update on a replica copy", () => {
     expect(found.storage).toEqual([{ module: "media/default", id: "media-default:key-layout", kind: "auto", blobWrites: true, pending: 2, introducedIn: "6.1.0", stored: "6.0.0" }]);
   });
 
+  it("warns about stored items that the conversion keeps as .bin downloads and names them", async () => {
+    const h = harness();
+    installPersistence(h.releaseDir);
+    const base = oldForm(3);
+    const notes = [
+      { item: "m1", reason: "media/anim/spin.apng is stored as image/apng, a type media/default does not publish as itself: it is kept as spin-apng.bin and served as application/octet-stream" },
+      { item: "m2", reason: "original media/gone.png is missing" },
+      { item: "m3", reason: "media/photo.jpg is stored as image/jpg, a type media/default does not publish as itself: it is kept as photo-jpg.bin and served as application/octet-stream" },
+    ];
+    storages.list = [{ ...base, migrations: base.migrations.map((m) => ({ ...m, plan: async () => ok({ counts: { items: 3, typeDemoted: 2 }, notes }) })) }];
+    const ctx = await h.context();
+    await computePlan(ctx, database(join(h.root, "copy.db")));
+    expect(h.output.warn).toEqual(["2 stored item(s) of a type media/default does not publish as itself would be kept as .bin downloads and served as application/octet-stream: m1, m3; upload them again as a listed type after the update to serve them as their own type"]);
+  });
+
+  it("does not warn when the conversion keeps no item as a .bin download", async () => {
+    const h = harness();
+    installPersistence(h.releaseDir);
+    storages.list = [oldForm(3)];
+    await computePlan(await h.context(), database(join(h.root, "copy.db")));
+    expect(h.output.warn).toEqual([]);
+  });
+
   it("finds nothing pending once the old form is gone", async () => {
     const h = harness();
     installPersistence(h.releaseDir);
