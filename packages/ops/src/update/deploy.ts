@@ -4,15 +4,15 @@ import { messageOf, stopTarget } from "../context.ts";
 import { OpsError } from "../errors.ts";
 import { Interrupted } from "../interrupt.ts";
 import { keys, unstamp } from "../layout.ts";
-import { recordPlacement, refuseUnfinishedPlacement } from "../placements.ts";
+import { recordPlacement } from "../placements.ts";
 import { confirm } from "../questions.ts";
-import { buildDatabase, completeGeneration, promote, stableGenerations } from "../replica.ts";
+import { promote, stableGenerations } from "../replica.ts";
 import { appClock, type ServerClock } from "../serverTime.ts";
 import { sha256 } from "../sqlite.ts";
 import { checkGate } from "./gate.ts";
 import { continueJournal, listUpdateRuns, readUpdateRun } from "./journal.ts";
 import { UPDATE_PIN_PREFIX, updateKeys } from "./layout.ts";
-import { computePlan, planHash } from "./plan.ts";
+import { computePlan, planHash, replicaCopy } from "./plan.ts";
 import { UPDATE_EXIT, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateRun } from "./types.ts";
 import { concludeVerify, outcomeOf } from "./verify.ts";
 
@@ -30,16 +30,6 @@ interface Flow {
 const record = (ctx: UpdateContext, step: string, state: "started" | "done" | "failed" | "skipped", data: Record<string, unknown> = {}): Promise<void> => ctx.journal.record(step, state, { phase: "deploy", ...data });
 
 const sleeper = (ctx: UpdateContext) => ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
-
-async function replicaCopy(ctx: UpdateContext, file: string): Promise<string> {
-  const prefix = ctx.env.app.replicaPrefix;
-  const gens = await stableGenerations(ctx.app, prefix, ctx.poll);
-  const newest = gens.at(-1);
-  if (newest === undefined) throw new OpsError(`the replica under ${prefix} has no generation`, 1, prefix);
-  await refuseUnfinishedPlacement(ctx, gens);
-  await buildDatabase(ctx.app, prefix, await completeGeneration(ctx.app, prefix, newest, ctx.poll), file);
-  return file;
-}
 
 async function cutoverDatabase(ctx: UpdateContext, backupId: string, file: string): Promise<string> {
   const manifest = await readManifest(ctx, backupId);

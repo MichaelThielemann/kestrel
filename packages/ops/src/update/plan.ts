@@ -8,7 +8,8 @@ import { failure, err, isErr, ok } from "@michaelthielemann/kestrel-contracts/er
 import { runShapeMigrations, type BlobOps, type ModuleRun, type ModuleStorage } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { OpsError } from "../errors.ts";
-import { blobstoreOf } from "../replica.ts";
+import { refuseUnfinishedPlacement } from "../placements.ts";
+import { blobstoreOf, buildDatabase, completeGeneration, stableGenerations } from "../replica.ts";
 import type { ObjectStore } from "../store.ts";
 import { listUpdateRuns, readUpdateRun } from "./journal.ts";
 import { releaseStorages } from "./storages.ts";
@@ -21,6 +22,17 @@ export const VERSIONED_PACKAGES = "@michaelthielemann/kestrel";
 export const CONTENT_LEDGER = "content_migrations";
 
 const PERSISTENCE_IMPL = "@michaelthielemann/kestrel-persistence-sqlite/impl";
+
+/** Rebuilds the newest replica generation, as listed now, into `file` and resolves to it; refuses with exit 1 for an empty replica or an unfinished placement. */
+export async function replicaCopy(ctx: UpdateContext, file: string): Promise<string> {
+  const prefix = ctx.env.app.replicaPrefix;
+  const gens = await stableGenerations(ctx.app, prefix, ctx.poll);
+  const newest = gens.at(-1);
+  if (newest === undefined) throw new OpsError(`the replica under ${prefix} has no generation`, 1, prefix);
+  await refuseUnfinishedPlacement(ctx, gens);
+  await buildDatabase(ctx.app, prefix, await completeGeneration(ctx.app, prefix, newest, ctx.poll), file);
+  return file;
+}
 
 /** The versions of `packages` whose name starts with {@link VERSIONED_PACKAGES}, sorted by name. */
 export function versionSet(packages: Readonly<Record<string, string>>): VersionSet {
