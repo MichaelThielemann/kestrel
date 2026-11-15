@@ -65,6 +65,16 @@ file. When the write lock is taken (an open write transaction elsewhere), the ch
 and tried again at the next check. Once every frame is copied back, the next writer starts the WAL
 over from its beginning; the file keeps its size and SQLite reuses it, it is not truncated.
 
+The read transaction keeps every frame committed after it from being copied back, so after a snapshot
+that took a while to read and upload while other connections committed, the WAL holds many frames that
+are not in the database file yet. When a checkpoint finds 8 MiB or more of such frames (`copyBackBytes`
+in the options of `createReplicationSqlite` of `./impl`), it first reads the remaining committed frames
+under the write lock, as above, and takes the read transaction again at the end of the WAL without
+copying anything; then a worker thread with a connection of its own copies back every frame up to there,
+which the WAL cannot start over beneath, since the read transaction holds it. It repeats that, up to four
+times, while 8 MiB or more accumulate meanwhile, and only then copies back the rest on the event loop's
+thread as above: what was committed while the last worker ran.
+
 A checkpoint runs from `replication.sync` when the WAL holds `checkpointBytes` of frames or
 `checkpointSeconds` have passed since the last one, and, between syncs, as soon as a once-per-second
 check finds `checkpointBytes` of frames in the WAL, so the WAL stays near `checkpointBytes` however

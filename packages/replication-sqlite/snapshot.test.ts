@@ -12,7 +12,7 @@ import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok } from "@michaelthielemann/kestrel/result";
-import { createReplicationSqlite, restoreFromBlobs, type Replication } from "./impl.ts";
+import { createReplicationSqlite, restoreFromBlobs, type Replication, type ReplicationOptions } from "./impl.ts";
 import { referenceRestore, referenceSnapshot } from "./reference.fixture.ts";
 
 const io = vi.hoisted(() => ({ beforeRead: null as null | ((path: string) => Promise<void> | void) }));
@@ -113,7 +113,7 @@ function live(overrides: { autoVacuum?: boolean } = {}) {
     app.exec("COMMIT");
   };
   const blobs = memoryBlobs();
-  const start = (config: Overrides = {}, options: { checkIntervalMs?: number } = {}) => {
+  const start = (config: Overrides = {}, options: Pick<ReplicationOptions, "checkIntervalMs" | "copyBackBytes"> = {}) => {
     const repl = createReplicationSqlite({ file, prefix: "replica/", checkpointBytes: 1024 * 1024 * 1024, checkpointSeconds: 100_000, snapshotSeconds: 24 * 3600, retentionSeconds: 48 * 3600, restoreOnStart: true, ...config }, blobs, clock.now, { checkIntervalMs: 3_600_000, ...options });
     open.push(repl);
     return repl;
@@ -224,27 +224,65 @@ async function whileCheckpointLockIsHeld<T>(task: () => Promise<T>): Promise<T> 
   }
 }
 
-function copiedBackOnThisThread(file: string): { frames: () => number; stop: () => void } {
+function walIndex(file: string): { frames: () => number; backfilled: () => number } {
   const little = endianness() === "LE";
-  const backfilled = (): number => {
+  const read = (offset: number): number => {
     try {
       const shm = readFileSync(`${file}-shm`);
-      return shm.byteLength < 100 ? 0 : new DataView(shm.buffer, shm.byteOffset, shm.byteLength).getUint32(96, little);
+      return shm.byteLength < 100 ? 0 : new DataView(shm.buffer, shm.byteOffset, shm.byteLength).getUint32(offset, little);
     } catch {
       return 0;
     }
   };
+  return { frames: () => read(16), backfilled: () => read(96) };
+}
+
+function copiedBackOnThisThread(file: string): { frames: () => number; largest: () => number; stop: () => void } {
+  const { backfilled } = walIndex(file);
   // eslint-disable-next-line @typescript-eslint/unbound-method -- called only through apply, with the statement as this
   const original = StatementSync.prototype.get;
   let frames = 0;
+  let largest = 0;
   const spy = vi.spyOn(StatementSync.prototype, "get").mockImplementation(function (this: StatementSync, ...args: Parameters<typeof original>) {
     if (!this.sourceSQL.includes("wal_checkpoint")) return original.apply(this, args);
     const before = backfilled();
     const row = original.apply(this, args);
-    frames += Math.max(0, backfilled() - before);
+    const copied = Math.max(0, backfilled() - before);
+    frames += copied;
+    largest = Math.max(largest, copied);
     return row;
   });
-  return { frames: () => frames, stop: () => spy.mockRestore() };
+  return { frames: () => frames, largest: () => largest, stop: () => spy.mockRestore() };
+}
+
+function threadWriter(file: string, options: { ms: number; rowsPerCommit: number; pauseMs: number }): Promise<number> {
+  const source = `
+    const { DatabaseSync } = require("node:sqlite");
+    const { workerData, parentPort } = require("node:worker_threads");
+    const db = new DatabaseSync(workerData.file);
+    db.exec("PRAGMA busy_timeout = 10000; PRAGMA wal_autocheckpoint = 0");
+    const insert = db.prepare("INSERT INTO t (v) VALUES (?)");
+    const bump = db.prepare("UPDATE counter SET n = n + 1 WHERE k = 'other'");
+    const pause = new Int32Array(new SharedArrayBuffer(4));
+    const until = Date.now() + workerData.ms;
+    let i = 0;
+    while (Date.now() < until) {
+      db.exec("BEGIN IMMEDIATE");
+      for (let row = 0; row < workerData.rowsPerCommit; row++) insert.run("other-".padEnd(3800, "o"));
+      bump.run();
+      db.exec("COMMIT");
+      i++;
+      Atomics.wait(pause, 0, 0, workerData.pauseMs);
+    }
+    db.close();
+    parentPort.postMessage(i);
+  `;
+  const worker = new Worker(source, { eval: true, workerData: { file, ...options } });
+  workers.push(worker);
+  return new Promise<number>((resolve, reject) => {
+    worker.once("message", (n: number) => resolve(n));
+    worker.once("error", reject);
+  });
 }
 
 function checkpointWaitingOnAnotherThread(file: string, busyMs: number): { started: Promise<void>; done: Promise<void> } {
@@ -533,6 +571,46 @@ describe("replication/sqlite snapshot while a checkpoint on another thread waits
     expectOk(await repl.sync());
     expect(await restored(l.blobs, l.dir)).toMatchObject({ generation, ...fingerprint(l.app), check: "ok" });
   }, 30_000);
+});
+
+describe("replication/sqlite checkpoint after a snapshot while another thread writes", () => {
+  it("copies the frames committed while a snapshot was read and uploaded back on a worker thread, so no checkpoint on this thread copies back more than copyBackBytes, after the first and after a periodic snapshot", async () => {
+    const l = live();
+    l.insert(2000, 3800);
+    l.app.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    const copyBackBytes = MB;
+    const repl = l.start({ checkpointBytes: copyBackBytes, snapshotSeconds: 60 }, { checkIntervalMs: 20, copyBackBytes });
+    const put = l.blobs.put.bind(l.blobs);
+    l.blobs.put = async (key, data, options) => {
+      if (key.endsWith("/snapshot.db")) await sleep(1_000);
+      return put(key, data, options);
+    };
+    const copied = copiedBackOnThisThread(l.file);
+    const writing = threadWriter(l.file, { ms: 4_000, rowsPerCommit: 10, pauseMs: 10 });
+    let run: Awaited<ReturnType<typeof measured<{ first: string; second: string }>>>;
+    try {
+      run = await measured(async () => {
+        await sleep(200);
+        const first = expectOk(await repl.sync()).generation;
+        await sleep(400);
+        l.clock.advance(61_000);
+        const second = expectOk(await repl.sync()).generation;
+        await sleep(600);
+        return { first, second };
+      });
+    } finally {
+      copied.stop();
+    }
+    await writing;
+    l.blobs.put = put;
+    const { first, second } = run.value;
+    reportMeasurement("checkpoint after a snapshot", { largestFramesCopiedOnThisThread: copied.largest(), framesCopiedOnThisThread: copied.frames(), longestSliceMs: run.longestMs });
+    expect(second > first).toBe(true);
+    expect(copied.largest()).toBeLessThanOrEqual(Math.floor(copyBackBytes / (4096 + 24)));
+    expect(run.longestMs).toBeLessThan(250);
+    expectOk(await repl.sync());
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation: second, ...fingerprint(l.app), check: "ok" });
+  }, 60_000);
 });
 
 describe("replication/sqlite snapshot while other connections commit", () => {

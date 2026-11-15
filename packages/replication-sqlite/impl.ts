@@ -28,6 +28,8 @@ export interface Config {
 export interface ReplicationOptions {
   /** How often the WAL size is compared with `checkpointBytes` between syncs, in milliseconds. Default 1000. */
   checkIntervalMs?: number;
+  /** How many bytes of WAL frames not yet copied back into the database file a checkpoint leaves to a worker thread before it copies back the rest itself. Default 8 MiB. */
+  copyBackBytes?: number;
   /** Receives the warning when another process is found writing to the same replica, and the messages about acknowledging a reported restore from a placed generation. Default: nothing is logged. */
   logger?: Logger;
   /**
@@ -377,6 +379,9 @@ const isBusy = (e: unknown): boolean => typeof e === "object" && e !== null && "
 const CLOSED = failure("TRANSIENT", "replication/sqlite: the replication was closed while it read the snapshot");
 const STOPPING = failure("TRANSIENT", "replication/sqlite: the process is stopping, so the snapshot was not taken; the generation before it stays current");
 
+const COPY_BACK_ROUNDS = 4;
+const COPY_BACK_BYTES = 8 * 1024 * 1024;
+
 const chunkBytes = (header: WalHeader): number => Math.max(1, Math.floor(READ_CHUNK_BYTES / frameSize(header.pageSize))) * frameSize(header.pageSize);
 
 const COPY_BACK = `
@@ -442,6 +447,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   let orphan: { snapshot: string; origin: string | null } | null = null;
   const onStop = new Set<() => void>();
   const logger = options.logger ?? silentLogger;
+  const copyBackBytes = options.copyBackBytes ?? COPY_BACK_BYTES;
   const startedAt = now();
   const own = new Set<string>();
   let newestListed = 0;
@@ -651,40 +657,78 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     }
   };
 
-  const checkpoint = async (): Promise<Result<{ done: boolean; bytes: number; frames: number }, BlobstoreError>> => {
-    const currentGeneration = generation;
-    if (currentGeneration === null) return ok({ done: false, bytes: 0, frames: 0 });
+  const underWriteLock = <T>(task: () => T): T | "busy" => {
     try {
       writeLock.exec("BEGIN IMMEDIATE");
     } catch (e) {
-      if (isBusy(e)) return ok({ done: false, bytes: 0, frames: 0 });
+      if (isBusy(e)) return "busy";
       throw e;
     }
-    let tail: ReturnType<typeof readCommittedSync>;
-    let done: boolean;
     try {
-      tail = readCommittedSync(continueFrom);
-      release();
-      try {
-        const row = boundaryCast<{ busy: number; log: number; checkpointed: number } | undefined>(conn.prepare("PRAGMA wal_checkpoint(PASSIVE)").get(), "host");
-        done = row !== undefined && row.busy === 0 && row.log === row.checkpointed;
-      } finally {
-        holdRead();
-      }
+      return task();
     } finally {
       writeLock.exec("ROLLBACK");
     }
-    if (tail) {
-      if (tail.frames > 0) {
-        pending.push({ key: segmentKey(currentGeneration, now()), data: tail.segment });
-        seq += 1;
-      }
-      cursor = { ...tail.at, frame: tail.at.frame + tail.frames, checksum: tail.checksum };
+  };
+
+  const keepTail = (currentGeneration: string, tail: ReturnType<typeof readCommittedSync>): { bytes: number; frames: number } => {
+    if (!tail) return { bytes: 0, frames: 0 };
+    if (tail.frames > 0) {
+      pending.push({ key: segmentKey(currentGeneration, now()), data: tail.segment });
+      seq += 1;
     }
-    if (done) lastCheckpointAt = now();
-    const flushed = await flushPending();
-    if (isErr(flushed)) return flushed;
-    return ok({ done, bytes: tail && tail.frames > 0 ? tail.segment.byteLength : 0, frames: tail?.frames ?? 0 });
+    cursor = { ...tail.at, frame: tail.at.frame + tail.frames, checksum: tail.checksum };
+    return { bytes: tail.frames > 0 ? tail.segment.byteLength : 0, frames: tail.frames };
+  };
+
+  const uncopiedBytes = (): number => {
+    const state = walState();
+    return state.busy !== 0 || state.log < 0 ? 0 : (state.log - Math.max(0, state.checkpointed)) * frameSize(pageSize);
+  };
+
+  const checkpoint = async (): Promise<Result<{ done: boolean; bytes: number; frames: number }, BlobstoreError>> => {
+    const currentGeneration = generation;
+    if (currentGeneration === null) return ok({ done: false, bytes: 0, frames: 0 });
+    let bytes = 0;
+    let frames = 0;
+    const kept = (tail: ReturnType<typeof readCommittedSync>): void => {
+      const added = keepTail(currentGeneration, tail);
+      bytes += added.bytes;
+      frames += added.frames;
+    };
+    const ended = async (done: boolean): Promise<Result<{ done: boolean; bytes: number; frames: number }, BlobstoreError>> => {
+      if (done) lastCheckpointAt = now();
+      const flushed = await flushPending();
+      if (isErr(flushed)) return flushed;
+      return ok({ done, bytes, frames });
+    };
+    for (let round = 0; round < COPY_BACK_ROUNDS && uncopiedBytes() >= copyBackBytes; round++) {
+      const tail = underWriteLock(() => {
+        const read = readCommittedSync(continueFrom);
+        release();
+        holdRead();
+        return read;
+      });
+      if (tail === "busy") return ended(false);
+      kept(tail);
+      const copying = copyBackOnWorker(file);
+      if (copying === null) break;
+      await copying;
+      if (closed) return ok({ done: false, bytes, frames });
+    }
+    const finished = underWriteLock(() => {
+      const tail = readCommittedSync(continueFrom);
+      release();
+      try {
+        const row = boundaryCast<WalState | undefined>(conn.prepare("PRAGMA wal_checkpoint(PASSIVE)").get(), "host");
+        return { tail, done: row !== undefined && row.busy === 0 && row.log === row.checkpointed };
+      } finally {
+        holdRead();
+      }
+    });
+    if (finished === "busy") return ended(false);
+    kept(finished.tail);
+    return ended(finished.done);
   };
 
   let queue: Promise<unknown> = Promise.resolve();

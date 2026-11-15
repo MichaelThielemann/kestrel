@@ -2111,12 +2111,16 @@ Net changes since 5.8.2.
   only the frames that are not yet copied back into the database file are applied, under the module's read
   transaction as before; when the WAL file is `checkpointBytes` or larger, a worker thread copies the frames
   that read transaction sees back into the database file first, so the checkpoint the snapshot runs on the
-  event loop's thread has next to nothing left to copy. The image is byte for byte the one written before,
-  so the replica format is unchanged: earlier releases restore what this one writes, and the other way
-  round. When a snapshot upload fails, its key is removed again, and while that removal fails, every later
-  sync, snapshot, checkpoint and seal tries it again first and fails with `TRANSIENT` before it uploads
-  anything, also before the first generation, so a restore never picks a generation whose process went on
-  shipping frames into the one before it or uploaded a later snapshot.
+  event loop's thread has next to nothing left to copy. A checkpoint that finds 8 MiB or more of frames not
+  yet copied back, as after a snapshot that took a while to read and upload while other connections
+  committed, takes its read transaction again at the end of the WAL and leaves those frames to a worker
+  thread as well, before it copies back the rest on the event loop's thread. The image is byte for byte the
+  one written before, so the replica format is unchanged: earlier releases restore what this one writes,
+  and the other way round. When a snapshot upload fails, its key is removed again, and while that removal
+  fails, every later sync, snapshot, checkpoint and seal tries it again first and fails with `TRANSIENT`
+  before it uploads anything, also before the first generation, so a restore never picks a generation whose
+  process went on shipping frames into the one before it or uploaded a later snapshot. `ReplicationOptions`
+  of `./impl` gains `copyBackBytes`.
 - `replication-sqlite`: a restore applies the WAL segments into one image that grows in place, instead of
   copying the image at every commit that changes the database size, so restoring a generation of a growing
   database takes time in proportion to its segments.
