@@ -55,7 +55,7 @@ function fakes(): Fakes {
     }),
     retire: vi.fn(async (_ctx: UpdateContext, run: UpdateRun) => {
       retiredStates.push(run.state);
-      return { droplets: [], revisions: [], savedDroplet: null, kept: [] };
+      return { droplets: [], revisions: [], savedDroplet: null, kept: [], leftovers: [] };
     }),
     migrateCopy: vi.fn(async (ctx: UpdateContext, input: MigrateInput): Promise<MigrateResult> => {
       const data = await ctx.backups.get(LOCATION + keys.db(input.cutoverBackup));

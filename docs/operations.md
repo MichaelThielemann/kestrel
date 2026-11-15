@@ -43,7 +43,7 @@ prefix its credentials need:
 | `app.mediaPrefix` | yes | storage migrations write new keys, also as server-side copies (deploy); changed originals are copied back (rollback, restore) | no; only `update cleanup` removes originals |
 | `app.deliveryPrefix` | yes | the backup's keys are written back (rollback, restore) | yes: a rollback or restore removes the keys the backup does not hold |
 | `app.derivedPrefixes` | yes | no | no |
-| `backups.prefix` | yes | every command but `backup list` and `update status`; `status` writes only short-lived probes under `probes/` and `.kestrel-clock/` | yes: `backup prune` removes the backups that are due (`backups/<id>/`) and the objects no backup refers to (`objects/`), and on every run without `--dry-run`, before its `prune-delete` question and also when nothing is due, the entries under `recent/<day>/` older than a day; `update cleanup` and the `retire` step of a verified deploy remove the code saved for a closed run (`updates/<env>/runs/<run>/droplet-*`); a copy into `objects/` that failed is removed again; the clock and protection probes under `.kestrel-clock/` and `probes/` are deleted again |
+| `backups.prefix` | yes | every command but `backup list` and `update status`; `status` writes only short-lived probes under `probes/` and `.kestrel-clock/` | yes: `backup prune` removes the backups that are due (`backups/<id>/`) and the objects no backup refers to (`objects/`), and on every run without `--dry-run`, before its `prune-delete` question and also when nothing is due, the entries under `recent/<day>/` older than a day; `update cleanup` removes the code its run saved (`updates/<env>/runs/<run>/droplet-*`), and the `retire` step of a verified deploy the code saved for an earlier run that is closed and holds no pin; a deploy whose credentials may not delete there leaves that code, which no rollback needs any more, with one warning naming its keys and still ends verified with exit 0, `update status` lists it, and `backup prune` removes it once it is a day old; a copy into `objects/` that failed is removed again; the clock and protection probes under `.kestrel-clock/` and `probes/` are deleted again |
 
 The store's clock is measured with a probe object that is written, listed and deleted again, under
 `.kestrel-clock/` on an S3-compatible store and `probes/` on any other. `update prepare` measures the clock of the
@@ -178,7 +178,7 @@ two runs that start in the same moment.
 | `migrate` | down | The migration of a copy of the cutover database, see below. |
 | `promote`, `swap`, `start` | down | The migrated copy becomes the newest replica generation, the staged release becomes the app's code with its own configuration, and the app starts; one step with no question between them, so no old release starts on converted data. |
 | `verify` | serving once the start became ready | See below. The downtime ends with a start that became ready, or with a verification that passed after a start that was not ready yet. |
-| `retire` | serving | Only after `verify` passed: the replaced release's code is saved into the backup location when the platform hands it out, then every older release of the app is deleted, so neither the platform's own rollback nor an old pipeline run can start it on the converted data. When the platform hands out no code or saving it fails, that release is deleted all the same and a warning says that a later `update rollback` brings back the cutover state with the app stopped; a release another open deploy run needs stays. When deleting fails or is interrupted, the run stays verified but ends with exit 1, because the older releases can still be started; `update status` names `update resume`, and `update resume` or `update accept` retire them again. |
+| `retire` | serving | Only after `verify` passed: the replaced release's code is saved into the backup location when the platform hands it out, then every older release of the app is deleted, so neither the platform's own rollback nor an old pipeline run can start it on the converted data. When the platform hands out no code or saving it fails, that release is deleted all the same and a warning says that a later `update rollback` brings back the cutover state with the app stopped; a release another open deploy run needs stays. When deleting an older release fails or is interrupted, the run stays verified but ends with exit 1, because the older releases can still be started; `update status` names `update resume`, and `update resume` or `update accept` retire them again. The step then deletes the code earlier deploy runs saved that are closed and hold no pin; when that fails, for credentials without delete rights in the backup location, the code stays with one warning that names its keys and `backup prune`, and the step ends as done. |
 
 ### Verification
 
@@ -318,7 +318,8 @@ kestrel update resume --env prod --run <id> --break-lock --answers break-lock.js
 changed something, or the one `--run` names (a newer deploy the gate refused is named beside it), with its state,
 the hosts its processes ran on, the version change, the cutover backup, the time of every step with the ones the
 app was down for, the total downtime (until a start that became ready, a verification that passed or a verified
-rollback), the derived keys of a rollback, the command to run next, and every other run in an open state. It takes
+rollback), the derived keys of a rollback, the command to run next, every other run in an open state, and the code of
+earlier releases that no rollback needs any more but a retire could not delete (`savedCode` with `--json`). It takes
 no lock and writes nothing.
 
 ### Accept and cleanup
@@ -329,7 +330,10 @@ after the accept, removes the originals under the media prefix that no row of th
 that the cutover backup holds, after the `cleanup-delete` answer, releases the pin, so prune treats the cutover
 backup like any other, and deletes the replaced release's code the run saved. A later deploy that passes
 verification deletes the saved code of every earlier deploy run that is no longer open and holds no pin on its
-cutover backup as well, so the code of the release before a major change stays until that run's cleanup. A deploy
+cutover backup as well, so the code of the release before a major change stays until that run's cleanup. Where the
+deploy's credentials may not delete in the backup location, that code stays with a warning, `update status` lists
+it, and `backup prune` with credentials that may delete there removes it once it is a day old (`savedCode` in its
+`--json` document). A deploy
 that accepts such a run on the way names its `update cleanup --run <id>`, and so does `update cleanup` when it
 refuses a later run that is not accepted.
 

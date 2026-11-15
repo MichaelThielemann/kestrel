@@ -13,6 +13,7 @@ export * from "./prepare.ts";
 export * from "./resume.ts";
 export * from "./retire.ts";
 export * from "./rollback.ts";
+export * from "./savedCode.ts";
 export * from "./seal.ts";
 export * from "./status.ts";
 export * from "./steps.ts";

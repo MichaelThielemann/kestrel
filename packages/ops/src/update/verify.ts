@@ -170,7 +170,7 @@ export async function retireStep(ctx: UpdateContext, run: UpdateRun, again = fal
   await ctx.journal.record("retire", "started", { phase: "deploy" });
   try {
     const retired = await ctx.steps.retire(ctx, run);
-    await ctx.journal.record("retire", "done", { phase: "deploy", droplets: retired.droplets, revisions: retired.revisions, savedDroplet: retired.savedDroplet, kept: retired.kept });
+    await ctx.journal.record("retire", "done", { phase: "deploy", droplets: retired.droplets, revisions: retired.revisions, savedDroplet: retired.savedDroplet, kept: retired.kept, leftovers: retired.leftovers });
     return { ok: true };
   } catch (cause) {
     await recordQuietly(ctx, "retire", "failed", { phase: "deploy", error: messageOf(cause) });

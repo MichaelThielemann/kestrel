@@ -159,7 +159,7 @@ describe("an ordinary deploy", { timeout: 30_000 }, () => {
     const h = harness({ from: { runtime: "6.0.0" }, to: { runtime: "6.0.0" } });
     await h.target.start();
     await h.target.app?.seed();
-    const retire = vi.fn(async () => ({ droplets: [], revisions: [], savedDroplet: null, kept: [] }));
+    const retire = vi.fn(async () => ({ droplets: [], revisions: [], savedDroplet: null, kept: [], leftovers: [] }));
     const ctx = await h.context({ steps: { retire } });
     const outcome = await deploy(ctx);
     expect(outcome.exitCode).toBe(0);

@@ -18,6 +18,8 @@ export const updateKeys = {
   configuration: (env: string, runId: string) => `updates/${env}/runs/${runId}/configuration.json`,
   /** The bits of the droplet a deploy replaced, saved before the droplet was deleted. */
   droplet: (env: string, runId: string, guid: string) => `updates/${env}/runs/${runId}/droplet-${guid}.tgz`,
+  /** The prefix of the keys every deploy run of `env` writes besides its journal: its configuration and the droplet bits it saved. */
+  runs: (env: string) => `updates/${env}/runs/`,
   /** The prefix of every droplet's bits a deploy saved; `update cleanup` of the run, or `retire` of a later verified deploy once the run is closed and holds no update pin, removes them. */
   droplets: (env: string, runId: string) => `updates/${env}/runs/${runId}/droplet-`,
   /** The update pin on a backup: a `pins/` key of the backup with the run id behind {@link UPDATE_PIN_PREFIX}. */

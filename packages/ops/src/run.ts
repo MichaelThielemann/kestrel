@@ -16,7 +16,7 @@ import { acquireLock, breakLocks, type Lock } from "./lock.ts";
 import { createOutput, type Output } from "./output.ts";
 import { packageDir, packageEntry } from "./packages.ts";
 import type { Prompt } from "./questions.ts";
-import { fixedText, Redactor } from "./redact.ts";
+import { fixedText, literal, Redactor } from "./redact.ts";
 import type { PollOptions } from "./replica.ts";
 import { restoreBackup, restoreToLocal } from "./restore.ts";
 import { s3Store } from "./s3Store.ts";
@@ -447,7 +447,8 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
       }
       case "backup-prune": {
         const result = await prune(ctx, cmd.dryRun);
-        out.info(`${cmd.dryRun ? "would remove" : "removed"} ${result.backups.length} backup(s) and ${result.objects.length} object(s); kept ${result.kept.length}`);
+        out.info(fixedText`${cmd.dryRun ? literal("would remove") : literal("removed")} ${result.backups.length} backup(s) and ${result.objects.length} object(s)${result.savedCode.length > 0 ? fixedText`, and ${result.savedCode.length} file(s) of saved code` : literal("")}; kept ${result.kept.length}`);
+        for (const key of result.savedCode) out.info(`  ${key}`);
         await finish(true, {});
         emit("backup-prune", { ok: true, ...result });
         return 0;

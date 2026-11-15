@@ -2,6 +2,7 @@ import { parseJsonOrNull } from "../layout.ts";
 import { fixedText, literal } from "../redact.ts";
 import { stableList } from "../store.ts";
 import { listUpdateRuns, readUpdateRun, reportOf, retirePending, RUN_STEP } from "./journal.ts";
+import { obsoleteSavedCode } from "./savedCode.ts";
 import { OPEN_STATES, type UpdateContext, type UpdateReport, type UpdateRun, type UpdateRunState, type VersionSet } from "./types.ts";
 
 /** One update run as `update status` shows it. */
@@ -29,6 +30,8 @@ export interface UpdateStatusReport {
   latestAttempt: UpdateRunStatus | null;
   /** Every update run of the environment that is in an open state. */
   open: UpdateRunStatus[];
+  /** Keys of droplet bits that no rollback needs any more but a `retire` could not delete, which `backup prune` removes (see `obsoleteSavedCode`). */
+  savedCode: string[];
 }
 
 const LOCK_START = /^locks\/([^/]+)\/\d{8}T\d{6}Z-start-[0-9a-f]{4}\.json$/;
@@ -146,7 +149,8 @@ export async function updateStatus(ctx: UpdateContext, runId: string | null): Pr
   const newest = deploys.at(-1)?.runId ?? null;
   chosen ??= newest;
   const latestAttempt = runId === null && newest !== null && newest !== chosen ? await read(newest) : null;
-  return { env: ctx.envName, run: chosen === null ? null : await read(chosen), latestAttempt, open };
+  const savedCode = (await obsoleteSavedCode(ctx)).map((info) => info.key);
+  return { env: ctx.envName, run: chosen === null ? null : await read(chosen), latestAttempt, open, savedCode };
 }
 
 function duration(ms: number | null): string {
@@ -185,5 +189,6 @@ export function renderStatus(report: UpdateStatusReport): string[] {
   if (report.latestAttempt !== null) lines.push(fixedText`newest attempt ${literal(report.latestAttempt.runId)} is ${literal(report.latestAttempt.state)}: it changed nothing`);
   const others = report.open.filter((status) => status.runId !== report.run?.runId);
   if (others.length > 0) lines.push(fixedText`open runs besides it: ${others.length}`, ...others.flatMap(runLines));
+  if (report.savedCode.length > 0) lines.push(fixedText`saved code of earlier releases that no rollback needs any more: ${report.savedCode.join(", ")}; kestrel backup prune --env ${literal(report.env)} removes it once it is a day old, with credentials that may delete there`);
   return lines;
 }

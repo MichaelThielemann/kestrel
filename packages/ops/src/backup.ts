@@ -12,6 +12,7 @@ import { placedUnstarted, refuseUnfinishedPlacement } from "./placements.ts";
 import { confirm } from "./questions.ts";
 import { buildDatabase, completeGeneration, SEALING_MAJOR, sealOf, stableGenerations, type SealReport } from "./replica.ts";
 import { UPDATE_PIN_PREFIX } from "./update/layout.ts";
+import { obsoleteSavedCode } from "./update/savedCode.ts";
 import { integrityCheck, referencedBlobs, sha256, sha256File, tableCounts, vacuumInto } from "./sqlite.ts";
 import { ObjectMissing, PreconditionFailed, listMap, stableList, transfer, type ObjectInfo, type ObjectStore } from "./store.ts";
 
@@ -468,6 +469,8 @@ export interface PruneResult {
   dryRun: boolean;
   backups: string[];
   objects: string[];
+  /** Keys of droplet bits saved by update runs that no rollback needs any more (see `obsoleteSavedCode`). */
+  savedCode: string[];
   kept: string[];
 }
 
@@ -552,6 +555,8 @@ async function backupIdsAtLocation(ctx: Pick<OpsContext, "backups" | "location">
  * another run holds the lock. Unless `dryRun` is set, it then also removes the clock and protection probes older than
  * {@link PROBE_MAX_AGE_MS} that a refused delete left in the backup location, and below the replica prefix when the
  * backups live in a store of their own; a probe it cannot list or delete there is warned about once and left in place.
+ * It also removes the droplet bits of update runs of the environment that no rollback needs any more
+ * (`obsoleteSavedCode`), which the `retire` step of a later deploy could not delete, once they are a day old.
  */
 export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResult> {
   const now = ctx.clock();
@@ -604,20 +609,22 @@ export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResu
     }
   }
   const objects = (await ctx.backups.list(`${ctx.location}objects/`)).filter((o) => !referenced.has(o.key) && now - o.lastModified >= PRUNE_MIN_AGE_MS).map((o) => o.key);
-  const result: PruneResult = { dryRun, backups: remove, objects, kept: [...keep].sort() };
+  const savedCode = (await obsoleteSavedCode(ctx)).filter((info) => now - info.lastModified >= PRUNE_MIN_AGE_MS).map((info) => info.key);
+  const result: PruneResult = { dryRun, backups: remove, objects, savedCode, kept: [...keep].sort() };
   if (dryRun) return result;
   const oldest = dayOf(now - PRUNE_MIN_AGE_MS);
   for (const info of await ctx.backups.list(`${ctx.location}recent/`)) {
     const day = /^recent\/(\d{8})\//.exec(info.key.slice(ctx.location.length))?.[1];
     if (day !== undefined && day < oldest) await ctx.backups.delete(info.key);
   }
-  const due = remove.length > 0 || objects.length > 0;
+  const due = remove.length > 0 || objects.length > 0 || savedCode.length > 0;
   if (due) {
-    await confirm(ctx.answers, "prune-delete", fixedText`prune removes ${remove.length} backup(s) and ${objects.length} object(s)`);
+    await confirm(ctx.answers, "prune-delete", fixedText`prune removes ${remove.length} backup(s) and ${objects.length} object(s)${savedCode.length > 0 ? fixedText`, and ${savedCode.length} file(s) of saved code no rollback needs any more` : literal("")}`);
     for (const id of remove) for (const info of await ctx.backups.list(ctx.location + keys.backupDir(id))) await ctx.backups.delete(info.key);
     for (const key of objects) await ctx.backups.delete(key);
+    for (const key of savedCode) await ctx.backups.delete(key);
   }
   await removeStaleProbes(ctx, now);
-  if (due) await ctx.journal.record("prune", "done", { backups: remove, objects: objects.length });
+  if (due) await ctx.journal.record("prune", "done", { backups: remove, objects: objects.length, savedCode });
   return result;
 }

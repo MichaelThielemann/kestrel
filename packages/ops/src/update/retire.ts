@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
 import { messageOf } from "../context.ts";
 import { OpsError } from "../errors.ts";
-import { holdsUpdatePin, removeSavedDroplets } from "./cleanup.ts";
+import { Interrupted } from "../interrupt.ts";
+import { fixedText, literal } from "../redact.ts";
+import { stableList } from "../store.ts";
 import { listUpdateRuns, readUpdateRun } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
+import { holdsUpdatePin } from "./savedCode.ts";
 import { OPEN_STATES, type RetireResult, type UpdateContext, type UpdateRun } from "./types.ts";
-import { fixedText, literal } from "../redact.ts";
 
 const verifiedPassed = (run: UpdateRun): boolean => (run.state === "verified" || run.state === "accepted") && run.records.some((r) => r.step === "verify" && r.state === "done" && (r.phase === "deploy" || r.phase === "verify") && r.data.verdict === "passed");
 
@@ -35,6 +37,29 @@ async function otherDeploys(ctx: UpdateContext, run: UpdateRun): Promise<{ neede
   return { needed, closed };
 }
 
+async function removeObsoleteCode(ctx: UpdateContext, runIds: readonly string[]): Promise<string[]> {
+  const left: string[] = [];
+  let refusal: string | null = null;
+  const leave = (key: string, error: unknown): void => {
+    if (error instanceof Interrupted) throw error;
+    left.push(key);
+    refusal ??= messageOf(error);
+  };
+  for (const runId of runIds) {
+    const prefix = ctx.location + updateKeys.droplets(ctx.envName, runId);
+    let saved: string[];
+    try {
+      saved = (await stableList(ctx.backups, prefix, ctx.poll)).map((info) => info.key);
+    } catch (error) {
+      leave(`${prefix}*`, error);
+      continue;
+    }
+    for (const key of saved) await ctx.backups.delete(key).catch((error: unknown) => leave(key, error));
+  }
+  if (refusal !== null) ctx.out.warn(fixedText`the saved code of earlier releases, which no rollback needs any more, stays: deleting it failed (${refusal}); kestrel backup prune --env ${literal(ctx.envName)} removes it with credentials that may delete under ${ctx.location}${literal("updates/")} once it is a day old: ${left.join(", ")}`);
+  return left;
+}
+
 /**
  * Retires the previous releases of deploy run `run` once its verification passed, and only then: saves the replaced
  * droplet's bits into the backup location when the target hands them out, then deletes every droplet but the current
@@ -44,7 +69,9 @@ async function otherDeploys(ctx: UpdateContext, run: UpdateRun): Promise<{ neede
  * than the one the run deployed. A droplet that another open deploy run of the environment recorded as its previous or
  * staged droplet stays. The droplet bits that earlier deploy runs of the environment saved are deleted once those runs
  * are no longer open and hold no update pin on their cutover backup; a pinned run keeps them until `update cleanup`,
- * so its rollback can start the release before it.
+ * so its rollback can start the release before it. A failure to delete those bits, such as credentials without delete
+ * rights in the backup location, does not fail the step: it warns once, naming the keys left behind and `backup prune`,
+ * which removes them, and returns them as `leftovers`.
  */
 export async function retire(ctx: UpdateContext, run: UpdateRun): Promise<RetireResult> {
   if (!verifiedPassed(run)) throw new OpsError(fixedText`refusing to retire the previous releases of run ${literal(run.runId)}: its verification has not passed (the run is ${literal(run.state)}); a rollback still needs them`, 1, "retire");
@@ -78,6 +105,6 @@ export async function retire(ctx: UpdateContext, run: UpdateRun): Promise<Retire
   }
   const lost = revisions.filter((r) => r.droplet !== null && deleted.includes(r.droplet)).map((r) => r.guid);
   if (deleted.length > 0) ctx.out.info(`deleted ${deleted.length} droplet(s) of earlier releases; ${lost.length} revision(s) can no longer be rolled back to by the platform`);
-  for (const runId of closed) await removeSavedDroplets(ctx, runId);
-  return { droplets: deleted, revisions: lost, savedDroplet, kept };
+  const leftovers = await removeObsoleteCode(ctx, closed);
+  return { droplets: deleted, revisions: lost, savedDroplet, kept, leftovers };
 }

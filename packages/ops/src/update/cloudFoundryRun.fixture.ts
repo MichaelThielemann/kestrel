@@ -18,6 +18,7 @@ import { fromJsonl, keys, parseJsonOrNull, type BlobEntry, type SiteEntry } from
 import { listGenerations, markerKey } from "../replica.ts";
 import { sha256 } from "../sqlite.ts";
 import type { ObjectInfo, ObjectStore } from "../store.ts";
+import { runOps } from "../run.ts";
 import { allRows, FIXTURE } from "../upgradeFixture.fixture.ts";
 import { runUpdate } from "./command.ts";
 import { readUpdateRun } from "./journal.ts";
@@ -350,6 +351,33 @@ export class CloudFoundryRun {
       project: { versions: versionsOf(release, join(this.root, "releases", release.version)), lockfileSha256: null },
       ...(options.host === undefined ? {} : { host: options.host }),
       ...(options.steps === undefined ? {} : { updateSteps: options.steps }),
+    });
+    const start = stdout.lastIndexOf('{\n  "schema"');
+    const json = start < 0 ? {} : boundaryCast<Record<string, unknown>>(JSON.parse(stdout.slice(start)), "json");
+    return { code, stdout, stderr, json };
+  }
+
+  /** Runs `kestrel <args> --env prod`, a command of backups and restores such as `backup prune`, in process like {@link CloudFoundryRun.update}; `clock` replaces the tool's clock. */
+  async ops(args: string[], options: Pick<CommandOptions, "store" | "credentials"> & { clock?: () => number } = {}): Promise<CommandRun> {
+    this.environments(this.newest, {}, {}, options.credentials !== undefined);
+    const store = options.store?.(this.store) ?? this.store;
+    let stdout = "";
+    let stderr = "";
+    const code = await runOps([...args, "--env", "prod"], {
+      cwd: this.root,
+      env: options.credentials === undefined ? {} : { RUN_ACCESS_KEY: options.credentials.accessKeyId, RUN_SECRET_KEY: options.credentials.secretAccessKey },
+      stdout: (text) => {
+        stdout += text;
+      },
+      stderr: (text) => {
+        stderr += text;
+      },
+      targets: { "@michaelthielemann/kestrel-target-cloudfoundry": (config, deps) => cloudFoundryTarget(config, deps, { env: this.cf.env({ PATH: process.env.PATH ?? "" }), pollMs: 20, stopTimeoutMs: 30_000, readTimeoutMs: 5000, callTimeoutMs: 30_000 }) },
+      stores: () => store,
+      stateRoot: join(this.root, "state"),
+      poll: { delayMs: 20, attempts: 150 },
+      readyTimeoutMs: 10_000,
+      ...(options.clock === undefined ? {} : { clock: options.clock }),
     });
     const start = stdout.lastIndexOf('{\n  "schema"');
     const json = start < 0 ? {} : boundaryCast<Record<string, unknown>>(JSON.parse(stdout.slice(start)), "json");

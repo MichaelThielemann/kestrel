@@ -278,6 +278,8 @@ export interface RetireResult {
   savedDroplet: string | null;
   /** Droplets left in place: the previous one when saving its bits failed, and those another open deploy run needs. */
   kept: string[];
+  /** Keys of droplet bits earlier closed runs saved that no rollback needs any more and that could not be deleted. */
+  leftovers: string[];
 }
 
 /** What a rollback did. */

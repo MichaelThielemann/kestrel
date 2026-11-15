@@ -8,6 +8,7 @@ import { referencedBlobs } from "../sqlite.ts";
 import { stableList } from "../store.ts";
 import { listUpdateRuns, readUpdateRun, reportOf } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
+import { holdsUpdatePin, removeSavedDroplets } from "./savedCode.ts";
 import { UPDATE_EXIT, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
 import { fixedText, literal } from "../redact.ts";
 
@@ -43,26 +44,12 @@ async function orphans(ctx: UpdateContext, cutover: string): Promise<BlobEntry[]
   });
 }
 
-/** Deletes the droplet bits run `runId` saved into the backup location and resolves to their keys. */
-export async function removeSavedDroplets(ctx: Pick<UpdateContext, "backups" | "location" | "envName" | "poll">, runId: string): Promise<string[]> {
-  const saved = (await stableList(ctx.backups, ctx.location + updateKeys.droplets(ctx.envName, runId), ctx.poll)).map((info) => info.key);
-  for (const key of saved) await ctx.backups.delete(key);
-  return saved;
-}
-
 /** Releases the update pin of run `runId` on backup `backupId`, if it holds one; prune then treats the backup like any other. */
 export async function releaseUpdatePin(ctx: Pick<UpdateContext, "backups" | "location" | "clock">, backupId: string, runId: string): Promise<boolean> {
   if ((await ctx.backups.head(ctx.location + updateKeys.pin(backupId, runId))) === null) return false;
   const released = ctx.location + updateKeys.unpin(backupId, runId);
   if ((await ctx.backups.head(released)) === null) await ctx.backups.put(released, jsonBytes({ runId, at: ctx.clock() }), { contentType: "application/json" });
   return true;
-}
-
-/** True while run `run` holds an update pin on its cutover backup that no release record cancels. */
-export async function holdsUpdatePin(ctx: Pick<UpdateContext, "backups" | "location">, run: Pick<UpdateRun, "runId" | "cutoverBackup">): Promise<boolean> {
-  if (run.cutoverBackup === null) return false;
-  if ((await ctx.backups.head(ctx.location + updateKeys.pin(run.cutoverBackup, run.runId))) === null) return false;
-  return (await ctx.backups.head(ctx.location + updateKeys.unpin(run.cutoverBackup, run.runId))) === null;
 }
 
 async function pinnedElsewhere(ctx: UpdateContext, runId: string): Promise<string> {

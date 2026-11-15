@@ -29,7 +29,7 @@ other targets come as their own packages.
 | `backup create [--freeze] [--kind manual\|scheduled\|cutover]` | Writes a backup and verifies it. `--freeze` stops the app first and starts it again afterwards; without it the database comes from the replica of the running app. |
 | `backup list` | Every backup of the environment, with its verification state and pins. |
 | `backup verify <id>` | Verifies a backup again from what the backup location holds and records the result next to it. Exit 1 names the failing part or key; an id the location holds nothing under is reported, and nothing is written under that id (the run leaves its journal entries and lock trace like every writing command). |
-| `backup prune [--dry-run]` | Removes backups beyond the retention of their kind and the objects nothing refers to any more. |
+| `backup prune [--dry-run]` | Removes backups beyond the retention of their kind, the objects nothing refers to any more and the saved code of earlier releases that no rollback of an update needs any more. |
 | `restore --backup <id> [--no-safety-backup]` | Restores a backup over the environment. |
 | `restore --to local <dir> (--backup <id> \| --latest) [--with-media] [--keep-sessions]` | Writes a backup's database, or the newest replica generation, to `<dir>/kestrel.db` without login sessions; `--latest` skips an unfinished placement of a failed restore on top of the replica, names it, and copies the generation before it; `--with-media` adds the originals under `<dir>/blobs/` after the `confirm` answer, asked before anything is written, directories included, and refuses first, naming `blobs.jsonl`, when that list holds another number of entries than the manifest counts; when the backup holds originals whose keys differ only in case (as 5.x media keys can) and `<dir>` lies on a file system that does not tell such names apart (macOS by default), it refuses first, naming both keys. Files are written with mode 0600, new directories with 0700; a run that fails removes the files and the directories it created. |
 
@@ -317,7 +317,7 @@ names every generation after the ones it listed, so the restore does not wait fo
 | `deploy` | In the deploy job: gate, staging while the app runs, recorded configuration, precopy, stop, seal, verified cutover backup, migration of a copy of its database, promotion, swap and start as one step, verification; after a passed verification the older releases are deleted, after a failed one the cutover state comes back. |
 | `verify` | Verifies the running release of a halted run again. |
 | `update accept`, `rollback`, `resume`, `abort` | Close, roll back, continue or end the newest deploy run, or the one `--run <id>` names. |
-| `update status` | Every update run of the environment from the backup location, with its hosts, state, next command and the time and downtime of each step. Takes no lock. |
+| `update status` | Every update run of the environment from the backup location, with its hosts, state, next command and the time and downtime of each step, and the saved code of earlier releases that a retire could not delete and `backup prune` removes. Takes no lock. |
 | `update cleanup [--dry-run]` | After `cleanupAfterDays`: removes the originals only the cutover backup still references and releases its pin. A deploy pins its cutover backup only for a change of the major, unknown running versions or a pending storage migration; a rollback or an abort that brought the previous release back releases the pin as well. |
 | `update bundle [--out <dir>]` | Writes `.kestrel-ops/` with the release's versions, the target manifests, the module packages whose storage migrations a deploy runs and the host facts `RunOptions.host` passes. |
 
@@ -368,7 +368,11 @@ that cannot be parsed fails it. Interactive runs ask before deleting;
 `--dry-run` only lists. A run that deletes also removes, after the backups and objects that are due, the clock and
 protection probes older than an hour that a refused delete left under `.kestrel-clock/` or `probes/` of the backup
 location, and below the replica prefix when the backup location lies in a store of its own; a probe its credentials
-may not list or delete there stays, and the prune warns once and ends as it would without it.
+may not list or delete there stays, and the prune warns once and ends as it would without it. Prune also removes the
+code of earlier releases that update runs of the environment saved (`updates/<env>/runs/<run>/droplet-*`) and no
+rollback needs any more: that of a run that is closed, holds no pin and that a later deploy superseded by retiring
+the older releases. That deploy's `retire` deletes it itself and leaves it, with a warning, only when its
+credentials may not delete in the backup location. `--dry-run` and `--json` list it as `savedCode`.
 
 ## Lock and journal
 A writing command takes the lock: a start entry under `locks/<run>/`, a heartbeat every ten minutes and a

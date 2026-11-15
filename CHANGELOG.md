@@ -1824,7 +1824,10 @@ Net changes since 5.8.2.
   passed verification are the older releases of the app deleted, the replaced one's code saved into the backup
   location first where the platform hands it out; a failed save does not keep it. When deleting them fails or is
   interrupted, the deploy ends with exit 1 because they can still start, `update resume` or `update accept`
-  deletes them, and the gate of a later deploy refuses until they are. A
+  deletes them, and the gate of a later deploy refuses until they are. The saved code of earlier deploy runs that
+  are closed and hold no pin is deleted then as well; a deploy whose credentials may not delete in the backup
+  location leaves it with one warning naming its keys and still ends verified with exit 0, `update status` lists it
+  (`savedCode`), and `backup prune` removes it once it is a day old (`savedCode` in its document). A
   hard failure after the stop and before the cutover backup is written starts the previous release again on the
   unchanged replica. A rollback promotes the cutover database again before any old release starts, copies back
   originals, replaces the delivery prefix and lists it again, restores the recorded configuration verbatim, starts
