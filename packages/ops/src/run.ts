@@ -7,7 +7,7 @@ import { createBackup, listBackups, prune, unpin, verifyBackup } from "./backup.
 import { projectFacts } from "./bundle.ts";
 import { messageOf, type OpsContext } from "./context.ts";
 import { resolveCredential, type CommandRunner } from "./credentials.ts";
-import { ENVIRONMENTS_FILE, environmentProblems, loadEnvironments, type Environment, type StorageConfig } from "./environments.ts";
+import { ENVIRONMENTS_FILE, environmentProblems, loadEnvironments, updateSettings, type Environment, type StorageConfig } from "./environments.ts";
 import { OpsError } from "./errors.ts";
 import { Journal } from "./journal.ts";
 import { Interrupt, interruptible, type SignalSource } from "./interrupt.ts";
@@ -48,6 +48,7 @@ export interface RunOptions {
   /** Root of the local working directories. Default: the per-user state directory. */
   stateRoot?: string;
   poll?: PollOptions;
+  /** How long a start waits for the app's readiness check, in place of `update.readyTimeoutSeconds` of the environment. */
   readyTimeoutMs?: number;
   /** How long after the start a restore waits for the first generation of a runtime before 6, which writes it at its first `replication.sync`. Default 90 000. */
   generationWaitMs?: number;
@@ -333,7 +334,7 @@ export async function openContext(options: RunOptions, request: ContextRequest):
       tool: { name: "@michaelthielemann/kestrel-ops", version: toolVersion() },
       project: request.project,
       poll: options.poll ?? {},
-      readyTimeoutMs: options.readyTimeoutMs ?? 300_000,
+      readyTimeoutMs: options.readyTimeoutMs ?? updateSettings(environment).readyTimeoutSeconds * 1000,
       generationWaitMs: options.generationWaitMs ?? 90_000,
     };
     const opened = workspace;

@@ -1885,7 +1885,8 @@ Net changes since 5.8.2.
   will wait the whole `update.sealTimeoutSeconds` for a seal and names how to make the running runtime known,
   unless the stored data tells a release before 6.
   `kestrel.environments.json` takes an optional `update` block (`release.dir`, `localBoot`, the waits and
-  `cleanupAfterDays`). `update bundle` writes `.kestrel-ops/` with the release's versions, the host facts, every
+  `cleanupAfterDays`); its `readyTimeoutSeconds` bounds every start the tool makes, in a deploy and its
+  verification, a rollback, an abort, `restore --backup` and `backup create --freeze`. `update bundle` writes `.kestrel-ops/` with the release's versions, the host facts, every
   target manifest the environments name and the module packages whose storage migrations a deploy runs;
   `run.mjs` hands `deploy`, `verify` and `update …` to `runUpdate`. `docs/operations.md` describes the flow.
 - `kestrel-target-cloudfoundry` implements the update target of `kestrel-ops`: a preflight that reports

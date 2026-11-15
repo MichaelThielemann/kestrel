@@ -34,6 +34,7 @@ export interface OpsContext {
   /** Versions of the project's packages and the lockfile hash, recorded in each manifest. */
   project: { versions: Record<string, string>; lockfileSha256: string | null };
   poll: PollOptions;
+  /** How long a start waits for the app's readiness check: `update.readyTimeoutSeconds` of the environment. */
   readyTimeoutMs: number;
   /** How long after the start a restore waits for the first generation of an app whose runtime names it by its own clock. */
   generationWaitMs: number;

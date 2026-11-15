@@ -399,4 +399,7 @@ pipeline.
 
 The `update` block of an environment also sets the waits: `sealTimeoutSeconds` (60), `syncWindowSeconds` (120),
 `renderTimeoutSeconds` (600) and `readyTimeoutSeconds` (300). `restore --backup` waits up to `syncWindowSeconds`
-for the app's acknowledgement as well.
+for the app's acknowledgement as well. `readyTimeoutSeconds` bounds every wait for a start to become ready: the
+deploy's start and, once more, the readiness check of its verification, the start of the previous release in a
+rollback or an abort, the start again after a refused rollback, and the starts of `restore --backup` and of
+`backup create --freeze`.

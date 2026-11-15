@@ -125,7 +125,9 @@ from.
   `{port}` and `{build}`, `readyPath`, `timeoutSeconds`); and the waits `sealTimeoutSeconds` (60),
   `syncWindowSeconds` (120), `renderTimeoutSeconds` (600), `readyTimeoutSeconds` (300) and `cleanupAfterDays`
   (14). See [Update](#update). `restore --backup` also waits up to `syncWindowSeconds` for the app to
-  acknowledge the restored generation (see [Promotion](#promotion)).
+  acknowledge the restored generation (see [Promotion](#promotion)), and every start the tool makes, also those
+  of `restore --backup` and `backup create --freeze`, waits up to `readyTimeoutSeconds` for the app to become
+  ready.
 
 ## Targets
 A target stops, starts and describes the app. `local` runs it on this machine: `command` is started in `dir`
