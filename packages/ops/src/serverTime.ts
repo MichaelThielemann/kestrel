@@ -16,10 +16,11 @@ export interface ServerClock {
 
 const warned = new WeakSet<Output>();
 
-function leftoverProbe(out: Output | undefined, key: string): void {
+/** Warns on `out` that the probe `key` could not be deleted, once per output for every kind of probe. */
+export function leftoverProbe(out: Output | undefined, key: string, kind: "clock" | "protection" = "clock"): void {
   if (out === undefined || warned.has(out)) return;
   warned.add(out);
-  out.warn(`the clock probe ${key} could not be deleted with the tool's credentials; the measurement holds, and backup prune removes stale probes with credentials that may delete there`);
+  out.warn(`the ${kind} probe ${key} could not be deleted with the tool's credentials; the ${kind === "clock" ? "measurement" : "result"} holds, and backup prune removes stale probes with credentials that may delete there`);
 }
 
 /**

@@ -79,6 +79,29 @@ describe("the clock probe of a key that may not delete it", () => {
     expect(warnings[0]).toContain(`${LOCATION}.kestrel-clock/6c1d`);
   });
 
+  it("lets status report when neither the tool's nor the app's credentials may delete its probes", async () => {
+    const bucket = new MemoryBucket("status-probes");
+    const store = refusingProbeDeletes(memoryStore(bucket));
+    const h = createHarness({ store });
+    h.editEnvironments((file) => {
+      const prod = file.environments.prod ?? {};
+      prod.app = { ...(prod.app ?? {}), credentials: { accessKeyId: { env: "OPS_ACCESS_KEY" }, secretAccessKey: { env: "OPS_SECRET_KEY" } } };
+    });
+    try {
+      await h.app.start();
+      await h.app.seed();
+      const report = await h.run(["status", "--json"]);
+      expect(report.code, report.stderr).toBe(0);
+      expect(report.json).toMatchObject({ protectedFromApp: "yes", problems: [] });
+      const warnings = report.stderr.split("\n").filter((line) => line.startsWith("warning: "));
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("backup prune");
+      expect([...bucket.objects.keys()].filter(isProbe)).toHaveLength(2);
+    } finally {
+      await h.dispose();
+    }
+  });
+
   it("lets a deploy promote, start and verify the release", async () => {
     const bucket = new MemoryBucket("clock-deploy");
     const h = createUpdateHarness({ store: refusingProbeDeletes(memoryStore(bucket)), from: { runtime: "6.0.0" } });

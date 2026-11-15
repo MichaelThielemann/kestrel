@@ -1035,8 +1035,8 @@ Net changes since 5.8.2.
   that never reach any output (lines for a person are masked; the documents the tool stores and its `--json`
   output hold no credential value and mask only the free text of error messages, so a credential that is part
   of a fixed text, such as the access key `kestrel`, leaves every schema, key and name in them intact), a
-  journal and lock trace in the backup location, a clock measurement whose probe object a key without delete
-  rights leaves behind with a warning instead of failing (`backup prune` removes probes older than an hour where
+  journal and lock trace in the backup location, a clock measurement and a protection probe of `status` whose
+  probe object a key without delete rights leaves behind with a warning instead of failing (`backup prune` removes probes older than an hour where
   its credentials may delete them and leaves the others with a warning, still pruning the backups that are due;
   `docs/operations.md` lists the permissions per prefix), and `writeBundle()`
   for a self-contained runner in a deploy artifact that carries the target adapters it needs.

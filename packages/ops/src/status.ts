@@ -3,10 +3,12 @@ import { runtimeVersion, type OpsContext } from "./context.ts";
 import { environmentProblems } from "./environments.ts";
 import { listRuns, openRuns, type RunSummary } from "./journal.ts";
 import { keys } from "./layout.ts";
+import { Interrupted } from "./interrupt.ts";
 import { heldLocks, type HeldLock } from "./lock.ts";
+import type { Output } from "./output.ts";
 import { unfinishedMessage, unfinishedPlacements } from "./placements.ts";
 import { listGenerations } from "./replica.ts";
-import { appClock } from "./serverTime.ts";
+import { appClock, leftoverProbe } from "./serverTime.ts";
 import type { ObjectStore } from "./store.ts";
 import type { TargetFacts, TargetStatus } from "./target.ts";
 
@@ -34,8 +36,13 @@ const isAccessDenied = (cause: unknown): boolean => {
   return name === "AccessDenied" || status === 403;
 };
 
-/** Writes a probe with the tool's credentials and tries to delete it with the app's: only an access-denied answer proves the backups are out of the app's reach. */
-export async function probeProtection(tool: ObjectStore, app: ObjectStore | null, location: string, runId: string): Promise<Protection> {
+/**
+ * Writes a probe with the tool's credentials and tries to delete it with the app's: only an access-denied answer
+ * proves the backups are out of the app's reach. The tool's credentials delete the probe afterwards; a delete that
+ * fails does not change the result and is warned about on `out` once per output, since `backup prune` removes stale
+ * probes.
+ */
+export async function probeProtection(tool: ObjectStore, app: ObjectStore | null, location: string, runId: string, out?: Output): Promise<Protection> {
   if (app === null) return "unknown";
   const key = location + keys.probe(runId);
   await tool.put(key, new TextEncoder().encode("probe"), { contentType: "text/plain" });
@@ -45,7 +52,10 @@ export async function probeProtection(tool: ObjectStore, app: ObjectStore | null
   } catch (cause) {
     return isAccessDenied(cause) ? "yes" : "unknown";
   } finally {
-    await tool.delete(key);
+    await tool.delete(key).catch((cause: unknown) => {
+      if (cause instanceof Interrupted) throw cause;
+      leftoverProbe(out, key, "protection");
+    });
   }
 }
 
@@ -58,7 +68,7 @@ export async function status(ctx: OpsContext, appCredentialStore: ObjectStore | 
   const newest = gens.at(-1) ?? null;
   const clock = await appClock(ctx);
   const problems = environmentProblems(ctx.env);
-  const protectedFromApp = await probeProtection(ctx.backups, appCredentialStore, ctx.location, ctx.runId);
+  const protectedFromApp = await probeProtection(ctx.backups, appCredentialStore, ctx.location, ctx.runId, ctx.out);
   if (protectedFromApp === "no") problems.push("the app's credentials can delete backups");
   const unfinished = (await unfinishedPlacements(ctx, gens)).at(-1);
   if (unfinished !== undefined) problems.push(unfinishedMessage(unfinished));
