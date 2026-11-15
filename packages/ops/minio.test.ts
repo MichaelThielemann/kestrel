@@ -4,6 +4,7 @@ import { backupRestoreRoundTrip } from "./src/scenario.fixture.ts";
 import { s3Store } from "./src/s3Store.ts";
 import { serverClock } from "./src/serverTime.ts";
 import { PreconditionFailed } from "./src/store.ts";
+import { updateEndToEnd } from "./src/update/endToEnd.fixture.ts";
 
 const endpoint = process.env.KESTREL_S3_ENDPOINT;
 
@@ -51,5 +52,20 @@ describe.skipIf(!endpoint)("kestrel-ops against MinIO", () => {
     } finally {
       store.close();
     }
+  });
+});
+
+describe.skipIf(!endpoint)("an update run of an app on the stub Cloud Foundry platform against MinIO", () => {
+  updateEndToEnd(() => {
+    const store = s3Store({
+      bucket: process.env.KESTREL_S3_BUCKET ?? "kestrel-test",
+      prefix: `ops-update-e2e/${Date.now()}-${randomBytes(4).toString("hex")}/`,
+      endpoint,
+      region: "us-east-1",
+      forcePathStyle: true,
+      accessKeyId: process.env.KESTREL_S3_ACCESS_KEY,
+      secretAccessKey: process.env.KESTREL_S3_SECRET_KEY,
+    });
+    return { store, close: () => store.close() };
   });
 });

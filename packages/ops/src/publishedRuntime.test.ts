@@ -7,6 +7,8 @@ import { MemoryBucket, memoryStore } from "./memoryStore.ts";
 import { PUBLISHED_RUNTIME_ENV, PublishedRuntimeApp, loadPublishedReplication } from "./publishedRuntime.fixture.ts";
 import { listGenerations } from "./replica.ts";
 import { allRows, copyFixtureDatabase, fixture, FIXTURE_LOCATION, FIXTURE_REPLICA, fixtureProject, loadFixtureBlobs } from "./upgradeFixture.fixture.ts";
+import { CloudFoundryRun, killAfterPut, type KilledStore } from "./update/cloudFoundryRun.fixture.ts";
+import { UPDATE_EXIT } from "./update/types.ts";
 
 const runtimeDir = process.env[PUBLISHED_RUNTIME_ENV];
 
@@ -72,4 +74,59 @@ describe.skipIf(runtimeDir === undefined)("the fixture on the published replicat
     expect(app.restoredFrom).toBe(own);
     expect(withoutSessions(allRows(app.file))).toEqual(withoutSessions(allRows(backedUp)));
   }, 30_000);
+});
+
+describe.skipIf(runtimeDir === undefined)("an update hop from the fixture with the old release on the published replication package", () => {
+  let instances: PublishedRuntimeApp[];
+  let run: CloudFoundryRun;
+
+  beforeEach(async () => {
+    instances = [];
+    const published = await loadPublishedReplication(runtimeDir ?? "");
+    const store = memoryStore(new MemoryBucket("published-update"));
+    run = await CloudFoundryRun.create(store, { version: fixture.version, runtime: fixture.version, renders: false }, {
+      fixture: true,
+      instance: (release) => {
+        if (release.version !== fixture.version) return null;
+        const instance = new PublishedRuntimeApp(store, published);
+        instances.push(instance);
+        return instance;
+      },
+    });
+  });
+  afterEach(async () => {
+    await run.dispose();
+    for (const instance of instances) instance.dispose();
+  });
+
+  const expectCutoverStateOnThePublishedRelease = async (runId: string): Promise<void> => {
+    const ended = await run.run(runId);
+    expect(ended.state).toBe("rolled-back");
+    expect(run.current().version).toBe(fixture.version);
+    expect(run.instance).not.toBeNull();
+    expect(run.liveRows()).toEqual(await run.backupRows(ended.cutoverBackup ?? ""));
+    expect(run.starts.filter((start) => start.version === fixture.version).map((start) => start.origin)).toEqual([null, "restore"]);
+    expect(run.violations).toEqual([]);
+    expect(ended.records.find((r) => r.step === "rollback-verify" && r.state === "done")?.data).toMatchObject({ provenance: "marker" });
+  };
+
+  it("rolls a failed verification back: the published release starts only on the cutover state promoted again, which its first snapshot proves", async () => {
+    run.addRelease({ version: "6.0.0", modules: true, ready: "not-ready" });
+    expect((await run.update(["prepare"])).code).toBe(UPDATE_EXIT.done);
+    const deployed = await run.update(["deploy"]);
+    expect(deployed.code, deployed.stderr).toBe(UPDATE_EXIT.rolledBack);
+    await expectCutoverStateOnThePublishedRelease(String(deployed.json.runId));
+  }, 300_000);
+
+  it("aborts a deploy killed after the promotion by rolling back before the published release starts again", async () => {
+    run.addRelease({ version: "6.0.0", modules: true });
+    expect((await run.update(["prepare"])).code).toBe(UPDATE_EXIT.done);
+    const seen: { killed?: KilledStore } = {};
+    const deployed = await run.update(["deploy"], { store: (store) => (seen.killed = killAfterPut(store, (key) => key.endsWith("-promote-done.json"))).store });
+    expect(seen.killed?.killed).toBe(true);
+    expect(run.instance).toBeNull();
+    const aborted = await run.update(["abort", "--break-lock"], { answers: { "break-lock": "accept" } });
+    expect(aborted.code, aborted.stderr).toBe(UPDATE_EXIT.done);
+    await expectCutoverStateOnThePublishedRelease(String(deployed.json.runId));
+  }, 300_000);
 });
