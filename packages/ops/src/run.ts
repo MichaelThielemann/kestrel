@@ -1,9 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createBackup, listBackups, prune, unpin, verifyBackup } from "./backup.ts";
+import { projectFacts } from "./bundle.ts";
 import { messageOf, type OpsContext } from "./context.ts";
 import { resolveCredential, type CommandRunner } from "./credentials.ts";
 import { ENVIRONMENTS_FILE, environmentProblems, loadEnvironments, type Environment, type StorageConfig } from "./environments.ts";
@@ -12,18 +13,21 @@ import { Journal } from "./journal.ts";
 import { Interrupt, interruptible, type SignalSource } from "./interrupt.ts";
 import { hex, parseBackupId, parseJson, type BackupKind } from "./layout.ts";
 import { acquireLock, breakLocks, type Lock } from "./lock.ts";
-import { createOutput } from "./output.ts";
+import { createOutput, type Output } from "./output.ts";
 import { packageDir, packageEntry } from "./packages.ts";
 import type { Prompt } from "./questions.ts";
 import { Redactor } from "./redact.ts";
 import type { PollOptions } from "./replica.ts";
 import { restoreBackup, restoreToLocal } from "./restore.ts";
 import { s3Store } from "./s3Store.ts";
-import { sha256File } from "./sqlite.ts";
 import { status } from "./status.ts";
 import type { ObjectStore } from "./store.ts";
 import { localTarget, type TargetFactory } from "./target.ts";
-import { createWorkspace, stateDir } from "./workspace.ts";
+import type { UpdateCommands } from "./update/command.ts";
+import type { HostFacts, UpdateSteps } from "./update/types.ts";
+import { createWorkspace, stateDir, type Workspace } from "./workspace.ts";
+
+export { runUpdate, UPDATE_USAGE } from "./update/command.ts";
 
 /** Builds an object store from a storage block with resolved credentials; tests replace it. */
 export type StoreFactory = (config: StorageConfig, credentials: { accessKeyId: string; secretAccessKey: string } | null, role: "tool" | "app") => ObjectStore;
@@ -52,6 +56,14 @@ export interface RunOptions {
   project?: { versions: Record<string, string>; lockfileSha256: string | null };
   /** Where SIGINT and SIGTERM arrive while a writing command runs. Default: `process`. */
   signals?: SignalSource;
+  /** The directory `update.release.dir` is relative to; a bundle passes the directory that holds it. Default: {@link RunOptions.cwd}. */
+  releaseRoot?: string;
+  /** Facts the host project contributes to an update, as `bundle.json` carries them. Default: none. */
+  host?: HostFacts;
+  /** Steps of an update that replace the real ones; for tests of one phase. */
+  updateSteps?: Partial<UpdateSteps>;
+  /** Update commands that replace the real ones; for tests of the command line. */
+  updateCommands?: Partial<UpdateCommands>;
 }
 
 /** The usage text of the commands {@link runOps} understands. */
@@ -67,20 +79,24 @@ common options: --env <name>, --json, --yes, --answers <file>, --keep (keep the 
   --break-lock (release the lock of a run that ended without releasing it)
 exit codes: 0 done, 1 a check failed or a step was refused, 2 usage or configuration error`;
 
-interface Parsed {
+/** A command line split into operands and flags. */
+export interface ParsedArgs {
   positional: string[];
   flags: Map<string, string | true>;
 }
 
+type Parsed = ParsedArgs;
+
 const VALUE_FLAGS = new Set(["--env", "--kind", "--backup", "--to", "--answers"]);
 
-function parse(argv: readonly string[]): Parsed {
+/** Splits `argv` into operands and flags; a flag in `valueFlags` takes the next argument as its value (exit 2 without one). */
+export function parseArgs(argv: readonly string[], valueFlags: ReadonlySet<string>): ParsedArgs {
   const positional: string[] = [];
   const flags = new Map<string, string | true>();
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] ?? "";
     if (!arg.startsWith("--")) positional.push(arg);
-    else if (VALUE_FLAGS.has(arg)) {
+    else if (valueFlags.has(arg)) {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith("--")) throw new OpsError(`${arg} needs a value`, 2, arg);
       flags.set(arg, value);
@@ -89,6 +105,8 @@ function parse(argv: readonly string[]): Parsed {
   }
   return { positional, flags };
 }
+
+const parse = (argv: readonly string[]): Parsed => parseArgs(argv, VALUE_FLAGS);
 
 const KNOWN_FLAGS = new Set([...VALUE_FLAGS, "--freeze", "--dry-run", "--no-safety-backup", "--latest", "--with-media", "--keep-sessions", "--json", "--yes", "--keep", "--break-lock"]);
 
@@ -140,10 +158,10 @@ function readCommand(parsed: Parsed): Command {
   const operands = name === "status" || name === "restore" ? parsed.positional.slice(1) : rest;
   const expected = name === "backup-verify" ? 1 : 0;
   if (name !== "restore-local" && operands.length !== expected) throw usage(expected === 1 ? "backup verify needs one backup id" : `${label} takes no argument ${operands.join(" ")}`);
-  const backup = value(parsed, "--backup");
+  const backup = flagValue(parsed, "--backup");
   switch (name) {
     case "backup-create": {
-      const kind = value(parsed, "--kind") ?? "manual";
+      const kind = flagValue(parsed, "--kind") ?? "manual";
       if (kind !== "manual" && kind !== "scheduled" && kind !== "cutover") throw usage("--kind must be manual, scheduled or cutover", "--kind");
       return { name, kind, freeze: parsed.flags.has("--freeze") };
     }
@@ -155,7 +173,7 @@ function readCommand(parsed: Parsed): Command {
       if (backup === null) throw usage("restore needs --backup <id> or --to local <dir>", "--backup");
       return { name, backupId: backupIdArgument(backup, "--backup"), noSafetyBackup: parsed.flags.has("--no-safety-backup") };
     case "restore-local": {
-      if (value(parsed, "--to") !== "local") throw usage("--to takes local <dir>", "--to");
+      if (flagValue(parsed, "--to") !== "local") throw usage("--to takes local <dir>", "--to");
       if (sub === undefined || rest.length > 0) throw usage("restore --to local needs one directory", "--to");
       const latest = parsed.flags.has("--latest");
       if ((backup === null) === !latest) throw usage("restore --to local needs --backup <id> or --latest", "--backup");
@@ -168,45 +186,16 @@ function readCommand(parsed: Parsed): Command {
   }
 }
 
-function value(parsed: Parsed, flag: string): string | null {
+/** The value of `flag`, or null when it was not given. */
+export function flagValue(parsed: ParsedArgs, flag: string): string | null {
   const v = parsed.flags.get(flag);
   return typeof v === "string" ? v : null;
 }
 
-function toolVersion(): string {
+/** The version of this kestrel-ops. */
+export function toolVersion(): string {
   const manifest = fileURLToPath(new URL("../package.json", import.meta.url));
   return boundaryCast<{ version: string }>(JSON.parse(readFileSync(manifest, "utf8")), "json").version;
-}
-
-function readJsonFile(file: string): unknown {
-  try {
-    return JSON.parse(readFileSync(file, "utf8"));
-  } catch (cause) {
-    throw new OpsError(`${file} is not valid JSON: ${messageOf(cause)}`, 2, file);
-  }
-}
-
-function installedVersion(file: string): string | null {
-  try {
-    const version: unknown = Reflect.get(Object(readJsonFile(file)), "version");
-    return typeof version === "string" ? version : null;
-  } catch {
-    return null;
-  }
-}
-
-function projectFacts(root: string): { versions: Record<string, string>; lockfileSha256: string | null } {
-  const versions: Record<string, string> = {};
-  const manifest = join(root, "package.json");
-  if (existsSync(manifest)) {
-    const pkg = boundaryCast<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(readJsonFile(manifest), "json");
-    for (const name of Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })) {
-      const version = installedVersion(join(root, "node_modules", name, "package.json"));
-      if (version !== null) versions[name] = version;
-    }
-  }
-  const lock = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock"].map((f) => join(root, f)).find((f) => existsSync(f));
-  return { versions, lockfileSha256: lock === undefined ? null : sha256File(lock) };
 }
 
 const defaultStores: StoreFactory = (config, credentials) =>
@@ -263,6 +252,110 @@ export function terminalPrompt(signal?: AbortSignal): Prompt | undefined {
   };
 }
 
+/** Loads environment `name`, or the only one when `name` is null, from the project's environments file; exit 2 when there is none or not that one. */
+export function selectEnvironment(root: string, name: string | null): { envName: string; environment: Environment } {
+  const environments = loadEnvironments(root);
+  const names = Object.keys(environments);
+  const envName = name ?? (names.length === 1 ? (names[0] ?? "") : "");
+  const environment = environments[envName];
+  if (names.length === 0) throw new OpsError("kestrel.environments.json names no environment", 2, "kestrel.environments.json");
+  if (environment === undefined) throw new OpsError(envName === "" ? `--env is required (${names.join(", ")})` : `unknown environment ${envName} (${names.join(", ")})`, 2, "--env");
+  return { envName, environment };
+}
+
+/** What {@link openContext} builds a context from, besides {@link RunOptions}. */
+export interface ContextRequest {
+  envName: string;
+  environment: Environment;
+  root: string;
+  /** This process's run id, for the lock, the journal and the working directory. */
+  runId: string;
+  /** A writing command has its environment's prefixes checked and listens for SIGINT and SIGTERM. */
+  writing: boolean;
+  answersFile: string | null;
+  yes: boolean;
+  keep: boolean;
+  project: OpsContext["project"];
+  redactor: Redactor;
+  out: Output;
+}
+
+/** A context for one command and what the command releases when it ends. */
+export interface OpenedContext {
+  ctx: OpsContext;
+  /** The app's bucket reached with the app's own credentials, or null when the environment names none. */
+  appStore(): Promise<ObjectStore | null>;
+  /** The backup location's store without the interrupt guard, so the lock is released after a signal. */
+  lockStore: ObjectStore;
+  /** Removes the working directory unless it is kept and stops listening for signals. */
+  close(): void;
+}
+
+/**
+ * Builds the context of one command on environment `request.environment`: credentials, stores (guarded by the
+ * interrupt of a writing command), target, working directory, journal of `request.runId` and the answer source.
+ */
+export async function openContext(options: RunOptions, request: ContextRequest): Promise<OpenedContext> {
+  const { envName, environment, redactor, runId } = request;
+  const clock = options.clock ?? Date.now;
+  const env = options.env ?? process.env;
+  const problems = request.writing ? environmentProblems(environment) : [];
+  if (problems.length > 0) throw new OpsError(`${ENVIRONMENTS_FILE}: ${problems.join("; ")}`, 2, ENVIRONMENTS_FILE);
+  const interrupt = new Interrupt();
+  const stopListening = request.writing ? interrupt.listen(options.signals ?? process) : () => undefined;
+  let workspace: Workspace | null = null;
+  try {
+    const stores = options.stores ?? defaultStores;
+    const toolCredentials = await credentialsOf(environment.storage.credentials, `${envName}.storage.credentials`, redactor, env, options.runCommand);
+    const backupStorage = environment.backups.storage ?? environment.storage;
+    const backupCredentials = environment.backups.storage ? await credentialsOf(backupStorage.credentials, `${envName}.backups.storage.credentials`, redactor, env, options.runCommand) : toolCredentials;
+    const app = stores(environment.storage, toolCredentials, "tool");
+    const backups = environment.backups.storage ? stores(backupStorage, backupCredentials, "tool") : app;
+    workspace = createWorkspace(options.stateRoot ?? stateDir(env), runId, request.keep);
+    const target = await loadTarget(environment, options, request.root, clock);
+    const journal = new Journal(runId, backups, environment.backups.prefix, redactor, clock, workspace.path("journal.jsonl"));
+    const ask = options.prompt ?? terminalPrompt(interrupt.signal);
+    const prompt: Prompt | undefined = ask && ((question) => interrupt.race(ask(redactor.apply(question))));
+    const ctx: OpsContext = {
+      envName,
+      env: environment,
+      app: interruptible(app, interrupt),
+      backups: interruptible(backups, interrupt),
+      location: environment.backups.prefix,
+      target,
+      out: request.out,
+      answers: { answers: readAnswers(request.answersFile), yes: request.yes, ...(prompt ? { prompt } : {}) },
+      clock,
+      redactor,
+      workspace,
+      runId,
+      journal,
+      tool: { name: "@michaelthielemann/kestrel-ops", version: toolVersion() },
+      project: request.project,
+      poll: options.poll ?? {},
+      readyTimeoutMs: options.readyTimeoutMs ?? 300_000,
+      generationWaitMs: options.generationWaitMs ?? 90_000,
+    };
+    const opened = workspace;
+    return {
+      ctx,
+      lockStore: backups,
+      appStore: async () => {
+        const appCredentials = await credentialsOf(environment.app.credentials, `${envName}.app.credentials`, redactor, env, options.runCommand);
+        return appCredentials === null ? null : stores(backupStorage, appCredentials, "app");
+      },
+      close: () => {
+        opened.dispose();
+        stopListening();
+      },
+    };
+  } catch (error) {
+    workspace?.dispose();
+    stopListening();
+    throw error;
+  }
+}
+
 /** Runs one command line of `status`, `backup` or `restore` and returns its exit code. */
 export async function runOps(argv: readonly string[], options: RunOptions = {}): Promise<number> {
   const redactor = new Redactor();
@@ -284,61 +377,35 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
     emit("error", { ok: false, message, element: error instanceof OpsError ? (error.element ?? null) : null });
     return 2;
   }
-  const clock = options.clock ?? Date.now;
   const root = resolve(options.cwd ?? process.cwd());
-  const env = options.env ?? process.env;
   const runId = hex(6);
-  const interrupt = new Interrupt();
-  let stopListening = (): void => undefined;
+  let opened: OpenedContext | null = null;
   let ctx: OpsContext | null = null;
   let lock: Lock | null = null;
   let writes = false;
   try {
-    const environments = loadEnvironments(root);
-    const names = Object.keys(environments);
-    const envName = value(parsed, "--env") ?? (names.length === 1 ? (names[0] ?? "") : "");
-    const environment = environments[envName];
-    if (names.length === 0) throw new OpsError("kestrel.environments.json names no environment", 2, "kestrel.environments.json");
-    if (environment === undefined) throw new OpsError(envName === "" ? `--env is required (${names.join(", ")})` : `unknown environment ${envName} (${names.join(", ")})`, 2, "--env");
+    const { envName, environment } = selectEnvironment(root, flagValue(parsed, "--env"));
     const named = cmd.name === "backup-verify" ? cmd.id : cmd.name === "restore" || cmd.name === "restore-local" ? cmd.backupId : null;
     const owner = named === null ? null : parseBackupId(named)?.env;
     if (named !== null && owner !== envName) throw usage(`backup ${named} belongs to environment ${owner ?? "?"}, not ${envName}`, named);
     const name = cmd.name === "restore-local" ? "restore" : cmd.name;
     const writing = name !== "status" && name !== "backup-list";
-    const problems = writing ? environmentProblems(environment) : [];
-    if (problems.length > 0) throw new OpsError(`${ENVIRONMENTS_FILE}: ${problems.join("; ")}`, 2, ENVIRONMENTS_FILE);
-    if (writing) stopListening = interrupt.listen(options.signals ?? process);
-    const stores = options.stores ?? defaultStores;
-    const toolCredentials = await credentialsOf(environment.storage.credentials, `${envName}.storage.credentials`, redactor, env, options.runCommand);
-    const backupStorage = environment.backups.storage ?? environment.storage;
-    const backupCredentials = environment.backups.storage ? await credentialsOf(backupStorage.credentials, `${envName}.backups.storage.credentials`, redactor, env, options.runCommand) : toolCredentials;
-    const app = stores(environment.storage, toolCredentials, "tool");
-    const backups = environment.backups.storage ? stores(backupStorage, backupCredentials, "tool") : app;
-    const workspace = createWorkspace(options.stateRoot ?? stateDir(env), runId, parsed.flags.has("--keep"));
-    const target = await loadTarget(environment, options, root, clock);
-    const journal = new Journal(runId, backups, environment.backups.prefix, redactor, clock, workspace.path("journal.jsonl"));
-    const ask = options.prompt ?? terminalPrompt(interrupt.signal);
-    const prompt: Prompt | undefined = ask && ((question) => interrupt.race(ask(redactor.apply(question))));
-    ctx = {
+    opened = await openContext(options, {
       envName,
-      env: environment,
-      app: interruptible(app, interrupt),
-      backups: interruptible(backups, interrupt),
-      location: environment.backups.prefix,
-      target,
-      out,
-      answers: { answers: readAnswers(value(parsed, "--answers")), yes: parsed.flags.has("--yes"), ...(prompt ? { prompt } : {}) },
-      clock,
-      redactor,
-      workspace,
+      environment,
+      root,
       runId,
-      journal,
-      tool: { name: "@michaelthielemann/kestrel-ops", version: toolVersion() },
+      writing,
+      answersFile: flagValue(parsed, "--answers"),
+      yes: parsed.flags.has("--yes"),
+      keep: parsed.flags.has("--keep"),
       project: options.project ?? (cmd.name === "backup-create" || cmd.name === "restore" ? projectFacts(root) : { versions: {}, lockfileSha256: null }),
-      poll: options.poll ?? {},
-      readyTimeoutMs: options.readyTimeoutMs ?? 300_000,
-      generationWaitMs: options.generationWaitMs ?? 90_000,
-    };
+      redactor,
+      out,
+    });
+    ctx = opened.ctx;
+    const { journal } = ctx;
+    const appStore = (): Promise<ObjectStore | null> => opened?.appStore() ?? Promise.resolve(null);
     const finish = async (ok: boolean, data: Record<string, unknown>): Promise<void> => {
       await journal.finish(ok, data).catch((cause: unknown) => out.warn(`the end entry of the journal could not be written: ${messageOf(cause)}; the run counts as open for two hours`));
     };
@@ -346,13 +413,11 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
     if (writes) {
       await journal.record("run", "started", { command: name, env: envName });
       if (parsed.flags.has("--break-lock")) await breakLocks(ctx, runId);
-      lock = await acquireLock(backups, ctx.location, runId, name, clock);
+      lock = await acquireLock(opened.lockStore, ctx.location, runId, name, ctx.clock);
     }
     switch (cmd.name) {
       case "status": {
-        const appCredentials = await credentialsOf(environment.app.credentials, `${envName}.app.credentials`, redactor, env, options.runCommand);
-        const appStore = appCredentials === null ? null : stores(backupStorage, appCredentials, "app");
-        const report = await status(ctx, appStore);
+        const report = await status(ctx, await appStore());
         out.info(`${envName}: target ${report.target.state} (${report.target.instances} instance(s)), replica ${report.replica.newest ?? "empty"}${report.replica.sealed ? " sealed" : ""}, runtime ${report.replica.runtime ?? "unknown"}`);
         out.info(`backups: ${report.backups.length}, open runs: ${report.openRuns.length}, held locks: ${report.locks.length}, clock skew ${Math.round(report.clockSkewMs / 1000)} s, protected from the app: ${report.protectedFromApp}`);
         for (const problem of report.problems) out.warn(problem);
@@ -413,7 +478,6 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
     return opsError?.exitCode ?? 1;
   } finally {
     await lock?.release().catch(() => undefined);
-    ctx?.workspace.dispose();
-    stopListening();
+    opened?.close();
   }
 }
