@@ -105,6 +105,23 @@ describe("verifying a started release", { timeout: 20_000 }, () => {
     expect(failed(result)).toEqual(["render-started"]);
   });
 
+  it("cannot tell, instead of failing, when the store cannot be read during a check", async () => {
+    const s = await startOnPromoted();
+    const store = s.ctx.app;
+    let failures = 1;
+    s.ctx.app = {
+      ...store,
+      list: async (prefix) => {
+        if (prefix.startsWith(PREFIXES.replica) && failures-- > 0) throw new Error("connect ETIMEDOUT");
+        return store.list(prefix);
+      },
+    };
+    const result = await verify(s);
+    expect(result.verdict).toBe("unverifiable");
+    expect(result.ready).toMatchObject({ outcome: "unverifiable", reason: expect.stringContaining("connect ETIMEDOUT") as unknown });
+    expect(failed(result)).toContain("readable");
+  });
+
   it("fails on a crash event since the start, and on a release that never runs", async () => {
     const s = await startOnPromoted();
     s.h.target.crashes.push({ at: Date.now(), type: "audit.app.process.crash", reason: "out of memory" });

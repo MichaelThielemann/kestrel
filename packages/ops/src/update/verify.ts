@@ -1,4 +1,5 @@
 import { messageOf } from "../context.ts";
+import { Interrupted } from "../interrupt.ts";
 import { acknowledgement, listGenerations, type Generation } from "../replica.ts";
 import { readUpdateRun, reportOf } from "./journal.ts";
 import type { ReadyProbe } from "./target.ts";
@@ -35,11 +36,25 @@ const describeProbe = (probe: ReadyProbe): string => (probe.outcome === "unverif
  * readiness in three outcomes (ready; not-ready fails; unverifiable halts); `applied.json` of the promoted generation
  * names it and the nonce of its `origin.json`; the release's own generation, sorting after the promoted one, shows its
  * first snapshot; the newest object of that generation advances within `update.syncWindowSeconds`; a key under the
- * delivery prefix newer than the start shows that a render began within `update.renderTimeoutSeconds`. Soft checks
- * (pages and media of the delivery prefix answering) only warn.
+ * delivery prefix newer than the start shows that a render began within `update.renderTimeoutSeconds`. The soft
+ * check `pages` (the delivery prefix holds keys) only warns. When reading the store or the target throws during a
+ * check, the check `readable` fails and the verdict is `unverifiable`: a check that cannot be read halts, it does not
+ * roll back.
  */
 export async function verifyRelease(ctx: UpdateContext, input: VerifyInput): Promise<VerifyResult> {
   const checks: VerifyCheck[] = [];
+  try {
+    return await checkRelease(ctx, input, checks);
+  } catch (error) {
+    if (error instanceof Interrupted) throw error;
+    const reason = `a check could not read the store or the target: ${messageOf(error)}`;
+    checks.push(check("readable", false, reason));
+    ctx.out.error(`verify readable: ${reason}`);
+    return { verdict: "unverifiable", checks, ready: { outcome: "unverifiable", status: null, reason }, ownGeneration: null };
+  }
+}
+
+async function checkRelease(ctx: UpdateContext, input: VerifyInput, checks: VerifyCheck[]): Promise<VerifyResult> {
   const status = await ctx.target.status();
   const crashes = await ctx.target.crashEvents(input.startedAt);
   checks.push(check("instance", status.state === "started" && status.instances > 0, `${status.state} with ${status.instances} running instance(s)`));

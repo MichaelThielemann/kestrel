@@ -204,13 +204,14 @@ export type RollbackReason = { kind: "automatic"; failure: string } | { kind: "r
 /**
  * The verdict of verification. `passed`: every hard check held. `failed`: a hard check failed (no running instance,
  * crash events, readiness `not-ready`, no acknowledgement of the promoted generation, no first snapshot, a sync time
- * that does not advance, no render started), which rolls back. `unverifiable`: readiness was `unverifiable`, which halts.
+ * that does not advance, no render started), which rolls back. `unverifiable`: readiness was `unverifiable`, or a
+ * check could not read the store or the target, which halts.
  */
 export type VerifyVerdict = "passed" | "failed" | "unverifiable";
 
 /** One hard or soft check of verification. */
 export interface VerifyCheck {
-  name: "instance" | "crashes" | "ready" | "provenance" | "first-snapshot" | "sync-advances" | "render-started" | "pages" | "media";
+  name: "instance" | "crashes" | "ready" | "provenance" | "first-snapshot" | "sync-advances" | "render-started" | "pages" | "media" | "readable";
   hard: boolean;
   ok: boolean;
   detail: string;

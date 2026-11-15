@@ -13,7 +13,7 @@ import { checkGate } from "./gate.ts";
 import { continueJournal, listUpdateRuns, readUpdateRun } from "./journal.ts";
 import { UPDATE_PIN_PREFIX, updateKeys } from "./layout.ts";
 import { computePlan, planHash, replicaCopy } from "./plan.ts";
-import { UPDATE_EXIT, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateRun, type VersionSet } from "./types.ts";
+import { UPDATE_EXIT, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateRun, type VerifyResult, type VersionSet } from "./types.ts";
 import { concludeVerify, outcomeOf } from "./verify.ts";
 
 type Entry = "seal" | "cutover-backup" | "migrate" | "swap" | "start" | "verify";
@@ -147,6 +147,7 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
   const from = order.indexOf(entry);
   const at = (e: Entry): boolean => order.indexOf(e) >= from;
   let step: string = entry;
+  let result: VerifyResult;
   try {
     if (at("seal")) {
       step = "seal";
@@ -207,8 +208,7 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     }
     step = "verify";
     await record(ctx, "verify", "started");
-    const result = await ctx.steps.verify(ctx, { promoted: { generation: promoted.generation, nonce: promoted.nonce }, startedAt: flow.startedAt ?? ctx.clock() });
-    return await concludeVerify(ctx, "deploy", result, (run) => known(run, flow));
+    result = await ctx.steps.verify(ctx, { promoted: { generation: promoted.generation, nonce: promoted.nonce }, startedAt: flow.startedAt ?? ctx.clock() });
   } catch (error) {
     if (error instanceof Interrupted) throw new Interrupted(error.signal, interruptedAfterStop(ctx, step));
     const failure = `${step}: ${messageOf(error)}`;
@@ -221,6 +221,7 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     }
     return outcomeOf(ctx, UPDATE_EXIT.rolledBack, flow.cutoverBackup === null ? `the deploy failed at ${failure} before its cutover backup; nothing was promoted, and the previous release runs again on the unchanged replica` : `the deploy failed at ${failure}; rolled back to the cutover state`);
   }
+  return concludeVerify(ctx, "deploy", result, (run) => known(run, flow));
 }
 
 const doneStep = (run: UpdateRun, step: string): boolean => run.records.some((r) => r.phase === "deploy" && r.step === step && r.state === "done");

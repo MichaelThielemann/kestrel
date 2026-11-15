@@ -212,6 +212,38 @@ describe("deploying 5.8.1 to 6.0 on the stand-in target", { timeout: 30_000 }, (
     expect((await s.h.target.status()).state).toBe("started");
   });
 
+  it("halts with exit 1 and keeps the new release running when the store cannot be read during verification", async () => {
+    const s = await scenario();
+    const store = s.ctx.app;
+    let armed = false;
+    s.ctx.app = {
+      ...store,
+      list: async (prefix) => {
+        if (armed && prefix.startsWith(PREFIXES.replica)) {
+          armed = false;
+          throw new Error("connect ETIMEDOUT");
+        }
+        return store.list(prefix);
+      },
+    };
+    const steps = s.ctx.steps;
+    s.ctx.steps = {
+      ...steps,
+      verify: async (ctx, input) => {
+        armed = true;
+        return steps.verify(ctx, input);
+      },
+    };
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode, outcome.message).toBe(1);
+    expect(outcome.state).toBe("halted");
+    expect(outcome.message).toContain("connect ETIMEDOUT");
+    expect(s.steps.rollback).not.toHaveBeenCalled();
+    expect(s.steps.retire).not.toHaveBeenCalled();
+    expect((await s.h.target.status()).state).toBe("started");
+    expect(s.h.target.release.runtime).toBe("6.0.0");
+  });
+
   it("refuses every later deploy while a halted run is open, also after the gate refused one", async () => {
     const s = await scenario({ to: { ready: "forbidden" } });
     const halted = await deploy(s.ctx);
