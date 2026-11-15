@@ -1,6 +1,6 @@
 import { messageOf, recordQuietly } from "../context.ts";
 import { Interrupted } from "../interrupt.ts";
-import { acknowledgement, listGenerations, type Generation } from "../replica.ts";
+import { listGenerations, readAcknowledgement, type Generation } from "../replica.ts";
 import { readManifest } from "../backup.ts";
 import { readUpdateRun, reportOf } from "./journal.ts";
 import { guardRollback, wroteSinceStart } from "./rollback.ts";
@@ -37,8 +37,9 @@ const describeProbe = (probe: ReadyProbe): string => (probe.outcome === "unverif
 /**
  * Verifies a started release. Hard checks: an instance runs and the platform recorded no crash since the start, both
  * read again once every wait below ended, so a crash inside the windows fails the verification;
- * readiness in three outcomes (ready; not-ready fails; unverifiable halts); `applied.json` of the promoted generation
- * names it and the nonce of its `origin.json`; the release's own generation, sorting after the promoted one, shows its
+ * readiness in three outcomes (ready; not-ready fails; unverifiable halts); within `update.syncWindowSeconds`
+ * `applied.json` of the promoted generation names it and the nonce of its `origin.json`, since a runtime writes it at
+ * the first sync after the start; the release's own generation, sorting after the promoted one, shows its
  * first snapshot; within `update.syncWindowSeconds` a WAL segment written after that snapshot, or a later generation
  * with a snapshot, shows that the sync advances (`origin.json`, `applied.json` and `sealed.json` do not count); a key under the
  * delivery prefix newer than the start shows that a render began within `update.renderTimeoutSeconds`. The soft
@@ -77,8 +78,8 @@ async function checkRelease(ctx: UpdateContext, input: VerifyInput, checks: Veri
   if (running && ready.outcome !== "not-ready") {
     const prefix = ctx.env.app.replicaPrefix;
     const promoted = input.promoted.generation;
-    const ack = await acknowledgement(ctx.app, prefix, { generation: promoted, nonce: input.promoted.nonce, at: 0, sha256: "", bytes: 0 }, ctx.poll);
-    checks.push(check("provenance", ack === "applied", ack === "applied" ? `applied.json of ${promoted} names its nonce` : `no applied.json of ${promoted} names the nonce of its origin.json; the release did not restore the promoted generation`));
+    const ack = await until(ctx, ctx.update.syncWindowSeconds, () => readAcknowledgement(ctx.app, prefix, input.promoted), (read) => read === "applied");
+    checks.push(check("provenance", ack === "applied", ack === "applied" ? `applied.json of ${promoted} names its nonce` : `no applied.json of ${promoted} names the nonce of its origin.json within ${ctx.update.syncWindowSeconds} s; the release did not restore the promoted generation`));
     const gens = await until(ctx, ctx.update.syncWindowSeconds, () => listGenerations(ctx.app, prefix), (g) => own(g, promoted) !== undefined);
     const first = own(gens, promoted);
     ownGeneration = first?.name ?? null;

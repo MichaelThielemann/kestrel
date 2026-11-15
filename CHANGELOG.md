@@ -1804,7 +1804,8 @@ Net changes since 5.8.2.
   a verified cutover backup that records the running versions, pinned until `update cleanup` for a change of the
   major, unknown running versions or a pending storage migration, so no migration starts without one; migrates a copy
   of its database; promotes it, swaps the code and starts the release as one step; and verifies it with three
-  outcomes, reading the instance and the crash events again once its waits ended: passed, failed (an automatic
+  outcomes, waiting up to `update.syncWindowSeconds` for the `applied.json` the release writes at its first sync
+  and reading the instance and the crash events again once its waits ended: passed, failed (an automatic
   rollback to the cutover state, exit 3, or exit 1 when no previous release was left to start) or unverifiable (403, no
   connection, or a check that cannot read the store or the platform: the run halts with exit 1). Only after a
   passed verification are the older releases of the app deleted, the replaced one's code saved into the backup
@@ -1815,7 +1816,8 @@ Net changes since 5.8.2.
   unchanged replica. A rollback promotes the cutover database again before any old release starts, copies back
   originals, replaces the delivery prefix and lists it again, restores the recorded configuration verbatim, starts
   the previous release and proves through `applied.json` or a marker row in its first snapshot (table
-  `kestrel_ops_provenance`) that it restored the cutover state; it reports the derived keys that differ from the
+  `kestrel_ops_provenance`), within `update.syncWindowSeconds`, that it restored the cutover state; it reports the
+  derived keys that differ from the
   cutover backup and releases the pin on it. `update rollback`, and `update abort` of a run whose new release
   started, stop the app first and take a verified safety backup of the stopped state; after `accept`, or once the
   stopped state holds what the new release wrote since its start, they show what would be lost and need the

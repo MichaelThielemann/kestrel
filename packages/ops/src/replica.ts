@@ -337,17 +337,21 @@ export async function promote(input: PromoteInput): Promise<Promoted> {
 /** Whether a runtime acknowledged a promoted generation: `applied` (an `applied.json` with its nonce), or `unconfirmed`. */
 export type Acknowledgement = "applied" | "unconfirmed";
 
+/** Reads the `applied.json` of a promoted generation once: `applied` when it names the generation and the nonce of its `origin.json`. */
+export async function readAcknowledgement(store: ObjectStore, prefix: string, promoted: Pick<Promoted, "generation" | "nonce">): Promise<Acknowledgement> {
+  const data = await store.get(markerKey(prefix, promoted.generation, "applied"));
+  const value: unknown = data === null ? null : parseJsonOrNull(data);
+  return isApplied(value) && value.generation === promoted.generation && value.nonce === promoted.nonce ? "applied" : "unconfirmed";
+}
+
 /**
  * Reads the `applied.json` a runtime writes into a promoted generation once it reported the restore, until it names
  * the generation and the nonce of its `origin.json`, or `attempts` reads found none.
  */
 export async function acknowledgement(store: ObjectStore, prefix: string, promoted: Promoted, poll: PollOptions = {}): Promise<Acknowledgement> {
   const sleep = poll.sleep ?? defaultSleep;
-  const key = markerKey(prefix, promoted.generation, "applied");
   for (let i = 0; i < (poll.attempts ?? 30); i++) {
-    const data = await store.get(key);
-    const value: unknown = data === null ? null : parseJsonOrNull(data);
-    if (isApplied(value) && value.generation === promoted.generation && value.nonce === promoted.nonce) return "applied";
+    if ((await readAcknowledgement(store, prefix, promoted)) === "applied") return "applied";
     await sleep(poll.delayMs ?? 1000);
   }
   return "unconfirmed";

@@ -5,7 +5,7 @@ import { acceptSeal, createBackup, readManifest, readSeal } from "../backup.ts";
 import { messageOf, recordQuietly, startTarget, stopTarget } from "../context.ts";
 import { OpsError } from "../errors.ts";
 import { fromJsonl, hex, keys, parseJsonOrNull, type BlobEntry, type DerivedEntry, type Manifest, type SealState, type SiteEntry } from "../layout.ts";
-import { acknowledgement, buildDatabase, completeGeneration, listGenerations, markerKey, promote, stableGenerations, type Promoted } from "../replica.ts";
+import { buildDatabase, completeGeneration, listGenerations, markerKey, promote, readAcknowledgement, stableGenerations, type Promoted } from "../replica.ts";
 import { downloadDb, restoreDelivery, restoreOriginals } from "../restore.ts";
 import { appClock, type ServerClock } from "../serverTime.ts";
 import { deleteSessions, hasAccessChanges, lossReport, sha256, type LossReport } from "../sqlite.ts";
@@ -185,14 +185,16 @@ async function verifyPrevious(ctx: UpdateContext, promoted: Promoted, marker: st
   const ready = await ctx.target.probeReady();
   if (ready.outcome !== "ready") throw new OpsError(`the previous release started but its readiness answers ${ready.outcome}${ready.status === null ? "" : ` (${ready.status})`}`, 1, "target");
   const sleep = sleepOf(ctx);
-  for (let i = 0; i < (ctx.poll.attempts ?? 30); i++) {
-    if ((await acknowledgement(ctx.app, ctx.env.app.replicaPrefix, promoted, { ...ctx.poll, attempts: 1 })) === "applied") return { ready: ready.status, provenance: "applied", generation: promoted.generation };
+  const deadline = ctx.clock() + ctx.update.syncWindowSeconds * 1000;
+  for (;;) {
+    if ((await readAcknowledgement(ctx.app, ctx.env.app.replicaPrefix, promoted)) === "applied") return { ready: ready.status, provenance: "applied", generation: promoted.generation };
     const own = await firstSnapshotMarker(ctx, promoted.generation, marker);
     if (own?.holds === true) return { ready: ready.status, provenance: "marker", generation: promoted.generation, ownGeneration: own.generation };
     if (own !== null) throw new OpsError(`the first snapshot the previous release wrote after ${promoted.generation} does not hold the marker row of this rollback, and no applied.json acknowledges the generation: it did not start from the promoted cutover state`, 1, ctx.env.app.replicaPrefix);
+    if (ctx.clock() >= deadline) break;
     await sleep(ctx.poll.delayMs ?? 1000);
   }
-  throw new OpsError(`the previous release neither acknowledged generation ${promoted.generation} in applied.json nor wrote a first snapshot after it`, 1, ctx.env.app.replicaPrefix);
+  throw new OpsError(`the previous release neither acknowledged generation ${promoted.generation} in applied.json nor wrote a first snapshot after it within ${ctx.update.syncWindowSeconds} s`, 1, ctx.env.app.replicaPrefix);
 }
 
 async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Manifest): Promise<RollbackResult> {

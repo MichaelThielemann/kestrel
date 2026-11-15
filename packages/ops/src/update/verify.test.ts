@@ -110,6 +110,24 @@ describe("verifying a started release", { timeout: 20_000 }, () => {
     expect(failed(result)).toEqual(["ready"]);
   });
 
+  it("waits within the sync window for an applied.json the runtime writes only at a later sync, after the store's poll attempts ran out", async () => {
+    const s = await startOnPromoted();
+    const key = markerKey(PREFIXES.replica, s.promoted.generation, "applied");
+    const applied = await s.h.store.get(key);
+    if (applied === null) throw new Error("the release did not acknowledge the promoted generation");
+    await s.h.store.delete(key);
+    s.ctx.poll = { delayMs: 5, attempts: 2 };
+    s.ctx.update = { ...s.ctx.update, syncWindowSeconds: 3 };
+    const late = setTimeout(() => void s.h.store.put(key, applied), 400);
+    try {
+      const result = await verify(s);
+      expect(failed(result)).toEqual([]);
+      expect(result.verdict).toBe("passed");
+    } finally {
+      clearTimeout(late);
+    }
+  });
+
   it("fails when applied.json of the promoted generation is missing", async () => {
     const s = await startOnPromoted();
     await s.h.store.delete(markerKey(PREFIXES.replica, s.promoted.generation, "applied"));

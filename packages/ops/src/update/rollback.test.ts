@@ -223,6 +223,26 @@ describe("rolling an update back", () => {
 });
 
 describe("update rollback", () => {
+  it("waits within the sync window for the first sync of the previous release to prove the cutover state", async () => {
+    const s = await scenario({ update: { syncWindowSeconds: 3 } });
+    const deployed = await deployUntil(s, "verify");
+    const run = await runOf(s, deployed.runId);
+    const { ctx } = await continueRun(s, deployed.runId, "update rollback");
+    const inner = ctx.app;
+    let hiddenUntil = 0;
+    const start = s.h.target.start.bind(s.h.target);
+    s.h.target.start = async () => {
+      await start();
+      hiddenUntil = Date.now() + 600;
+    };
+    const hidden = (key: string): boolean => Date.now() < hiddenUntil && (key.endsWith("/applied.json") || /\/gen\/\d{8}T\d{6}Z-[0-9a-f]+\//.test(key));
+    ctx.app = { ...inner, get: async (key) => (hidden(key) ? null : inner.get(key)), list: async (prefix) => (await inner.list(prefix)).filter((info) => !hidden(info.key)) };
+    ctx.poll = { ...ctx.poll, attempts: 3 };
+    const result = await rollback(ctx, run, { kind: "requested" });
+    expect(result.ended).toBe("previous-release");
+    expect(hiddenUntil).toBeGreaterThan(0);
+  });
+
   it("restores a recorded plain value verbatim, also one that reads like the redaction mask", async () => {
     const s = await scenario();
     const deployed = await deployUntil(s, "verify");

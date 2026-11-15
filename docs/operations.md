@@ -174,10 +174,12 @@ the next command.
 
 The hard checks: an instance runs and the platform recorded no crash since the start, both read once more after
 every wait below ended, so a crash while verification waits fails it; the readiness path
-answers 200 (503, a body with `ready: false` or another 5xx answer fails); `applied.json` of the promoted
-generation names it and the nonce of its `origin.json`; the release's own generation, sorting after the
-promoted one, shows its first snapshot, and within `update.syncWindowSeconds` a WAL segment of that generation
-or a later snapshot shows that its sync advances (`origin.json`, `applied.json` and `sealed.json` do not count); a
+answers 200 (503, a body with `ready: false` or another 5xx answer fails); within `update.syncWindowSeconds`
+`applied.json` of the promoted generation names it and the nonce of its `origin.json` (the release writes it at its
+first sync after the start, so the window has to cover the interval at which the project runs `replication.sync`);
+the release's own generation, sorting after the promoted one, shows its first snapshot, and within
+`update.syncWindowSeconds` a WAL segment of that generation or a later snapshot shows that its sync advances
+(`origin.json`, `applied.json` and `sealed.json` do not count); a
 key of the delivery prefix newer than the start shows within `update.renderTimeoutSeconds` that rendering began.
 A delivery prefix without any key only warns. No page or medium is fetched over the network.
 
@@ -200,9 +202,10 @@ unchanged replica; it refuses while the app's code is the staged release or whil
 placed by an update and no release acknowledged it, and `update resume` rolls back once the journal lists the
 cutover backup.
 
-The verification after a rollback proves that the started release restored the promoted cutover state: either
-its `applied.json` names the generation and its nonce, or the first snapshot it wrote after that generation holds
-the marker row the rollback put into the promoted database. Releases before 6 write no `applied.json`, so the
+The verification after a rollback proves within `update.syncWindowSeconds` that the started release restored the
+promoted cutover state: either its `applied.json` names the generation and its nonce, or the first snapshot it wrote
+after that generation holds the marker row the rollback put into the promoted database. Both appear at the first
+sync of the release. Releases before 6 write no `applied.json`, so the
 marker row proves it for them; it stays in the table `kestrel_ops_provenance`, one row per rollback.
 
 `kestrel update rollback` of a run whose new release started stops the app first and waits for the seal, so nothing
