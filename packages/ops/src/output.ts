@@ -13,7 +13,7 @@ export function createOutput(redactor: Redactor, stdout: (text: string) => void,
     info: (line) => {
       if (!quiet) stdout(redactor.apply(line) + "\n");
     },
-    warn: (line) => stderr(redactor.apply(`warning: ${line}`) + "\n"),
-    error: (line) => stderr(redactor.apply(`error: ${line}`) + "\n"),
+    warn: (line) => stderr(`warning: ${redactor.apply(line)}\n`),
+    error: (line) => stderr(`error: ${redactor.apply(line)}\n`),
   };
 }
