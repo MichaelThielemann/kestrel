@@ -6,7 +6,7 @@ import { err, failure, isErr, ok, type KestrelError, type Result } from "@michae
 import type { Filter } from "@michaelthielemann/kestrel-contracts/query";
 import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import { pageUrl } from "./site-url.ts";
-import { BODY_HEADING_OFFSET, bodyOf, buildLlmsFullTxt, buildLlmsTxt, extractMain, htmlToMarkdown, LLMS_CONTENT_TYPE, LLMS_FULL_KEY, LLMS_KEY, type LlmsConfig, type LlmsFullPage, type LlmsFullSection, type LlmsSection } from "./llms.ts";
+import { BODY_HEADING_OFFSET, bodyOf, buildLlmsTxt, extractMain, htmlToMarkdown, LLMS_CONTENT_TYPE, LLMS_FULL_KEY, LLMS_KEY, llmsFullPieces, type LlmsConfig, type LlmsFullPage, type LlmsFullSection, type LlmsSection } from "./llms.ts";
 
 export { normalizeSiteUrl, pageUrl } from "./site-url.ts";
 
@@ -153,13 +153,25 @@ export interface IndexFiles {
 
 const REMOVED = "-";
 const READ_BATCH = 50;
+const ENCODE_CHARS = 1 << 18;
 
 function nextTurn(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-function sha256(body: string | Uint8Array): string {
+function sha256(body: Uint8Array): string {
   return createHash("sha256").update(body).digest("hex");
+}
+
+async function joined(parts: readonly Uint8Array[]): Promise<Uint8Array> {
+  const out = new Uint8Array(parts.reduce((size, part) => size + part.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    if (offset > 0) await nextTurn();
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
 }
 
 function text(value: unknown): string | undefined {
@@ -177,12 +189,40 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
 
   const stopped = (): KestrelError => failure("TRANSIENT", "delivery/static: the process is stopping, the export runs again after the restart");
 
-  const putIfChanged = async (name: string, body: string, contentType: string): Promise<Result<string, KestrelError>> => {
+  const encode = async (pieces: Iterable<string>): Promise<Result<{ parts: Uint8Array[]; hash: string }, KestrelError>> => {
+    const encoder = new TextEncoder();
+    const hash = createHash("sha256");
+    const parts: Uint8Array[] = [];
+    let pending: string[] = [];
+    let pendingChars = 0;
+    const flush = (): void => {
+      const part = encoder.encode(pending.join(""));
+      hash.update(part);
+      parts.push(part);
+      pending = [];
+      pendingChars = 0;
+    };
+    for (const piece of pieces) {
+      if (pendingChars >= ENCODE_CHARS) {
+        flush();
+        await nextTurn();
+        if (deps.stopping()) return err(stopped());
+      }
+      pending.push(piece);
+      pendingChars += piece.length;
+    }
+    flush();
+    return ok({ parts, hash: hash.digest("hex") });
+  };
+
+  const putIfChanged = async (name: string, pieces: Iterable<string>, contentType: string): Promise<Result<string, KestrelError>> => {
     const key = `${config.prefix}${name}`;
-    const hash = sha256(body);
+    const encoded = await encode(pieces);
+    if (isErr(encoded)) return encoded;
+    const { parts, hash } = encoded.value;
     if (written.get(key) === hash) return ok(hash);
     written.delete(key);
-    const put = await blobs.put(key, new TextEncoder().encode(body), { contentType });
+    const put = await blobs.put(key, await joined(parts), { contentType });
     if (isErr(put)) return put;
     written.set(key, hash);
     return ok(hash);
@@ -303,7 +343,7 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
   const writeRobots = async (sitemapWritten: boolean): Promise<Result<void, KestrelError>> => {
     if (config.robots === null) return ok();
     const sitemapUrl = sitemapWritten && config.siteUrl !== undefined ? `${config.siteUrl}/${SITEMAP_KEY}` : undefined;
-    const put = await putIfChanged(ROBOTS_KEY, buildRobotsTxt({ policy: config.robots.policy, extra: config.robots.extra, sitemapUrl }), ROBOTS_CONTENT_TYPE);
+    const put = await putIfChanged(ROBOTS_KEY, [buildRobotsTxt({ policy: config.robots.policy, extra: config.robots.extra, sitemapUrl })], ROBOTS_CONTENT_TYPE);
     return isErr(put) ? put : ok();
   };
 
@@ -351,7 +391,7 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
       const recorded = await own("sitemap", null);
       return isErr(recorded) ? recorded : ok(false);
     }
-    const put = await putIfChanged(SITEMAP_KEY, buildSitemapXml(sitemapUrls(entries, deps.defaultLocale)), SITEMAP_CONTENT_TYPE);
+    const put = await putIfChanged(SITEMAP_KEY, [buildSitemapXml(sitemapUrls(entries, deps.defaultLocale))], SITEMAP_CONTENT_TYPE);
     if (isErr(put)) return put;
     const recorded = await own("sitemap", put.value);
     return isErr(recorded) ? recorded : ok(true);
@@ -389,7 +429,7 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
     const head = await header();
     if (isErr(head)) return head;
     const sections: LlmsSection[] = sectionsOf(entries, (e) => ({ title: e.title, url: e.url, ...(e.description === undefined ? {} : { description: e.description }) })).map((s) => ({ heading: s.heading, entries: s.items }));
-    const llms = await putIfChanged(LLMS_KEY, buildLlmsTxt({ ...head.value, sections }), LLMS_CONTENT_TYPE);
+    const llms = await putIfChanged(LLMS_KEY, [buildLlmsTxt({ ...head.value, sections })], LLMS_CONTENT_TYPE);
     if (isErr(llms)) return llms;
     const sitemap = sitemapOn ? await writeSitemap(entries) : ok(false);
     if (isErr(sitemap)) return sitemap;
@@ -432,7 +472,7 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
     }
     if (missingMain) logger.info("delivery/static: rendered output without <main>, llms-full.txt uses the whole body");
     const sections: LlmsFullSection[] = sectionsOf(entries, (e) => pages.get(e)).map((s) => ({ heading: s.heading, pages: s.items.filter((p): p is LlmsFullPage => p !== undefined) }));
-    const full = await putIfChanged(LLMS_FULL_KEY, buildLlmsFullTxt({ ...head.value, sections }), LLMS_CONTENT_TYPE);
+    const full = await putIfChanged(LLMS_FULL_KEY, llmsFullPieces({ ...head.value, sections }), LLMS_CONTENT_TYPE);
     if (isErr(full)) return full;
     const recorded = await own("llmsFull", full.value);
     if (isErr(recorded)) return recorded;

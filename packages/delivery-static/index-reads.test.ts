@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,8 +15,9 @@ import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createPersistenceSqlite } from "@michaelthielemann/kestrel-persistence-sqlite/impl";
 import { createSiteDefault, createSitePaths, routesConfig } from "@michaelthielemann/kestrel-site-default/impl";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
-import { createDeliveryStatic, STATUS, type Delivery, type StatusRow } from "./impl.ts";
+import { createDeliveryStatic, keyFor, STATE, STATUS, type Delivery, type StatusRow } from "./impl.ts";
 import { statusIdOf } from "./keys.ts";
+import { buildLlmsFullTxt, htmlToMarkdown, type LlmsFullPage } from "./llms.ts";
 import { configSchema } from "./module.ts";
 
 const GOLDEN = join(import.meta.dirname, "__fixtures__", "index-files");
@@ -68,15 +69,22 @@ afterEach(async () => {
   for (const database of databases.splice(0)) database.close();
 });
 
-function memoryBlobs(): Blobstore & { files: Map<string, string> } {
+function memoryBlobs(options: { readTurn?: boolean } = {}): Blobstore & { files: Map<string, string>; lastReadAt: () => number; putAt: Map<string, number> } {
   const files = new Map<string, string>();
+  const putAt = new Map<string, number>();
+  let lastReadAt = 0;
   return {
     files,
+    putAt,
+    lastReadAt: () => lastReadAt,
     async put(key, data) {
+      putAt.set(key, performance.now());
       files.set(key, typeof data === "string" ? data : new TextDecoder().decode(data));
       return ok();
     },
     async get(key) {
+      if (options.readTurn === true) await new Promise((resolve) => setImmediate(resolve));
+      lastReadAt = performance.now();
       const file = files.get(key);
       return ok(file === undefined ? null : new TextEncoder().encode(file));
     },
@@ -368,13 +376,13 @@ function counted(db: Persistence): { db: Persistence; calls: () => number } {
   return { db: new Proxy(db, handler), calls: () => calls };
 }
 
-async function largeSite(pages: number) {
+async function largeSite(pages: number, options: { main?: string } = {}) {
   const sqlite = createPersistenceSqlite({ file: ":memory:" });
   databases.push(sqlite);
   const { db, calls } = counted(sqlite);
   const content = await createContentDefault(largeModel, db);
-  const blobs = memoryBlobs();
-  const config = configSchema.parse({ types: { pages: { home: "home" } }, prefix: "site/", siteUrl: "https://example.org", robots: { policy: "allow" }, dependencies: { render: "events" } });
+  const blobs = memoryBlobs({ readTurn: options.main !== undefined });
+  const config = configSchema.parse({ types: { pages: { home: "home" } }, prefix: "site/", siteUrl: "https://example.org", robots: { policy: "allow" }, ...(options.main === undefined ? {} : { llms: { full: true } }), dependencies: { render: "events" } });
   const delivery = await createDeliveryStatic(config, { content, site: createSiteDefault(content), renderer: pageRenderer(new Set()), blobs, db, logger: silentLogger, events: quietEvents });
   instances.push(delivery);
   const body = `<p>${"Ein Absatz mit etwas Text, damit jede Seite ein wenig wiegt. ".repeat(20)}</p>`;
@@ -390,7 +398,37 @@ async function largeSite(pages: number) {
     rows.push(row(id, "de", `/seite-${i}`), row(id, "en", `/en/page-${i}`));
   }
   expectOk(await db.createMany<StatusRow>(STATUS, rows));
-  return { delivery, calls, candidates: rows.length, published };
+  if (options.main !== undefined) for (const { path } of rows) blobs.files.set(keyFor("site/", path ?? "/", "html"), `<html><body><nav>Menü</nav><main>${options.main}</main></body></html>`);
+  return { delivery, db, blobs, calls, candidates: rows.length, published };
+}
+
+function largeSiteLlmsFull(pages: number, main: string): string {
+  const body = htmlToMarkdown(main, { siteUrl: "https://example.org", headingOffset: 3 });
+  const listed: LlmsFullPage[] = [];
+  for (let i = 0; i < pages; i++) {
+    const description = i % 7 === 0 ? {} : { description: `Beschreibung ${i}` };
+    if (i % 7 !== 0) listed.push({ title: `Seite ${i}`, url: `https://example.org/seite-${i}`, ...description, body });
+    if (i % 10 !== 0) listed.push({ title: `Page ${i}`, url: `https://example.org/en/page-${i}`, ...description, body });
+  }
+  listed.sort((a, b) => (a.url < b.url ? -1 : a.url > b.url ? 1 : 0));
+  return buildLlmsFullTxt({ siteName: "example.org", sections: [{ heading: "pages", pages: listed }] });
+}
+
+function watchTurns(): { stop(): number[] } {
+  const turns: number[] = [];
+  let running = true;
+  const tick = (): void => {
+    turns.push(performance.now());
+    if (running) setImmediate(tick);
+  };
+  tick();
+  return {
+    stop() {
+      running = false;
+      tick();
+      return turns;
+    },
+  };
 }
 
 describe("index exports over a large site", () => {
@@ -418,5 +456,27 @@ describe("index exports over a large site", () => {
     expect(turns.length).toBeGreaterThan(s.candidates / 100);
     expect(Math.max(...between.map((b) => b.calls))).toBeLessThanOrEqual(10);
     expect(Math.max(...between.map((b) => b.ms))).toBeLessThan(250);
+  }, 60_000);
+
+  it("gives the event loop a turn for every few hundred kilobytes while it assembles a large llms-full.txt, and writes the same file", async () => {
+    const main = `<h2>Abschnitt</h2><p>${"Ein Absatz mit etwas Text, damit jede Seite ein wenig wiegt. ".repeat(400)}</p>`;
+    const s = await largeSite(600, { main });
+    const watch = watchTurns();
+    const exported = await s.delivery.exportLlmsFull();
+    const turns = watch.stop();
+    expect(expectOk(exported)).toEqual({ entries: s.published });
+    const file = s.blobs.files.get("site/llms-full.txt") ?? "";
+    const bytes = Buffer.byteLength(file);
+    expect(bytes).toBeGreaterThan(16 * 2 ** 20);
+    const expected = largeSiteLlmsFull(600, main);
+    expect(file.length).toBe(expected.length);
+    expect(file === expected).toBe(true);
+    const owned = expectOk(await s.db.findOne<{ id: string; value: string }>(STATE, { id: "llmsFull" }));
+    expect(owned?.value).toBe(createHash("sha256").update(file).digest("hex"));
+    const writtenAt = s.blobs.putAt.get("site/llms-full.txt") ?? 0;
+    const assembling = turns.filter((at) => at > s.blobs.lastReadAt() && at < writtenAt);
+    expect(assembling.length).toBeGreaterThanOrEqual(Math.floor(bytes / 2 ** 20));
+    const gaps = turns.slice(1).map((at, i) => at - (turns[i] ?? at));
+    expect(Math.max(...gaps)).toBeLessThan(250);
   }, 60_000);
 });

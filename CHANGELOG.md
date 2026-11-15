@@ -1448,6 +1448,8 @@ Net changes since 5.8.2.
   without `siteUrl` there is no sitemap, one that still holds what an earlier export wrote is removed
   and one of the site's own stays; without `siteUrl` boot warns. Without `llms.full` an llms-full.txt
   is removed only while it holds what an export wrote. Unchanged files are not written again within a process.
+  llms-full.txt is encoded, hashed and assembled in pieces of a few hundred kilobytes with a turn of the event loop
+  between two pieces, so a file of many megabytes does not hold up requests and saves either.
   The result gains `_indexes: { entries }` or `_llmsFull: { entries }`, and
   `delivery.readStaleStatus` answers `exports: { indexes, llmsFull }` with each export's last `at`,
   `entries`, `error` and `skipped` (no list written because no output is rendered yet).

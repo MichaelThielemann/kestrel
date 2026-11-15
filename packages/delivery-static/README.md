@@ -92,7 +92,9 @@ batch; the default locale's published values, which fill an empty field of anoth
 same batch. An export therefore makes a few reads per 50 documents instead of several per row; a single type
 is read one row at a time. Between two reads the export lets the event loop run other work, such as a
 request or a save waiting for the database, so an export over a large site never holds the process for the
-whole pass.
+whole pass. llms-full.txt is encoded to UTF-8, hashed and assembled in pieces of a few hundred kilobytes (a page
+larger than that is a piece of its own), with a turn of the event loop between two pieces, so a file of many
+megabytes does not hold the process either.
 
 **Guard.** When published documents exist but no row serves a file yet (before the first render, or after
 every first render failed), sitemap.xml and llms.txt are left as they are and a warning is logged; robots.txt
