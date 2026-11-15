@@ -10,6 +10,8 @@ export interface FakeDroplet {
   createdAt: string;
   processTypes: Record<string, string>;
   bits: string;
+  /** The container image of a droplet staged from one, or null for a buildpack droplet. */
+  image: string | null;
 }
 
 /** The web process of an app as the fake platform holds it. */
@@ -37,7 +39,7 @@ const field = (value: unknown, ...path: string[]): unknown => path.reduce<unknow
 /**
  * Droplets, revisions, the web process and environment updates of the fake platform, as extra routes and a
  * `download-droplet` subcommand of a {@link FakeCloudFoundry}. `bodies` records every request body the routes read,
- * `downloads` whether the platform hands out droplet bits.
+ * `downloads` whether a download succeeds at all, `failDownloads` how many downloads fail with a network error first.
  */
 export class FakeDroplets {
   readonly droplets = new Map<string, FakeDroplet>();
@@ -45,6 +47,7 @@ export class FakeDroplets {
   readonly processes = new Map<string, FakeProcess>();
   readonly bodies: Array<{ method: string; path: string; data: string }> = [];
   downloads: boolean = true;
+  failDownloads: number = 0;
   private clock = Date.parse("2026-11-01T08:00:00Z");
 
   constructor(readonly cf: FakeCloudFoundry) {
@@ -58,8 +61,8 @@ export class FakeDroplets {
   }
 
   /** Adds a staged droplet of `app`; `current` makes it the app's current droplet and records a revision for it. */
-  addDroplet(app: FakeCfApp, options: { guid?: string; current?: boolean; bits?: string; processTypes?: Record<string, string> } = {}): FakeDroplet {
-    const droplet: FakeDroplet = { guid: options.guid ?? randomUUID(), app: app.guid, state: "STAGED", createdAt: this.stamp(), processTypes: options.processTypes ?? { web: "node .output/server/index.mjs" }, bits: options.bits ?? `bits of droplet ${this.droplets.size + 1}` };
+  addDroplet(app: FakeCfApp, options: { guid?: string; current?: boolean; bits?: string; processTypes?: Record<string, string>; image?: string } = {}): FakeDroplet {
+    const droplet: FakeDroplet = { guid: options.guid ?? randomUUID(), app: app.guid, state: "STAGED", createdAt: this.stamp(), processTypes: options.processTypes ?? { web: "node .output/server/index.mjs" }, bits: options.bits ?? `bits of droplet ${this.droplets.size + 1}`, image: options.image ?? null };
     this.droplets.set(droplet.guid, droplet);
     if (options.current === true) {
       app.droplet = droplet.guid;
@@ -87,7 +90,7 @@ export class FakeDroplets {
   }
 
   private dropletJson(d: FakeDroplet): unknown {
-    return { guid: d.guid, state: d.state, created_at: d.createdAt, process_types: d.processTypes, links: { app: { href: `https://api.example.test/v3/apps/${d.app}` } } };
+    return { guid: d.guid, state: d.state, created_at: d.createdAt, process_types: d.processTypes, image: d.image, links: { app: { href: `https://api.example.test/v3/apps/${d.app}` } } };
   }
 
   private route(request: FakeCfRequest): FakeCfAnswer | undefined {
@@ -151,7 +154,7 @@ export class FakeDroplets {
       const appGuid = field(JSON.parse(data), "relationships", "app", "data", "guid");
       const types = field(JSON.parse(data), "process_types");
       if (typeof appGuid !== "string" || this.cf.all.every((a) => a.guid !== appGuid)) return unprocessable("app not found");
-      const droplet: FakeDroplet = { guid: randomUUID(), app: appGuid, state: "AWAITING_UPLOAD", createdAt: this.stamp(), processTypes: typeof types === "object" && types !== null ? Object.fromEntries(Object.entries(types).map(([k, v]) => [k, String(v)])) : {}, bits: "" };
+      const droplet: FakeDroplet = { guid: randomUUID(), app: appGuid, state: "AWAITING_UPLOAD", createdAt: this.stamp(), processTypes: typeof types === "object" && types !== null ? Object.fromEntries(Object.entries(types).map(([k, v]) => [k, String(v)])) : {}, bits: "", image: null };
       this.droplets.set(droplet.guid, droplet);
       return fakeJson(this.dropletJson(droplet));
     }
@@ -182,6 +185,10 @@ export class FakeDroplets {
     const path = args[args.indexOf("--path") + 1] ?? "";
     const droplet = this.droplets.get(guid);
     if (app === undefined || droplet === undefined || droplet.app !== app.guid) return { code: 1, stdout: "FAILED\n", stderr: "Droplet not found\n" };
+    if (this.failDownloads > 0) {
+      this.failDownloads -= 1;
+      return { code: 1, stdout: "FAILED\n", stderr: "dial tcp: i/o timeout\n" };
+    }
     if (!this.downloads) return { code: 1, stdout: "FAILED\n", stderr: "Downloading droplets is not supported by this platform\n" };
     writeFileSync(path, droplet.bits);
     return { code: 0, stdout: `Droplet downloaded successfully at ${path}\nOK\n`, stderr: "" };

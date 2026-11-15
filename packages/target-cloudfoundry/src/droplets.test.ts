@@ -80,11 +80,32 @@ describe("droplets and revisions of the Cloud Foundry target", { timeout: 60_000
     for (const call of cf.calls) expect(call.join(" ")).not.toContain("the old release");
   });
 
-  it("answers false when the platform does not hand out droplet bits", async () => {
+  it("answers false for a droplet of a container image, whose bits the platform does not hand out", async () => {
+    const app = cf.app(API.name);
+    const old = fake.addDroplet(app, { current: true, image: "registry.example.test/site:5" });
+    fake.addDroplet(app, { current: true });
+    expect(await (await target()).saveDroplet?.(old.guid, join(root, "droplet.bin"))).toBe(false);
+    expect(cf.calls.some((call) => call[0] === "download-droplet")).toBe(false);
+  });
+
+  it("tries a failed download again and saves the bits once it works", async () => {
+    const app = cf.app(API.name);
+    const old = fake.addDroplet(app, { current: true, bits: "the old release" });
+    fake.addDroplet(app, { current: true });
+    fake.failDownloads = 1;
+    const file = join(root, "droplet.bin");
+    expect(await (await target()).saveDroplet?.(old.guid, file)).toBe(true);
+    expect(FakeDroplets.bitsOf(file)).toBe("the old release");
+    expect(cf.calls.filter((call) => call[0] === "download-droplet")).toHaveLength(2);
+  });
+
+  it("refuses with exit 1 when every download attempt fails, instead of answering that the platform hands out no bits", async () => {
     const app = cf.app(API.name);
     const old = fake.addDroplet(app, { current: true });
     fake.addDroplet(app, { current: true });
     fake.downloads = false;
-    expect(await (await target()).saveDroplet?.(old.guid, join(root, "droplet.bin"))).toBe(false);
+    const t = await target();
+    await expect(t.saveDroplet?.(old.guid, join(root, "droplet.bin"))).rejects.toMatchObject({ exitCode: 1 });
+    await expect(t.saveDroplet?.(old.guid, join(root, "droplet.bin"))).rejects.toThrow(`downloading the bits of droplet ${old.guid}`);
   });
 });

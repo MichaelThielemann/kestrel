@@ -128,7 +128,7 @@ export interface UpdateTarget extends Target {
   listRevisions(): Promise<RevisionInfo[]>;
   /** Deletes a droplet that is not current; a revision that names it can no longer be rolled back to. */
   deleteDroplet(guid: string): Promise<void>;
-  /** Writes the bits of `guid` to `file`; false when the platform does not hand them out. */
+  /** Writes the bits of `guid` to `file`; false when the platform does not hand them out, a rejection when it could but the download failed. */
   saveDroplet?(guid: string, file: string): Promise<boolean>;
   /** Uploads droplet bits saved by {@link UpdateTarget.saveDroplet} and resolves to the new droplet's id. */
   restoreDroplet?(file: string): Promise<string>;

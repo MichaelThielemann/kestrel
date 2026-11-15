@@ -104,7 +104,7 @@ export async function concludeVerify(ctx: UpdateContext, phase: UpdatePhase, res
   await ctx.journal.record("retire", "started", { phase: "deploy" });
   try {
     const retired = await ctx.steps.retire(ctx, run);
-    await ctx.journal.record("retire", "done", { phase: "deploy", droplets: retired.droplets, revisions: retired.revisions, savedDroplet: retired.savedDroplet });
+    await ctx.journal.record("retire", "done", { phase: "deploy", droplets: retired.droplets, revisions: retired.revisions, savedDroplet: retired.savedDroplet, kept: retired.kept });
   } catch (cause) {
     await ctx.journal.record("retire", "failed", { phase: "deploy", error: messageOf(cause) });
     ctx.out.warn(`the new release is verified, but retiring the previous releases failed: ${messageOf(cause)}`);

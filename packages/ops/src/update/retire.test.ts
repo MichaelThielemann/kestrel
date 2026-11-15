@@ -63,8 +63,20 @@ describe("retiring the previous releases after an update", () => {
     s.h.target.dropletBits = false;
     const deployed = await deployUntil(s, "verify");
     const result = await retire(deployed.ctx, await runOf(s, deployed.runId));
-    expect(result).toMatchObject({ droplets: [s.previousDroplet], savedDroplet: null });
+    expect(result).toMatchObject({ droplets: [s.previousDroplet], savedDroplet: null, kept: [] });
     expect(s.h.output.warn.join("\n")).toContain("no bits");
+  });
+
+  it("keeps the replaced droplet when saving its bits fails, so a rollback can still start it", async () => {
+    const s = await scenario();
+    s.h.target.saveDroplet = async () => {
+      throw new Error("downloading the bits failed 3 times");
+    };
+    const deployed = await deployUntil(s, "verify");
+    const result = await retire(deployed.ctx, await runOf(s, deployed.runId));
+    expect(result).toMatchObject({ droplets: [], savedDroplet: null, kept: [s.previousDroplet] });
+    expect(s.h.target.droplets.has(s.previousDroplet)).toBe(true);
+    expect(s.h.output.warn.join("\n")).toContain(`droplet ${s.previousDroplet} stays`);
   });
 
   it("keeps a droplet another open run needs to roll back to", async () => {
@@ -78,6 +90,7 @@ describe("retiring the previous releases after an update", () => {
     expect((await runOf(s, other.run.id)).state).toBe("down");
     const result = await retire(deployed.ctx, await runOf(s, deployed.runId));
     expect(result.droplets).toEqual([s.previousDroplet]);
+    expect(result.kept).toEqual([needed]);
     expect(s.h.target.droplets.has(needed)).toBe(true);
     expect(s.h.output.warn.join("\n")).toContain(`droplet ${needed} stays: update run ${other.run.id} is down`);
   });

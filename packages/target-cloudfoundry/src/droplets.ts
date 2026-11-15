@@ -14,7 +14,9 @@ const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(do
 
 const pageSchema = <T extends z.ZodType>(item: T) => z.object({ pagination: z.object({ next: z.object({ href: z.string() }).nullish() }).nullish(), resources: z.array(item) });
 
-const dropletSchema = z.object({ guid: z.string(), state: z.string(), created_at: z.string(), process_types: z.record(z.string(), z.string()).nullish() });
+const dropletSchema = z.object({ guid: z.string(), state: z.string(), created_at: z.string(), process_types: z.record(z.string(), z.string()).nullish(), image: z.string().nullish() });
+
+const DOWNLOAD_ATTEMPTS = 3;
 const revisionSchema = z.object({ guid: z.string(), version: z.number().int(), created_at: z.string(), droplet: z.object({ guid: z.string() }).nullish() });
 const currentSchema = z.object({ guid: z.string() });
 const savedHeader = z.object({ schema: z.literal("kestrel-target-cloudfoundry/droplet@1"), processTypes: z.record(z.string(), z.string()) });
@@ -127,24 +129,33 @@ export async function deleteDroplet(session: CfSession, guid: string): Promise<v
 
 /**
  * Downloads the bits of droplet `guid` into `file` (mode 0600), behind a header line with the droplet's process
- * types, which a new droplet needs; false when the platform does not hand them out.
+ * types, which a new droplet needs. False for a droplet of a container image, whose bits the platform does not hand
+ * out. A failed or empty download is tried three times in all; after that it refuses with exit 1.
  */
 export async function saveDroplet(session: CfSession, guid: string, file: string): Promise<boolean> {
   const droplet = await session.api(`/v3/droplets/${guid}`, dropletSchema);
+  if (typeof droplet.image === "string" && droplet.image !== "") return false;
   const dir = await mkdtemp(join(tmpdir(), "kestrel-cf-droplet-"));
   try {
     const bits = join(dir, "droplet.tgz");
-    await session.confirmTarget();
-    const result = await session.run(["download-droplet", session.app, "--droplet", guid, "--path", bits], { timeoutMs: 1_800_000 });
-    if (result.code !== 0) return false;
-    const size = await stat(bits).then(
-      (s) => s.size,
-      () => 0,
-    );
-    if (size === 0) return false;
-    const header = `${JSON.stringify({ schema: DROPLET_HEADER, processTypes: droplet.process_types ?? {} })}\n`;
-    await writeFile(file, Buffer.concat([Buffer.from(header), await readFile(bits)]), { mode: 0o600 });
-    return true;
+    for (let attempt = 1; ; attempt++) {
+      await session.confirmTarget();
+      const result = await session.run(["download-droplet", session.app, "--droplet", guid, "--path", bits], { timeoutMs: 1_800_000 });
+      const size =
+        result.code !== 0
+          ? 0
+          : await stat(bits).then(
+              (s) => s.size,
+              () => 0,
+            );
+      if (size > 0) {
+        const header = `${JSON.stringify({ schema: DROPLET_HEADER, processTypes: droplet.process_types ?? {} })}\n`;
+        await writeFile(file, Buffer.concat([Buffer.from(header), await readFile(bits)]), { mode: 0o600 });
+        return true;
+      }
+      if (attempt >= DOWNLOAD_ATTEMPTS) throw new OpsError(`downloading the bits of droplet ${guid} of ${session.app} failed ${attempt} times (cf download-droplet ${result.code === 0 ? "wrote an empty file" : `exited with ${result.code}`})`, 1, "target");
+      await sleep(session.pollMs * attempt);
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

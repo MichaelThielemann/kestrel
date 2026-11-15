@@ -260,8 +260,10 @@ export interface RetireResult {
   droplets: string[];
   /** Revisions that named a deleted droplet and can no longer be rolled back to. */
   revisions: string[];
-  /** The previous droplet's bits, saved into the backup location before it was deleted, or null when the target cannot hand them out. */
+  /** The previous droplet's bits, saved into the backup location before it was deleted, or null when they were not saved. */
   savedDroplet: string | null;
+  /** Droplets left in place: the previous one when saving its bits failed, and those another open deploy run needs. */
+  kept: string[];
 }
 
 /** What a rollback did. */

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { messageOf } from "../context.ts";
 import { OpsError } from "../errors.ts";
 import { listUpdateRuns, readUpdateRun } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
@@ -31,7 +32,7 @@ async function neededByOpenRuns(ctx: UpdateContext, run: UpdateRun): Promise<Map
 /**
  * Retires the previous releases of deploy run `run` once its verification passed, and only then: saves the replaced
  * droplet's bits into the backup location when the target hands them out, then deletes every droplet but the current
- * one, so neither the platform's own rollback nor an old pipeline run can start an old release on the converted data.
+ * one (the replaced droplet stays when saving its bits failed), so neither the platform's own rollback nor an old pipeline run can start an old release on the converted data.
  * Refuses unless the run's journal shows `verify` done with verdict `passed`, and while the app runs another droplet
  * than the one the run deployed. A droplet that another open deploy run of the environment recorded as its previous or
  * staged droplet stays.
@@ -43,17 +44,24 @@ export async function retire(ctx: UpdateContext, run: UpdateRun): Promise<Retire
   if (current === null || (run.stagedDroplet !== null && current !== run.stagedDroplet)) throw new OpsError(`refusing to retire the previous releases: the app runs droplet ${current ?? "(none)"}, not the droplet run ${run.runId} deployed (${run.stagedDroplet ?? "unknown"})`, 1, "retire");
   const previous = run.previousDroplet;
   let savedDroplet: string | null = null;
+  const kept: string[] = [];
   if (previous !== null && previous !== current && droplets.some((d) => d.guid === previous)) {
-    savedDroplet = await saveBits(ctx, run, previous);
-    if (savedDroplet === null) ctx.out.warn(`the target hands out no bits of droplet ${previous}; once it is deleted, a rollback of run ${run.runId} brings back the cutover state but leaves the app stopped`);
+    try {
+      savedDroplet = await saveBits(ctx, run, previous);
+      if (savedDroplet === null) ctx.out.warn(`the target hands out no bits of droplet ${previous}; once it is deleted, a rollback of run ${run.runId} brings back the cutover state but leaves the app stopped`);
+    } catch (error) {
+      kept.push(previous);
+      ctx.out.warn(`droplet ${previous} stays: saving its bits failed (${messageOf(error)}), and a rollback of run ${run.runId} needs it; never start it through the platform, only through update rollback; the next deploy that passes verification deletes it`);
+    }
   }
   const revisions = await ctx.target.listRevisions();
   const needed = await neededByOpenRuns(ctx, run);
   const deleted: string[] = [];
   for (const droplet of droplets) {
-    if (droplet.guid === current) continue;
+    if (droplet.guid === current || kept.includes(droplet.guid)) continue;
     const other = needed.get(droplet.guid);
     if (other !== undefined) {
+      kept.push(droplet.guid);
       ctx.out.warn(`droplet ${droplet.guid} stays: update run ${other.runId} is ${other.state} and needs it to roll back`);
       continue;
     }
@@ -62,5 +70,5 @@ export async function retire(ctx: UpdateContext, run: UpdateRun): Promise<Retire
   }
   const lost = revisions.filter((r) => r.droplet !== null && deleted.includes(r.droplet)).map((r) => r.guid);
   if (deleted.length > 0) ctx.out.info(`deleted ${deleted.length} droplet(s) of earlier releases; ${lost.length} revision(s) can no longer be rolled back to by the platform`);
-  return { droplets: deleted, revisions: lost, savedDroplet };
+  return { droplets: deleted, revisions: lost, savedDroplet, kept };
 }

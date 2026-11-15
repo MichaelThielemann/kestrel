@@ -111,8 +111,10 @@ The target implements the update interface of `kestrel-ops`, which `kestrel upda
 - **Verification** probes the readiness of the app in three outcomes (200 ready; 503 or another 5xx not ready;
   401, 403, 404, a timeout or no connection unverifiable) and reads the crash events since the start.
 - **Retiring** lists the app's droplets and revisions and deletes every droplet but the current one once the new
-  release passed verification, after its bits were saved into the backup location where the platform hands
-  them out, so neither `cf rollback` nor an old pipeline run can start an old release on converted data.
+  release passed verification, after its bits were saved into the backup location, so neither `cf rollback` nor
+  an old pipeline run can start an old release on converted data. A droplet of a container image has no bits to
+  save and is deleted all the same. A download that fails is tried three times; when all three fail, the previous
+  droplet stays, so `update rollback` can still start it.
 
 ## API
 `createTarget(config, { root, clock })` is the factory `kestrel-ops` imports. `cloudFoundryTarget(config, deps,
