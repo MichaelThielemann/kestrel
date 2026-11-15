@@ -100,9 +100,13 @@ from.
   memory. Every line the tool writes to the terminal, questions included, passes a redactor that masks them,
   also where one is part of other text. The documents it stores (journal, manifests, verifications, receipts,
   the recorded configuration) and the `--json` output hold names, ids, keys and hashes, never a credential's
-  value; only a plain value of the recorded configuration in which a credential shorter than 16 characters is part
-  of a name, a host or a path, such as `kestrel-media` for the access key `kestrel`, is kept verbatim, while one in
-  which it stands as a token of its own, such as `minio:minioadmin`, is kept as a fingerprint. Their schema, keys, names and every other field are written as they are; only the free-text fields
+  value. A plain value of the recorded configuration is kept as a fingerprint when it holds a credential of 16 or
+  more characters, or a shorter one as a token of its own or as the user or password of a URL, and verbatim
+  otherwise; a shorter credential stands as a token of its own where it is neither preceded nor followed by a
+  letter, a digit, `_` or `-`, nor by a run of `.` and `/` with such a character beyond it. So `minio:minioadmin`,
+  `minioadmin.` and `s3://minioadmin` are fingerprints, while `kestrel-media`, `kestrel.example.net` and
+  `https://kestrel.example.net/kestrel` stay verbatim for the access key `kestrel`, and `s3://kestrel` is a
+  fingerprint. Their schema, keys, names and every other field are written as they are; only the free-text fields
   `message`, `error`, `failure`, `detail` and `problems` are masked, since a failed call may quote what it was
   sent. A credential that is part of a fixed text, such as an access key `kestrel`, therefore never changes a
   schema, key or name. In terminal lines, questions and messages, what the tool writes itself (questions and

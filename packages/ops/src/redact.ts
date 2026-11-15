@@ -86,10 +86,11 @@ export function fixedLines(lines: readonly string[]): string {
   return lines.reduce((text, line, i) => (i === 0 ? fixedText`${line}` : fixedText`${text}\n${line}`), "");
 }
 
-const NAME_CHARACTER = "[\\p{L}\\p{N}_./-]";
+const NAME_CHARACTER = "[\\p{L}\\p{N}_-]";
+const JOINER = "[./]";
 
 function token(secret: string): RegExp {
-  return new RegExp(`(?<!${NAME_CHARACTER})${secret.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&")}(?!${NAME_CHARACTER})`, "u");
+  return new RegExp(`(?<!${NAME_CHARACTER}${JOINER}*)${secret.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&")}(?!${JOINER}*${NAME_CHARACTER})`, "u");
 }
 
 function userinfos(text: string): string[] {
@@ -148,9 +149,9 @@ export class Redactor {
   /**
    * Whether the value `text` carries a registered secret, in any form {@link Redactor.apply} masks. A secret of at least
    * {@link EMBEDDED_SECRET_LENGTH} characters counts anywhere in it; a shorter one where it stands as a token of its own,
-   * neither preceded nor followed by a letter, a digit, `_`, `-`, `.` or `/`, and as the user or password of a URL. A
-   * shorter secret that is only part of a name, a host or a path, such as an access key `kestrel` in `kestrel-media` or
-   * `https://kestrel.example.net`, does not count.
+   * neither preceded nor followed by a letter, a digit, `_` or `-`, nor by a run of `.` and `/` with such a character
+   * beyond it, and as the user or password of a URL. So `minioadmin.`, `minioadmin/` and `s3://minioadmin` count, while
+   * an access key `kestrel` in `kestrel-media`, `kestrel.example.net` or `https://kestrel.example.net/kestrel` does not.
    */
   holds(text: string): boolean {
     const users = userinfos(text);

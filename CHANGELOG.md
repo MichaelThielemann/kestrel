@@ -1033,7 +1033,7 @@ Net changes since 5.8.2.
   next to the database. Also `status`, `backup list|verify|prune` with retention per
   kind, `restore --to local`, a `local` target, credentials from environment variables or commands
   that never reach any output (lines for a person are masked; the documents the tool stores and its `--json`
-  output hold no credential value, except a plain value of the recorded configuration in which a credential shorter than 16 characters is only part of a name, a host or a path, and mask only their free-text fields `message`, `error`, `failure`, `detail`
+  output hold no credential value, except a plain value of the recorded configuration that holds a credential shorter than 16 characters neither as a token of its own (neither preceded nor followed by a letter, a digit, `_` or `-`, nor by a run of `.` and `/` with such a character beyond it) nor as the user or password of a URL, and mask only their free-text fields `message`, `error`, `failure`, `detail`
   and `problems`, wherever a credential occurs there, so a credential that is part of a fixed text, such as the access key `kestrel`, leaves every schema, key and name in them intact; in terminal lines, questions and messages, the questions and their ids, command names, flags, environment names and ids the tool writes itself stay as written when a credential equals one of their words, while a credential in an answer to a question, an error of the store, an answer of the platform, the output of a command or a table, user or host name read from the data is masked, and one of 16 characters or more everywhere), a
   journal and lock trace in the backup location, a clock measurement and a protection probe of `status` whose
   probe object a key without delete rights leaves behind with a warning instead of failing (`backup prune` removes probes older than an hour where
@@ -1807,8 +1807,10 @@ Net changes since 5.8.2.
   without resolving the sources), and pending content migrations without `update.localBoot`; stages the release while the old one serves (a staging failure never stops the app); records
   the app's configuration, secret values only as salted fingerprints (also a plain value that contains one of the
   tool's credentials of 16 or more characters, or a shorter one as a token of its own, neither preceded nor followed
-  by a letter, a digit, `_`, `-`, `.` or `/`, or as a URL's user or password; a plain value of which a shorter
-  credential is only part of a name, a host or a path, such as `kestrel-media`, verbatim, so a rollback restores it); stops the app and waits for the seal, except
+  by a letter, a digit, `_` or `-`, nor by a run of `.` and `/` with such a character beyond it, or as a URL's user
+  or password; every other plain value, such as `kestrel-media`, `kestrel.example.net` or
+  `https://kestrel.example.net/kestrel` for the access key `kestrel`, verbatim, so a rollback restores it, while
+  `minioadmin.`, `s3://minioadmin` and `s3://kestrel` are fingerprints); stops the app and waits for the seal, except
   when the running versions name a runtime before 6, which writes none, or, with the running versions unknown, the
   stored data the pending storage migrations convert was written by a release before 6 (told by the modules' storage
   version rows and the oldest pending migration's `introducedIn`, not by `convertsFrom` alone); takes

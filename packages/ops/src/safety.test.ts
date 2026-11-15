@@ -145,6 +145,15 @@ describe("secrets", () => {
     for (const value of ["kestrel-media", "kestrel_media", "kestrels", "kestrel-ops/backup@1", "https://kestrel.example.net/kestrel", "bucket=kestrel-media", "site-media", "xminioadmin", "Sh0rtPass!2"]) expect(redactor.holds(value), value).toBe(false);
   });
 
+  it("counts a dot or a slash next to a short credential as part of a name only when a name character lies beyond it", () => {
+    const redactor = new Redactor();
+    redactor.add("kestrel");
+    redactor.add("Sh0rtPass!");
+    redactor.add("minioadmin");
+    for (const value of ["minioadmin.", "token=minioadmin.", "Sh0rtPass!.", "minioadmin/", "s3://minioadmin", "s3://kestrel", "/kestrel", "kestrel./"]) expect(redactor.holds(value), value).toBe(true);
+    for (const value of ["kestrel.example.net", "https://kestrel.example.net/kestrel", "kestrel/media", "media/kestrel", "media./kestrel", "s3://kestrel.example.net", "kestrel-media", "x-minioadmin", "minioadmin_"]) expect(redactor.holds(value), value).toBe(false);
+  });
+
   it("masks a known credential in the text of a question asked at the terminal", async () => {
     const h = createHarness({ store: memoryStore(new MemoryBucket("secret-prompt")) });
     try {
