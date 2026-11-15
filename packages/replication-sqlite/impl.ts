@@ -406,6 +406,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   let reading = false;
   let copiedBeforeGeneration = false;
   let pending: Array<{ key: string; data: Uint8Array }> = [];
+  let orphan: { snapshot: string; origin: string | null } | null = null;
   const logger = options.logger ?? silentLogger;
   const startedAt = now();
   const own = new Set<string>();
@@ -459,7 +460,19 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     }
   };
 
+  const removeOrphan = async (): Promise<Result<void, BlobstoreError>> => {
+    const left = orphan;
+    if (left === null) return ok();
+    const removed = await blobs.remove(left.snapshot);
+    if (isErr(removed)) return err(failure("TRANSIENT", `replication/sqlite: ${left.snapshot}, the snapshot of an upload that failed, is still to be removed; no frames are shipped until it is, since a restore would pick its generation: ${removed.error.message}`));
+    if (left.origin !== null) await blobs.remove(left.origin);
+    orphan = null;
+    return ok();
+  };
+
   const flushPending = async (): Promise<Result<void, BlobstoreError>> => {
+    const cleared = await removeOrphan();
+    if (isErr(cleared)) return cleared;
     for (let next = pending[0]; next !== undefined; next = pending[0]) {
       const put = await blobs.put(next.key, next.data, { contentType: "application/octet-stream" });
       if (isErr(put)) return put;
@@ -496,15 +509,16 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       snapshotOrder = Math.max(at, newestListed + 1, snapshotOrder + 1);
       const gen = `${stamp(snapshotOrder)}-${orderKey(snapshotOrder)}${orderKey(at)}${randomBytes(10).toString("hex")}`;
       own.add(gen);
-      if (placedRestore) {
-        const carried = await blobs.put(markerKey(config.prefix, gen, "origin"), new TextEncoder().encode(placedRestore.origin), { contentType: "application/json" });
+      const originKey = placedRestore ? markerKey(config.prefix, gen, "origin") : null;
+      if (placedRestore && originKey !== null) {
+        const carried = await blobs.put(originKey, new TextEncoder().encode(placedRestore.origin), { contentType: "application/json" });
         if (isErr(carried)) return carried;
       }
       const snapshotKey = `${config.prefix}gen/${gen}/snapshot.db`;
       const put = await blobs.put(snapshotKey, image, { contentType: "application/vnd.sqlite3" });
       if (isErr(put)) {
-        await blobs.remove(snapshotKey);
-        if (placedRestore) await blobs.remove(markerKey(config.prefix, gen, "origin"));
+        orphan = { snapshot: snapshotKey, origin: originKey };
+        await removeOrphan();
         return put;
       }
       if (placedRestore) unacknowledged.push(gen);
@@ -512,6 +526,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       seq = 0;
       cursor = position === null ? null : { ...position };
       pending = [];
+      orphan = null;
       lastSnapshotAt = at;
       return ok({ generation: gen, bytes: image.byteLength });
     } finally {

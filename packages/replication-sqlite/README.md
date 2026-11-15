@@ -21,9 +21,11 @@ frame it applies overwrites them, and the WAL cannot start over beneath frames i
 frames it applies have to continue the WAL's checksum chain up to the last committed frame, and the WAL
 header has to read the same before and after; otherwise the snapshot is read again, up to ten times, and
 the run fails with `TRANSIENT` after that. Frames committed while the snapshot is read are not in it and
-are shipped after it. When the upload of a snapshot fails, the module removes its key again, so that a
-restore never picks a generation whose process went on shipping into the one before it. A process killed
-while it reads or uploads a snapshot leaves the replica as its last sync left it.
+are shipped after it. When the upload of a snapshot fails, the module removes its key again; while that
+removal fails, every later sync, checkpoint and seal tries it again first and fails with `TRANSIENT` before
+it uploads anything, so no frame is shipped into the generation before it while a restore would pick the
+failed one. A process killed while it reads or uploads a snapshot leaves the replica as its last sync left
+it, or with the new generation, whose snapshot holds every frame that sync shipped.
 
 A generation is named by a time, then 12 hex digits of the same time in milliseconds, 12 hex digits of
 the time the snapshot was taken in milliseconds and 20 random hex digits (`20260927T101500Z-0192…9f…`),

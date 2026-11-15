@@ -527,4 +527,41 @@ describe("replication/sqlite failed snapshot upload", () => {
     expect([...l.blobs.blobs.keys()].filter((key) => key.endsWith("/snapshot.db"))).toEqual([`replica/gen/${first}/snapshot.db`]);
     expect(await restored(l.blobs, l.dir)).toMatchObject({ generation: first, ...fingerprint(l.app), check: "ok" });
   });
+
+  it("ships no frame and writes no seal while the key of a failed snapshot upload cannot be removed, and continues the generation before it once the key is gone", async () => {
+    const l = live();
+    l.insert(50, 900);
+    const repl = l.start();
+    const first = expectOk(await repl.sync()).generation;
+    l.insert(10, 900);
+    const put = l.blobs.put.bind(l.blobs);
+    const remove = l.blobs.remove.bind(l.blobs);
+    let unreachable = true;
+    l.blobs.put = async (key, data, options) => {
+      const stored = await put(key, data, options);
+      return unreachable && key.endsWith("/snapshot.db") ? err(failure("TRANSIENT", "the store kept the object but answered an error")) : stored;
+    };
+    l.blobs.remove = async (key) => (unreachable ? err(failure("TRANSIENT", "the store is unreachable")) : remove(key));
+    const keys = (suffix: string) => [...l.blobs.blobs.keys()].filter((key) => key.endsWith(suffix)).sort();
+    const segments = () => [...l.blobs.blobs.keys()].filter((key) => key.startsWith(`replica/gen/${first}/wal/`)).sort();
+    expect((await repl.snapshot()).ok).toBe(false);
+    const atSnapshot = fingerprint(l.app);
+    const orphan = keys("/snapshot.db").find((key) => !key.includes(first))?.split("/")[2];
+    expect(orphan).toBeDefined();
+    const shipped = segments();
+    for (let round = 0; round < 3; round++) {
+      l.insert(7, 900);
+      const synced = await repl.sync();
+      expect(synced.ok).toBe(false);
+      if (!synced.ok) expect(synced.error.code).toBe("TRANSIENT");
+    }
+    expect((await repl.seal()).ok).toBe(false);
+    expect(segments()).toEqual(shipped);
+    expect(keys("/sealed.json")).toEqual([]);
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation: orphan, ...atSnapshot, check: "ok" });
+    unreachable = false;
+    expect(expectOk(await repl.sync()).generation).toBe(first);
+    expect(keys("/snapshot.db")).toEqual([`replica/gen/${first}/snapshot.db`]);
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation: first, ...fingerprint(l.app), check: "ok" });
+  });
 });
