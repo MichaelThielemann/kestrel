@@ -2144,6 +2144,10 @@ Net changes since 5.8.2.
   it, and a prune that is still listing the replica or removing a generation ends there. The first snapshot
   of a process without a generation completes before teardown seals it. The `Replication` interface of
   `./impl` gains `quiesce()`.
+- `blobstore-s3`: `put` hashes the body for the request signature itself, in slices of 1 MiB with the event
+  loop running between them, and hands the SDK the hash; the SDK hashed it in one piece, which held the
+  event loop for about 40 ms per 100 MB, and for about 140 ms on a CPU without SHA instructions. The
+  request is the same.
 - `site-default`: the `maxCascade` limit counts every language row of the page being saved, so a save is refused or accepted
   the same way whatever the clock reads. Before, a row of the saved page whose only change was its timestamp counted only
   when the clock had advanced since the page was last saved.

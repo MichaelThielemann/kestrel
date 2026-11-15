@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, NoSuchKey, PutObjectCommand, S3Client, type S3ClientConfig } from "@aws-sdk/client-s3";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { failure } from "@michaelthielemann/kestrel/errors";
@@ -63,6 +64,32 @@ export function isTransient(cause: unknown): boolean {
   return false;
 }
 
+const HASH_SLICE_BYTES = 1024 * 1024;
+
+async function payloadHash(data: Uint8Array): Promise<string> {
+  const hash = createHash("sha256");
+  for (let offset = 0; offset < data.byteLength; offset += HASH_SLICE_BYTES) {
+    if (offset > 0) await new Promise<void>((resolve) => setImmediate(resolve));
+    hash.update(data.subarray(offset, offset + HASH_SLICE_BYTES));
+  }
+  return hash.digest("hex");
+}
+
+const hasHeaders = (request: unknown): request is { headers: Record<string, string> } => typeof request === "object" && request !== null && "headers" in request && typeof request.headers === "object" && request.headers !== null;
+
+async function putCommand(input: ConstructorParameters<typeof PutObjectCommand>[0] & { Body: Uint8Array }): Promise<PutObjectCommand> {
+  const command = new PutObjectCommand(input);
+  const hash = await payloadHash(input.Body);
+  command.middlewareStack.add(
+    (next) => async (args) => {
+      if (hasHeaders(args.request)) args.request.headers["x-amz-content-sha256"] = hash;
+      return next(args);
+    },
+    { step: "build", name: "payloadHashMiddleware" },
+  );
+  return command;
+}
+
 export function createBlobstoreS3(config: Config, client: S3Like = createClient(config)): BlobstoreS3 {
   const fullKey = (key: string): string => {
     if (key === "" || key.startsWith("/")) throw new Error(`blobstore/s3: invalid key ${JSON.stringify(key)}`);
@@ -75,7 +102,7 @@ export function createBlobstoreS3(config: Config, client: S3Like = createClient(
     },
     async put(key, data, options = {}): Promise<Result<void, BlobstoreError>> {
       try {
-        await client.send(new PutObjectCommand({ Bucket: config.bucket, Key: fullKey(key), Body: data, ...(options.contentType === undefined ? {} : { ContentType: options.contentType }) }));
+        await client.send(await putCommand({ Bucket: config.bucket, Key: fullKey(key), Body: data, ...(options.contentType === undefined ? {} : { ContentType: options.contentType }) }));
         return ok();
       } catch (cause) {
         if (isTransient(cause)) return err(failure("TRANSIENT", `blobstore/s3: put ${JSON.stringify(key)} failed`, { cause }));

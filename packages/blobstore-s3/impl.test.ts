@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { describe, it, expect, vi } from "vitest";
 import { blobstoreContractTests } from "@michaelthielemann/kestrel-contracts/blobstore.contract.test";
@@ -153,5 +154,45 @@ describe("blobstore/s3", () => {
   it("get treats NoSuchKey as Ok(null) rather than TRANSIENT", async () => {
     const store = createBlobstoreS3({ bucket: "b", prefix: "" }, failingS3(Object.assign(new Error("NoSuchKey"), { name: "NoSuchKey" })));
     expect(expectOk(await store.get("missing"))).toBeNull();
+  });
+});
+
+describe("blobstore/s3 upload of a large object", () => {
+  it("hashes the body for the request signature in slices with the event loop running between them, and signs the request with that hash", async () => {
+    const sent: Array<Record<string, string>> = [];
+    let turns = 0;
+    let turning = true;
+    const turn = (): void => {
+      if (!turning) return;
+      turns += 1;
+      setImmediate(turn);
+    };
+    const client = new S3Client({
+      region: "us-east-1",
+      endpoint: "http://127.0.0.1:9",
+      forcePathStyle: true,
+      credentials: { accessKeyId: "key", secretAccessKey: "secret" },
+      requestHandler: {
+        handle: async (request: { headers: Record<string, string> }) => {
+          turning = false;
+          sent.push({ ...request.headers });
+          return { response: { statusCode: 200, headers: {}, body: new Uint8Array() } };
+        },
+        updateHttpClientConfig: () => {},
+        httpHandlerConfigs: () => ({}),
+      },
+    });
+    const store = createBlobstoreS3({ bucket: "b", prefix: "site/" }, client);
+    const body = new Uint8Array(32 * 1024 * 1024);
+    for (let i = 0; i < body.byteLength; i += 4096) body[i] = (i / 4096) & 0xff;
+    setImmediate(turn);
+    const started = performance.now();
+    expectOk(await store.put("snapshot.db", body, { contentType: "application/vnd.sqlite3" }));
+    const ms = performance.now() - started;
+    client.destroy();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.["x-amz-content-sha256"]).toBe(createHash("sha256").update(body).digest("hex"));
+    expect(sent[0]?.authorization).toMatch(/SignedHeaders=[^,]*x-amz-content-sha256/);
+    expect(turns, `the event loop turned ${turns} times in ${Math.round(ms)} ms`).toBeGreaterThanOrEqual(16);
   });
 });

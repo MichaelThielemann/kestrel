@@ -8,7 +8,9 @@ the SDK's retry limit including the first try). `put` stores the `contentType` h
 `Content-Type`, so a public copy served straight from the bucket answers with the right type (serve
 only the public tree, `site/*`, see the key table in `media-default`'s README; the rest of the bucket
 holds originals, database replicas and backups); `get` returns bytes only
-and `list` reports key and size. The store never wrote sidecar files.
+and `list` reports key and size. The store never wrote sidecar files. `put` computes the SHA-256 of the
+body that signs the request itself, in slices of 1 MiB with the event loop running between them, so an
+upload of a large object, such as a database snapshot, does not hold the event loop for the whole hash.
 
 `requestChecksumCalculation` (`WHEN_SUPPORTED` or `WHEN_REQUIRED`) passes through to the SDK. Recent SDK
 versions add a CRC32 trailer to every upload; a store that does not understand it fails the request or
