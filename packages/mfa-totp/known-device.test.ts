@@ -173,3 +173,40 @@ describe("sign-in from a known device", () => {
     await kestrel.stop();
   });
 });
+
+describe("boot with known devices", () => {
+  async function warningsFor(knownDevices: boolean) {
+    const kestrel = await bootKestrel({
+      config: {
+        modules: [
+          { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: ":memory:" } },
+          { use: "@michaelthielemann/kestrel-authn-multi", config: {} },
+          { use: "@michaelthielemann/kestrel-mfa-totp", config: { secretKey: KEY } },
+          {
+            use: "@michaelthielemann/kestrel-ratelimit-memory",
+            config: {
+              buckets: { loginAccount: { limit: 5, windowSeconds: 300, key: "username", counts: "failures", ...(knownDevices ? { knownDevices: { limit: 10, windowSeconds: 300 } } : {}) } },
+              ...(knownDevices ? { deviceCookies: { secretKey: DEVICE_KEY } } : {}),
+            },
+          },
+        ],
+        triggers: [],
+        http: null,
+      },
+      modules: [persistence, authnMulti, module, ratelimit],
+      pipelines: [definePipeline({ name: "login", steps: ["ratelimit.check:loginAccount", "authn.login", "mfa.check", ...(knownDevices ? ["ratelimit.rememberDevice:loginAccount"] : [])] })],
+      logger: silentLogger,
+    });
+    const warnings = kestrel.warnings.filter((warning) => warning.code === "unwritten-optional-read");
+    await kestrel.stop();
+    return warnings;
+  }
+
+  it("does not warn that nothing writes knownDevice when a bucket counts known devices", async () => {
+    expect(await warningsFor(true)).toEqual([]);
+  });
+
+  it("warns that nothing writes knownDevice when no bucket counts known devices", async () => {
+    expect(await warningsFor(false)).toEqual([expect.objectContaining({ pipeline: "login", step: "mfa.check", key: "knownDevice" })]);
+  });
+});

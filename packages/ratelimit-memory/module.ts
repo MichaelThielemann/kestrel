@@ -14,7 +14,7 @@ const NOT_COUNTED_CODES = new Set(["RATE_LIMITED", "SECOND_FACTOR_REQUIRED", "SE
 /** The default lifetime of a device cookie: 30 days. */
 export const DEVICE_COOKIE_MAX_AGE_SECONDS = 2_592_000;
 
-type Instance = RateLimit & { pending: Map<string, Array<{ bucket: string; key: string }>>; devices: DeviceCookies | undefined };
+type Instance = RateLimit & { pending: Map<string, Array<{ bucket: string; key: string }>>; devices: DeviceCookies | undefined; countsDevices: boolean };
 
 const budgetSchema = z
   .object({
@@ -91,7 +91,7 @@ export default defineModule({
     const withDevices = Object.entries(config.buckets).find(([, bucket]) => bucket.knownDevices !== undefined);
     if (withDevices !== undefined && config.deviceCookies === undefined) throw new Error(`ratelimit/memory: bucket "${withDevices[0]}" has knownDevices, which needs deviceCookies`);
     const devices = config.deviceCookies === undefined ? undefined : createDeviceCookies(config.deviceCookies);
-    return { ...createRateLimitMemory(config), pending: new Map(), devices };
+    return { ...createRateLimitMemory(config), pending: new Map(), devices, countsDevices: withDevices !== undefined };
   },
 
   attach: (limit, kestrel) =>
@@ -146,11 +146,12 @@ export default defineModule({
   describe: (limit) => ({
     check: (bucket: string) => {
       const kind = bucket === "<arg>" ? "ip" : limit.keyOf(bucket);
-      const devices = bucket !== "<arg>" && limit.deviceBucketOf(bucket) !== undefined;
+      const placeholder = bucket === "<arg>";
+      const devices = !placeholder && limit.deviceBucketOf(bucket) !== undefined;
       return {
         summary: `Rate limit bucket ${bucket}, counted by ${kind === "ip" ? "client address" : kind}${devices ? "; a device with a valid device cookie for the account is counted in its own budget instead" : ""}`,
         reads: kind === "identity" ? ["identity"] : ["ip?", "payload.username?", "payload.email?", "headers.cookie?"],
-        writes: devices ? ["knownDevice?"] : [],
+        writes: devices || (placeholder && limit.countsDevices) ? ["knownDevice?"] : [],
         input: { type: "object", properties: { username: { type: "string", maxLength: MAX_ACCOUNT_NAME }, email: { type: "string", maxLength: MAX_ACCOUNT_NAME } }, additionalProperties: true },
         errors: { 400: `an account name longer than ${MAX_ACCOUNT_NAME} characters`, 429: "too many requests" },
       };

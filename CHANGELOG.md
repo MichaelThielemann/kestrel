@@ -2347,6 +2347,9 @@ Net changes since 5.8.2.
   locale. For a page not saved yet, and for a stored page whose saved status is not published in the locale, it
   answered `"not published in this locale"`, although the status the caller is editing may be published.
   `reachable` keeps its meaning: `true` only for a free, valid path of a stored page that is live in the locale.
+- `ratelimit-memory`: with a bucket that has `knownDevices`, the boot reports no `unwritten-optional-read` warning
+  (in `kestrel.warnings` and `kestrel check`) for the `knownDevice` that `mfa.check` reads; `ratelimit.check` on
+  that bucket writes it. Without such a bucket the warning stays, since nothing writes `knownDevice` then.
 
 ## 5.8.2 – 2026-09-27
 
