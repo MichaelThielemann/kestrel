@@ -384,6 +384,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`data/redirect-reserved-paths`](#data-redirect-reserved-paths) | data | manual (warning) | a stored `redirects-default` rule or automatic redirect whose source can match a reserved path (`/admin`, `/api`, `/media` unless `reservedPaths` says otherwise) |
 | [`data/site-media-leftovers`](#data-site-media-leftovers) | data | manual (warning) | a leftover 5.x static export copy next to the public copies `media.syncPublic` writes |
 | [`data/blobstore-tmp-suffix`](#data-blobstore-tmp-suffix) | data | none (info) | a stored filesystem-blobstore key already ending in `.kestrel-tmp` |
+| [`data/blobstore-scan-incomplete`](#data-blobstore-scan-incomplete) | data | manual (info or warning) | the blobstore-filesystem root or a directory below it could not be read, so the blob checks did not run in full |
 | [`steps/ctx-done-terminal-output`](#steps-ctx-done-terminal-output) | source | none (info) | a local module calling `ctx.done()` |
 | [`tests/run-pipeline-validates`](#tests-run-pipeline-validates) | source | none (info) | a file importing `testing/runPipeline` |
 | [`boot/dependency-cycle`](#boot-dependency-cycle) | boot | manual | a module dependency cycle |
@@ -816,6 +817,18 @@ that might still link one has been republished.
 A stored filesystem-blobstore key already ending in `.kestrel-tmp`: 6.0.0 reserves that suffix for
 its own atomic-write temp files, so such a key is now unlisted and unreadable through the store.
 Info only, since a legitimate use of that literal suffix before 6.0.0 is unlikely but not impossible.
+
+#### data-blobstore-scan-incomplete
+`data/site-media-leftovers` and `data/blobstore-tmp-suffix` read the directory the
+blobstore-filesystem `root` resolves to, relative to the project root. When that directory does not
+exist, this finding names the resolved path as info and neither check runs; a project that never stored
+a blob has nothing to check, while one whose blob store lives elsewhere runs `data` where the root
+resolves to it. When the root or the delivery-static media export directory below it cannot be read
+for another reason (permissions, a file where a directory belongs), it is a warning naming the path,
+the cause and the check that did not run. A missing media export directory under an existing root is
+not reported: there is nothing left over to find. Directories deeper in the blob store that cannot be
+read are skipped by `data/blobstore-tmp-suffix` and counted in one info finding that names the first
+cause.
 
 #### steps-ctx-done-terminal-output
 A local module calls `ctx.done()`. A step that ends the run this way without declaring
@@ -1282,8 +1295,11 @@ reads: `data/redirect-reserved-paths` (`redirects-default`), `data/site-media-le
 (`blobstore-filesystem`, `delivery-static`), `data/blobstore-tmp-suffix` (`blobstore-filesystem`) and,
 unless the host plugin provides a `dataModel` hook, the underscore-field count and
 `data/translation-slug` (`content-default`, `site-default`). A project with no `kestrel.config.ts` and
-no host plugin is unaffected; those checks simply have nothing to read. Error severity without a host
-plugin; a warning naming the plugin when one was detected.
+no host plugin is unaffected; those checks simply have nothing to read. Error severity, with or without
+a host plugin, so the run exits with `1` instead of passing with checks left out; the finding names the
+plugin when one was detected. A path in a module config that the host plugin resolved inside its scratch
+copy of the project (a blobstore root under a data directory the host derives from the project root, say)
+is read at the same place in the project itself.
 
 #### plugin-api
 A `plugin.rules` id that collides with a built-in one is a load error, naming the id and the plugin;

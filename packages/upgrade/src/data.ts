@@ -184,7 +184,7 @@ function configLoadFailedFinding(problem: string, plugin: UpgradePlugin | undefi
   return {
     id: "data/config-load-failed",
     rule: "data/config-load-failed",
-    severity: plugin === undefined ? "error" : "warning",
+    severity: "error",
     tier: "data",
     where: {},
     message: `the module configs could not be loaded: ${problem}${hookless}; these checks read a module config and did not run: ${skipped}`,
@@ -551,79 +551,118 @@ async function mediaIdsOf(db: Persistence): Promise<Set<string>> {
   }
 }
 
-async function siteMediaLeftoversFindings(root: string, configs: ModuleConfigs, mediaIds: ReadonlySet<string>): Promise<Finding[]> {
-  const blobstore = blobstoreFilesystemConfig(configs);
-  if (blobstore === undefined) return [];
-  const deliveryConfig = configs.configs.get("delivery-static");
-  if (!isRecord(deliveryConfig)) return [];
+function scanIncompleteFinding(id: string, severity: Finding["severity"], path: string, message: string, suggestion: string): Finding {
+  return { id: `data/blobstore-scan-incomplete:${id}`, rule: "data/blobstore-scan-incomplete", severity, tier: "data", where: { path }, message, suggestion, fix: { kind: "manual" }, docs: upgradingDocs("data-blobstore-scan-incomplete") };
+}
+
+function errorCode(thrown: unknown): string | undefined {
+  return isRecord(thrown) && typeof thrown.code === "string" ? thrown.code : undefined;
+}
+
+function errorText(thrown: unknown): string {
+  return thrown instanceof Error ? thrown.message : String(thrown);
+}
+
+async function siteMediaLeftoversFindings(root: string, blobstore: BlobstoreFilesystemInfo, deliveryConfig: Record<string, unknown>, mediaIds: ReadonlySet<string>): Promise<Finding[]> {
   const deliveryPrefix = typeof deliveryConfig.prefix === "string" ? deliveryConfig.prefix : "";
   const media = deliveryConfig.media;
   const target = isRecord(media) && typeof media.target === "string" ? media.target : "media/";
   const leftoversDir = resolve(root, blobstore.root, deliveryPrefix, target);
+  let read;
   try {
-    const entries = (await readdir(leftoversDir, { withFileTypes: true })).filter((e) => !(e.isDirectory() && mediaIds.has(e.name)));
-    if (entries.length === 0) return [];
-    const names = entries.map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).sort();
-    const shown = names.slice(0, LEFTOVER_NAMES_SHOWN).join(", ") + (names.length > LEFTOVER_NAMES_SHOWN ? ` and ${names.length - LEFTOVER_NAMES_SHOWN} more` : "");
-    return [
-      {
-        id: "data/site-media-leftovers",
-        rule: "data/site-media-leftovers",
-        severity: "warning",
-        tier: "data",
-        where: { path: leftoversDir },
-        message: `${entries.length} entr${entries.length === 1 ? "y" : "ies"} under "${leftoversDir}", the 5.x delivery-static media export directory, that are not the public copy of a media item: ${shown}`,
-        suggestion: "media.syncPublic writes the public copy of each item under <id>/ in this directory, and removes the files exactly one folder deep (<folder>/<file>) because its own copies go there, so links to those stop working with its first run; a file directly in this directory and anything in a deeper folder stays. Republish every page that might still link one of these entries, then delete what is left of these entries; keep the <id>/ directories",
-        fix: { kind: "manual" },
-        docs: upgradingDocs("data-site-media-leftovers"),
-      },
-    ];
-  } catch {
-    return [];
+    read = await readdir(leftoversDir, { withFileTypes: true });
+  } catch (thrown) {
+    if (errorCode(thrown) === "ENOENT") return [];
+    return [scanIncompleteFinding("media-export", "warning", leftoversDir, `the 5.x delivery-static media export directory "${leftoversDir}" could not be read (${errorText(thrown)}), so data/site-media-leftovers did not run`, "make the directory readable by the user running kestrel upgrade data, or correct the delivery-static prefix and media.target, then run data again")];
   }
+  const entries = read.filter((e) => !(e.isDirectory() && mediaIds.has(e.name)));
+  if (entries.length === 0) return [];
+  const names = entries.map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).sort();
+  const shown = names.slice(0, LEFTOVER_NAMES_SHOWN).join(", ") + (names.length > LEFTOVER_NAMES_SHOWN ? ` and ${names.length - LEFTOVER_NAMES_SHOWN} more` : "");
+  return [
+    {
+      id: "data/site-media-leftovers",
+      rule: "data/site-media-leftovers",
+      severity: "warning",
+      tier: "data",
+      where: { path: leftoversDir },
+      message: `${entries.length} entr${entries.length === 1 ? "y" : "ies"} under "${leftoversDir}", the 5.x delivery-static media export directory, that are not the public copy of a media item: ${shown}`,
+      suggestion: "media.syncPublic writes the public copy of each item under <id>/ in this directory, and removes the files exactly one folder deep (<folder>/<file>) because its own copies go there, so links to those stop working with its first run; a file directly in this directory and anything in a deeper folder stays. Republish every page that might still link one of these entries, then delete what is left of these entries; keep the <id>/ directories",
+      fix: { kind: "manual" },
+      docs: upgradingDocs("data-site-media-leftovers"),
+    },
+  ];
 }
 
 const TMP_SUFFIX = ".kestrel-tmp";
 const TMP_SUFFIX_SCAN_LIMIT = 20_000;
 const TMP_SUFFIX_MAX_DEPTH = 8;
 
-async function collectTmpSuffixedFiles(dir: string, depth: number, visited: { count: number }, found: string[]): Promise<void> {
-  if (depth > TMP_SUFFIX_MAX_DEPTH || visited.count > TMP_SUFFIX_SCAN_LIMIT) return;
+interface TmpSuffixScan {
+  visited: number;
+  found: string[];
+  unreadable: Array<{ path: string; cause: string }>;
+}
+
+async function collectTmpSuffixedFiles(dir: string, depth: number, scan: TmpSuffixScan): Promise<void> {
+  if (depth > TMP_SUFFIX_MAX_DEPTH || scan.visited > TMP_SUFFIX_SCAN_LIMIT) return;
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
-  } catch {
+  } catch (thrown) {
+    scan.unreadable.push({ path: dir, cause: errorText(thrown) });
     return;
   }
   for (const entry of entries) {
-    visited.count++;
-    if (visited.count > TMP_SUFFIX_SCAN_LIMIT) return;
+    scan.visited++;
+    if (scan.visited > TMP_SUFFIX_SCAN_LIMIT) return;
     const full = join(dir, entry.name);
-    if (entry.isDirectory()) await collectTmpSuffixedFiles(full, depth + 1, visited, found);
-    else if (entry.name.endsWith(TMP_SUFFIX)) found.push(full);
+    if (entry.isDirectory()) await collectTmpSuffixedFiles(full, depth + 1, scan);
+    else if (entry.name.endsWith(TMP_SUFFIX)) scan.found.push(full);
   }
 }
 
-async function blobstoreTmpSuffixFindings(root: string, configs: ModuleConfigs): Promise<Finding[]> {
-  const blobstore = blobstoreFilesystemConfig(configs);
-  if (blobstore === undefined) return [];
-  const storeRoot = resolve(root, blobstore.root);
-  const found: string[] = [];
-  await collectTmpSuffixedFiles(storeRoot, 0, { count: 0 }, found);
-  if (found.length === 0) return [];
-  return [
-    {
+async function blobstoreTmpSuffixFindings(storeRoot: string): Promise<Finding[]> {
+  const scan: TmpSuffixScan = { visited: 0, found: [], unreadable: [] };
+  await collectTmpSuffixedFiles(storeRoot, 0, scan);
+  const findings: Finding[] = [];
+  if (scan.found.length > 0) {
+    findings.push({
       id: "data/blobstore-tmp-suffix",
       rule: "data/blobstore-tmp-suffix",
       severity: "info",
       tier: "data",
       where: { path: storeRoot },
-      message: `${found.length} stored key(s) already end in "${TMP_SUFFIX}" (first: "${found[0]}")`,
+      message: `${scan.found.length} stored key(s) already end in "${TMP_SUFFIX}" (first: "${scan.found[0]}")`,
       suggestion: "rename these keys by hand if they are meant to stay readable; 6.0.0 treats this suffix as its own atomic-write temp file and skips it",
       fix: { kind: "none" },
       docs: upgradingDocs("data-blobstore-tmp-suffix"),
-    },
-  ];
+    });
+  }
+  const [first] = scan.unreadable;
+  if (first !== undefined) {
+    const n = scan.unreadable.length;
+    findings.push(scanIncompleteFinding("subdirectories", "info", storeRoot, `${n} director${n === 1 ? "y" : "ies"} below the blobstore-filesystem root "${storeRoot}" could not be read, so data/blobstore-tmp-suffix did not look inside ${n === 1 ? "it" : "them"} (first: ${first.cause})`, "make the blob store readable by the user running kestrel upgrade data, then run data again"));
+  }
+  return findings;
+}
+
+async function blobstoreFindings(root: string, configs: ModuleConfigs, mediaIds: ReadonlySet<string>): Promise<Finding[]> {
+  const blobstore = blobstoreFilesystemConfig(configs);
+  if (blobstore === undefined) return [];
+  const deliveryConfig = configs.configs.get("delivery-static");
+  const storeRoot = resolve(root, blobstore.root);
+  try {
+    await readdir(storeRoot);
+  } catch (thrown) {
+    const skipped = [...(isRecord(deliveryConfig) ? ["data/site-media-leftovers"] : []), "data/blobstore-tmp-suffix"].join(" and ");
+    if (errorCode(thrown) === "ENOENT") {
+      return [scanIncompleteFinding("root", "info", storeRoot, `the blobstore-filesystem root "${storeRoot}" does not exist, so ${skipped} did not run`, "if the blob store lives elsewhere, run data where the blobstore-filesystem root resolves to it; a project that never stored a blob has nothing to check")];
+    }
+    return [scanIncompleteFinding("root", "warning", storeRoot, `the blobstore-filesystem root "${storeRoot}" could not be read (${errorText(thrown)}), so ${skipped} did not run`, "make the blob store readable by the user running kestrel upgrade data, or correct the blobstore-filesystem root, then run data again")];
+  }
+  const [leftovers, tmpSuffix] = await Promise.all([isRecord(deliveryConfig) ? siteMediaLeftoversFindings(root, blobstore, deliveryConfig, mediaIds) : Promise.resolve([]), blobstoreTmpSuffixFindings(storeRoot)]);
+  return [...leftovers, ...tmpSuffix];
 }
 
 /** Copies `dbFile` (and any `-wal`/`-shm` siblings), verifies the copy with `PRAGMA quick_check`, then reads it through the project's own persistence-sqlite; the given file is never opened after the copy. The copy directory is always removed before returning, whether the step succeeds or refuses. */
@@ -668,8 +707,8 @@ export async function runDataStep(dbFile: string, root: string, plugins: readonl
     } finally {
       db.close();
     }
-    const [siteMediaLeftovers, blobstoreTmpSuffix] = await Promise.all([siteMediaLeftoversFindings(root, configs, mediaIds), blobstoreTmpSuffixFindings(root, configs)]);
-    const findings = [...queued.findings, ...underscoreFieldFindings(counts), ...mediaLayout, ...translationSlugs, ...redirectRules, ...siteMediaLeftovers, ...blobstoreTmpSuffix, ...dataModelIssues, ...fromPlugin];
+    const blobs = await blobstoreFindings(root, configs, mediaIds);
+    const findings = [...queued.findings, ...underscoreFieldFindings(counts), ...mediaLayout, ...translationSlugs, ...redirectRules, ...blobs, ...dataModelIssues, ...fromPlugin];
     const report: UpgradeReport = {
       schema: 1,
       tool: { name: "kestrel-upgrade", version: toolVersion() },

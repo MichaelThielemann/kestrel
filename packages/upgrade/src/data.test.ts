@@ -329,7 +329,7 @@ describe("runDataStep: underscore-field counts for a plugin project", () => {
     const plugin: UpgradePlugin = {
       kind: "test-plugin",
       detect: (candidate) => candidate === root,
-      load: () => Promise.resolve({ issues: [] }),
+      load: () => Promise.resolve(emptyProject(root)),
       dataModel: () => Promise.resolve(undefined),
     };
     const result = await runDataStep(file, root, [plugin]);
@@ -414,7 +414,7 @@ describe("runDataStep: underscore-field counts for a plugin project", () => {
     expect(result.report?.underscoreFields).toEqual({});
   });
 
-  it("names the plugin, as a warning not an error, when a detected plugin has no dataModel hook and its own config cannot be loaded without it", async () => {
+  it("names the plugin, as an error, when a detected plugin has no dataModel hook and its own config cannot be loaded without it", async () => {
     const root = await mkdtemp(join(PROJECT_ROOT, "__fixtures__", ".tmp-data-plugin-broken-config-test-"));
     projectRoots.push(root);
     await writeFile(join(root, "package.json"), JSON.stringify({ name: "tmp", type: "module" }));
@@ -427,10 +427,10 @@ describe("runDataStep: underscore-field counts for a plugin project", () => {
       load: () => Promise.resolve({ issues: [] }),
     };
     const result = await runDataStep(file, root, [plugin]);
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode).toBe(1);
     const finding = result.report?.findings.find((f) => f.rule === "data/config-load-failed");
     expect(finding).toBeDefined();
-    expect(finding?.severity).toBe("warning");
+    expect(finding?.severity).toBe("error");
     expect(finding?.message).toContain("test-host-plugin");
     expect(finding?.message).toContain("no dataModel hook");
     expect(result.report?.underscoreFields).toEqual({});
@@ -448,7 +448,7 @@ describe("the data CLI command with a registered plugin", () => {
     const plugin: UpgradePlugin = {
       kind: "test-plugin",
       detect: (candidate) => candidate === root,
-      load: () => Promise.resolve({ issues: [] }),
+      load: () => Promise.resolve(emptyProject(root)),
       dataModel: () => Promise.resolve({ types: { page: { fields: { _hint: {} } } } }),
     };
     const lines: string[] = [];

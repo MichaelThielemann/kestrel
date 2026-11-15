@@ -1980,9 +1980,15 @@ Net changes since 5.8.2.
   `kestrel.config.ts` does not load by itself, the way `migrate` does, and loads the project once for
   all its checks, so `data/redirect-reserved-paths`, `data/site-media-leftovers`,
   `data/blobstore-tmp-suffix`, the underscore-field count and `data/translation-slug` also run in a project
-  whose config imports what only the host resolves. When the configs load neither way, `data/config-load-failed` names the cause and each
-  check that did not run with the modules whose config it reads, instead of those checks reporting
-  nothing.
+  whose config imports what only the host resolves. A path the host plugin resolves inside its scratch copy
+  of the project, such as a blobstore-filesystem root under the host's data directory, is read at the same
+  place in the project. When the configs load neither way, `data/config-load-failed` is an error, with or
+  without a host plugin, and names the cause and each check that did not run with the modules whose config
+  it reads, instead of those checks reporting nothing.
+- `kestrel upgrade data` reports `data/blobstore-scan-incomplete` when the blobstore-filesystem root does
+  not exist (info, naming the resolved path), when it or the delivery-static media export directory cannot
+  be read (warning, naming the cause), and when directories below the root could not be scanned (info, with
+  their count), instead of `data/site-media-leftovers` and `data/blobstore-tmp-suffix` reporting nothing.
 - `content/default` looks up type names, fields in a filter, a sort and written data by their own name, so
   `?sort=constructor` and `toString` answer `400` (unknown sort field) and a written field named like an
   `Object.prototype` member is reported as an unknown field instead of passing the check.

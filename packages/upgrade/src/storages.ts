@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { realpath } from "node:fs/promises";
+import { join, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { effectiveModuleConfig } from "@michaelthielemann/kestrel";
 import { loadConfig, loadModule } from "@michaelthielemann/kestrel/load";
@@ -78,7 +79,8 @@ function tablesOf(file: string): Set<string> {
 
 /**
  * The project's module configs as {@link loadModuleConfigs} found them. `configs` holds the effective
- * config of the first entry per module token; `from` names where they came from; `problem` is set when
+ * config of the first entry per module token, with a path the host plugin resolved inside its scratch
+ * copy of the project pointing at the same place in the project; `from` names where they came from; `problem` is set when
  * neither `kestrel.config.ts` nor the host plugin loaded although at least one of the two is there;
  * `missing` is set when there is no `kestrel.config.ts` and no host plugin.
  */
@@ -96,14 +98,42 @@ function messageOf(thrown: unknown): string {
 
 type ModuleEntry = Parameters<typeof effectiveModuleConfig>[0] & { use: string };
 
-function setupConfig(entry: ModuleEntry): unknown {
-  return effectiveModuleConfig({ config: entry.config ?? {}, defaults: entry.defaults });
+type Rebase = (value: unknown) => unknown;
+
+const unchanged: Rebase = (value) => value;
+
+function setupConfig(entry: ModuleEntry, rebase: Rebase = unchanged): unknown {
+  return rebase(effectiveModuleConfig({ config: entry.config ?? {}, defaults: entry.defaults }));
 }
 
-function byToken(modules: readonly ModuleEntry[]): Map<string, unknown> {
+function byToken(modules: readonly ModuleEntry[], rebase: Rebase = unchanged): Map<string, unknown> {
   const configs = new Map<string, unknown>();
-  for (const entry of modules) if (!configs.has(useToken(entry.use))) configs.set(useToken(entry.use), setupConfig(entry));
+  for (const entry of modules) if (!configs.has(useToken(entry.use))) configs.set(useToken(entry.use), setupConfig(entry, rebase));
   return configs;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const proto: unknown = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+async function scratchRebase(scratch: string, root: string): Promise<Rebase> {
+  const real = await realpath(scratch).catch(() => scratch);
+  const prefixes = real === scratch ? [scratch] : [scratch, real];
+  const rebase: Rebase = (value) => {
+    if (typeof value === "string") {
+      for (const prefix of prefixes) {
+        if (value === prefix) return root;
+        if (value.startsWith(`${prefix}${sep}`)) return join(root, value.slice(prefix.length + 1));
+      }
+      return value;
+    }
+    if (Array.isArray(value)) return value.map(rebase);
+    if (isPlainRecord(value)) return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, rebase(inner)]));
+    return value;
+  };
+  return rebase;
 }
 
 async function pluginConfigs(root: string, plugin: UpgradePlugin): Promise<ModuleConfigs | string> {
@@ -112,16 +142,17 @@ async function pluginConfigs(root: string, plugin: UpgradePlugin): Promise<Modul
     const loaded = await plugin.load(root, scratch.dir, new Map());
     if (loaded.project === undefined) return `the "${plugin.kind}" plugin could not load the project${loaded.issues.length === 0 ? "" : `: ${loaded.issues.map((i) => i.message).join("; ")}`}`;
     const definitions = loaded.project.input.modules;
+    const rebase = await scratchRebase(scratch.dir, root);
     const modules = loaded.project.input.config.modules.map((entry, i): ConfiguredModule => ({
       use: entry.use,
-      config: setupConfig(entry),
+      config: setupConfig(entry, rebase),
       definition: async () => {
         const definition = definitions[i];
         if (definition === undefined) throw new Error(`the "${plugin.kind}" plugin loaded no module for ${entry.use}`);
         return definition;
       },
     }));
-    return { configs: byToken(loaded.project.input.config.modules), modules, from: `the "${plugin.kind}" plugin` };
+    return { configs: byToken(loaded.project.input.config.modules, rebase), modules, from: `the "${plugin.kind}" plugin` };
   } catch (thrown) {
     return `the "${plugin.kind}" plugin's load() threw: ${messageOf(thrown)}`;
   } finally {
