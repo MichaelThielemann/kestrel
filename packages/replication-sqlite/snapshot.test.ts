@@ -415,6 +415,56 @@ describe("replication/sqlite snapshot interrupted by the end of the process", ()
   });
 });
 
+describe("replication/sqlite WAL before the first generation", () => {
+  it("keeps the WAL near checkpointBytes before the first sync, and the first sync and every later one ship every frame", async () => {
+    const l = live();
+    const repl = l.start({ checkpointBytes: 256 * 1024, checkpointSeconds: 1 }, { checkIntervalMs: 5 });
+    let maxWal = 0;
+    for (let i = 0; i < 120; i++) {
+      l.insert(10, 12_000);
+      maxWal = Math.max(maxWal, l.walSize());
+      await sleep(2);
+    }
+    expect(maxWal).toBeLessThan(2 * 1024 * 1024);
+    const list = l.blobs.list.bind(l.blobs);
+    let listing = true;
+    l.blobs.list = async (prefix) => {
+      l.blobs.list = list;
+      await sleep(300);
+      listing = false;
+      return list(prefix);
+    };
+    const first = repl.sync();
+    while (listing) {
+      l.insert(10, 12_000);
+      maxWal = Math.max(maxWal, l.walSize());
+      await sleep(2);
+    }
+    expectOk(await first);
+    expect(maxWal).toBeLessThan(2 * 1024 * 1024);
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ ...fingerprint(l.app), check: "ok" });
+    for (let round = 0; round < 3; round++) {
+      for (let i = 0; i < 30; i++) {
+        l.insert(10, 12_000);
+        await sleep(1);
+      }
+      l.clock.advance(2_000);
+      expectOk(await repl.sync());
+      expect(await restored(l.blobs, l.dir)).toMatchObject({ ...fingerprint(l.app), check: "ok" });
+    }
+  }, 60_000);
+
+  it("seals a first snapshot of everything committed before the first sync after checkpoints copied it into the database file", async () => {
+    const l = live();
+    const repl = l.start({ checkpointBytes: 64 * 1024 }, { checkIntervalMs: 5 });
+    for (let i = 0; i < 20; i++) l.insert(10, 8000);
+    await sleep(100);
+    const sealed = expectOk(await repl.seal());
+    if (sealed === null) throw new Error("expected a seal");
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation: sealed.generation, ...fingerprint(l.app), check: "ok" });
+  });
+});
+
 describe("replication/sqlite failed snapshot upload", () => {
   it("removes the snapshot key again when its upload fails after the store kept it, so a restore keeps to the generation before it", async () => {
     const l = live();

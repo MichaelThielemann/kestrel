@@ -394,6 +394,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   let lastCheckpointAt: number | null = null;
   let restorePrepared = false;
   let closed = false;
+  let reading = false;
+  let copiedBeforeGeneration = false;
   let pending: Array<{ key: string; data: Uint8Array }> = [];
   const logger = options.logger ?? silentLogger;
   const startedAt = now();
@@ -476,31 +478,36 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       if (isErr(listing)) return listing;
       observe(listing.value);
     }
-    const read = await readSnapshot({ file, walFile, probe: walState, now, stopped: () => closed });
-    if (read === "stopped") return ok(null);
-    if (read === "unsettled") return err(failure("TRANSIENT", "replication/sqlite: the WAL kept starting over while the snapshot read it; the next run tries again"));
-    const { image, position, at } = read;
-    snapshotOrder = Math.max(at, newestListed + 1, snapshotOrder + 1);
-    const gen = `${stamp(snapshotOrder)}-${orderKey(snapshotOrder)}${orderKey(at)}${randomBytes(10).toString("hex")}`;
-    own.add(gen);
-    if (placedRestore) {
-      const carried = await blobs.put(markerKey(config.prefix, gen, "origin"), new TextEncoder().encode(placedRestore.origin), { contentType: "application/json" });
-      if (isErr(carried)) return carried;
+    reading = true;
+    try {
+      const read = await readSnapshot({ file, walFile, probe: walState, now, stopped: () => closed });
+      if (read === "stopped") return ok(null);
+      if (read === "unsettled") return err(failure("TRANSIENT", "replication/sqlite: the WAL kept starting over while the snapshot read it; the next run tries again"));
+      const { image, position, at } = read;
+      snapshotOrder = Math.max(at, newestListed + 1, snapshotOrder + 1);
+      const gen = `${stamp(snapshotOrder)}-${orderKey(snapshotOrder)}${orderKey(at)}${randomBytes(10).toString("hex")}`;
+      own.add(gen);
+      if (placedRestore) {
+        const carried = await blobs.put(markerKey(config.prefix, gen, "origin"), new TextEncoder().encode(placedRestore.origin), { contentType: "application/json" });
+        if (isErr(carried)) return carried;
+      }
+      const snapshotKey = `${config.prefix}gen/${gen}/snapshot.db`;
+      const put = await blobs.put(snapshotKey, image, { contentType: "application/vnd.sqlite3" });
+      if (isErr(put)) {
+        await blobs.remove(snapshotKey);
+        if (placedRestore) await blobs.remove(markerKey(config.prefix, gen, "origin"));
+        return put;
+      }
+      if (placedRestore) unacknowledged.push(gen);
+      generation = gen;
+      seq = 0;
+      cursor = position === null ? null : { ...position };
+      pending = [];
+      lastSnapshotAt = at;
+      return ok({ generation: gen, bytes: image.byteLength });
+    } finally {
+      reading = false;
     }
-    const snapshotKey = `${config.prefix}gen/${gen}/snapshot.db`;
-    const put = await blobs.put(snapshotKey, image, { contentType: "application/vnd.sqlite3" });
-    if (isErr(put)) {
-      await blobs.remove(snapshotKey);
-      if (placedRestore) await blobs.remove(markerKey(config.prefix, gen, "origin"));
-      return put;
-    }
-    if (placedRestore) unacknowledged.push(gen);
-    generation = gen;
-    seq = 0;
-    cursor = position === null ? null : { ...position };
-    pending = [];
-    lastSnapshotAt = at;
-    return ok({ generation: gen, bytes: image.byteLength });
   };
 
   const shipNewFrames = async (): Promise<Result<{ bytes: number; frames: number }, BlobstoreError>> => {
@@ -606,8 +613,25 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     if (isErr(shipped) || closed) return;
     await checkpoint();
   };
+  const checkpointBeforeGeneration = (): void => {
+    if (walContentBytes() < config.checkpointBytes) return;
+    release();
+    let row: { busy: number; log: number; checkpointed: number } | undefined;
+    try {
+      row = boundaryCast<{ busy: number; log: number; checkpointed: number } | undefined>(conn.prepare("PRAGMA wal_checkpoint(PASSIVE)").get(), "host");
+    } finally {
+      holdRead();
+    }
+    copiedBeforeGeneration = true;
+    if (row !== undefined && row.busy === 0 && row.log === row.checkpointed) lastCheckpointAt = now();
+  };
   const timer = setInterval(() => {
-    if (closed || sealedAs !== null || queued > 0 || generation === null) return;
+    if (closed || sealedAs !== null) return;
+    if (generation === null) {
+      if (!reading) checkpointBeforeGeneration();
+      return;
+    }
+    if (queued > 0) return;
     if (walContentBytes() < config.checkpointBytes) return;
     exclusive(maintain).catch(() => undefined);
   }, options.checkIntervalMs ?? 1000);
@@ -747,7 +771,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
         if (sealedAs !== null) return ok(sealedAs);
         const acknowledging = placedRestore !== null && handled;
         if (generation === null) {
-          if (walState().log === 0) return ok(null);
+          if (walState().log === 0 && !copiedBeforeGeneration) return ok(null);
           const snap = await takeSnapshot();
           if (isErr(snap)) return snap;
           if (snap.value === null) return err(CLOSED);

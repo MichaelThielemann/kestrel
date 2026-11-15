@@ -59,6 +59,15 @@ check finds `checkpointBytes` of frames in the WAL, so the WAL stays near `check
 rarely `replication.sync` runs. An older read snapshot on another connection can keep a checkpoint
 from copying every frame back; the WAL then keeps growing and the next check tries again.
 
+Before the process has a generation, nothing ships frames and the first snapshot holds every frame
+committed until it is read. The once-per-second check then checkpoints as soon as the WAL holds
+`checkpointBytes` of frames, without the write lock and without reading frames, also while the first
+`replication.sync` lists the replica: it releases the read transaction, runs `wal_checkpoint(PASSIVE)`
+and takes the read transaction again. The WAL therefore stays near `checkpointBytes` until the first
+snapshot, which then reads little more than the database file. The check pauses from the moment a
+snapshot starts reading until it is uploaded or given up, since the frames committed meanwhile belong
+to the generation it starts.
+
 If an upload fails after a checkpoint, the frames stay in memory and go out first on the next run;
 a new snapshot supersedes them, as does the snapshot a restarted process takes on its first sync.
 A `replication.sync` called before a running one has started reading returns that run's result;

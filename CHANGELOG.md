@@ -2115,6 +2115,10 @@ Net changes since 5.8.2.
 - `replication-sqlite`: a restore applies the WAL segments into one image that grows in place, instead of
   copying the image at every commit that changes the database size, so restoring a generation of a growing
   database takes time in proportion to its segments.
+- `replication-sqlite`: the WAL grew without bound until the first generation of a process existed, because
+  the module's read transaction kept every checkpoint from copying frames back, and the first snapshot then
+  had to read it whole. Before the first generation, the once-per-second check now checkpoints as soon as
+  the WAL holds `checkpointBytes` of frames, also while the first `replication.sync` lists the replica.
 - `site-default`: the `maxCascade` limit counts every language row of the page being saved, so a save is refused or accepted
   the same way whatever the clock reads. Before, a row of the saved page whose only change was its timestamp counted only
   when the clock had advanced since the page was last saved.
