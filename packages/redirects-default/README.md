@@ -6,7 +6,7 @@ Admin-managed redirects, plus automatic redirects for documents that moved: the 
 same as delivery-static), `key` (`redirects.json`), `reservedPaths` (see below). Requires `content@1`, `blobstore@1` and `persistence@1`
 (own collections, reached through no other module's contract).
 Steps: `redirects.validate` before `content.set` (`VALIDATION`, `details { row, field, reason, path? }`, message `Row N: …`, also for
-an editor rule that would redirect into an existing automatic redirect); `redirects.recordMoves` applies
+an editor rule that would redirect into an existing automatic redirect and for rules that redirect in a loop); `redirects.recordMoves` applies
 `site.pathsMoved` moves to the automatic-redirect state; `redirects.lookup` in the site pipeline before
 `site.resolve` – on a hit (editor or automatic) the pipeline ends with `{ redirect: { to, status } }`;
 `redirects.export` after save and in publish-all writes `<prefix>redirects.json` (`[{ from, pattern,
@@ -56,8 +56,29 @@ localized message: `{ row, field, reason, path? }`. `row` is the 1-based positio
 | `to` | `placeholder-in-host` | `$1`, `$2`, … in the host of an absolute URL | |
 | `to` | `placeholder-out-of-range` | `$n` with `n` beyond the wildcards of `from` | |
 | `to` | `placeholder-syntax` | a placeholder written as `${1}` | |
-| `to` | `automatic-redirect-loop` | points at the source of an automatic redirect | the target |
+| `to` | `automatic-redirect-loop` | points at the source of an automatic redirect, also with a trailing slash, query or fragment | the source of the automatic redirect |
+| `to` | `redirect-loop` | following the editor rules from a source comes back to a path already passed, or takes more than 20 redirects | the target |
 | `status` | `invalid-status` | not 301, 302, 307 or 308 | |
+
+## Redirect loops
+
+`redirects.validate` follows the editor rules the way `redirects.lookup` does, starting at the source of
+every rule, with `sample` standing for each wildcard: first match first, `$n` filled in, a path target
+taken without its query, fragment and trailing slash, an absolute URL ending the chain. A list in which
+such a chain comes back to a path it has already passed is refused with `redirect-loop`, at the row
+whose target closes the loop, and the message names the paths and the rows:
+
+```text
+Row 3: "To" /a leads back to /a, a redirect loop: /a → /b → /a (rows 1, 3)
+```
+
+That covers a rule whose target is its own source (`/a` → `/a`), a target that only adds a trailing slash
+or a query (`/a` → `/a/`), a wildcard rule that matches its own target (`/blog/**` → `/blog/$1`) and rules
+that point at each other, also through several rows. A chain that keeps growing (`/news/**` →
+`/news/archive/$1`) or passes more than 20 redirects is refused the same way, since browsers stop
+following after about as many. Only the sample path is followed, so a loop that only a particular
+capture reaches is not found. Rows that a stored list holds already are not checked when it is
+published; the next save checks the whole list.
 
 A list that is not a list (`not-a-list`) or holds more than 1000 rules (`too-many-rules`) is rejected as
 a whole: `details` is `{ reason }` without `row` and `field`. Duplicate rules are not rejected: the first
@@ -167,7 +188,7 @@ on every request.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `redirects.validate` | Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect | – | – | { rules?: object[] } | – | 400 Row N: <reason>; details carries { row, field, reason, path? } | – | no |
+| `redirects.validate` | Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect and for rules that redirect in a loop | – | – | { rules?: object[] } | – | 400 Row N: <reason>; details carries { row, field, reason, path? } | – | no |
 | `redirects.recordMoves` | Apply site.pathsMoved moves to the automatic-redirect state: per document the highest seq wins, a tie inside one run favours the destination path | `payload` | `result.autoRedirects` | { moves?: object[], … } | { autoRedirects: object, … } | 400 payload.moves is missing or malformed | – | no |
 | `redirects.lookup` | End the pipeline with { redirect: { to, status } } on an editor rule or an automatic redirect (a moved document's old path); pass through otherwise | `params.path` | `result?` | – | – (ends: { redirect: object }) | – | – | no |
 | `redirects.export` | Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped, skippedRules }` to the result) | – | `result.redirects` | – | { redirects: object, … } | – | – | no |

@@ -169,6 +169,10 @@ describe("automatic redirects: reserved paths", () => {
     const loop = await r.validate([{ from: "/older", to: "/old-news" }]).catch((error: unknown) => error);
     expect(loop).toBeInstanceOf(RedirectRuleError);
     expect(loop instanceof RedirectRuleError && loop.toDetails()).toEqual({ row: 1, field: "to", reason: "automatic-redirect-loop", path: "/old-news" });
+    for (const target of ["/old-news/", "/old-news?from=older"]) {
+      const spelled = await r.validate([{ from: "/older", to: target }]).catch((error: unknown) => error);
+      expect(spelled instanceof RedirectRuleError && spelled.toDetails()).toEqual({ row: 1, field: "to", reason: "automatic-redirect-loop", path: "/old-news" });
+    }
   });
 });
 

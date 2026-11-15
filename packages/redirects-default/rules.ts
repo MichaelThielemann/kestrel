@@ -27,6 +27,9 @@ export const MAX_RULES = 1000;
 /** A request path longer than this, in characters, matches no rule. */
 export const MAX_LOOKUP_PATH_LENGTH = 2048;
 
+/** The most redirects one request may pass through the editor rules; browsers give up after about as many. */
+export const MAX_REDIRECT_HOPS = 20;
+
 /**
  * The path prefixes a redirect source may not take unless the configuration says otherwise: the admin
  * routes, the API mount and the public media files.
@@ -62,6 +65,7 @@ export const REDIRECT_RULE_REASONS = [
   "placeholder-out-of-range",
   "placeholder-syntax",
   "automatic-redirect-loop",
+  "redirect-loop",
   "invalid-status",
   "not-a-list",
   "too-many-rules",
@@ -75,7 +79,7 @@ export const REDIRECT_RULE_REASONS = [
  * `backslash`, `dot-segments`, `adjacent-double-wildcards`, `too-many-wildcards`, `reserved-path`.
  * Target (`to`): `blank`, `control-characters`, `backslash`, `protocol-relative`, `unsupported-scheme`,
  * `invalid-url`, `embedded-credentials`, `placeholder-in-host`, `placeholder-out-of-range`,
- * `placeholder-syntax`, `automatic-redirect-loop`. Status: `invalid-status`. Whole list: `not-a-list`,
+ * `placeholder-syntax`, `automatic-redirect-loop`, `redirect-loop`. Status: `invalid-status`. Whole list: `not-a-list`,
  * `too-many-rules`, which is also the reason of each row beyond the limit when a list is published.
  */
 export type RedirectRuleReason = (typeof REDIRECT_RULE_REASONS)[number];
@@ -85,7 +89,7 @@ export type RedirectRuleReason = (typeof REDIRECT_RULE_REASONS)[number];
  * `row` is the 1-based position in the list. It is absent when saving a list that is rejected as a whole
  * (`not-a-list`, `too-many-rules`); `field` is absent for those and for a row skipped as `too-many-rules`
  * because it lies beyond the limit. `path` is the offending path where one exists: the reserved prefix for
- * `reserved-path`, the target for `automatic-redirect-loop`.
+ * `reserved-path`, the source of the automatic redirect for `automatic-redirect-loop`, the target for `redirect-loop`.
  */
 export interface RedirectRuleDetails {
   row?: number;
@@ -325,6 +329,61 @@ export function compilePublishableRedirects(rows: unknown, options: CompileOptio
     }
   });
   return { rules, skipped, skippedRules };
+}
+
+/** The path a browser requests after a redirect to the path `target`: no query or fragment, no trailing slash. */
+export function targetPath(target: string): string {
+  const path = `/${(target.split(/[?#]/)[0] ?? "").replace(/^\/+/, "")}`;
+  return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+}
+
+function literalPrefix(from: string): string {
+  const wildcard = from.indexOf("*");
+  return wildcard === -1 ? from : from.slice(0, wildcard);
+}
+
+function rowList(rows: number[]): string {
+  const sorted = [...new Set(rows)].sort((a, b) => a - b);
+  return `${sorted.length === 1 ? "row" : "rows"} ${sorted.join(", ")}`;
+}
+
+/**
+ * Refuse editor rules that redirect in a loop. From the source of every rule, a wildcard standing for one
+ * sample segment, the rules are followed first match first, as `matchRedirect` does: a path target that
+ * comes back to a path already passed, or a chain longer than `MAX_REDIRECT_HOPS`, throws `redirect-loop`
+ * at the row whose target closes it, naming the paths and the rows involved. Absolute URL targets end a chain.
+ */
+export function assertNoRedirectLoop(rules: readonly RedirectRule[]): void {
+  const prefixes = rules.map((rule) => literalPrefix(rule.from));
+  const firstMatch = (path: string): { index: number; target: string } | undefined => {
+    for (const [index, rule] of rules.entries()) {
+      if (!path.startsWith(prefixes[index] ?? "")) continue;
+      const hit = matchRedirect([rule], path);
+      if (hit) return { index, target: hit.target };
+    }
+    return undefined;
+  };
+  for (const rule of rules) {
+    const passed = [targetPath(rule.from.replace(/\*\*|\*/g, "sample"))];
+    const rows: number[] = [];
+    for (;;) {
+      const hit = firstMatch(passed[passed.length - 1] ?? "/");
+      if (!hit || !hit.target.startsWith("/")) break;
+      rows.push(hit.index + 1);
+      const next = targetPath(hit.target);
+      const target = rules[hit.index]?.target ?? hit.target;
+      const row = hit.index + 1;
+      const back = passed.indexOf(next);
+      if (back !== -1) {
+        const loop = [...passed.slice(back), next];
+        throw new RedirectRuleError(`"To" ${target} leads back to ${next}, a redirect loop: ${loop.join(" → ")} (${rowList(rows.slice(back))})`, { field: "to", reason: "redirect-loop", path: target }).atRow(row);
+      }
+      passed.push(next);
+      if (rows.length > MAX_REDIRECT_HOPS) {
+        throw new RedirectRuleError(`"To" ${target} leads on through more than ${MAX_REDIRECT_HOPS} redirects without ending: ${passed.slice(0, 3).join(" → ")} → … (${rowList(rows)})`, { field: "to", reason: "redirect-loop", path: target }).atRow(row);
+      }
+    }
+  }
 }
 
 /** The artifact body. An empty list is a valid document (`[]`), never an absent file. */

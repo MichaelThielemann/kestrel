@@ -5,7 +5,7 @@ import type { Document, Filter, Persistence, PersistenceError, Schema } from "@m
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { unobserved } from "@michaelthielemann/kestrel/reads";
 import { matchWildcardPath } from "./match.ts";
-import { compilePublishableRedirects, compileRedirects, exactPathPatternSource, matchRedirect, reservedPathOf, serializeRedirects, RedirectRuleError, type RedirectRule, type RedirectRuleDetails } from "./rules.ts";
+import { assertNoRedirectLoop, compilePublishableRedirects, compileRedirects, exactPathPatternSource, matchRedirect, reservedPathOf, serializeRedirects, RedirectRuleError, targetPath, type RedirectRule, type RedirectRuleDetails } from "./rules.ts";
 
 export type { RedirectRuleDetails, RedirectRuleField, RedirectRuleReason } from "./rules.ts";
 export { REDIRECT_RULE_REASONS, RedirectRuleError } from "./rules.ts";
@@ -258,10 +258,12 @@ export async function createRedirects(config: Config, deps: { content: Content; 
       if (isErr(effective)) return effective;
       const sources = new Set(effective.value.filter((auto) => reservedPathOf(auto.from, config.reservedPaths) === undefined).map((auto) => auto.from));
       compiled.forEach((rule, i) => {
-        if (rule.target.startsWith("/") && sources.has(rule.target)) {
-          throw new RedirectRuleError(`Row ${i + 1}: "To" points at ${rule.target}, which is itself an automatic redirect – this would create a redirect loop`, { row: i + 1, field: "to", reason: "automatic-redirect-loop", path: rule.target });
+        const path = targetPath(rule.target);
+        if (rule.target.startsWith("/") && sources.has(path)) {
+          throw new RedirectRuleError(`Row ${i + 1}: "To" points at ${path}, which is itself an automatic redirect – this would create a redirect loop`, { row: i + 1, field: "to", reason: "automatic-redirect-loop", path });
         }
       });
+      assertNoRedirectLoop(compiled);
       return ok(undefined);
     },
     recordMoves: (moves) =>

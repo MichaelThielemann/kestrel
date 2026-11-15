@@ -12487,7 +12487,7 @@
       "module": "redirects/default",
       "factory": false,
       "description": {
-        "summary": "Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect",
+        "summary": "Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect and for rules that redirect in a loop",
         "reads": [],
         "writes": [],
         "input": {
@@ -12710,6 +12710,7 @@
                           "placeholder-out-of-range",
                           "placeholder-syntax",
                           "automatic-redirect-loop",
+                          "redirect-loop",
                           "invalid-status",
                           "not-a-list",
                           "too-many-rules"
@@ -23972,6 +23973,7 @@
                               "placeholder-out-of-range",
                               "placeholder-syntax",
                               "automatic-redirect-loop",
+                              "redirect-loop",
                               "invalid-status",
                               "not-a-list",
                               "too-many-rules"
@@ -24517,6 +24519,7 @@
                               "placeholder-out-of-range",
                               "placeholder-syntax",
                               "automatic-redirect-loop",
+                              "redirect-loop",
                               "invalid-status",
                               "not-a-list",
                               "too-many-rules"
@@ -26650,6 +26653,7 @@
                               "placeholder-out-of-range",
                               "placeholder-syntax",
                               "automatic-redirect-loop",
+                              "redirect-loop",
                               "invalid-status",
                               "not-a-list",
                               "too-many-rules"
@@ -30838,7 +30842,7 @@
           "name": "redirects.validate",
           "module": "redirects/default",
           "description": {
-            "summary": "Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect",
+            "summary": "Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect and for rules that redirect in a loop",
             "reads": [],
             "writes": [],
             "input": {
@@ -31021,6 +31025,7 @@
                               "placeholder-out-of-range",
                               "placeholder-syntax",
                               "automatic-redirect-loop",
+                              "redirect-loop",
                               "invalid-status",
                               "not-a-list",
                               "too-many-rules"

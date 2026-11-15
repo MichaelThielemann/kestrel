@@ -116,7 +116,7 @@ export default defineModule({
 
   describe: (redirects) => ({
     validate: {
-      summary: "Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect",
+      summary: "Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect and for rules that redirect in a loop",
       reads: [],
       writes: [],
       input: { type: "object", properties: { [redirects.field]: { type: "array", items: ROW_SCHEMA } }, additionalProperties: false },

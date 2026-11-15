@@ -2426,6 +2426,16 @@ Net changes since 5.8.2.
   mark keeps it, with its attempts, and an output without a public path is not marked.
 - `media-default`: an upload whose `provenance` starts with `{` but is not valid JSON answers 400 `VALIDATION`
   instead of 500 `INTERNAL`, and stores nothing.
+- `redirects-default`: `redirects.validate` refuses editor rules that redirect in a loop with the new reason
+  `redirect-loop` (`field: "to"`, `path` the target), at the row whose target closes the loop: a rule whose
+  target is its own source, also with a trailing slash, query or fragment added (`/a` → `/a/`), a wildcard rule
+  that matches its own target (`/blog/**` → `/blog/$1`), rules that point at each other, and a chain that grows
+  on every hop or passes more than 20 redirects. The message names the paths and rows of
+  the loop, for instance `Row 3: "To" /a leads back to /a, a redirect loop: /a → /b → /a (rows 1, 3)`. Such a
+  list was saved and answered every visitor of the path with a redirect loop. `automatic-redirect-loop` also
+  catches a target that reaches the source of an automatic redirect with a trailing slash, query or fragment,
+  and its `path` is that source. `REDIRECT_RULE_REASONS` and the `reason` enum of the published schema list
+  `redirect-loop`.
 
 ## 5.8.2 – 2026-09-27
 

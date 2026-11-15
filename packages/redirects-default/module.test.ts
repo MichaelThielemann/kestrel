@@ -92,6 +92,13 @@ describe("redirects/default module steps", () => {
     expect(res.error).toBe('redirects: Row 2: "From" can match the reserved path /admin, which the application serves itself');
   });
 
+  it("validate refuses rules that redirect in a loop and names the loop", async () => {
+    const { instance } = await boot();
+    const res = await run(["redirects.validate"], { body: { rules: [{ from: "/loop-a", to: "/loop-b" }, { from: "/loop-b", to: "/loop-a", status: "302" }] } }, instance);
+    expect(res).toMatchObject({ status: 400, code: "VALIDATION", details: { row: 2, field: "to", reason: "redirect-loop", path: "/loop-a" } });
+    expect(res.error).toBe('redirects: Row 2: "To" /loop-a leads back to /loop-a, a redirect loop: /loop-a → /loop-b → /loop-a (rows 1, 2)');
+  });
+
   it("validate reports a status rejection against the status field", async () => {
     const { instance } = await boot();
     const res = await run(["redirects.validate"], { body: { rules: [{ from: "/a", to: "/b", status: "303" }] } }, instance);
