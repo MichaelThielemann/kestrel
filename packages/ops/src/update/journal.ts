@@ -96,7 +96,8 @@ function summarize(runId: string, env: string, firstCommand: string | null, reco
       continue;
     }
     if (r.state !== "done") {
-      if (r.phase === "rollback" && r.state === "started") state = "rolling-back";
+      if (r.phase === "rollback" && r.step !== RUN_STEP && r.state === "started") state = "rolling-back";
+      if (r.phase === "deploy" && r.state === "failed" && state === "deploying") state = "untouched";
       if (r.phase === "deploy" && r.step === "start" && r.state === "started") state = "verifying";
       continue;
     }

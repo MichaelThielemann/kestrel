@@ -61,6 +61,28 @@ describe("update run journal", () => {
     expect(OPEN_STATES.has(run.state)).toBe(true);
   });
 
+  it("marks a deploy whose step failed before the stop as untouched without an end record, and leaves an accepted run accepted while a rollback command only opened", async () => {
+    const bucket = new MemoryBucket("journal");
+    const refused = journalOn(bucket, "refused", () => 1);
+    await refused.record(RUN_STEP, "started", { command: "update deploy", env: "prod", phase: "deploy" });
+    await refused.record("gate", "started", { phase: "deploy" });
+    await refused.record("gate", "failed", { phase: "deploy", error: "no receipt" });
+    expect((await readUpdateRun(ctxOf(bucket), "refused")).state).toBe("untouched");
+
+    const accepted = journalOn(bucket, "accepted", () => 2);
+    await accepted.record(RUN_STEP, "started", { command: "update deploy", env: "prod", phase: "deploy" });
+    await accepted.record("stop", "done", { phase: "deploy" });
+    await accepted.record("seal", "failed", { phase: "deploy" });
+    expect((await readUpdateRun(ctxOf(bucket), "accepted")).state).toBe("down");
+    await accepted.record("start", "done", { phase: "deploy", ready: true });
+    await accepted.record("verify", "done", { phase: "deploy", verdict: "passed" });
+    await accepted.record("accept", "done", { phase: "accept" });
+    await accepted.record(RUN_STEP, "started", { command: "update rollback", env: "prod", phase: "rollback" });
+    expect((await readUpdateRun(ctxOf(bucket), "accepted")).state).toBe("accepted");
+    await accepted.record("rollback", "started", { phase: "rollback", reason: "requested" });
+    expect((await readUpdateRun(ctxOf(bucket), "accepted")).state).toBe("rolling-back");
+  });
+
   it("lets a later command continue the run's numbering and counts its records in the run's phase", async () => {
     const bucket = new MemoryBucket("journal");
     const first = journalOn(bucket, "run2", () => 1);
