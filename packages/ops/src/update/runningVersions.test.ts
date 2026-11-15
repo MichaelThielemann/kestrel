@@ -72,6 +72,26 @@ describe("the running versions of an update", { timeout: 60_000 }, () => {
     const run = await readUpdateRun(ctx, ctx.run.id);
     expect(gateVersions(run)).toMatchObject({ from: null });
     expect(stepMs(run, "seal")).toBeGreaterThanOrEqual(1_500);
-    expect(h.output.warn.join("\n")).toContain("seal unknown");
+    const warned = h.output.warn.join("\n");
+    expect(warned).toContain("seal unknown");
+    expect(warned).not.toContain("does not report");
+    expect(warned).toContain("the running replication runtime version is unknown");
+    expect(warned).toContain("point the target's dir at an installation of the running release");
+  });
+
+  it("are not taken from the release's own installation, and the deploy that waits for the seal says why and how to name them", async () => {
+    const h = await running({ update: { sealTimeoutSeconds: 2 } });
+    h.target.reported = fakeRelease({ runtime: "6.0.0" }).versions;
+    h.target.packagesFrom = h.root;
+    const { receipt } = await prepare(await h.context({ command: "update prepare" }), { fullMedia: false });
+    expect(receipt.versions.from).toBeNull();
+    const ctx = await h.context({ answers: { "unsealed-stop": "accept" } });
+    const outcome = await deploy(ctx);
+    expect(outcome.exitCode, outcome.message).toBe(UPDATE_EXIT.done);
+    const run = await readUpdateRun(ctx, ctx.run.id);
+    expect(stepMs(run, "seal")).toBeGreaterThanOrEqual(1_500);
+    const warned = h.output.warn.join("\n");
+    expect(warned).not.toContain("does not report");
+    expect(warned).toContain("the running replication runtime version is unknown");
   });
 });

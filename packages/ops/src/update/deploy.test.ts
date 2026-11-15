@@ -391,6 +391,26 @@ describe("the versions the cutover backup records", { timeout: 30_000 }, () => {
     expect(manifest.versions).toEqual({});
     expect(manifest.major).toBe(5);
   });
+
+  it("asks about the unsealed stop without waiting for a seal when the running versions are unknown and the pending storage migrations convert from a major before 6", async () => {
+    storages.list = [media];
+    const s = await scenario({ update: { sealTimeoutSeconds: 20 } }, false);
+    await receiptFor(s.ctx, [{ module: "media/default", id: "media-default:key-layout", kind: "auto", blobWrites: true, pending: 2 }]);
+    const describe = s.h.target.describe.bind(s.h.target);
+    s.h.target.describe = async () => ({ ...(await describe()), packages: {} });
+    const scope = join(s.h.releaseDir, "node_modules", "@michaelthielemann");
+    mkdirSync(scope, { recursive: true });
+    symlinkSync(resolve(dirname(new URL(import.meta.url).pathname), "..", "..", "..", "persistence-sqlite"), join(scope, "kestrel-persistence-sqlite"));
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode, outcome.message).toBe(0);
+    const run = await readUpdateRun(s.ctx, s.ctx.run.id);
+    const seal = run.records.filter((r) => r.phase === "deploy" && r.step === "seal");
+    expect(seal.map((r) => r.state)).toEqual(["started", "done"]);
+    expect((seal[1]?.at ?? Infinity) - (seal[0]?.at ?? 0)).toBeLessThan(5_000);
+    expect(seal[1]?.data.state).toBe("unsupported");
+    expect(s.h.output.warn.join("\n")).toContain("seal unsupported (runtime before 6)");
+    expect((await cutoverManifest(s)).major).toBe(5);
+  });
 });
 
 describe("continuing an interrupted deploy", { timeout: 30_000 }, () => {

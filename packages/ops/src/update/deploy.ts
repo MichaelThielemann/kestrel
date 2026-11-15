@@ -101,8 +101,9 @@ function stopQuestion(ctx: UpdateContext, plan: UpdatePlan): string {
  * Deploys the release in the order of `DEPLOY_STEPS`. While the old release serves: `gate`, `stage` (a staging
  * failure ends the run with exit 1 and the app was never stopped), `configuration` (recorded once into the backup
  * location; a plain variable whose value holds a secret of the tool is kept only as a fingerprint), `precopy`. Then `stop` (after the `update-stop` answer), `seal` (waits for the seal after STOPPED, unless the running
- * versions name a replication runtime before the sealing major; they are those of `runningVersions`, or when it knows
- * none, the `versions.from` of the receipt the gate matched),
+ * versions name a replication runtime before the sealing major, or, when they are unknown, the pending storage
+ * migrations convert from such a major; the running versions are those of `runningVersions`, or when it knows none,
+ * the `versions.from` of the receipt the gate matched),
  * `cutover-backup` (verified; it records the running versions, or without them the major the pending storage
  * migrations convert from; pinned for this run until `update cleanup` when {@link pinsCutover} says so), `migrate` (on a copy of the cutover
  * database), and `promote`, `swap` and `start` as one step without a question between them. `verify` decides: passed
@@ -184,13 +185,13 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     if (at("seal")) {
       step = "seal";
       await record(ctx, "seal", "started");
-      const seal = await ctx.steps.waitForSeal(ctx, flow.stoppedAt, flow.from);
+      const major = flow.from === null ? await sourceMajor(ctx, flow.plan) : null;
+      const seal = await ctx.steps.waitForSeal(ctx, flow.stoppedAt, flow.from, major);
       await acceptSeal(ctx, seal, flow.stoppedAt);
       await record(ctx, "seal", "done", { state: seal.state, generation: seal.generation });
       step = "cutover-backup";
       await record(ctx, "cutover-backup", "started");
       const running = { ...ctx, project: { versions: flow.from ?? {}, lockfileSha256: null } };
-      const major = flow.from === null ? await sourceMajor(ctx, flow.plan) : null;
       if (flow.from === null && major === null) ctx.out.warn("the running versions are unknown and no pending storage migration names the major they convert from; the cutover backup records neither, so prune cannot keep it as the newest backup of its major");
       const backup = await createBackup(running, { kind: "cutover", mode: { kind: "stopped", seal, stoppedAt: flow.stoppedAt }, versions: flow.from ?? {}, ...(major === null ? {} : { major }), ...(flow.pin ? { pinFor: UPDATE_PIN_PREFIX + ctx.run.id } : {}) });
       flow.cutoverBackup = backup.id;

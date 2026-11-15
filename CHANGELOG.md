@@ -1804,7 +1804,8 @@ Net changes since 5.8.2.
   the app's configuration, secret values only as salted fingerprints (also a plain value that is one of the tool's
   credentials, holds one as a URL's user or password or as the value of a `key=value` pair, or contains one of 16
   or more characters; any other plain value verbatim, so a rollback restores it); stops the app and waits for the seal, except
-  when the running versions name a runtime before 6, which writes none; takes
+  when the running versions name a runtime before 6, which writes none, or, with the running versions unknown, the
+  pending storage migrations convert from a major before 6; takes
   a verified cutover backup that records the running versions, pinned until `update cleanup` for a change of the
   major, unknown running versions or a pending storage migration, so no migration starts without one; migrates a copy
   of its database; promotes it, swaps the code and starts the release as one step; and verifies it with three

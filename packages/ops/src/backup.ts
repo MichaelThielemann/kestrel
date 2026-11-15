@@ -53,9 +53,9 @@ export async function acceptSeal(ctx: OpsContext, seal: SealReport, stoppedAt: n
   const lastFrame = new Date(seal.lastFrameAt).toISOString();
   const lines = [
     seal.state === "unsupported"
-      ? `seal unsupported (runtime ${seal.runtime ?? "unknown"}): the replica cannot prove the stop shipped every frame`
+      ? `seal unsupported (runtime ${seal.runtime ?? `before ${SEALING_MAJOR}`}): the replica cannot prove the stop shipped every frame`
       : seal.state === "unknown"
-        ? `seal unknown: generation ${seal.generation} has no seal and the target does not report the replication runtime version; a runtime before ${SEALING_MAJOR} writes none, a later one stopped without teardown`
+        ? `seal unknown: generation ${seal.generation} has no seal and the running replication runtime version is unknown; a runtime before ${SEALING_MAJOR} writes none, a later one stopped without teardown`
         : `unsealed: generation ${seal.generation} has no seal; the stop went without teardown`,
     `last shipped segment ${lastFrame}, stopped ${new Date(stoppedAt).toISOString()}`,
     ...evidence,

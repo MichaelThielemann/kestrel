@@ -332,7 +332,7 @@ export interface UpdateOutcome {
  * the real ones.
  */
 export interface UpdateSteps {
-  waitForSeal(ctx: UpdateContext, stoppedAt: number, running?: Readonly<Record<string, string>> | null): Promise<SealReport>;
+  waitForSeal(ctx: UpdateContext, stoppedAt: number, running?: Readonly<Record<string, string>> | null, convertsFrom?: number | null): Promise<SealReport>;
   migrateCopy(ctx: UpdateContext, input: MigrateInput): Promise<MigrateResult>;
   verify(ctx: UpdateContext, input: VerifyInput): Promise<VerifyResult>;
   rollback(ctx: UpdateContext, run: UpdateRun, reason: RollbackReason): Promise<RollbackResult>;
