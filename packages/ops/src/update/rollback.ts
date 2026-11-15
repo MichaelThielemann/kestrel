@@ -13,7 +13,7 @@ import { stableList, type ObjectInfo } from "../store.ts";
 import { readUpdateRun, reportOf } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
 import type { ConfigurationRestore, RecordedConfiguration } from "./target.ts";
-import { UPDATE_EXIT, type RollbackReason, type RollbackResult, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
+import { UPDATE_EXIT, type DerivedReport, type RollbackReason, type RollbackResult, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
 
 /** The table a rollback adds to the database it promotes for a release before 6, holding one marker row per rollback. */
 export const PROVENANCE_TABLE = "kestrel_ops_provenance";
@@ -97,19 +97,27 @@ async function replaceDelivery(ctx: UpdateContext, site: readonly SiteEntry[], c
   }
 }
 
-async function changedDerived(ctx: UpdateContext, backupId: string): Promise<string[]> {
+const DERIVED_SAMPLE = 20;
+
+async function compareDerived(ctx: UpdateContext, backupId: string): Promise<RollbackResult["derived"]> {
   const recorded = new Map((await jsonl<DerivedEntry>(ctx, keys.derived(backupId))).map((entry) => [entry.key, entry]));
+  const added = new Set<string>();
   const changed = new Set<string>();
   const seen = new Set<string>();
   for (const prefix of ctx.env.app.derivedPrefixes) {
     for (const info of await stableList(ctx.app, prefix, ctx.poll)) {
       seen.add(info.key);
       const entry = recorded.get(info.key);
-      if (entry === undefined || entry.etag !== info.etag || entry.size !== info.size) changed.add(info.key);
+      if (entry === undefined) added.add(info.key);
+      else if (entry.etag !== info.etag || entry.size !== info.size) changed.add(info.key);
     }
   }
-  for (const key of recorded.keys()) if (!seen.has(key)) changed.add(key);
-  return [...changed].sort();
+  const missing = [...recorded.keys()].filter((key) => !seen.has(key));
+  return { added: [...added].sort(), changed: [...changed].sort(), missing: missing.sort() };
+}
+
+function derivedRecord(derived: RollbackResult["derived"]): DerivedReport {
+  return { added: derived.added.length, changed: derived.changed.length, missing: derived.missing.length, keys: { added: derived.added.slice(0, DERIVED_SAMPLE), changed: derived.changed.slice(0, DERIVED_SAMPLE), missing: derived.missing.slice(0, DERIVED_SAMPLE) } };
 }
 
 async function stopAndSeal(ctx: UpdateContext): Promise<SealState> {
@@ -202,8 +210,10 @@ async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Man
   await ctx.journal.record("restore-originals", "done", { restored: originalsRestored });
 
   const delivery = await replaceDelivery(ctx, await jsonl<SiteEntry>(ctx, keys.site(manifest.id)), clock);
-  const derivedChanged = await changedDerived(ctx, manifest.id);
-  await ctx.journal.record("restore-delivery", "done", { written: delivery.written.length, removed: delivery.removed.length, relisted: delivery.relisted, derivedChanged: derivedChanged.length });
+  const derived = await compareDerived(ctx, manifest.id);
+  await ctx.journal.record("restore-delivery", "done", { written: delivery.written.length, removed: delivery.removed.length, relisted: delivery.relisted, derived: derivedRecord(derived) });
+  const differing = [...derived.added, ...derived.changed, ...derived.missing];
+  if (differing.length > 0) ctx.out.warn(`derived keys differ from the cutover backup ${manifest.id}: ${derived.added.length} added, ${derived.changed.length} changed, ${derived.missing.length} missing, such as ${differing.slice(0, 5).join(", ")}; the release renders them again`);
 
   const recorded = await recordedConfiguration(ctx, run.runId);
   let configuration: ConfigurationRestore = { set: [], removed: [], unchanged: [], unrestorable: [] };
@@ -216,7 +226,7 @@ async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Man
     for (const name of configuration.unrestorable) ctx.out.warn(`${name} holds another value than when the update began; its old value is not known and was not restored`);
   }
 
-  const result: RollbackResult = { ended: "stopped", generation: promoted.generation, seal, delivery, originalsRestored, configuration: { set: configuration.set, removed: configuration.removed, unrestorable: configuration.unrestorable }, derivedChanged };
+  const result: RollbackResult = { ended: "stopped", generation: promoted.generation, seal, delivery, originalsRestored, configuration: { set: configuration.set, removed: configuration.removed, unrestorable: configuration.unrestorable }, derived };
   if (!(await restoreDroplet(ctx, run, recorded))) {
     await ctx.journal.record("start", "skipped", { reason: "no previous droplet to start" });
     await ctx.journal.record("rollback", "done", { ended: "stopped", generation: promoted.generation });
@@ -289,7 +299,7 @@ async function restartPrevious(ctx: UpdateContext, run: UpdateRun, reason: Rollb
     const seal = await stopAndSeal(ctx);
     const generation = (await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).at(-1)?.name ?? "";
     const recorded = await recordedConfiguration(ctx, run.runId);
-    const result: RollbackResult = { ended: "stopped", generation, seal, delivery: { written: [], removed: [], relisted: 0 }, originalsRestored: [], configuration: { set: [], removed: [], unrestorable: [] }, derivedChanged: [] };
+    const result: RollbackResult = { ended: "stopped", generation, seal, delivery: { written: [], removed: [], relisted: 0 }, originalsRestored: [], configuration: { set: [], removed: [], unrestorable: [] }, derived: { added: [], changed: [], missing: [] } };
     if (!(await restoreDroplet(ctx, run, recorded))) {
       await ctx.journal.record("start", "skipped", { reason: "no previous droplet to start" });
       await ctx.journal.record("rollback", "done", { ended: "stopped", generation });

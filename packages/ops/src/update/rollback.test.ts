@@ -7,6 +7,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { listGenerations, markerKey } from "../replica.ts";
 import { sha256 } from "../sqlite.ts";
 import { stableList, type ObjectStore } from "../store.ts";
+import { reportOf } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
 import { rollback, rollbackCommand } from "./rollback.ts";
 import { acceptRun, blobsOf, continueRun, createScenario, deployUntil, guardStarts, newestOrigin, rowsOf, runOf, type Scenario, type ScenarioOptions } from "./scenario.fixture.ts";
@@ -74,7 +75,7 @@ describe("rolling an update back", () => {
     const run = await runOf(s, deployed.runId);
     expect(run.cutoverBackup).toBeNull();
     const result = await rollback(deployed.ctx, run, { kind: "automatic", failure: "cutover-backup: socket hang up" });
-    expect(result).toMatchObject({ ended: "previous-release", originalsRestored: [], derivedChanged: [] });
+    expect(result).toMatchObject({ ended: "previous-release", originalsRestored: [], derived: { added: [], changed: [], missing: [] } });
     expect((await runOf(s, deployed.runId)).state).toBe("rolled-back");
     expect(s.h.target.current).toBe(s.previousDroplet);
     expect(s.h.target.app?.rows("pages")).toEqual(before);
@@ -115,7 +116,9 @@ describe("rolling an update back", () => {
     expect(s.h.target.configuration).toMatchObject({ env: { KESTREL_MIGRATIONS: "apply", SITE_NAME: "Studio", API_TOKEN: NEW_SECRET }, healthCheck: { type: "http", endpoint: "/ready", timeoutSeconds: 180 }, memoryMb: 1024, command: null });
     expect(s.h.target.configuration.env.ADDED_BY_RELEASE).toBeUndefined();
     await expectCutoverState(s, backupId);
-    expect(result.derivedChanged).toEqual([`${PREFIXES.derived}news/thumb.webp`, `${PREFIXES.derived}about/thumb.webp`].sort());
+    expect(result.derived).toEqual({ added: [`${PREFIXES.derived}news/thumb.webp`], changed: [`${PREFIXES.derived}about/thumb.webp`], missing: [] });
+    expect(s.h.output.warn.join("\n")).toContain(`derived keys differ from the cutover backup ${backupId}: 1 added, 1 changed, 0 missing, such as ${PREFIXES.derived}news/thumb.webp`);
+    expect(reportOf(await runOf(s, deployed.runId)).derived).toEqual({ added: 1, changed: 1, missing: 0, keys: { added: [`${PREFIXES.derived}news/thumb.webp`], changed: [`${PREFIXES.derived}about/thumb.webp`], missing: [] } });
     expect(violations).toEqual([]);
     const generations = (await listGenerations(s.h.store, PREFIXES.replica)).map((g) => g.name);
     expect(generations.at(-2)).toBe(result.generation);

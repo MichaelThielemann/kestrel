@@ -3,7 +3,7 @@ import { OpsError } from "../errors.ts";
 import { Journal } from "../journal.ts";
 import { parseJsonOrNull } from "../layout.ts";
 import { stableList } from "../store.ts";
-import { UPDATE_PHASES, type StepTiming, type UpdatePhase, type UpdateRecord, type UpdateReport, type UpdateRun, type UpdateRunState, type VersionChange } from "./types.ts";
+import { UPDATE_PHASES, type DerivedReport, type StepTiming, type UpdatePhase, type UpdateRecord, type UpdateReport, type UpdateRun, type UpdateRunState, type VersionChange } from "./types.ts";
 
 /** The journal step that opens each command of an update run, with `{ command, env, phase }` as its data. */
 export const RUN_STEP = "run";
@@ -180,10 +180,19 @@ export function continueJournal(ctx: Pick<OpsContext, "backups" | "location" | "
   return new Journal(run.runId, ctx.backups, ctx.location, ctx.redactor, ctx.clock, ctx.workspace.path("journal.jsonl"), run.lastSeq);
 }
 
+const isKeyList = (value: unknown): value is string[] => Array.isArray(value) && value.every((key) => typeof key === "string");
+
+function isDerivedReport(value: unknown): value is DerivedReport {
+  const counts = ["added", "changed", "missing"];
+  const listed = field(value, "keys");
+  return counts.every((name) => typeof field(value, name) === "number") && counts.every((name) => isKeyList(field(listed, name)));
+}
+
 /**
  * The timings of a run from its journal: one entry per step from its `started` record (or the record before it, for a
  * step recorded only as `done`) to its `done`, `failed` or `skipped` record. The app counts as down from a `stop` until
- * a `start` that became ready; `downtimeMs` sums those periods and is null while the app is still down.
+ * a `start` that became ready; `downtimeMs` sums those periods and is null while the app is still down. `derived` is
+ * the comparison of the derived prefixes the last rollback recorded.
  */
 export function reportOf(run: Pick<UpdateRun, "runId" | "records">): UpdateReport {
   const steps: StepTiming[] = [];
@@ -192,7 +201,9 @@ export function reportOf(run: Pick<UpdateRun, "runId" | "records">): UpdateRepor
   let downSince = 0;
   let total = 0;
   let previousAt = run.records[0]?.at ?? 0;
+  let derived: DerivedReport | undefined;
   for (const r of run.records) {
+    if (r.step === "restore-delivery" && r.state === "done" && isDerivedReport(r.data.derived)) derived = r.data.derived;
     const id = `${r.phase}:${r.step}`;
     if (r.step === RUN_STEP || r.step === "run-done" || r.step === "run-failed") {
       previousAt = r.at;
@@ -220,5 +231,5 @@ export function reportOf(run: Pick<UpdateRun, "runId" | "records">): UpdateRepor
     }
     previousAt = r.at;
   }
-  return { runId: run.runId, steps, downtimeMs: down ? null : total };
+  return { runId: run.runId, steps, downtimeMs: down ? null : total, ...(derived === undefined ? {} : { derived }) };
 }

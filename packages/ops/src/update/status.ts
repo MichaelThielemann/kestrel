@@ -135,6 +135,11 @@ function runLines(status: UpdateRunStatus): string[] {
   if (status.cutoverBackup !== null) lines.push(`  cutover backup ${status.cutoverBackup}`);
   for (const step of status.report.steps) lines.push(`  ${`${step.phase} ${step.step}`.padEnd(36, " ")} ${duration(step.ms).padStart(12, " ")}${step.appDown ? "  app down" : ""}`);
   lines.push(`  downtime ${status.report.downtimeMs === null ? "the app is still down" : duration(status.report.downtimeMs)}`);
+  const derived = status.report.derived;
+  if (derived !== undefined) {
+    const sample = [...derived.keys.added, ...derived.keys.changed, ...derived.keys.missing].slice(0, 5);
+    lines.push(`  derived keys after the rollback: ${derived.added} added, ${derived.changed} changed, ${derived.missing} missing${sample.length === 0 ? "" : `, such as ${sample.join(", ")}`}`);
+  }
   lines.push(status.next === null ? "  nothing to do" : `  next: ${status.next}`);
   return lines;
 }

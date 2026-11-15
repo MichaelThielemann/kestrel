@@ -48,7 +48,7 @@ function fakes(): Fakes {
     rollback: vi.fn(async (ctx: UpdateContext, _run: UpdateRun, reason: RollbackReason): Promise<RollbackResult> => {
       await ctx.journal.record("rollback", "started", { phase: "rollback", reason: reason.kind });
       await ctx.journal.record("rollback", "done", { phase: "rollback" });
-      return { ended: "stopped", generation: "", seal: "sealed", delivery: { written: [], removed: [], relisted: 0 }, originalsRestored: [], configuration: { set: [], removed: [], unrestorable: [] }, derivedChanged: [] };
+      return { ended: "stopped", generation: "", seal: "sealed", delivery: { written: [], removed: [], relisted: 0 }, originalsRestored: [], configuration: { set: [], removed: [], unrestorable: [] }, derived: { added: [], changed: [], missing: [] } };
     }),
     retire: vi.fn(async (_ctx: UpdateContext, run: UpdateRun) => {
       retiredStates.push(run.state);

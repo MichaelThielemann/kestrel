@@ -277,8 +277,16 @@ export interface RollbackResult {
   delivery: { written: string[]; removed: string[]; relisted: number };
   originalsRestored: string[];
   configuration: { set: string[]; removed: string[]; unrestorable: string[] };
-  /** Keys of a derived prefix whose ETag differs from the cutover backup's listing. */
-  derivedChanged: string[];
+  /** Keys of the derived prefixes compared with the cutover backup's ETag listing: live but not in the listing, with another ETag or size, and listed but gone. */
+  derived: { added: string[]; changed: string[]; missing: string[] };
+}
+
+/** How the derived prefixes compared with the cutover backup's ETag listing in a rollback: counts, and up to 20 keys of each. */
+export interface DerivedReport {
+  added: number;
+  changed: number;
+  missing: number;
+  keys: { added: string[]; changed: string[]; missing: string[] };
 }
 
 /** Time spent in one step, and whether the app was down during it. */
@@ -296,6 +304,8 @@ export interface UpdateReport {
   runId: string;
   steps: StepTiming[];
   downtimeMs: number | null;
+  /** The comparison of the derived prefixes by the run's last rollback that got that far; absent without one. */
+  derived?: DerivedReport;
 }
 
 /** How an update command ended. */
