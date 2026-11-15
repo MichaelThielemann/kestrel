@@ -296,9 +296,9 @@ export class FakeApp implements Target {
 
   /**
    * Renders every page to the delivery prefix and removes outputs of pages that are gone, as a full export does, and
-   * records each output in `render_status` of the database, as the delivery's status rows do.
+   * with `record` records each output in `render_status` of the database, as the delivery's status rows do.
    */
-  async export(): Promise<void> {
+  async export(record = true): Promise<void> {
     const { store, prefixes } = this.options;
     const pages = boundaryCast<Array<{ id: string; title: string; body: string }>>(this.rows("pages"), "host");
     const wanted = new Set<string>();
@@ -307,7 +307,7 @@ export class FakeApp implements Target {
       wanted.add(key);
       const html = `<h1>${page.title}</h1><p>${page.body}</p>`;
       await store.put(key, encode(html), { contentType: "text/html; charset=utf-8" });
-      this.run(`INSERT OR REPLACE INTO render_status VALUES (?, ?, ?)`, page.id, key, createHash("sha256").update(html).digest("hex"));
+      if (record) this.run(`INSERT OR REPLACE INTO render_status VALUES (?, ?, ?)`, page.id, key, createHash("sha256").update(html).digest("hex"));
     }
     await store.put(`${prefixes.delivery}sitemap.xml`, encode(pages.map((p) => `/${p.id}/`).join("\n")), { contentType: "application/xml" });
     wanted.add(`${prefixes.delivery}sitemap.xml`);

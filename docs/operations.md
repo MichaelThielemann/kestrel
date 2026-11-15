@@ -179,7 +179,8 @@ answers 200 (503, a body with `ready: false` or another 5xx answer fails); withi
 first sync after the start, so the window has to cover the interval at which the project runs `replication.sync`);
 the release's own generation, sorting after the promoted one, shows its first snapshot, and within
 `update.syncWindowSeconds` a WAL segment of that generation or a later snapshot shows that its sync advances
-(`origin.json`, `applied.json` and `sealed.json` do not count); a
+(`origin.json`, `applied.json` and `sealed.json` do not count; a release on which nothing is written writes a
+segment without frames at its first sync after that snapshot, so the window has to cover two sync intervals); a
 key of the delivery prefix newer than the start shows within `update.renderTimeoutSeconds` that rendering began.
 A delivery prefix without any key only warns. No page or medium is fetched over the network.
 

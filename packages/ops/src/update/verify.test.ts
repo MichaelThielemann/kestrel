@@ -62,6 +62,15 @@ describe("verifying a started release", { timeout: 20_000 }, () => {
     expect(result.ownGeneration! > s.promoted.generation).toBe(true);
   });
 
+  it("passes a release that writes nothing to its database after its first snapshot", async () => {
+    const s = await startOnPromoted({ records: false });
+    const own = (await listGenerations(s.h.store, PREFIXES.replica)).find((g) => g.name > s.promoted.generation);
+    expect(own?.segments.map((segment) => segment.size)).toEqual([32]);
+    const result = await verify(s);
+    expect(failed(result)).toEqual([]);
+    expect(result.verdict).toBe("passed");
+  });
+
   it("fails when the platform records a crash during the readiness and sync windows, after the first look found none", async () => {
     const s = await startOnPromoted();
     const probe = s.h.target.probeReady.bind(s.h.target);

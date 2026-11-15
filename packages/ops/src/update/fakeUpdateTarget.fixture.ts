@@ -20,6 +20,8 @@ export interface FakeRelease {
   crashes: boolean;
   /** Renders every page into the delivery prefix right after it started, as a release that re-renders after a restore does. */
   renders: boolean;
+  /** Records each render in its database; false leaves the database as its first snapshot holds it, as an idle site does. */
+  records: boolean;
   /** Environment changes its configuration brings; `null` removes a variable. */
   env: Record<string, string | null>;
 }
@@ -46,10 +48,10 @@ export interface FakeUpdateTargetOptions {
   configuration?: Partial<FakeConfiguration>;
 }
 
-/** A release with every field given a default: runtime 6.0.0, ready, no crash, renders, no environment change. */
+/** A release with every field given a default: runtime 6.0.0, ready, no crash, renders and records, no environment change. */
 export function fakeRelease(overrides: Partial<FakeRelease> = {}): FakeRelease {
   const runtime = overrides.runtime ?? "6.0.0";
-  return { runtime, versions: { "@michaelthielemann/kestrel": runtime, "@michaelthielemann/kestrel-replication-sqlite": runtime }, ready: "ready", crashes: false, renders: true, env: {}, ...overrides };
+  return { runtime, versions: { "@michaelthielemann/kestrel": runtime, "@michaelthielemann/kestrel-replication-sqlite": runtime }, ready: "ready", crashes: false, renders: true, records: true, env: {}, ...overrides };
 }
 
 const fingerprint = (salt: string, value: string): string => createHash("sha256").update(salt + value).digest("hex");
@@ -166,7 +168,7 @@ export class FakeUpdateTarget implements UpdateTarget {
     await app.start();
     this.app = app;
     if (release.renders) {
-      await app.export();
+      await app.export(release.records);
       await app.sync();
     }
   }
