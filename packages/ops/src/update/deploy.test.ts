@@ -379,7 +379,7 @@ describe("the versions the cutover backup records", { timeout: 30_000 }, () => {
   it("records the major the pending storage migrations convert from when the running versions are unknown", async () => {
     storages.list = [media];
     const s = await scenario({}, false);
-    await receiptFor(s.ctx, [{ module: "media/default", id: "media-default:key-layout", kind: "auto", blobWrites: true, pending: 2 }]);
+    await receiptFor(s.ctx, [{ module: "media/default", id: "media-default:key-layout", kind: "auto", blobWrites: true, pending: 2, introducedIn: "6.0.0", stored: null }]);
     const describe = s.h.target.describe.bind(s.h.target);
     s.h.target.describe = async () => ({ ...(await describe()), packages: {} });
     const scope = join(s.h.releaseDir, "node_modules", "@michaelthielemann");
@@ -395,7 +395,7 @@ describe("the versions the cutover backup records", { timeout: 30_000 }, () => {
   it("asks about the unsealed stop without waiting for a seal when the running versions are unknown and the pending storage migrations convert from a major before 6", async () => {
     storages.list = [media];
     const s = await scenario({ update: { sealTimeoutSeconds: 20 } }, false);
-    await receiptFor(s.ctx, [{ module: "media/default", id: "media-default:key-layout", kind: "auto", blobWrites: true, pending: 2 }]);
+    await receiptFor(s.ctx, [{ module: "media/default", id: "media-default:key-layout", kind: "auto", blobWrites: true, pending: 2, introducedIn: "6.0.0", stored: null }]);
     const describe = s.h.target.describe.bind(s.h.target);
     s.h.target.describe = async () => ({ ...(await describe()), packages: {} });
     const scope = join(s.h.releaseDir, "node_modules", "@michaelthielemann");
@@ -410,6 +410,54 @@ describe("the versions the cutover backup records", { timeout: 30_000 }, () => {
     expect(seal[1]?.data.state).toBe("unsupported");
     expect(s.h.output.warn.join("\n")).toContain("seal unsupported (runtime before 6)");
     expect((await cutoverManifest(s)).major).toBe(5);
+  });
+
+  const later: ModuleStorage = { module: "media/default", version: "6.1.0", convertsFrom: "5.0.0", migrations: [{ id: "media-default:later-layout", introducedIn: "6.1.0", kind: "auto", blobWrites: false, summary: "rewrites rows", detect: async () => ok({ pending: 2, sample: [] }), plan: async () => ok({ counts: {}, notes: [] }), apply: async () => ok({ counts: {}, notes: [] }) }] };
+
+  async function runningSixWithUnknownVersions(stored: string | null): Promise<Scenario> {
+    storages.list = [later];
+    const s = await scenario({ from: { runtime: "6.0.0" }, update: { sealTimeoutSeconds: 10 } }, false);
+    if (stored !== null) {
+      s.h.target.app?.run(`CREATE TABLE kestrel_storage_versions ("id" TEXT PRIMARY KEY, "module" TEXT, "version" TEXT, "migrations" TEXT, "updatedAt" REAL)`);
+      s.h.target.app?.run(`INSERT INTO kestrel_storage_versions VALUES ('v1', 'media/default', ?, '[]', 1)`, stored);
+      await s.h.target.app?.sync();
+    }
+    await receiptFor(s.ctx, [{ module: "media/default", id: "media-default:later-layout", kind: "auto", blobWrites: false, pending: 2, introducedIn: "6.1.0", stored }]);
+    const describe = s.h.target.describe.bind(s.h.target);
+    s.h.target.describe = async () => ({ ...(await describe()), packages: {} });
+    const scope = join(s.h.releaseDir, "node_modules", "@michaelthielemann");
+    mkdirSync(scope, { recursive: true });
+    symlinkSync(resolve(dirname(new URL(import.meta.url).pathname), "..", "..", "..", "persistence-sqlite"), join(scope, "kestrel-persistence-sqlite"));
+    s.h.target.sealDelayMs = 1500;
+    return s;
+  }
+
+  async function sealRecords(s: Scenario): Promise<{ state: unknown; ms: number }> {
+    const run = await readUpdateRun(s.ctx, s.ctx.run.id);
+    const seal = run.records.filter((r) => r.phase === "deploy" && r.step === "seal");
+    return { state: seal[1]?.data.state, ms: (seal[1]?.at ?? 0) - (seal[0]?.at ?? 0) };
+  }
+
+  it("waits for the seal of a stopped 6.x runtime with unknown running versions when the release converts from 5 and the stored data has a 6.x version row", async () => {
+    const s = await runningSixWithUnknownVersions("6.0.0");
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode, outcome.message).toBe(0);
+    const seal = await sealRecords(s);
+    expect(seal.state).toBe("sealed");
+    expect(seal.ms).toBeGreaterThanOrEqual(1_000);
+    expect(s.h.output.warn.join("\n")).not.toContain("seal unsupported");
+    expect((await cutoverManifest(s)).major).toBe(6);
+  });
+
+  it("waits for the seal and records no major when the stored data has no version row and its oldest pending migration came within 6.x", async () => {
+    const s = await runningSixWithUnknownVersions(null);
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode, outcome.message).toBe(0);
+    const seal = await sealRecords(s);
+    expect(seal.state).toBe("sealed");
+    expect(seal.ms).toBeGreaterThanOrEqual(1_000);
+    expect(s.h.output.warn.join("\n")).not.toContain("seal unsupported");
+    expect((await cutoverManifest(s)).major).toBeUndefined();
   });
 });
 
@@ -474,7 +522,7 @@ describe("continuing an interrupted deploy", { timeout: 30_000 }, () => {
   });
 
   it("starts a migration killed in the middle again from the cutover backup", async () => {
-    const pending: UpdatePlan["storage"] = [{ module: "media/default", id: "media-default:key-layout", kind: "auto", blobWrites: true, pending: 2 }];
+    const pending: UpdatePlan["storage"] = [{ module: "media/default", id: "media-default:key-layout", kind: "auto", blobWrites: true, pending: 2, introducedIn: "6.0.0", stored: null }];
     storages.list = [{ module: "media/default", version: "6.0.0", convertsFrom: "5.0.0", migrations: [{ id: "media-default:key-layout", introducedIn: "6.0.0", kind: "auto", blobWrites: true, summary: "moves originals", detect: async () => ok({ pending: 2, sample: [] }), plan: async () => ok({ counts: {}, notes: [] }), apply: async () => ok({ counts: {}, notes: [] }) }] }];
     const h = createUpdateHarness();
     harnesses.push(h);

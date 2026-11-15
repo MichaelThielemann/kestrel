@@ -28,7 +28,7 @@ const OLD = { "@michaelthielemann/kestrel": "5.8.1" };
 const NEW = { "@michaelthielemann/kestrel": "6.0.0" };
 
 const plan = (overrides: Partial<UpdatePlan> = {}): UpdatePlan => ({ versions: { from: OLD, to: NEW }, storage: [], content: [], questions: [], ...overrides });
-const pending: UpdatePlan["storage"] = [{ module: "media/default", id: "media-default:key-layout", kind: "auto", blobWrites: true, pending: 4 }];
+const pending: UpdatePlan["storage"] = [{ module: "media/default", id: "media-default:key-layout", kind: "auto", blobWrites: true, pending: 4, introducedIn: "6.0.0", stored: null }];
 
 async function writeReceipt(ctx: UpdateContext, of: UpdatePlan, runId = "prep01", createdAt = 1): Promise<UpdateReceipt> {
   const hash = planHash(of);

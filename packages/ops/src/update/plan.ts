@@ -4,7 +4,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { failure, err, isErr, ok } from "@michaelthielemann/kestrel-contracts/errors";
-import { runShapeMigrations, type BlobOps, type ModuleRun, type ModuleStorage } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
+import { compareVersions, runShapeMigrations, type BlobOps, type ModuleRun, type ModuleStorage } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { PERSISTENCE_PACKAGE, SANITIZE_SVG_PACKAGE } from "../bundle.ts";
 import { REPLICATION_PACKAGE } from "../context.ts";
@@ -139,8 +139,37 @@ export function readOnlyBlobs(store: ObjectStore): { blobs: Blobstore; blobOps: 
 /** The storage migrations a run report leaves pending, without cleanup migrations, which no deploy runs. */
 export function pendingStorage(modules: readonly ModuleRun[]): PlannedStorageMigration[] {
   return modules.flatMap((module) =>
-    module.migrations.filter((m) => m.state === "pending" && m.kind !== "cleanup").map((m) => ({ module: module.module, id: m.id, kind: m.kind, blobWrites: m.blobWrites, pending: m.detected.pending })),
+    module.migrations.filter((m) => m.state === "pending" && m.kind !== "cleanup").map((m) => ({ module: module.module, id: m.id, kind: m.kind, blobWrites: m.blobWrites, pending: m.detected.pending, introducedIn: m.introducedIn, stored: module.stored })),
   );
+}
+
+const VERSION = /^(\d+)\.(\d+)\.(\d+)/;
+
+function writtenMajor(pending: readonly PlannedStorageMigration[], storage: ModuleStorage | undefined): number | null {
+  const oldest = pending.map((m) => m.introducedIn).sort(compareVersions)[0];
+  const lowest = VERSION.exec(pending[0]?.stored ?? storage?.convertsFrom ?? "");
+  const before = VERSION.exec(oldest ?? "");
+  if (lowest === null || before === null) return null;
+  const major = Number(lowest[1]);
+  const newest = before[2] === "0" && before[3] === "0" ? Number(before[1]) - 1 : Number(before[1]);
+  return major === newest ? major : null;
+}
+
+/**
+ * The major of the release that wrote the stored data the plan's pending storage migrations convert, or null when the
+ * plan has none or the data may come from more than one major. A module's data was written by a release from its
+ * storage version row (`stored`), or without one from the oldest version the release converts (`convertsFrom` of its
+ * entry in `storages`), up to the release before its oldest pending migration's `introducedIn`, since a release that
+ * runs keeps no data in a form its own migrations convert. Each module with a pending migration must name one major,
+ * and all of them the same.
+ */
+export function sourceMajor(plan: Pick<UpdatePlan, "storage">, storages: readonly ModuleStorage[]): number | null {
+  const majors = new Set<number | null>();
+  for (const module of new Set(plan.storage.map((m) => m.module))) {
+    majors.add(writtenMajor(plan.storage.filter((m) => m.module === module), storages.find((s) => s.module === module)));
+  }
+  const [major] = [...majors];
+  return majors.size === 1 && major !== undefined ? major : null;
 }
 
 /**

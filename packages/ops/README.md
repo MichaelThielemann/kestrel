@@ -187,8 +187,10 @@ A frozen backup records how the replica proves the stop was complete. A runtime 
 writes `gen/<generation>/sealed.json` at teardown: the backup reads `sealed`, whatever version the target
 reports, once a listing shows every WAL segment the seal counts, and builds the database from that listing; a
 listing that keeps lacking one stops the backup with exit 1. Without it the backup reads `unsealed` (the process stopped without teardown, so frames written after
-its last sync may be missing), `unsupported` for a runtime before 6, or `unknown` when the target cannot tell
-the runtime version. All three show the time of the last shipped segment and need the answer
+its last sync may be missing), `unsupported` for a runtime before 6, or `unknown` when nothing tells the runtime
+version. The cutover backup of a deploy whose running versions are unknown reads `unsupported` as well when the
+stored data the pending storage migrations convert was written by a release before 6, which then stands for the
+runtime. All three show the time of the last shipped segment and need the answer
 `unsealed-stop`. A newest generation reads `placed` when a restore of this environment recorded its placement,
 it has the plain time name of a promotion, holds `origin.json` but neither a WAL segment nor `applied.json`, and
 the journal of the restore that placed it shows no start of the app after the promotion: no app started from

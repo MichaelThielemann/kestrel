@@ -1806,7 +1806,8 @@ Net changes since 5.8.2.
   by a letter, a digit, `_`, `-`, `.` or `/`, or as a URL's user or password; a plain value of which a shorter
   credential is only part of a name, a host or a path, such as `kestrel-media`, verbatim, so a rollback restores it); stops the app and waits for the seal, except
   when the running versions name a runtime before 6, which writes none, or, with the running versions unknown, the
-  pending storage migrations convert from a major before 6; takes
+  stored data the pending storage migrations convert was written by a release before 6 (told by the modules' storage
+  version rows and the oldest pending migration's `introducedIn`, not by `convertsFrom` alone); takes
   a verified cutover backup that records the running versions, pinned until `update cleanup` for a change of the
   major, unknown running versions or a pending storage migration, so no migration starts without one; migrates a copy
   of its database; promotes it, swaps the code and starts the release as one step; and verifies it with three

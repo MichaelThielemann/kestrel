@@ -124,6 +124,10 @@ export interface PlannedStorageMigration {
   kind: "auto" | "ask" | "cleanup";
   blobWrites: boolean;
   pending: number;
+  /** The release whose storage shape the migration produces. */
+  introducedIn: string;
+  /** The version of the module's storage version row on the copy, or null when the stored data has none. */
+  stored: string | null;
 }
 
 /**
@@ -332,7 +336,7 @@ export interface UpdateOutcome {
  * the real ones.
  */
 export interface UpdateSteps {
-  waitForSeal(ctx: UpdateContext, stoppedAt: number, running?: Readonly<Record<string, string>> | null, convertsFrom?: number | null): Promise<SealReport>;
+  waitForSeal(ctx: UpdateContext, stoppedAt: number, running?: Readonly<Record<string, string>> | null, storedMajor?: number | null): Promise<SealReport>;
   migrateCopy(ctx: UpdateContext, input: MigrateInput): Promise<MigrateResult>;
   verify(ctx: UpdateContext, input: VerifyInput): Promise<VerifyResult>;
   rollback(ctx: UpdateContext, run: UpdateRun, reason: RollbackReason): Promise<RollbackResult>;

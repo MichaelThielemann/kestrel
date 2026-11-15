@@ -146,8 +146,8 @@ describe("the migration of the cutover copy", () => {
     const result = await migrateCopy(ctx, {
       cutoverBackup: backupId,
       plan: plan([
-        { module: "media/default", id: "media-default:id-key-layout", kind: "auto", blobWrites: true, pending: 0 },
-        { module: "images/default", id: "images-default:variant-slots", kind: "auto", blobWrites: false, pending: 0 },
+        { module: "media/default", id: "media-default:id-key-layout", kind: "auto", blobWrites: true, pending: 0, introducedIn: "6.0.0", stored: null },
+        { module: "images/default", id: "images-default:variant-slots", kind: "auto", blobWrites: false, pending: 0, introducedIn: "6.0.0", stored: null },
       ]),
       outFile,
     });
@@ -180,7 +180,7 @@ describe("the migration of the cutover copy", () => {
     const { ctx: base, backupId } = await cutoverOf(h, null);
     const ctx: UpdateContext = { ...base, release: { ...base.release, versions } };
     const writes = h.bucket?.writes.length ?? 0;
-    const error = await migrateCopy(ctx, { cutoverBackup: backupId, plan: plan([{ module: "images/default", id: "images-default:variant-slots", kind: "auto", blobWrites: false, pending: 0 }]), outFile: join(workDir(), "migrated.sqlite") }).catch((caught: unknown) => caught);
+    const error = await migrateCopy(ctx, { cutoverBackup: backupId, plan: plan([{ module: "images/default", id: "images-default:variant-slots", kind: "auto", blobWrites: false, pending: 0, introducedIn: "6.0.0", stored: null }]), outFile: join(workDir(), "migrated.sqlite") }).catch((caught: unknown) => caught);
     expect(error instanceof OpsError ? [error.exitCode, error.message] : error).toEqual([1, expect.stringContaining("media-default:id-key-layout")]);
     expect(h.bucket?.writes.slice(writes).filter((w) => !w.key.startsWith("kestrel-backups/"))).toEqual([]);
   }, 120_000);
