@@ -2360,6 +2360,15 @@ Net changes since 5.8.2.
   cannot be decoded `failed` with `cannot decode` and `attempts: 0`, and does not count them in `variants` and
   `media`. It set them back to `pending`, so they failed every attempt again, with an error about the content
   type or the width instead of `cannot decode`, until they were `failed` once more after `maxAttempts`.
+- `delivery-static`: a render that fails in `delivery.publish`, on save or in `delivery.publishAll` (a renderer
+  error, a timeout, a reserved path, a blob write the store refuses), is retried like a failed re-render instead
+  of staying in `state: "error"` unmarked, retried by nothing and missing from the stale counts. Its output is
+  marked with the failure as its first attempt: the status row and `_delivery` report `stale: true` and the cause
+  in `staleError`, `delivery.readStaleStatus` counts it under `stale` and, after `dependencies.maxAttempts` failed
+  attempts, under `failed`, where `delivery.retryStale` picks it up. With `dependencies.render: "background"` the
+  loop renders it again after the first `dependencies.backoffSeconds`; with `"events"`, `delivery.resumeStale`
+  raises its job once that backoff has passed, as for any mark it finds due. An output that already carried a
+  mark keeps it, with its attempts, and an output without a public path is not marked.
 
 ## 5.8.2 – 2026-09-27
 

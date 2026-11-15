@@ -547,7 +547,7 @@ describe("examples/minimal save response: publishing in its own lane", () => {
     expect(answeredFirst).toBe(false);
   }, 30_000);
 
-  it("records a failed render on the status row without a retry or a dead letter and keeps the live output", async () => {
+  it("records a failed render on the status row and marks it for a re-render after the backoff, without a queue retry or a dead letter, and keeps the live output", async () => {
     const example = await bootExample({ mode: "queue", lanes, relayPipelines: [], pollMs: 10 });
     try {
       const token = boundaryCast<{ token: string }>(await call(example, "login", { body: { username: "admin", password: "kestrel-demo" } }), "json").token;
@@ -558,10 +558,14 @@ describe("examples/minimal save response: publishing in its own lane", () => {
       const rendersBefore = example.reading.calls.filter((path) => path === "/schnell").length;
       example.reading.failPaths.add("/schnell");
       await call(example, "updatePage", { token, params: { id }, body: { title: "Neu", status: "published" } });
-      await settled(example);
+      await pollUntil(async () => {
+        const queue = boundaryCast<{ pending: number; running: number }>(await call(example, "queueStatus"), "json");
+        return queue.pending === 0 && queue.running === 0 && (await stale(example)).stale === 1;
+      });
       await new Promise((resolve) => setTimeout(resolve, 2500));
-      const status = boundaryCast<Array<{ locale: string; state: string }>>(await call(example, "pagePublishStatus", { token, params: { id } }), "json");
-      expect(status.find((row) => row.locale === "de")?.state).toBe("error");
+      const status = boundaryCast<Array<{ locale: string; state: string; stale: boolean; staleFailed: boolean; staleError: string | null }>>(await call(example, "pagePublishStatus", { token, params: { id } }), "json");
+      expect(status.find((row) => row.locale === "de")).toMatchObject({ state: "error", stale: true, staleFailed: false, staleError: "template threw" });
+      expect(await stale(example)).toMatchObject({ stale: 1, failed: 0 });
       expect(example.reading.calls.filter((path) => path === "/schnell").length).toBe(rendersBefore + 1);
       expect(page(example, "/schnell")).toContain("<h1>Alt</h1>");
       const queue = boundaryCast<{ dead: number; pending: number }>(await call(example, "queueStatus"), "json");

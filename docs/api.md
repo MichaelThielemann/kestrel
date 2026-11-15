@@ -749,7 +749,9 @@ language), `site/en/<slug>/index.html`, home page (`slug = home`) → `site/inde
 | POST | `/admin/publish-all/pages` | `{ documents, live, errors, redirects: { rules, skipped, skippedRules } }` – re-render everything, and afterwards also rewrite `redirects.json` and ask for an export of `sitemap.xml`, `robots.txt` and `llms.txt` (the pipeline chains `redirects.export` and `delivery.requestIndexes` onto `delivery.publishAll:pages`) (`pages.manage`) |
 
 `state`: `live` = delivered, `draft` = not published in that language, `error` = rendering or saving
-failed (`error` names the cause; the last `live` output stays in place).
+failed (`error` names the cause; the last `live` output stays in place). A failed render also marks
+the page for a re-render (`stale: true`, the cause in `staleError`), which runs after `backoffSeconds`,
+up to `maxAttempts` times; a page without a public path (`error: "no public path"`) is not marked.
 
 A page is also re-rendered when something it shows changes, without being saved itself: each render
 records what it read (with `renderer-plain`, the paths of the pages it links to; with a renderer that

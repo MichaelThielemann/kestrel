@@ -69,8 +69,11 @@ that saved the document: the response comes back after the render. To answer the
 the publishing pipeline its own lane in `events-queue`; the relay never claims a lane row, so the
 response then carries `_events.status: "pending"` and the lane writes the output afterwards. Visitor
 latency is unchanged, the render still runs in the same process. A render failure is recorded on the
-status row and the queue does not retry it; the output is rendered again once something marks it
-(see "Re-rendering dependents, never inside the request") or on the next save. The wiring, the read-back through `delivery.readStatus` and the delivery
+status row and the queue does not retry it. Instead the failed render marks its output, counted as its
+first attempt, and the output is rendered again like any marked output (see "Re-rendering dependents,
+never inside the request"): after `dependencies.backoffSeconds`, up to `dependencies.maxAttempts` times,
+or at once when something it read changes or on the next save. An output that was already marked keeps
+its mark and its attempts. The wiring, the read-back through `delivery.readStatus` and the delivery
 guarantees are described in the pipelines guide under `events.relay`.
 
 ## Index files
@@ -277,7 +280,9 @@ its last export failed.
 
 A render that fails keeps the previous output (`state: "error"`), records `staleError` and is tried again after
 `dependencies.backoffSeconds`, up to `dependencies.maxAttempts` times; with `"events"`, set both to the event
-delivery's own values. A render that throws counts as a failed attempt. Rows of a type or a locale that is no longer
+delivery's own values. A failed render of `delivery.publish` or `delivery.publishAll` marks its output the same
+way, as its first attempt: the loop renders it after the first backoff, and with `"events"` `delivery.resumeStale`
+raises its job once that backoff has passed. A render that throws counts as a failed attempt. Rows of a type or a locale that is no longer
 delivered are never marked. The loop claims up to five marked outputs at a time and renews the claim before each
 render; a row whose claim another process took over in the meantime is left to that process. Every render is bounded by `dependencies.renderTimeoutSeconds` per format (times the
 number of formats, it must stay below `claimTtlSeconds`): a

@@ -720,13 +720,14 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       if (isErr(removed)) logger.error("delivery/static: could not remove the dependency set of a render that lost, the sweep removes it", { ...output, error: removed.error.message });
     };
     const at = now();
+    const version = (before?.version ?? 0) + 1;
     const newKeys: Record<string, string> | null = target.state === "live" ? work.written : target.path === null ? {} : null;
     const fields: Partial<Omit<StatusRow, "id">> = {
       state: target.state,
       path: target.path,
       error: target.error,
       updatedAt: at,
-      version: (before?.version ?? 0) + 1,
+      version,
       depSet: set?.setId ?? null,
       depCount: set?.count ?? null,
       ...(target.state === "live" ? { publishedAt: at } : {}),
@@ -802,6 +803,11 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       } else if (work.failure === null && before?.staleToken) {
         const cleared = await db.updateMany<StatusRow>(STATUS, { id: ownId, staleToken: before.staleToken }, { staleToken: null, staleAt: null, staleRetryAt: null, staleAttempts: 0, staleError: null });
         if (isErr(cleared)) return err(dbFailure(cleared.error));
+      } else if (work.failure !== null && !keepsItsMark) {
+        const failedAt = now();
+        const marked = await db.updateMany<StatusRow>(STATUS, { id: ownId, version, staleToken: null }, { staleAt: failedAt, staleToken: randomUUID(), staleRetryAt: failedAt + backoffMs(1), staleAttempts: 1, staleError: work.failure });
+        if (isErr(marked)) return err(dbFailure(marked.error));
+        if (marked.value > 0) loop?.wake();
       }
       const after = await db.findOne<StatusRow>(STATUS, { id: ownId });
       if (isErr(after)) return err(dbFailure(after.error));

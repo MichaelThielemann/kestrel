@@ -916,10 +916,13 @@ What this does and does not change:
   assets) can already hold the new render while the row reports `error`. Only a failing step, such
   as a `TRANSIENT` from `content@1`, `site@1` or the persistence, is retried with `backoffSeconds`
   and ends dead after `maxAttempts`. `delivery.publish` is idempotent, so a repeated run writes the
-  same output. The output is rendered again as soon as it is marked: by a mark it already carried,
-  by a change to something it read, by `markAll` or by a new build, with `backoffSeconds` and
-  `maxAttempts` of the `dependencies` settings of `delivery-static`. Otherwise it stays as it was until the next save or
-  `publishAll`.
+  same output. The failed render marks its output for a re-render and counts as its first attempt,
+  unless the output already carried a mark, which it keeps with its attempts. The output is rendered
+  again with `backoffSeconds` and `maxAttempts` of the `dependencies` settings of `delivery-static`,
+  and sooner when a change to something it read, `markAll` or a new build marks it again. While it
+  waits, its status row reports `stale: true` with the cause in `staleError`, and
+  `delivery.readStaleStatus` counts it under `stale`, or under `failed` once `maxAttempts` renders
+  failed; `delivery.retryStale` starts those again.
 - Without a `coalesceKey` on the event, every save writes its own row and runs its own render, so
   five quick saves of one page render five times, one at a time and in creation order within one
   process; with several processes sharing the queue, rows of one lane run in parallel and can finish

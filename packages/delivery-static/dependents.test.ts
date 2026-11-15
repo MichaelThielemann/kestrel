@@ -172,6 +172,24 @@ function failingRemoveOnce(blobs: ReturnType<typeof memoryBlobs>, key: string): 
   };
 }
 
+function lockableBlobs(): ReturnType<typeof memoryBlobs> & { lock(): void; unlock(): void } {
+  const blobs = memoryBlobs();
+  let locked = false;
+  return {
+    ...blobs,
+    async put(key, data, options) {
+      if (locked) throw Object.assign(new Error(`EACCES: permission denied, open '${key}'`), { code: "EACCES" });
+      return blobs.put(key, data, options);
+    },
+    lock() {
+      locked = true;
+    },
+    unlock() {
+      locked = false;
+    },
+  };
+}
+
 function recordingLogger(): Logger & { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -608,11 +626,13 @@ describe("delivery/static dependencies: marks and renders", () => {
     const recorded = expectOk(await h.db.findMany<{ id: string; kind: string; depType: string; depId: string | null }>(DEPENDENCIES, { output: row.id })).items.map((r) => `${r.kind} ${r.depType} ${r.depId ?? "-"}`);
     expect(recorded).toContain(`document speakers ${broken}`);
     expect(recorded).toContain("type settings -");
+    const markOfTheFailure = row.staleToken;
     expectOk(await h.delivery.markDependents("speakers", [ids.ada]));
-    expect(await h.marked()).not.toContain(`${ids.kontakt}/de`);
+    expect((await h.row(ids.kontakt))?.staleToken).toBe(markOfTheFailure);
     expectOk(await h.content.update("speakers", broken, { name: "Fixed" }));
     expectOk(await h.delivery.markDependents("speakers", [broken]));
     expect(await h.marked()).toContain(`${ids.kontakt}/de`);
+    expect((await h.row(ids.kontakt))?.staleToken).not.toBe(markOfTheFailure);
     expectOk(await h.delivery.republishOutput({ type: "pages", docId: ids.kontakt, locale: "de" }));
     expect(h.html("/kontakt")).toContain("Fixed");
   });
@@ -627,6 +647,163 @@ describe("delivery/static dependencies: marks and renders", () => {
     expectOk(await h.content.update("pages", ids.kontakt, { body: [{ type: "lineup", id: lineup }] }, { locale: "de" }));
     expectOk(await h.delivery.publish("pages", ids.kontakt));
     expect((await h.row(ids.kontakt))?.depSet).toBeNull();
+  });
+});
+
+describe("delivery/static dependencies: a render that fails on save", () => {
+  it("is marked with its first attempt, counts as waiting and is raised by the recovery pass once the first backoff passed", async () => {
+    const blobs = lockableBlobs();
+    const h = await harness({ blobs, dependencies: { backoffSeconds: [120, 600] } });
+    const ids = await seed(h);
+    blobs.lock();
+    expectOk(await h.content.update("pages", ids.kontakt, { title: "Kontakt neu" }, { locale: "de" }));
+    h.emitted.length = 0;
+    const saved = Date.now();
+    const [de] = expectOk(await h.delivery.publish("pages", ids.kontakt));
+    const denied = "EACCES: permission denied, open 'site/kontakt/index.html'";
+    expect(de).toMatchObject({ state: "error", error: denied, path: "/kontakt", stale: true, staleFailed: false, staleError: denied });
+    const row = (await h.row(ids.kontakt))!;
+    expect(row.staleAttempts).toBe(1);
+    expect(row.staleRetryAt! - saved).toBeGreaterThanOrEqual(120_000);
+    expect(row.staleRetryAt! - saved).toBeLessThan(121_000);
+    expect(expectOk(await h.delivery.readStaleStatus())).toMatchObject({ stale: 1, failed: 0 });
+    expect(h.jobs()).toEqual([]);
+    h.advance(61_000);
+    expect(expectOk(await h.delivery.resumeStale()).dispatched).toBe(0);
+    h.advance(60_000);
+    expect(expectOk(await h.delivery.resumeStale()).dispatched).toBe(1);
+    expect(h.jobs()).toEqual([`${ids.kontakt}/de`]);
+    blobs.unlock();
+    expectOk(await h.delivery.republishOutput({ type: "pages", docId: ids.kontakt, locale: "de" }));
+    expect(h.html("/kontakt")).toContain("Kontakt neu");
+    expect(await h.marked()).toEqual([]);
+    expect(expectOk(await h.delivery.status("pages", ids.kontakt))[0]).toMatchObject({ state: "live", error: null, stale: false, staleError: null });
+  });
+
+  it("counts as failed after maxAttempts, and retryStale renders it again once the write succeeds", async () => {
+    const blobs = lockableBlobs();
+    const h = await harness({ blobs, dependencies: { maxAttempts: 2, backoffSeconds: [120] } });
+    const ids = await seed(h);
+    blobs.lock();
+    expectOk(await h.content.update("pages", ids.kontakt, { title: "Kontakt neu" }, { locale: "de" }));
+    expectOk(await h.delivery.publish("pages", ids.kontakt));
+    h.advance(121_000);
+    expect(expectOk(await h.delivery.resumeStale()).dispatched).toBe(1);
+    expectErr(await h.delivery.republishOutput({ type: "pages", docId: ids.kontakt, locale: "de" }), "TRANSIENT");
+    expect(expectOk(await h.delivery.readStaleStatus())).toMatchObject({ stale: 0, failed: 1 });
+    expect(expectOk(await h.delivery.status("pages", ids.kontakt))[0]).toMatchObject({ state: "error", stale: true, staleFailed: true });
+    h.advance(3_600_000);
+    expect(expectOk(await h.delivery.resumeStale()).dispatched).toBe(0);
+    blobs.unlock();
+    h.emitted.length = 0;
+    expect(expectOk(await h.delivery.retryStale())).toEqual({ retried: 1 });
+    expect(h.jobs()).toEqual([`${ids.kontakt}/de`]);
+    expectOk(await h.delivery.republishOutput({ type: "pages", docId: ids.kontakt, locale: "de" }));
+    expect(h.html("/kontakt")).toContain("Kontakt neu");
+    expect(expectOk(await h.delivery.readStaleStatus())).toMatchObject({ stale: 0, failed: 0 });
+  });
+
+  it("is rendered again by the background loop after the backoff, not before", async () => {
+    const blobs = lockableBlobs();
+    const h = await harness({ render: "background", blobs, dependencies: { backoffSeconds: [1] } });
+    const ids = await seed(h);
+    await h.settle();
+    blobs.lock();
+    expectOk(await h.content.update("pages", ids.kontakt, { title: "Kontakt neu" }, { locale: "de" }));
+    const renders = () => h.reading.calls.filter((c) => c === `${ids.kontakt}/de`).length;
+    const [de] = expectOk(await h.delivery.publish("pages", ids.kontakt));
+    expect(de).toMatchObject({ state: "error", stale: true });
+    const afterSave = renders();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(renders()).toBe(afterSave);
+    blobs.unlock();
+    await h.settle();
+    expect(renders()).toBe(afterSave + 1);
+    expect(h.html("/kontakt")).toContain("Kontakt neu");
+    expect(expectOk(await h.delivery.status("pages", ids.kontakt))[0]).toMatchObject({ state: "live", stale: false });
+  }, 10_000);
+
+  it("marks the first render of a new page the same way", async () => {
+    const blobs = lockableBlobs();
+    const h = await harness({ blobs });
+    blobs.lock();
+    const fresh = await h.page({ slug: "neu", title: "Neu", status: "published" });
+    const [de] = expectOk(await h.delivery.publish("pages", fresh));
+    expect(de).toMatchObject({ state: "error", path: null, stale: true, staleFailed: false });
+    expect((await h.row(fresh))?.staleAttempts).toBe(1);
+    expect(expectOk(await h.delivery.readStaleStatus())).toMatchObject({ stale: 1, failed: 0 });
+  });
+
+  it("keeps the mark and the attempts of an output that was already marked", async () => {
+    const blobs = lockableBlobs();
+    const h = await harness({ blobs });
+    const ids = await seed(h);
+    expectOk(await h.delivery.markDependents("settings", []));
+    const marked = (await h.row(ids.kontakt))!;
+    expectOk(await h.db.updateMany<StatusRow>(STATUS, { id: marked.id }, { staleAttempts: 2 }));
+    blobs.lock();
+    expectOk(await h.delivery.publish("pages", ids.kontakt));
+    expect(await h.row(ids.kontakt)).toMatchObject({ state: "error", staleToken: marked.staleToken, staleAt: marked.staleAt, staleRetryAt: marked.staleRetryAt, staleAttempts: 2 });
+  });
+
+  it("leaves an output unmarked that an unpublish took over between the failed write and its mark", async () => {
+    const fake = createFakePersistence();
+    let pause: ReturnType<typeof gate> | null = null;
+    const db: Persistence = {
+      ...fake,
+      updateMany: async (c, f, p) => {
+        if (pause !== null && c === STATUS && f.staleToken === null && "staleAttempts" in p && p.staleAttempts === 1) {
+          const g = pause;
+          pause = null;
+          g.arrive();
+          await g.wait;
+        }
+        return fake.updateMany(c, f, p);
+      },
+    };
+    const blobs = lockableBlobs();
+    const h = await harness({ db, content: await createContentDefault(model, db), blobs });
+    const ids = await seed(h);
+    blobs.lock();
+    const held = gate();
+    pause = held;
+    const saving = h.delivery.publish("pages", ids.kontakt);
+    await held.reached;
+    expectOk(await h.delivery.unpublish("pages", ids.kontakt));
+    held.release();
+    expectOk(await saving);
+    expect(await h.marked()).toEqual([]);
+    expect(expectOk(await h.delivery.readStaleStatus()).stale).toBe(0);
+  });
+
+  it("leaves successful saves unmarked, and an unpublish removes the mark of a failed one", async () => {
+    const blobs = lockableBlobs();
+    const h = await harness({ blobs });
+    const ids = await seed(h);
+    expect(await h.marked()).toEqual([]);
+    blobs.lock();
+    expectOk(await h.delivery.publish("pages", ids.kontakt));
+    expect(await h.marked()).toEqual([`${ids.kontakt}/de`]);
+    expectOk(await h.delivery.unpublish("pages", ids.kontakt));
+    blobs.unlock();
+    expectOk(await h.delivery.publish("pages", ids.info));
+    h.advance(3_600_000);
+    h.emitted.length = 0;
+    expect(expectOk(await h.delivery.resumeStale()).dispatched).toBe(0);
+    expect(expectOk(await h.delivery.retryStale())).toEqual({ retried: 0 });
+    expect(await h.marked()).toEqual([]);
+    expect(h.jobs()).toEqual([]);
+    expect(expectOk(await h.delivery.readStaleStatus())).toMatchObject({ stale: 0, failed: 0, rendering: 0 });
+  });
+
+  it("marks the outputs publishAll could not write the same way", async () => {
+    const blobs = lockableBlobs();
+    const h = await harness({ blobs });
+    const ids = await seed(h);
+    blobs.lock();
+    expect(expectOk(await h.delivery.publishAll("pages"))).toMatchObject({ live: 0, errors: 4 });
+    expect(await h.marked()).toEqual([`${ids.programm}/de`, `${ids.programm}/en`, `${ids.info}/de`, `${ids.kontakt}/de`].sort());
+    expect(expectOk(await h.delivery.readStaleStatus())).toMatchObject({ stale: 4, failed: 0 });
   });
 });
 
