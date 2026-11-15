@@ -12,7 +12,7 @@ import { sha256 } from "../sqlite.ts";
 import { checkGate } from "./gate.ts";
 import { continueJournal, listUpdateRuns, readUpdateRun } from "./journal.ts";
 import { UPDATE_PIN_PREFIX, updateKeys } from "./layout.ts";
-import { computePlan, planHash, replicaCopy } from "./plan.ts";
+import { computePlan, pinsCutover, planHash, replicaCopy } from "./plan.ts";
 import { UPDATE_EXIT, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateRun, type VerifyResult, type VersionSet } from "./types.ts";
 import { concludeVerify, outcomeOf } from "./verify.ts";
 
@@ -21,6 +21,7 @@ type Entry = "seal" | "cutover-backup" | "migrate" | "swap" | "start" | "verify"
 interface Flow {
   plan: UpdatePlan | null;
   from: VersionSet | null;
+  pin: boolean;
   staged: string;
   stoppedAt: number;
   cutoverBackup: string | null;
@@ -73,7 +74,7 @@ function stopQuestion(ctx: UpdateContext, plan: UpdatePlan): string {
  * Deploys the release in the order of `DEPLOY_STEPS`. While the old release serves: `gate`, `stage` (a staging
  * failure ends the run with exit 1 and the app was never stopped), `configuration` (recorded once into the backup
  * location), `precopy`. Then `stop` (after the `update-stop` answer), `seal` (waits for the seal after STOPPED),
- * `cutover-backup` (verified, pinned for this run until `update cleanup`), `migrate` (on a copy of the cutover
+ * `cutover-backup` (verified; pinned for this run until `update cleanup` when {@link pinsCutover} says so), `migrate` (on a copy of the cutover
  * database), and `promote`, `swap` and `start` as one step without a question between them. `verify` decides: passed
  * runs `retire` and ends with exit 0; failed runs the automatic rollback and ends with exit 3 once it verified the
  * cutover state; unverifiable halts with exit 1 and leaves the new release running.
@@ -87,7 +88,7 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
     const plan = await computePlan(ctx, await replicaCopy(ctx, ctx.workspace.path("plan.db")));
     const gate = await checkGate(ctx, plan, await earlierDeploys(ctx));
     if (gate.accepts !== null) await acceptImplicitly(ctx, gate.accepts);
-    await record(ctx, "gate", "done", { receipt: gate.receipt === null ? null : `${gate.planHash}/${gate.receipt.runId}`, versions: plan.versions, planHash: gate.planHash, ordinary: gate.ordinary });
+    await record(ctx, "gate", "done", { receipt: gate.receipt === null ? null : `${gate.planHash}/${gate.receipt.runId}`, versions: plan.versions, planHash: gate.planHash, ordinary: gate.ordinary, pin: pinsCutover(plan) });
 
     step = "stage";
     await record(ctx, "stage", "started");
@@ -112,7 +113,7 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
     await record(ctx, "stop", "started");
     stopBegun = true;
     const { stoppedAt } = await stopTarget(ctx);
-    flow = { plan, from: plan.versions.from, staged: staged.droplet, stoppedAt, cutoverBackup: null, promoted: null, startedAt: null };
+    flow = { plan, from: plan.versions.from, pin: pinsCutover(plan), staged: staged.droplet, stoppedAt, cutoverBackup: null, promoted: null, startedAt: null };
   } catch (error) {
     if (error instanceof Interrupted) throw stopBegun ? new Interrupted(error.signal, `the stop began, so the app may be stopped; do not start it by hand; run update abort --env ${ctx.envName} --run ${ctx.run.id}`) : error;
     if (stopBegun) return failedStop(ctx, error);
@@ -158,10 +159,10 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
       step = "cutover-backup";
       await record(ctx, "cutover-backup", "started");
       const running = { ...ctx, project: { versions: flow.from ?? {}, lockfileSha256: null } };
-      const backup = await createBackup(running, { kind: "cutover", mode: { kind: "stopped", seal, stoppedAt: flow.stoppedAt }, pinFor: UPDATE_PIN_PREFIX + ctx.run.id });
+      const backup = await createBackup(running, { kind: "cutover", mode: { kind: "stopped", seal, stoppedAt: flow.stoppedAt }, ...(flow.pin ? { pinFor: UPDATE_PIN_PREFIX + ctx.run.id } : {}) });
       flow.cutoverBackup = backup.id;
-      await record(ctx, "cutover-backup", "done", { backupId: backup.id });
-      ctx.out.info(`cutover backup ${backup.id} written, verified and pinned`);
+      await record(ctx, "cutover-backup", "done", { backupId: backup.id, pinned: flow.pin });
+      ctx.out.info(`cutover backup ${backup.id} written and verified${flow.pin ? ", pinned until update cleanup" : ""}`);
     }
     if (at("migrate")) {
       step = "migrate";
@@ -239,7 +240,8 @@ export async function continueDeploy(ctx: UpdateContext, run: UpdateRun): Promis
   if (run.stagedDroplet === null || typeof stoppedAt !== "number") return outcomeOf(ctx, UPDATE_EXIT.refused, `update run ${run.runId} records no staged droplet or no completed stop; run update ${run.cutoverBackup === null ? "abort" : "rollback"} --env ${ctx.envName} --run ${run.runId}`);
   const startRecord = [...run.records].reverse().find((r) => r.phase === "deploy" && r.step === "start");
   const recordedStart = startRecord?.data.startedAt;
-  const flow: Flow = { plan: null, from: run.versions?.from ?? null, staged: run.stagedDroplet, stoppedAt, cutoverBackup: run.cutoverBackup, promoted: run.promoted === null ? null : { ...run.promoted, at: unstamp(run.promoted.generation) }, startedAt: typeof recordedStart === "number" ? recordedStart : null };
+  const pin = run.records.find((r) => r.phase === "deploy" && r.step === "gate" && r.state === "done")?.data.pin;
+  const flow: Flow = { plan: null, from: run.versions?.from ?? null, pin: pin !== false, staged: run.stagedDroplet, stoppedAt, cutoverBackup: run.cutoverBackup, promoted: run.promoted === null ? null : { ...run.promoted, at: unstamp(run.promoted.generation) }, startedAt: typeof recordedStart === "number" ? recordedStart : null };
   if (flow.promoted !== null) {
     if (!startedStep(run, "start")) {
       const newest = (await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).at(-1);

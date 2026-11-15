@@ -112,6 +112,7 @@ describe("deploying 5.8.1 to 6.0 on the stand-in target", { timeout: 30_000 }, (
     expect(s.steps.retiredStates).toEqual(["verified"]);
     expect(s.steps.rollback).not.toHaveBeenCalled();
     expect(await s.h.store.head(LOCATION + updateKeys.configuration("prod", s.ctx.run.id))).not.toBeNull();
+    expect(await s.h.store.head(LOCATION + updateKeys.pin(run.cutoverBackup ?? "", s.ctx.run.id))).not.toBeNull();
     const byStep = new Map(outcome.report.steps.map((t) => [t.step, t]));
     expect(byStep.get("stage")?.appDown).toBe(false);
     expect(byStep.get("cutover-backup")?.appDown).toBe(true);

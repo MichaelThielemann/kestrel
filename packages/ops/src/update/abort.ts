@@ -1,6 +1,7 @@
 import { readManifest } from "../backup.ts";
 import { messageOf, recordQuietly, startTarget } from "../context.ts";
 import { stableGenerations } from "../replica.ts";
+import { releaseUpdatePin } from "./cleanup.ts";
 import { readUpdateRun, reportOf } from "./journal.ts";
 import { OPEN_STATES, UPDATE_EXIT, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
 
@@ -19,7 +20,7 @@ async function placedAfterCutover(ctx: UpdateContext, run: UpdateRun): Promise<b
 
 /**
  * `update abort`: ends an open run without finishing it. Before the promotion it starts the previous release again on
- * the unchanged replica and records `abort` with `promoted: false`; after the promotion it rolls back first
+ * the unchanged replica, releases the run's update pin on its cutover backup and records `abort` with `promoted: false`; after the promotion it rolls back first
  * (`RollbackReason` `abort`), so the old droplet never starts on a converted generation. A generation newer than the
  * cutover backup's source counts as promoted even when the journal did not record the promotion.
  */
@@ -53,6 +54,7 @@ export async function abort(ctx: UpdateContext, run: UpdateRun): Promise<UpdateO
     await recordQuietly(ctx, "abort", "failed", { phase: "abort", promoted: false, message: messageOf(error) });
     return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the abort could not start the previous release: ${messageOf(error)}`, run.state);
   }
+  if (run.cutoverBackup !== null && (await releaseUpdatePin(ctx, run.cutoverBackup, run.runId))) await recordQuietly(ctx, "unpin", "done", { backupId: run.cutoverBackup });
   await ctx.journal.record("abort", "done", { phase: "abort", promoted: false });
   return outcome(ctx, run.runId, UPDATE_EXIT.done, "aborted before the promotion: the previous release runs on the unchanged replica", "aborted");
 }

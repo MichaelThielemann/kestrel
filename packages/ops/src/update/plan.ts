@@ -165,3 +165,16 @@ export function planHash(plan: UpdatePlan): string {
 export function needsReceipt(plan: UpdatePlan): boolean {
   return !sameVersions(plan.versions.from, plan.versions.to) || plan.storage.length > 0;
 }
+
+const kestrelMajor = (versions: Readonly<Record<string, string>>): string | null => (versions["@michaelthielemann/kestrel"] ?? versions["@michaelthielemann/kestrel-replication-sqlite"])?.split(".")[0] ?? null;
+
+/**
+ * Whether a deploy of `plan` pins its cutover backup until `update cleanup`: when the major of Kestrel changes or the
+ * running versions are unknown, or when a storage migration is pending. Otherwise the retention of `cutover` backups
+ * keeps it.
+ */
+export function pinsCutover(plan: UpdatePlan): boolean {
+  if (plan.storage.length > 0 || plan.versions.from === null) return true;
+  const from = kestrelMajor(plan.versions.from);
+  return from === null || from !== kestrelMajor(plan.versions.to);
+}

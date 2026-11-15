@@ -126,7 +126,7 @@ describe("rolling an update back", () => {
 
     const steps = await journalSteps(s, deployed.runId);
     const tail = steps.slice(steps.indexOf("rollback started"));
-    expect(tail).toEqual(["rollback started", "stop done", "seal done", "re-promote done", "restore-originals done", "restore-delivery done", "restore-configuration done", "restore-droplet done", "start started", "start done", "rollback-verify done", "rollback done"]);
+    expect(tail).toEqual(["rollback started", "stop done", "seal done", "re-promote done", "restore-originals done", "restore-delivery done", "restore-configuration done", "restore-droplet done", "start started", "start done", "rollback-verify done", "unpin done", "rollback done"]);
     expect((await runOf(s, deployed.runId)).state).toBe("rolled-back");
     const verifyRecord = (await runOf(s, deployed.runId)).records.find((r) => r.step === "rollback-verify");
     expect(verifyRecord?.data).toMatchObject({ provenance: "marker" });
@@ -230,6 +230,7 @@ describe("update rollback", () => {
     const outcome = await rollbackCommand(ctx, run);
     expect(outcome).toMatchObject({ exitCode: UPDATE_EXIT.done, state: "rolled-back" });
     expect((await listBackups(ctx)).filter((b) => b.kind === "pre-restore")).toEqual([]);
+    expect((await listBackups(ctx)).find((b) => b.id === run.cutoverBackup)?.pinnedBy).toEqual([]);
   });
 
   it("after accept refuses with exit 1 without the environment's name as the answer, also with --yes, and with it reports the loss and takes a safety backup", async () => {

@@ -10,6 +10,7 @@ import { downloadDb, restoreDelivery, restoreOriginals } from "../restore.ts";
 import { appClock, type ServerClock } from "../serverTime.ts";
 import { deleteSessions, hasAccessChanges, lossReport, sha256, type LossReport } from "../sqlite.ts";
 import { stableList, type ObjectInfo } from "../store.ts";
+import { releaseUpdatePin } from "./cleanup.ts";
 import { readUpdateRun, reportOf } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
 import type { ConfigurationRestore, RecordedConfiguration } from "./target.ts";
@@ -242,6 +243,7 @@ async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Man
     await recordQuietly(ctx, "rollback-verify", "failed", { message: messageOf(error) });
     throw error;
   }
+  if (await releaseUpdatePin(ctx, manifest.id, run.runId)) await ctx.journal.record("unpin", "done", { backupId: manifest.id });
   await ctx.journal.record("rollback", "done", { ended: "previous-release", generation: promoted.generation });
   return { ...result, ended: "previous-release" };
 }
@@ -255,7 +257,8 @@ async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Man
  * configuration verbatim, without a question; makes the previous droplet current (uploading its saved bits when it
  * was deleted); starts it and verifies it: readiness, and provenance through `applied.json` for a sealing runtime or
  * through the marker row in the first snapshot of an older one. Without a previous droplet or its bits the rollback
- * ends with the app stopped on the cutover state (`ended: "stopped"`). A run that stopped the app but has no cutover
+ * ends with the app stopped on the cutover state (`ended: "stopped"`); once the previous release runs verified, the
+ * run's update pin on the cutover backup is released. A run that stopped the app but has no cutover
  * backup yet promoted nothing: its rollback makes the previous droplet current, starts it on the unchanged replica and
  * checks its readiness. It refuses instead while the app's current droplet is the one the run staged, or while the
  * newest generation carries an `origin.json` of kind `upgrade` that no `applied.json` acknowledges.

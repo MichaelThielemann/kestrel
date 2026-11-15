@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ok } from "@michaelthielemann/kestrel-contracts/errors";
 import type { ModuleStorage } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import { createUpdateHarness, type UpdateHarness } from "./harness.fixture.ts";
-import { computePlan, planHash, versionSet } from "./plan.ts";
+import { computePlan, pinsCutover, planHash, versionSet } from "./plan.ts";
 import type { UpdatePlan } from "./types.ts";
 import type * as Storages from "./storages.ts";
 
@@ -75,6 +75,22 @@ describe("the version set of an update", () => {
       ["@michaelthielemann/kestrel", "6.0.0"],
       ["@michaelthielemann/kestrel-ops", "6.0.0"],
     ]);
+  });
+});
+
+describe("the pin of a cutover backup", () => {
+  const plan = (from: Record<string, string> | null, to: Record<string, string>, storage: UpdatePlan["storage"] = []): UpdatePlan => ({ versions: { from, to }, storage, content: [], questions: [] });
+  const v = (version: string): Record<string, string> => ({ "@michaelthielemann/kestrel": version });
+
+  it("is taken for a change of the major, for unknown running versions and for a pending storage migration", () => {
+    expect(pinsCutover(plan(v("5.8.1"), v("6.0.0")))).toBe(true);
+    expect(pinsCutover(plan(null, v("6.0.0")))).toBe(true);
+    expect(pinsCutover(plan(v("6.0.0"), v("6.0.0"), [{ module: "media/default", id: "media-default:key-layout", kind: "auto", blobWrites: true, pending: 1 }]))).toBe(true);
+  });
+
+  it("is not taken within a major without a storage migration, where the retention keeps the backup", () => {
+    expect(pinsCutover(plan(v("6.0.0"), v("6.0.0")))).toBe(false);
+    expect(pinsCutover(plan(v("6.0.0"), v("6.1.0")))).toBe(false);
   });
 });
 

@@ -117,7 +117,7 @@ describe("the deploy gate", () => {
 });
 
 describe("an ordinary deploy", { timeout: 30_000 }, () => {
-  it("runs without a receipt and still takes a verified cutover backup pinned for the run", async () => {
+  it("runs without a receipt and still takes a verified cutover backup, which only the retention keeps", async () => {
     const h = harness({ from: { runtime: "6.0.0" }, to: { runtime: "6.0.0" } });
     await h.target.start();
     await h.target.app?.seed();
@@ -129,7 +129,7 @@ describe("an ordinary deploy", { timeout: 30_000 }, () => {
     expect(receipt).toBeNull();
     if (cutoverBackup === null) throw new Error("no cutover backup");
     expect(cutoverBackup).toMatch(/-cutover-/);
-    expect(await h.store.head(LOCATION + keys.pin(cutoverBackup, UPDATE_PIN_PREFIX + ctx.run.id))).not.toBeNull();
+    expect(await h.store.head(LOCATION + keys.pin(cutoverBackup, UPDATE_PIN_PREFIX + ctx.run.id))).toBeNull();
     expect((await h.store.list(LOCATION + `backups/${cutoverBackup}/verify/`)).length).toBeGreaterThan(0);
     expect(await h.store.head(LOCATION + keys.manifest(cutoverBackup))).not.toBeNull();
   });

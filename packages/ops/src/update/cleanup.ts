@@ -42,6 +42,14 @@ async function orphans(ctx: UpdateContext, cutover: string): Promise<BlobEntry[]
   });
 }
 
+/** Releases the update pin of run `runId` on backup `backupId`, if it holds one; prune then treats the backup like any other. */
+export async function releaseUpdatePin(ctx: Pick<UpdateContext, "backups" | "location" | "clock">, backupId: string, runId: string): Promise<boolean> {
+  if ((await ctx.backups.head(ctx.location + updateKeys.pin(backupId, runId))) === null) return false;
+  const released = ctx.location + updateKeys.unpin(backupId, runId);
+  if ((await ctx.backups.head(released)) === null) await ctx.backups.put(released, jsonBytes({ runId, at: ctx.clock() }), { contentType: "application/json" });
+  return true;
+}
+
 /**
  * `update cleanup`: ends an accepted deploy run at least `update.cleanupAfterDays` after its `accept`. Steps
  * `cleanup-check` (refuses before that, or for a run that is not accepted), `cleanup-delete` (originals under the media
@@ -76,8 +84,7 @@ export async function cleanup(ctx: UpdateContext, run: UpdateRun, options: Clean
     await recordQuietly(ctx, "cleanup-delete", "failed", { message: messageOf(error) });
     return outcome(ctx, run.runId, UPDATE_EXIT.refused, messageOf(error), run.state);
   }
-  const released = ctx.location + updateKeys.unpin(cutover, run.runId);
-  if ((await ctx.backups.head(released)) === null) await ctx.backups.put(released, jsonBytes({ runId: run.runId, at: ctx.clock() }), { contentType: "application/json" });
+  await releaseUpdatePin(ctx, cutover, run.runId);
   await ctx.journal.record("unpin", "done", { backupId: cutover });
   return outcome(ctx, run.runId, UPDATE_EXIT.done, `cleaned: deleted ${candidates.length} original(s); the cutover backup ${cutover} is no longer pinned`, "cleaned");
 }

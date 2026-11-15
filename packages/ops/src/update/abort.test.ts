@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { listBackups } from "../backup.ts";
 import { PREFIXES } from "../harness.fixture.ts";
 import { listGenerations, promote } from "../replica.ts";
 import { appClock } from "../serverTime.ts";
@@ -41,6 +42,8 @@ describe("update abort", () => {
       expect(violations).toEqual([]);
       const last = (await runOf(s, deployed.runId)).records.at(-1);
       expect(last).toMatchObject({ step: "abort", state: "done", data: { promoted: false } });
+      const cutover = run.cutoverBackup;
+      if (cutover !== null) expect((await listBackups(ctx)).find((b) => b.id === cutover)?.pinnedBy).toEqual([]);
     });
   }
 
