@@ -92,7 +92,7 @@ describe("mfa/totp checks", () => {
     env.advance(30_000);
     const code = codeAt(started.secret, env.now());
     expect(expectOk(await env.mfa.check(ALICE, ` ${code.slice(0, 3)}-${code.slice(3)} `))).toEqual({ kind: "pass" });
-    const [row] = expectOk(await env.db.findMany<{ failures: number }>(FACTORS, {})).items;
+    const [row] = expectOk(await env.db.findMany<{ id: string; failures: number }>(FACTORS, {})).items;
     expect(row?.failures).toBe(0);
   });
 
