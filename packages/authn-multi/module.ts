@@ -219,6 +219,7 @@ export default defineModule({
     endSessions: async (ctx: Context) => {
       const id = ctx.params.id;
       if (id === undefined) throw new Error("authn.endSessions: no params.id (boot's dataflow check already proved this route always provides it)");
+      if (ctx.identity?.id === id) return ctx.fail("VALIDATION", "you cannot end your own sessions through a route that acts on another user");
       const ended = await authn.endSessions(id);
       if (isErr(ended)) return ctx.fail(ended.error);
       return ok({ ...ctx, result: { ok: true } });
@@ -358,10 +359,11 @@ export default defineModule({
     },
     cleanupSessions: { summary: "Remove expired sessions", reads: [], writes: ["result"], output: { type: "object", properties: { removed: { type: "number" } }, required: ["removed"] } },
     endSessions: {
-      summary: "End every session of the user in params.id, e.g. after its second factor was reset",
+      summary: "End every session of the user in params.id, e.g. after its second factor was reset; the caller's own id is refused",
       reads: ["params.id"],
       writes: ["result"],
       output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+      errors: { 400: "the caller's own id" },
     },
     requireRecentAuth: (arg: string) => ({
       summary: `Require that the session's password was checked within the last ${arg} seconds, at login or through authn.confirmPassword; otherwise 403 REAUTH_REQUIRED`,

@@ -68,7 +68,8 @@ or `UPDATE mfa_factors SET "failures" = 0, "lockedUntil" = 0 WHERE "userId" = '<
 `{ ok, enrollmentCode }` — not the caller's own (400); a user who lost the device signs in with a recovery
 code. Run it after a
 step that ends that user's sessions, e.g. `authn-multi`'s `authn.endSessions`, so the enrollment code is
-the answer. `mfa.forget` removes the factor of a deleted user (event `user.deleted`). `mfa.listEnrolled`
+the answer. `authn.endSessions` refuses the caller's own id with 400 as well, so a request to reset one's
+own factor ends no session. `mfa.forget` removes the factor of a deleted user (event `user.deleted`). `mfa.listEnrolled`
 answers the ids of the users with a confirmed factor.
 
 Config: `issuer` (the name an app shows, default `Kestrel`), `secretKey` (required, secret),

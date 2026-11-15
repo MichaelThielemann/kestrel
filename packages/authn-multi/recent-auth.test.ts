@@ -89,6 +89,17 @@ describe("authn/multi ending a user's sessions and a second factor's code", () =
     expect(expectOk(await instance.resolve(headers.authorization.slice(7)))?.id).toBe(admin.id);
   });
 
+  it("authn.endSessions refuses the caller's own id and leaves every session of the caller in place", async () => {
+    const { instance, admin, options, headers } = await setup();
+    const second = await runPipeline(login, { body: { username: "admin", password: "long-enough" } }, options);
+    const secondToken = boundaryCast<{ token: string }>(second.result, "json").token;
+    const end = definePipeline({ name: "endOwnSessions", steps: ["authn.requireUser", "authn.endSessions"] });
+    const refused = await runPipeline(end, { params: { id: admin.id }, headers }, options);
+    expect(refused).toMatchObject({ status: 400, code: "VALIDATION", step: "authn.endSessions" });
+    expect(expectOk(await instance.resolve(headers.authorization.slice(7)))?.id).toBe(admin.id);
+    expect(expectOk(await instance.resolve(secondToken))?.id).toBe(admin.id);
+  });
+
   it("login accepts a second factor's code in the body and leaves it to a later step", async () => {
     const { options } = await setup();
     expect((await runPipeline(login, { body: { username: "admin", password: "long-enough", code: "123456" } }, options)).status).toBe(200);

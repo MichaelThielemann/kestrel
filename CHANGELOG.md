@@ -2448,6 +2448,9 @@ Net changes since 5.8.2.
   id and the params holding the user id. `Audit.anonymize` takes the name as an optional second argument.
   Those entries kept the name until retention removed them. A run from an HTTP route, such as the repair
   route behind `authn.requireAbsentUser`, still works by id only.
+- `authn-multi`: `authn.endSessions` refuses the caller's own id with 400 `VALIDATION` and ends no session. A
+  pipeline that resets a second factor runs it before `mfa.reset`, which refuses the caller's own factor, so
+  such a refused request ended every session of the caller, the one that sent it included.
 
 ## 5.8.2 – 2026-09-27
 

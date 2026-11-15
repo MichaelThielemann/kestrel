@@ -9102,7 +9102,7 @@
       "module": "authn/multi",
       "factory": false,
       "description": {
-        "summary": "End every session of the user in params.id, e.g. after its second factor was reset",
+        "summary": "End every session of the user in params.id, e.g. after its second factor was reset; the caller's own id is refused",
         "reads": [
           "params.id"
         ],
@@ -9119,6 +9119,9 @@
           "required": [
             "ok"
           ]
+        },
+        "errors": {
+          "400": "the caller's own id"
         }
       }
     },

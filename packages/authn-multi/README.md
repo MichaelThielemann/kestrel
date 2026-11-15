@@ -66,7 +66,7 @@ username is `CONFLICT` (409), the last admin guard is `LAST_ADMIN` (409).
 | `authn.deactivateUser` | `params.id` | `result` | `VALIDATION` (self), `NOT_FOUND`, `LAST_ADMIN`, `TRANSIENT` |
 | `authn.activateUser` | `params.id` | `result` | `NOT_FOUND`, `TRANSIENT` |
 | `authn.cleanupSessions` | – | `result` | `TRANSIENT` |
-| `authn.endSessions` | `params.id` | `result` | `TRANSIENT` |
+| `authn.endSessions` | `identity`, `params.id` | `result` | `VALIDATION` (self), `TRANSIENT` |
 | `authn.requireRecentAuth:<seconds>` | `token` | – | `UNAUTHENTICATED`, `REAUTH_REQUIRED`, `TRANSIENT` |
 | `authn.confirmPassword` | `token` | `result` | `VALIDATION`, `UNAUTHENTICATED`, `TRANSIENT` |
 
@@ -128,7 +128,7 @@ concerns), an e-mail field.
 | `authn.deactivateUser` | Deactivate a user (ends their sessions) | `params.id` | `result` | – | { ok: boolean, … } | 400 cannot deactivate yourself; 404 user not found; 409 the last active admin cannot be deactivated (`LAST_ADMIN`) | beside | yes |
 | `authn.activateUser` | Activate a user | `params.id` | `result` | – | { ok: boolean, … } | 404 user not found | beside | no |
 | `authn.cleanupSessions` | Remove expired sessions | – | `result` | – | { removed: number, … } | – | beside | no |
-| `authn.endSessions` | End every session of the user in params.id, e.g. after its second factor was reset | `params.id` | `result` | – | { ok: boolean, … } | – | beside | no |
+| `authn.endSessions` | End every session of the user in params.id, e.g. after its second factor was reset; the caller's own id is refused | `params.id` | `result` | – | { ok: boolean, … } | 400 the caller's own id | beside | no |
 | `authn.requireRecentAuth:<arg>` | Require that the session's password was checked within the last <arg> seconds, at login or through authn.confirmPassword; otherwise 403 REAUTH_REQUIRED | `token` | – | – | – | 401 not authenticated; 403 the last password check is older than the window (`REAUTH_REQUIRED`) | beside | no |
 | `authn.confirmPassword` | Confirm the caller's password; marks the session as freshly authenticated for authn.requireRecentAuth | `token` | `result` | { password: string } | { ok: boolean, … } | 400 the password is missing or wrong; 401 not authenticated | beside | no |
 
