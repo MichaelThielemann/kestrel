@@ -107,13 +107,45 @@ describe("kestrel status, backup, restore and update", () => {
     expect(usage.stderr).toContain("unknown option --frobnicate");
   });
 
-  it("update loads kestrel-ops and exits 2 when the installed one has no update assistant", async () => {
-    const dir = project("update", true);
-    const result = await runCli(["update", "prepare", "--env", "prod"], { cwd: dir, nodeArgs: TRANSFORM });
-    expect(result.code).toBe(2);
-    expect(result.stderr).toContain(`the installed ${OPS}`);
-    expect(result.stderr).toContain("has no update assistant");
+  it("update --help and help update list only the seven commands an operator runs", async () => {
+    const seven = ["prepare", "accept", "rollback", "status", "resume", "abort", "cleanup"];
+    for (const args of [["update", "--help"], ["help", "update"]]) {
+      const help = await runCli(args, { cwd: project("update-help", false), env: { NODE_PATH: "" } });
+      expect(help.code, args.join(" ")).toBe(0);
+      expect([...help.stdout.matchAll(/kestrel update (\S+)/g)].map((m) => m[1]), args.join(" ")).toEqual(seven);
+      expect(help.stdout, args.join(" ")).not.toMatch(/\b(deploy|verify|bundle)\b/);
+    }
   });
+
+  it("update hands every command to the update assistant of kestrel-ops in the project", async () => {
+    const dir = project("update", true);
+    const prepare = await runCli(["update", "prepare", "--env", "prod"], { cwd: dir, nodeArgs: TRANSFORM });
+    expect(prepare.code).toBe(2);
+    expect(prepare.stderr).toContain("kestrel.environments.json not found");
+    expect(prepare.stderr).not.toContain("no update assistant");
+    const status = await runCli(["update", "status", "--json"], { cwd: dir, nodeArgs: TRANSFORM });
+    expect(status.code).toBe(2);
+    expect(boundaryCast<Record<string, unknown>>(JSON.parse(status.stdout), "json")).toMatchObject({ schema: "kestrel-ops/update-status@1", ok: false, exitCode: 2 });
+    const usage = await runCli(["update", "frobnicate"], { cwd: dir, nodeArgs: TRANSFORM });
+    expect(usage.code).toBe(2);
+    expect(usage.stderr).toContain("unknown update command frobnicate");
+  });
+
+  it("update bundle writes the facts the project's host plugin contributes into the bundle", async () => {
+    const dir = project("update-bundle", true);
+    const host = join(dir, "node_modules", "example-host");
+    mkdirSync(host, { recursive: true });
+    const version = boundaryCast<{ version: string }>(JSON.parse(readFileSync(join(CLI_DIR, "package.json"), "utf8")), "json").version;
+    writeFileSync(join(host, "package.json"), JSON.stringify({ name: "example-host", version: "1.0.0", type: "module", kestrel: { plugin: "./plugin.mjs", pluginApi: 6, engine: `^${version.split(".")[0] ?? "0"}.0.0` } }));
+    writeFileSync(join(host, "plugin.mjs"), `export default () => ({ kind: "example", detect: async () => true, load: async () => ({ issues: [] }), ops: () => ({ readyPath: "/ready", secretEnvNames: ["SESSION_SECRET"], blobstoreFromEnv: () => undefined }) });\n`);
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "example-site", private: true, dependencies: { "example-host": "1.0.0", [OPS]: "*" } }));
+    writeFileSync(join(dir, "kestrel.environments.json"), JSON.stringify({ environments: { prod: { target: { adapter: "local", dir: ".", database: "data/kestrel.db", command: ["node", "server.mjs"], disk: "ephemeral" }, storage: { bucket: "b" }, app: { replicaPrefix: "database/", mediaPrefix: "media/", deliveryPrefix: "www/" }, backups: { prefix: "kestrel-backups/" } } } }));
+    const result = await runCli(["update", "bundle"], { cwd: dir, nodeArgs: TRANSFORM });
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    const info = boundaryCast<{ hostFacts: Record<string, unknown> }>(JSON.parse(readFileSync(join(dir, ".kestrel-ops", "bundle.json"), "utf8")), "json");
+    expect(info.hostFacts).toEqual({ readyPath: "/ready", secretEnvNames: ["SESSION_SECRET"] });
+  }, 120_000);
 
   it("keeps kestrel-ops and every @aws-sdk package out of the CLI's production dependency tree", () => {
     const manifest = readManifest(CLI_DIR);
