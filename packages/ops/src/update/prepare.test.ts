@@ -78,7 +78,7 @@ describe("preparing an update", { timeout: 30_000 }, () => {
     expect(h.target.actions).toEqual(["start"]);
     expect(appWrites(h, mark)).toEqual([]);
     const deploying = await h.context();
-    expect((await checkGate(deploying, receipt.plan, null)).receipt?.runId).toBe(ctx.run.id);
+    expect((await checkGate(deploying, receipt.plan, [])).receipt?.runId).toBe(ctx.run.id);
   });
 
   it("rehearses a migration that writes blobs without writing into the app's store", async () => {

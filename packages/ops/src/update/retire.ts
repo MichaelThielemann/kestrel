@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { OpsError } from "../errors.ts";
+import { listUpdateRuns, readUpdateRun } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
-import type { RetireResult, UpdateContext, UpdateRun } from "./types.ts";
+import { OPEN_STATES, type RetireResult, type UpdateContext, type UpdateRun } from "./types.ts";
 
 const verifiedPassed = (run: UpdateRun): boolean => (run.state === "verified" || run.state === "accepted") && run.records.some((r) => r.step === "verify" && r.state === "done" && (r.phase === "deploy" || r.phase === "verify") && r.data.verdict === "passed");
 
@@ -16,12 +17,24 @@ async function saveBits(ctx: UpdateContext, run: UpdateRun, guid: string): Promi
   return key;
 }
 
+async function neededByOpenRuns(ctx: UpdateContext, run: UpdateRun): Promise<Map<string, UpdateRun>> {
+  const needed = new Map<string, UpdateRun>();
+  for (const entry of await listUpdateRuns(ctx, ctx.envName)) {
+    if (entry.command !== "update deploy" || entry.runId === run.runId) continue;
+    const other = await readUpdateRun(ctx, entry.runId);
+    if (!OPEN_STATES.has(other.state)) continue;
+    for (const droplet of [other.previousDroplet, other.stagedDroplet]) if (droplet !== null) needed.set(droplet, other);
+  }
+  return needed;
+}
+
 /**
  * Retires the previous releases of deploy run `run` once its verification passed, and only then: saves the replaced
  * droplet's bits into the backup location when the target hands them out, then deletes every droplet but the current
  * one, so neither the platform's own rollback nor an old pipeline run can start an old release on the converted data.
  * Refuses unless the run's journal shows `verify` done with verdict `passed`, and while the app runs another droplet
- * than the one the run deployed.
+ * than the one the run deployed. A droplet that another open deploy run of the environment recorded as its previous or
+ * staged droplet stays.
  */
 export async function retire(ctx: UpdateContext, run: UpdateRun): Promise<RetireResult> {
   if (!verifiedPassed(run)) throw new OpsError(`refusing to retire the previous releases of run ${run.runId}: its verification has not passed (the run is ${run.state}); a rollback still needs them`, 1, "retire");
@@ -35,9 +48,15 @@ export async function retire(ctx: UpdateContext, run: UpdateRun): Promise<Retire
     if (savedDroplet === null) ctx.out.warn(`the target hands out no bits of droplet ${previous}; once it is deleted, a rollback of run ${run.runId} brings back the cutover state but leaves the app stopped`);
   }
   const revisions = await ctx.target.listRevisions();
+  const needed = await neededByOpenRuns(ctx, run);
   const deleted: string[] = [];
   for (const droplet of droplets) {
     if (droplet.guid === current) continue;
+    const other = needed.get(droplet.guid);
+    if (other !== undefined) {
+      ctx.out.warn(`droplet ${droplet.guid} stays: update run ${other.runId} is ${other.state} and needs it to roll back`);
+      continue;
+    }
     await ctx.target.deleteDroplet(droplet.guid);
     deleted.push(droplet.guid);
   }

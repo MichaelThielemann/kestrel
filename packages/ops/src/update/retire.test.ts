@@ -67,6 +67,21 @@ describe("retiring the previous releases after an update", () => {
     expect(s.h.output.warn.join("\n")).toContain("no bits");
   });
 
+  it("keeps a droplet another open run needs to roll back to", async () => {
+    const s = await scenario();
+    const needed = randomUUID();
+    s.h.target.droplets.set(needed, { release: fakeRelease({ runtime: "5.7.0" }), createdAt: Date.now() - 86_400_000 });
+    const deployed = await deployUntil(s, "verify");
+    const other = await s.h.context({ command: "update deploy" });
+    await other.journal.record("configuration", "done", { phase: "deploy", droplet: needed });
+    await other.journal.record("stop", "done", { phase: "deploy", stoppedAt: Date.now() });
+    expect((await runOf(s, other.run.id)).state).toBe("down");
+    const result = await retire(deployed.ctx, await runOf(s, deployed.runId));
+    expect(result.droplets).toEqual([s.previousDroplet]);
+    expect(s.h.target.droplets.has(needed)).toBe(true);
+    expect(s.h.output.warn.join("\n")).toContain(`droplet ${needed} stays: update run ${other.run.id} is down`);
+  });
+
   it("refuses while the app runs another droplet than the one the run deployed", async () => {
     const s = await scenario();
     const deployed = await deployUntil(s, "verify");

@@ -183,7 +183,7 @@ describe("kestrel update on the command line", () => {
     const before = [...(h.bucket?.objects.keys() ?? [])];
     const result = await run(h, ["status", "--json"]);
     expect(result.code).toBe(0);
-    expect(result.json).toMatchObject({ schema: "kestrel-ops/update-status@1", ok: true, env: "prod", run: { runId: id, state: "deploying", next: `kestrel update resume --env prod --run ${id}` } });
+    expect(result.json).toMatchObject({ schema: "kestrel-ops/update-status@1", ok: true, env: "prod", run: { runId: id, state: "deploying", next: `kestrel update abort --env prod --run ${id}` } });
     expect([...(h.bucket?.objects.keys() ?? [])]).toEqual(before);
     const text = await run(h, ["status"]);
     expect(text.stdout).toContain(`run ${id}  update deploy  deploying`);

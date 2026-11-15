@@ -41,9 +41,10 @@ async function cutoverDatabase(ctx: UpdateContext, backupId: string, file: strin
   return file;
 }
 
-async function previousDeploy(ctx: UpdateContext): Promise<UpdateRun | null> {
-  const earlier = (await listUpdateRuns(ctx, ctx.envName)).filter((r) => r.command === "update deploy" && r.runId !== ctx.run.id).at(-1);
-  return earlier === undefined ? null : readUpdateRun(ctx, earlier.runId);
+async function earlierDeploys(ctx: UpdateContext): Promise<UpdateRun[]> {
+  const runs: UpdateRun[] = [];
+  for (const entry of await listUpdateRuns(ctx, ctx.envName)) if (entry.command === "update deploy" && entry.runId !== ctx.run.id) runs.push(await readUpdateRun(ctx, entry.runId));
+  return runs;
 }
 
 async function acceptImplicitly(ctx: UpdateContext, runId: string): Promise<void> {
@@ -83,7 +84,7 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
   try {
     await record(ctx, "gate", "started");
     const plan = await computePlan(ctx, await replicaCopy(ctx, ctx.workspace.path("plan.db")));
-    const gate = await checkGate(ctx, plan, await previousDeploy(ctx));
+    const gate = await checkGate(ctx, plan, await earlierDeploys(ctx));
     if (gate.accepts !== null) await acceptImplicitly(ctx, gate.accepts);
     await record(ctx, "gate", "done", { receipt: gate.receipt === null ? null : `${gate.planHash}/${gate.receipt.runId}`, versions: plan.versions, planHash: gate.planHash, ordinary: gate.ordinary });
 

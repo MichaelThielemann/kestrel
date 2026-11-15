@@ -3,6 +3,7 @@ import { parseJsonOrNull } from "../layout.ts";
 import { stableList } from "../store.ts";
 import { updateKeys } from "./layout.ts";
 import { needsReceipt, planHash as hashOf, sameVersions } from "./plan.ts";
+import { nextCommand } from "./status.ts";
 import type { TargetPreflight } from "./target.ts";
 import { OPEN_STATES, type UpdateContext, type UpdatePlan, type UpdateReceipt, type UpdateRun } from "./types.ts";
 
@@ -39,14 +40,17 @@ export async function findReceipt(ctx: UpdateContext, planHash: string, to: Read
 /**
  * Lets a deploy through or refuses it with exit 1 before anything changes: a version change or a pending storage
  * migration without a matching receipt, more than one instance (desired or running), an active deployment of the
- * platform, or an update run of this environment in an open state (`down`, `verifying`, `halted`, `rolling-back`).
- * A `verified` run before it is accepted implicitly; the gate names it in {@link GateResult.accepts}.
+ * platform, or any of the `earlier` deploy runs of this environment (oldest first) in an open state (`deploying`,
+ * `down`, `verifying`, `halted`, `rolling-back`). The newest earlier run that got past its gate, when it is `verified`,
+ * is accepted implicitly; the gate names it in {@link GateResult.accepts}.
  */
-export async function checkGate(ctx: UpdateContext, plan: UpdatePlan, previous: UpdateRun | null): Promise<GateResult> {
+export async function checkGate(ctx: UpdateContext, plan: UpdatePlan, earlier: readonly UpdateRun[]): Promise<GateResult> {
   const preflight = await ctx.target.preflight();
   if (preflight.instances > 1 || preflight.running > 1) throw new OpsError(`the app is scaled to ${Math.max(preflight.instances, preflight.running)} instances; an update needs exactly one`, 1, "gate");
   if (preflight.activeDeployment !== null) throw new OpsError(`a deployment of the platform is in progress (${preflight.activeDeployment}), such as a rolling push; wait until it ends`, 1, "gate");
-  if (previous !== null && OPEN_STATES.has(previous.state)) throw new OpsError(`update run ${previous.runId} is ${previous.state}; finish it with update resume, update rollback or update abort --run ${previous.runId} first`, 1, "gate");
+  const open = earlier.find((run) => OPEN_STATES.has(run.state));
+  if (open !== undefined) throw new OpsError(`update run ${open.runId} is ${open.state}; finish it first with ${nextCommand(open, "update deploy") ?? `kestrel update abort --env ${ctx.envName} --run ${open.runId}`}`, 1, "gate");
+  const previous = earlier.filter((run) => run.state !== "untouched").at(-1) ?? null;
   const planHash = hashOf(plan);
   const ordinary = !needsReceipt(plan);
   const receipt = ordinary ? null : await findReceipt(ctx, planHash, plan.versions.to);

@@ -157,6 +157,22 @@ describe("deploying 5.8.1 to 6.0 on the stand-in target", { timeout: 30_000 }, (
     expect((await s.h.target.status()).state).toBe("started");
     expect(s.h.target.release.ready).toBe(ready);
   });
+
+  it("refuses every later deploy while a halted run is open, also after the gate refused one", async () => {
+    const s = await scenario({ to: { ready: "forbidden" } });
+    const halted = await deploy(s.ctx);
+    expect(halted.state).toBe("halted");
+    s.h.target.release.ready = "ready";
+    for (const attempt of [1, 2]) {
+      const ctx = await s.h.context({ answers: ANSWERS, steps: { rollback: s.steps.rollback, retire: s.steps.retire, migrateCopy: s.steps.migrateCopy } });
+      const outcome = await deploy(ctx);
+      expect(outcome.exitCode, `attempt ${attempt}`).toBe(1);
+      expect(outcome.message).toContain(`update run ${s.ctx.run.id} is halted`);
+    }
+    expect(s.steps.retire).not.toHaveBeenCalled();
+    expect((await readUpdateRun(s.ctx, s.ctx.run.id)).state).toBe("halted");
+    expect(s.h.target.actions.filter((a) => a === "stop")).toHaveLength(1);
+  });
 });
 
 describe("continuing an interrupted deploy", { timeout: 30_000 }, () => {

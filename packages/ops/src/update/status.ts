@@ -43,11 +43,13 @@ async function lockHosts(ctx: UpdateContext): Promise<Map<string, string>> {
   return hosts;
 }
 
-function nextCommand(run: UpdateRun, command: string): string | null {
+/** The command run `run`, opened by `command`, needs next, or null when it needs nothing. */
+export function nextCommand(run: UpdateRun, command: string): string | null {
   const scope = `--env ${run.env} --run ${run.runId}`;
   if (command === "update prepare") return run.state === "prepared" ? `node .kestrel-ops/run.mjs deploy --env ${run.env}` : null;
   switch (run.state) {
     case "deploying":
+      return `kestrel update abort ${scope}`;
     case "down":
     case "verifying":
     case "rolling-back":
