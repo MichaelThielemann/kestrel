@@ -277,7 +277,10 @@ delivered once EN itself is `published`); a language that is not published is ne
 another one. Fields without a translation fall back to the default language (`_locales` names the
 origin per field, e.g. `{ "slug": "de", "title": "en" }`), but only when the default language is
 itself `published`; otherwise the field stays empty. `_translations` reports only the languages
-that are themselves `published`.
+that are themselves `published` and have their own `slug` and `title`. A language published with its own
+slug but no title of its own (possible only in a model without `completeWhen`) is served with the default
+language's title and `_translations[locale]: false`; a frontend renders what `/site/*path` answers and does
+not turn such a document into a 404.
 Static delivery (`delivery.publish`) derives its published document the same way, so the export and
 the live API never disagree.
 A page with a `parent` lives below it: `/ueber-uns/team`, `/en/about-us/team`; in a language without

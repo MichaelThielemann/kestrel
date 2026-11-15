@@ -2451,6 +2451,11 @@ Net changes since 5.8.2.
 - `authn-multi`: `authn.endSessions` refuses the caller's own id with 400 `VALIDATION` and ends no session. A
   pipeline that resets a second factor runs it before `mfa.reset`, which refuses the caller's own factor, so
   such a refused request ended every session of the caller, the one that sent it included.
+- Docs: `site-default`, `content-default` and the pages API describe a translation published with its own slug
+  but without its own title in a model without `completeWhen`: `site.resolve` serves it, and static delivery
+  renders it, with the default locale's title (`_locales.title`) and `_translations[locale]: false`, so a
+  renderer decides by the answer of `site.resolve` whether a path is served, not by `_translations`;
+  `completeWhen` refuses such a save.
 
 ## 5.8.2 – 2026-09-27
 

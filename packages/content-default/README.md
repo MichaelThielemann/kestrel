@@ -9,7 +9,10 @@ apply per locale. The locale comes from `params.locale` or `payload.locale`. Rea
 a missing translation is `null`; `fallback: true` (step argument `?fallback=true`) fills it from
 the default locale and reports the origin per field in `_locales`; `_translations` says per locale
 whether the required localized fields are present. `completeWhen: { field: "status", equals: "published" }` on a type refuses to set that value for
-a locale whose required localized fields are missing (`VALIDATION` naming them).
+a locale whose required localized fields are missing (`VALIDATION` naming them). Without it, a locale can
+take that value with required localized fields still empty, since an update checks only the fields it
+writes; a fallback read then fills them from the default locale while `_translations` reports the locale
+as `false`.
 Validates every write (unknown fields, types, required, unique, reserved names — persistence backs
 `unique` with an index, so a race that slips past the pre-check still answers the same field-shaped
 error). A field name may not start with `_`: that namespace is reserved for members the system adds

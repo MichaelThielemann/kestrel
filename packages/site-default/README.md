@@ -11,7 +11,12 @@ linked page without a slug of its own in the link's locale is broken there. A lo
 published itself stays unserved and is never replaced by another locale's content (404). With
 `?fallback=true` an empty field of a served locale other than the slug is filled from the default
 locale only when the default locale's own values pass the filter too; with no such default the field
-stays empty. `_translations` lists only the locales that pass the filter themselves. Every `site@1`
+stays empty. `_translations` lists only the locales that pass the filter themselves, and among them only
+those whose required localized fields are all their own: a locale published with its own slug but without
+its own title is served, with the title of the default locale (`_locales.title` names it), and reports
+`_translations[locale]: false`. Whether a path is served is the answer of `site.resolve`, never
+`_translations`; a model that must not publish such a locale sets `completeWhen` in `content-default`,
+which refuses the save. Every `site@1`
 implementation must follow this rule; the shared contract suite
 (`@michaelthielemann/kestrel-contracts/site.contract.test`) tests it.
 Cost: with `?fallback=true` and N locales configured, resolving a non-default locale reads up to two
