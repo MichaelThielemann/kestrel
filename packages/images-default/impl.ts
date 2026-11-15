@@ -1911,26 +1911,35 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (closed) return shuttingDown();
       const filter: Filter = mediaId === undefined ? { state: "failed" } : { mediaId, state: "failed" };
       const affected = new Set<string>();
+      const retryable: string[] = [];
       for (let offset = 0; ; offset += PAGE) {
         const page = await db.findMany<Variant>(VARIANTS, filter, { sort: { id: "asc" }, limit: PAGE, offset });
         if (isErr(page)) return page;
-        for (const row of page.value.items) affected.add(row.mediaId);
+        for (const row of page.value.items) {
+          if (row.error === UNDECODABLE) continue;
+          affected.add(row.mediaId);
+          retryable.push(row.id);
+        }
         if (page.value.items.length < PAGE) break;
       }
       if (affected.size === 0) return ok({ variants: 0, media: 0, job: null });
-      const reset = await db.updateMany<Variant>(VARIANTS, filter, { state: "pending", error: null, attempts: 0, updatedAt: now() });
-      if (isErr(reset)) return reset;
+      let resetCount = 0;
+      for (let i = 0; i < retryable.length; i += PAGE) {
+        const reset = await db.updateMany<Variant>(VARIANTS, { id: { in: retryable.slice(i, i + PAGE) }, state: "failed" }, { state: "pending", error: null, attempts: 0, updatedAt: now() });
+        if (isErr(reset)) return reset;
+        resetCount += reset.value;
+      }
       if (mediaId !== undefined) {
         const regenerated = await generate(mediaId);
         if (isErr(regenerated)) return regenerated;
-        return ok({ variants: reset.value, media: affected.size, job: null });
+        return ok({ variants: resetCount, media: affected.size, job: null });
       }
       const started = await beginSync(true);
-      if (!isErr(started)) return ok({ variants: reset.value, media: affected.size, job: started.value });
+      if (!isErr(started)) return ok({ variants: resetCount, media: affected.size, job: started.value });
       if (started.error.code !== "CONFLICT") return started;
       const running = await currentJob();
       if (isErr(running)) return running;
-      return ok({ variants: reset.value, media: affected.size, job: running.value });
+      return ok({ variants: resetCount, media: affected.size, job: running.value });
     },
 
     async prune(names) {

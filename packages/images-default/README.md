@@ -514,9 +514,11 @@ which is what an admin UI shows.
 
 **Getting out of it** is `images.retryFailed`: it sets every `failed` variant back to `pending` with
 `attempts: 0` — all of them, or one media item's with `params.id`/`payload.id` — and then does the
-work. For a single item it regenerates right away and answers `job: null`; for all of them it opens
-a sync job that starts at the first media item, because a paused job's cursor may already have
-passed the affected ones. It answers `{ variants, media, job }`, and `{ variants: 0, media: 0, job:
+work. The sizes of an original that cannot be decoded stay `failed` with `cannot decode` and are not
+counted: their original does not change, so another attempt would fail the same way. For a single
+item it regenerates right away and answers `job: null`; for all of them it opens a sync job that
+starts at the first media item, because a paused job's cursor may already have passed the affected
+ones. It answers `{ variants, media, job }`, and `{ variants: 0, media: 0, job:
 null }` when nothing had given up. Redefining a size lifts the quarantine the same way, since a new
 spec is new work. There is deliberately **no cancel**: a sync job holds no external resource, every
 step it takes is a single idempotent variant write, and it stops by itself at the end of the

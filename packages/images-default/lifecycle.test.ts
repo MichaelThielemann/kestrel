@@ -320,6 +320,60 @@ describe("images/default: an image that cannot be decoded", () => {
   });
 });
 
+describe("images/default: images.retryFailed and images that cannot be decoded", () => {
+  const TEXT_AS_PNG = new TextEncoder().encode("plain text that only claims to be a picture");
+
+  async function undecodableWorld(): Promise<{ w: World; renders: string[] }> {
+    const renders: string[] = [];
+    const counting: Renderer = async (data, size, planned) => {
+      renders.push(size.name);
+      return fixedRenderer(data, size, planned);
+    };
+    const w = await world({}, counting);
+    await seed(w, "text", TEXT_AS_PNG, { contentType: "image/png", filename: "text.png", width: 0, height: 0 });
+    const whole = await jpeg(400, 300);
+    await seed(w, "cut", whole.slice(0, 24), { filename: "cut.jpg", width: 400, height: 300 });
+    expectOk(await w.images.plan(["text", "cut"]));
+    await whenIdle(w.images);
+    for (const id of ["text", "cut"]) expect((await rowsOf(w, id)).map((r) => [r.state, r.error, r.attempts])).toEqual([["failed", "cannot decode", 0]]);
+    expect(renders).toEqual([]);
+    return { w, renders };
+  }
+
+  it("leaves their sizes failed with cannot decode and renders nothing when it retries everything", async () => {
+    const { w, renders } = await undecodableWorld();
+    expect(expectOk(await w.images.retryFailed())).toEqual({ variants: 0, media: 0, job: null });
+    await whenIdle(w.images);
+    for (const id of ["text", "cut"]) expect((await rowsOf(w, id)).map((r) => [r.state, r.error, r.attempts])).toEqual([["failed", "cannot decode", 0]]);
+    expect(renders).toEqual([]);
+  });
+
+  it("leaves their sizes failed with cannot decode and renders nothing when it retries one of them", async () => {
+    const { w, renders } = await undecodableWorld();
+    for (const id of ["text", "cut"]) {
+      expect(expectOk(await w.images.retryFailed(id))).toEqual({ variants: 0, media: 0, job: null });
+      await whenIdle(w.images);
+      expect((await rowsOf(w, id)).map((r) => [r.state, r.error, r.attempts])).toEqual([["failed", "cannot decode", 0]]);
+    }
+    expect(renders).toEqual([]);
+  });
+
+  it("retries and counts only the sizes that gave up after failed renders", async () => {
+    const { w, renders } = await undecodableWorld();
+    await seed(w, "photo", await jpeg(400, 300));
+    expectOk(await w.images.generate("photo"));
+    await whenIdle(w.images);
+    expectOk(await w.db.updateMany<Variant>(VARIANTS, { mediaId: "photo" }, { state: "failed", error: "render failed", attempts: DEFAULT_MAX_ATTEMPTS }));
+    renders.length = 0;
+    const retried = expectOk(await w.images.retryFailed());
+    expect(retried).toMatchObject({ variants: 1, media: 1 });
+    await whenIdle(w.images);
+    expect((await rowsOf(w, "photo")).map((r) => [r.state, r.error])).toEqual([["done", null]]);
+    for (const id of ["text", "cut"]) expect((await rowsOf(w, id)).map((r) => [r.state, r.error, r.attempts])).toEqual([["failed", "cannot decode", 0]]);
+    expect(renders).toEqual(["thumb"]);
+  });
+});
+
 describe("images/default: a spec change of a size still planned", () => {
   it("keeps the row planned until its placeholder is written, so no listed path lacks its object", async () => {
     const w = await world();

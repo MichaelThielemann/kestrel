@@ -2356,6 +2356,10 @@ Net changes since 5.8.2.
   answered with an error in `_events` and no variants were rendered, and with `events-queue` the delivery went to
   the dead-letter and the items were placed and rendered only by the next `images.resume`. The same applies to
   `images.planned` raised after such an upload.
+- `images-default`: `images.retryFailed` (`POST /admin/images/retry-failed`) leaves the sizes of an original that
+  cannot be decoded `failed` with `cannot decode` and `attempts: 0`, and does not count them in `variants` and
+  `media`. It set them back to `pending`, so they failed every attempt again, with an error about the content
+  type or the width instead of `cannot decode`, until they were `failed` once more after `maxAttempts`.
 
 ## 5.8.2 – 2026-09-27
 
