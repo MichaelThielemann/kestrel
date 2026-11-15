@@ -65,19 +65,30 @@ export function buildLlmsTxt(opts: { siteName: string; siteDescription?: string;
   return `${lines.join("\n")}\n`;
 }
 
-export function buildLlmsFullTxt(opts: { siteName: string; siteDescription?: string; sections: LlmsFullSection[] }): string {
-  const blocks: string[] = [`# ${oneLine(opts.siteName)}`];
-  if (opts.siteDescription) blocks.push(`> ${escapeBlock(oneLine(opts.siteDescription))}`);
+export interface LlmsFullContent {
+  siteName: string;
+  siteDescription?: string;
+  sections: LlmsFullSection[];
+}
+
+/** llms-full.txt in consecutive pieces, one or a few per page; their concatenation is the file. */
+export function* llmsFullPieces(opts: LlmsFullContent): Generator<string> {
+  yield `# ${oneLine(opts.siteName)}`;
+  if (opts.siteDescription) yield `\n\n> ${escapeBlock(oneLine(opts.siteDescription))}`;
   for (const section of opts.sections) {
     if (section.pages.length === 0) continue;
-    blocks.push(`## ${oneLine(section.heading)}`);
+    yield `\n\n## ${oneLine(section.heading)}`;
     for (const page of section.pages) {
-      blocks.push(`### ${oneLine(page.title)}`, `Source: ${page.url}`);
-      if (page.description) blocks.push(escapeBlock(oneLine(page.description)));
-      if (page.body) blocks.push(page.body);
+      yield `\n\n### ${oneLine(page.title)}\n\nSource: ${page.url}`;
+      if (page.description) yield `\n\n${escapeBlock(oneLine(page.description))}`;
+      if (page.body) yield `\n\n${page.body}`;
     }
   }
-  return `${blocks.join("\n\n")}\n`;
+  yield "\n";
+}
+
+export function buildLlmsFullTxt(opts: LlmsFullContent): string {
+  return [...llmsFullPieces(opts)].join("");
 }
 
 export function extractMain(html: string): string | null {
