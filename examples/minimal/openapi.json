@@ -6889,7 +6889,7 @@
     "/admin/replication/restore": {
       "post": {
         "operationId": "replicationRestore",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission system.manage → Rebuild the database at a point in time next to the live file; applied on next start",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission system.manage → Rebuild the database at a point in time next to the live file; applied on the next start on the same disk, lost on an ephemeral disk",
         "tags": [
           "admin"
         ],

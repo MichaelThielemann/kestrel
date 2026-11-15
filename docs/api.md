@@ -859,10 +859,11 @@ configurable).
 | GET | `/admin/replication/status` | – | `{ generation, lineage, shippedFrames, lastSyncAt, lastSnapshotAt, lastCheckpointAt, walBytes, pendingRestore }` |
 | GET | `/admin/replication/points` | – | `[{ generation, at, kind: snapshot \| wal, key }]` – restore points, chronological |
 | POST | `/admin/replication/snapshot` | – | `{ generation, bytes }` – a new generation immediately |
-| POST | `/admin/replication/restore` | `{ generation?, at? }` (`at` in ms or ISO; omitted = latest) | `{ generation, at, file, restartRequired: true }` – rebuilds the DB at that point in time next to the live DB; **takes effect on the next start** (the open DB can't be replaced while running); 404 if there's no snapshot before `at` |
+| POST | `/admin/replication/restore` | `{ generation?, at? }` (`at` in ms or ISO; omitted = latest) | `{ generation, at, file, restartRequired: true }` – rebuilds the DB at that point in time next to the live DB; **takes effect on the next start on the same disk** (the open DB can't be replaced while running); on an ephemeral disk such as Cloud Foundry the next start is a new instance that never sees the file, so the restore has no effect there; 404 if there's no snapshot before `at` |
 
 UI suggestion: pick a point from `points` → `restore` → show a "restart required" notice;
-`status.pendingRestore` shows that a restore is waiting.
+`status.pendingRestore` shows that a restore is waiting. On a host with an ephemeral disk, offer no restore
+here and point to `kestrel restore --backup <id>` of `kestrel-ops` instead (see `docs/operations.md`).
 
 ## Content migrations (admin, permission `migrations.manage`)
 
@@ -873,8 +874,8 @@ checked against the model and the JSON Schema, and the ledger entry is written o
 At boot: `mode: "apply"` applies whatever is pending (dev), `"check"` refuses to start and lists
 what's pending (production; a deploy deliberately sets `apply`), `"off"` does nothing; the routes
 work in every mode. No `<type>.updated` event fires per document, but `migrations.applied` fires
-once after a run (`{ migrations: [id], documents }`). There is no `down` — the way back is
-replication (point-in-time recovery).
+once after a run (`{ migrations: [id], documents }`). There is no `down` — the way back is a restore:
+`kestrel restore --backup <id>`, or on a persistent disk a point-in-time restore from the replica.
 
 | Method | Path | Body | Response |
 |---|---|---|---|

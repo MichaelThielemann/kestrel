@@ -97,7 +97,7 @@ export default defineModule({
     },
     run: { summary: "Back up the file", reads: [], writes: ["result"], output: { type: "object", properties: { key: { type: "string" }, size: { type: "number" }, versions: { type: "array", items: { type: "string" } } }, required: ["key", "size", "versions"] } },
     restore: {
-      summary: "Stage the latest or a chosen version next to the file; applied on the next start",
+      summary: "Stage the latest or a chosen version next to the file; applied on the next start on the same disk, lost on an ephemeral disk",
       reads: [],
       writes: ["result"],
       input: { type: "object", properties: { key: { type: "string" } }, additionalProperties: false },

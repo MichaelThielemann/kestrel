@@ -47,6 +47,16 @@ target reports, which for the Cloud Foundry target are the packages installed in
 reads the right major only for backups taken from a checkout of the deployed release: a `backup create` run from a
 checkout of the new release against the old one is labelled with the new major.
 
+The backups are the restore points of an app on an ephemeral disk, such as Cloud Foundry, where every restart
+starts a new instance with an empty disk. The app's own restore steps, `replication.prepareRestore` (restore to a
+point in time from the replica) and `backup.restore` of `backup-blobstore`, only stage a file next to the
+database for the next start on the same disk. A new instance never sees that file: it rebuilds the database from
+the newest replica generation, so the app comes back with its current data and the staged restore has no
+effect. There, `kestrel restore --backup <id>` is the way back to an earlier state, and the newest backup
+before the damage is the earliest point it reaches. Schedule `backup create --kind scheduled` at least as often as
+the work you can afford to lose, for example every hour, and keep enough of them with
+`backups.retention.scheduled`. On a persistent disk the app's restore steps take effect at its next start.
+
 ## Permissions of the tool's credentials
 
 The tool reaches the app's bucket with `storage.credentials`, and a backup location in a store of its own with

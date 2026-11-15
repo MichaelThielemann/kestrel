@@ -4024,7 +4024,7 @@
       "module": "replication/sqlite",
       "factory": false,
       "description": {
-        "summary": "Rebuild the database at a point in time next to the live file; applied on next start",
+        "summary": "Rebuild the database at a point in time next to the live file; applied on the next start on the same disk, lost on an ephemeral disk",
         "reads": [],
         "writes": [
           "result"
@@ -27192,7 +27192,7 @@
           "name": "replication.prepareRestore",
           "module": "replication/sqlite",
           "description": {
-            "summary": "Rebuild the database at a point in time next to the live file; applied on next start",
+            "summary": "Rebuild the database at a point in time next to the live file; applied on the next start on the same disk, lost on an ephemeral disk",
             "reads": [],
             "writes": [
               "result"

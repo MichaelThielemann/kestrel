@@ -43,7 +43,8 @@ The boot-time `migrations.applied` (mode `"apply"`) reaches no listener by const
 inside `setup()`, and event triggers subscribe in `start()`, after every module is set up. Only an
 `apply()` triggered through a pipeline reaches event triggers; after a partial failure the event still fires, covering only the migrations that were
 applied before the failing one.
-Not included: `down` migrations (point-in-time recovery is the way back), transactions, file
+Not included: `down` migrations (a restore is the way back: `kestrel restore --backup <id>`, or on a
+persistent disk a point-in-time restore from the replica), transactions, file
 discovery of migration modules, a CLI — all a consumer concern.
 
 <!-- kestrel-docs:start -->

@@ -1955,6 +1955,11 @@ Net changes since 5.8.2.
 
 ### Changed
 
+- `replication-sqlite`, `backup-blobstore`: a restore staged by `replication.prepareRestore` or `backup.restore`
+  takes effect only when the process starts again on the same disk. On an ephemeral disk, such as Cloud Foundry,
+  the next start is a new instance that never sees the staged file and comes back with the current data. The step
+  summaries and the health note of a prepared restore say so, and `docs/operations.md` names
+  `kestrel restore --backup` with backups taken on a schedule as the way to restore an app on such a host.
 - `contracts`: the testing fake `fakePersistence` compares two strings without converting them to
   buffers unless one holds a surrogate, so filters and sorts over a few hundred rows run several times
   faster. The order stays the UTF-8 byte order that SQLite's binary collation uses.

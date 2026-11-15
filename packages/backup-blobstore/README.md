@@ -47,7 +47,10 @@ setup applies both on the next start (it deletes `<file>`, `<file>-wal` and `<fi
 the staged file into place and removes the marker) and logs `applied pending restore`. A marker
 without a staged file – an interrupted download – is dropped instead of applied. The step result is
 `{ key, size, file, pending: true, appliedOnRestart: true }`; **restart the process** for it to take
-effect. Preparing a restore twice keeps the newer one.
+effect. Preparing a restore twice keeps the newer one. The staged file and the marker live on the local disk,
+so only a start on the same disk applies them. On an ephemeral disk, such as Cloud Foundry, a restart is a new
+instance with an empty disk: the staged restore is gone and `restoreOnStart` brings back the latest backup
+instead. Restore a deployed app there with `kestrel restore --backup <id>` of `kestrel-ops`.
 
 **One process per file.** The first thing `setup()` does is take the instance lock on `file`, the
 sidecar `<file>.instance` next to it: before it applies a pending restore or restores a missing file.
@@ -97,7 +100,7 @@ Not included: continuous replication (see `replication-sqlite`), restore without
 |---|---|---|---|---|---|---|---|---|
 | `backup.checkRestored` | When the latest restore of the file was a prepared restore or a restore of a missing file from a periodic backup, by this module or another one (adds `_databaseRestoredAt`, the start of the boot that wrote it or null, to the result) | – | `result._databaseRestoredAt` | – | { _databaseRestoredAt: number \| null, … } | – | – | no |
 | `backup.run` | Back up the file | – | `result` | – | { key: string, size: number, versions: string[], … } | – | – | no |
-| `backup.restore` | Stage the latest or a chosen version next to the file; applied on the next start | – | `result` | { key?: string } | { key: string, size: number, file: string, pending: true, appliedOnRestart: true, … } | 400 unknown version; 404 no backup | – | no |
+| `backup.restore` | Stage the latest or a chosen version next to the file; applied on the next start on the same disk, lost on an ephemeral disk | – | `result` | { key?: string } | { key: string, size: number, file: string, pending: true, appliedOnRestart: true, … } | 400 unknown version; 404 no backup | – | no |
 | `backup.listVersions` | List backup versions | – | `result` | – | { versions: string[], … } | – | – | no |
 
 <!-- kestrel-docs:end -->

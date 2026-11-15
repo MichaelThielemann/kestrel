@@ -13,6 +13,12 @@ the generation and removes the `.part` file. A rebuild that fails while it write
 disk, removes it too, and one killed while it writes leaves only the `.part` file, which a start removes
 and never applies.
 
+A point-in-time restore through `replication.prepareRestore` writes `<file>.restore` and takes effect when the
+process starts again on the same disk. On an ephemeral disk, such as Cloud Foundry, a restart is a new instance
+with an empty disk: the staged file is gone, `restoreOnStart` rebuilds the newest generation and the restore has
+no effect. Restore a deployed app there with `kestrel restore --backup <id>` of `kestrel-ops`, from backups taken
+on a schedule (`kestrel backup create --kind scheduled`).
+
 A snapshot is read asynchronously in chunks of 1 MiB, with the event loop running between them, into one
 buffer of the database's size; no other copy of the database or the WAL is held. Before it reads, the
 snapshot runs a passive checkpoint on the module's second connection: it copies back into the database file
@@ -165,7 +171,7 @@ unknown `generation`, is `Err(NOT_FOUND)`; an unparsable `at` in the payload is 
 | `replication.snapshot` | – | `result` | `TRANSIENT` |
 | `replication.listPoints` | – | `result` | `TRANSIENT` |
 | `replication.readStatus` | – | `result` | `TRANSIENT` |
-| `replication.prepareRestore` | – | `result` (writes `<file>.restore`; applied by setup on the next start – the live database cannot be replaced while open) | `VALIDATION`, `NOT_FOUND`, `TRANSIENT` |
+| `replication.prepareRestore` | – | `result` (writes `<file>.restore`; applied by setup on the next start on the same disk – the live database cannot be replaced while open; lost on an ephemeral disk) | `VALIDATION`, `NOT_FOUND`, `TRANSIENT` |
 
 `backup/blobstore` follows the same pattern with its own file names (`<file>.restore-pending` plus
 `<file>.restore-marker`), so both modules can point at the same database without clashing. When
@@ -201,8 +207,9 @@ the replica as of the last shipped WAL frames, which a stop through teardown shi
 disk it happens at every start. A process that stopped without teardown loses the frames written since the
 last `replication.sync`, and output derived from them (for delivery-static, the files of pages saved in
 that window) is not rendered again. A database file copied into place by hand is not reported either.
-After either one, restore through `replication.prepareRestore` instead, or render everything again
-yourself (for delivery-static, `delivery.markAll` for every delivered type).
+After either one, restore through `replication.prepareRestore` instead (on a persistent disk; on an ephemeral
+disk through `kestrel restore --backup`), or render everything again yourself (for delivery-static,
+`delivery.markAll` for every delivered type).
 Not included: multi-process setups, encryption, restore without restart.
 
 ## Replica layout
@@ -344,7 +351,7 @@ keys, and nothing keeps a second process from writing.
 | `replication.snapshot` | Start a new generation with a full snapshot | – | `result` | – | { generation: string, bytes: number, … } | – | – | no |
 | `replication.listPoints` | Restore points (snapshots and WAL segments) | – | `result` | – | object[] | – | – | no |
 | `replication.readStatus` | Replication status | – | `result` | – | { generation: string \| null, lineage: number, shippedFrames: number, lastSyncAt: number \| null, lastSnapshotAt: number \| null, lastCheckpointAt: number \| null, walBytes: number, pendingRestore: string \| null, … } | – | – | no |
-| `replication.prepareRestore` | Rebuild the database at a point in time next to the live file; applied on next start | – | `result` | { generation?: string, at?: number \| string } | { generation: string, at: number, file: string, restartRequired: true, … } | 400 invalid "at" value; 404 no snapshot before the requested point | – | no |
+| `replication.prepareRestore` | Rebuild the database at a point in time next to the live file; applied on the next start on the same disk, lost on an ephemeral disk | – | `result` | { generation?: string, at?: number \| string } | { generation: string, at: number, file: string, restartRequired: true, … } | 400 invalid "at" value; 404 no snapshot before the requested point | – | no |
 
 Pipelines in `examples/minimal` using these steps:
 

@@ -1105,7 +1105,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     },
     health(): ModuleHealth {
       const notes: string[] = [];
-      if (restorePrepared) notes.push("replication/sqlite: a restore is prepared; restart the process to apply it");
+      if (restorePrepared) notes.push("replication/sqlite: a restore is prepared; restart the process on this disk to apply it (a new instance on an empty disk never sees it)");
       const behind = syncBehind();
       if (behind !== null) notes.push(behind);
       if (otherWriter !== null) notes.push(`replication/sqlite: another process writes to this replica (${otherWriter.key}, seen ${new Date(otherWriter.seenAt).toISOString()}); stop it, then run replication.snapshot here so the next restore starts from this process's data`);

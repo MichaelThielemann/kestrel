@@ -257,7 +257,7 @@ persistenceContractTests(async () => createPersistenceSqlite({ file: ":memory:" 
 | `media@1` | Read the ready files a media provider stores: `file`, `files`, `load` (file and bytes), `scan` (by type pattern, creation time, resumable cursor), `count`. Readiness is the provider's: only a file whose bytes are all stored and whose removal has not begun is visible, and a removal ends readiness before any byte goes | `KestrelError<"TRANSIENT">` — an unknown or not-ready id is `Ok(null)`; a `scan` limit outside 1–500 throws | `default` (`media-default`: upload into blobstore, metadata in persistence, plus its own steps) |
 | – (steps only) | Image variants: size registry, generation on upload, resumable sync, prune, delivery by path; requires `media@1` | – | `images-default` |
 | – (steps only) | Backup of a SQLite snapshot into blobstore, restore on start | – | `backup-blobstore` |
-| – (steps only) | Continuous SQLite replication (snapshots + WAL segments), point-in-time restore | – | `replication-sqlite` |
+| – (steps only) | Continuous SQLite replication (snapshots + WAL segments), point-in-time restore on a persistent disk | – | `replication-sqlite` |
 | – (steps only) | Reference integrity for `ref` fields | – | `references-default` |
 | – (steps only) | Find, check, report external links | – | `links-default` |
 | – (steps only) | Redirects: validate rules, resolve within the site pipeline, export `redirects.json` | – | `redirects-default` |
