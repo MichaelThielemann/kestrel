@@ -51,17 +51,13 @@ describe("update resume", () => {
     const deployed = await deployUntil(s, "cutover-backup", {}, (step, ctx) => {
       if (step !== "cutover-backup") return;
       const store = ctx.backups;
-      const failing = new Proxy(store, {
-        get(target, property) {
-          const value: unknown = Reflect.get(target, property);
-          if (property !== "put" || typeof value !== "function") return typeof value === "function" ? value.bind(target) : value;
-          return async (key: string, ...rest: unknown[]) => {
-            if (key.endsWith("blobs.jsonl")) throw new Error("killed while it wrote the cutover backup");
-            return Reflect.apply(value, target, [key, ...rest]);
-          };
+      ctx.backups = {
+        ...store,
+        put: async (key, data, options) => {
+          if (key.endsWith("blobs.jsonl")) throw new Error("killed while it wrote the cutover backup");
+          return store.put(key, data, options);
         },
-      });
-      Object.assign(ctx, { backups: failing });
+      };
     });
     expect(deployed.end.failure?.message).toContain("killed");
     const partial = (await listBackups(deployed.ctx)).filter((b) => b.kind === "cutover");

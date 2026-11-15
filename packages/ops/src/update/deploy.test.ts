@@ -568,16 +568,13 @@ describe("the next command a failed deploy names", { timeout: 30_000 }, () => {
   it("releases the update pin of a cutover backup that failed to be written before it rolls back", async () => {
     const s = await scenario();
     const store = s.ctx.backups;
-    s.ctx.backups = new Proxy(store, {
-      get(target, property) {
-        const value: unknown = Reflect.get(target, property);
-        if (property !== "put" || typeof value !== "function") return typeof value === "function" ? value.bind(target) : value;
-        return async (key: string, ...rest: unknown[]) => {
-          if (key.includes("-cutover-") && key.endsWith("blobs.jsonl")) throw new Error("the store answered 500");
-          return Reflect.apply(value, target, [key, ...rest]);
-        };
+    s.ctx.backups = {
+      ...store,
+      put: async (key, data, options) => {
+        if (key.includes("-cutover-") && key.endsWith("blobs.jsonl")) throw new Error("the store answered 500");
+        return store.put(key, data, options);
       },
-    });
+    };
     const outcome = await deploy(s.ctx);
     expect(outcome.exitCode, outcome.message).toBe(3);
     const partial = (await listBackups(s.ctx)).filter((b) => b.kind === "cutover");
