@@ -51,6 +51,7 @@ export function nextCommand(run: UpdateRun, command: string): string | null {
     case "deploying":
       return `kestrel update abort ${scope}`;
     case "down":
+      return run.records.some((r) => r.phase === "deploy" && r.step === "stop" && r.state === "done") ? `kestrel update resume ${scope}` : `kestrel update abort ${scope}`;
     case "verifying":
     case "rolling-back":
       return `kestrel update resume ${scope}`;

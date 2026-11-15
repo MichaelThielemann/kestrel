@@ -8,11 +8,13 @@ import { Interrupted } from "../interrupt.ts";
 import { jsonBytes, keys, stamp } from "../layout.ts";
 import { listGenerations } from "../replica.ts";
 import { sha256File } from "../sqlite.ts";
+import { abort } from "./abort.ts";
 import { continueDeploy, deploy } from "./deploy.ts";
 import { createUpdateHarness, type UpdateHarness, type UpdateHarnessOptions } from "./harness.fixture.ts";
 import { readUpdateRun } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
 import { planHash, versionSet } from "./plan.ts";
+import { updateStatus } from "./status.ts";
 import type { MigrateInput, MigrateResult, RollbackReason, RollbackResult, UpdateContext, UpdatePlan, UpdateReceipt, UpdateRun, UpdateSteps } from "./types.ts";
 import type * as Storages from "./storages.ts";
 
@@ -156,6 +158,53 @@ describe("deploying 5.8.1 to 6.0 on the stand-in target", { timeout: 30_000 }, (
     expect(s.steps.retire).not.toHaveBeenCalled();
     expect((await s.h.target.status()).state).toBe("started");
     expect(s.h.target.release.ready).toBe(ready);
+  });
+
+  function stopThenFail(s: Scenario): void {
+    const stop = s.h.target.stop.bind(s.h.target);
+    s.h.target.stop = async () => {
+      s.h.target.stop = stop;
+      await stop();
+      throw new Error("the app was stopped, and 120 s later its state could not be read; it stays stopped");
+    };
+  }
+
+  it("starts the previous release again when the stop fails after it stopped the app", async () => {
+    const s = await scenario();
+    stopThenFail(s);
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.state).toBe("untouched");
+    expect(outcome.message).toContain("the previous release runs");
+    expect(outcome.message).not.toContain("production is unchanged");
+    expect(s.h.target.actions).toEqual(["start", "stage", "stop", "start"]);
+    expect((await s.h.target.status()).state).toBe("started");
+  });
+
+  it("leaves a run that abort ends when the stop fails after it stopped the app and the app does not start again", async () => {
+    const s = await scenario();
+    stopThenFail(s);
+    const start = s.h.target.start.bind(s.h.target);
+    s.h.target.start = async () => {
+      throw new Error("start refused");
+    };
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.state).toBe("down");
+    expect(outcome.message).toContain(`update abort --env prod --run ${s.ctx.run.id}`);
+    expect(outcome.message).not.toContain("production is unchanged");
+    expect((await s.h.target.status()).state).toBe("stopped");
+    const run = await readUpdateRun(s.ctx, s.ctx.run.id);
+    expect((await updateStatus(s.ctx, s.ctx.run.id)).run?.next).toBe(`kestrel update abort --env prod --run ${s.ctx.run.id}`);
+    const resumed = await continueDeploy(await s.h.context({ run, answers: ANSWERS }), run);
+    expect(resumed.exitCode).toBe(1);
+    expect(resumed.message).toContain("update abort");
+    s.h.target.start = start;
+    const latest = await readUpdateRun(s.ctx, s.ctx.run.id);
+    const aborted = await abort(await s.h.context({ run: latest, answers: ANSWERS }), latest);
+    expect(aborted.exitCode).toBe(0);
+    expect(aborted.state).toBe("aborted");
+    expect((await s.h.target.status()).state).toBe("started");
   });
 
   it("refuses every later deploy while a halted run is open, also after the gate refused one", async () => {

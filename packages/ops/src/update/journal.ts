@@ -97,7 +97,7 @@ function summarize(runId: string, env: string, firstCommand: string | null, reco
     }
     if (r.state !== "done") {
       if (r.phase === "rollback" && r.step !== RUN_STEP && r.state === "started") state = "rolling-back";
-      if (r.phase === "deploy" && r.state === "failed" && state === "deploying") state = "untouched";
+      if (r.phase === "deploy" && r.state === "failed" && state === "deploying") state = r.step === "stop" && field(r.data, "appStopped") === true ? "down" : "untouched";
       if (r.phase === "deploy" && r.step === "start" && r.state === "started") state = "verifying";
       continue;
     }
@@ -208,7 +208,7 @@ export function reportOf(run: Pick<UpdateRun, "runId" | "records">): UpdateRepor
       open.delete(id);
       timing.endedAt = r.at;
       timing.ms = r.at - timing.startedAt;
-      if (r.step === "stop" && r.state === "done" && !down) {
+      if (r.step === "stop" && (r.state === "done" || field(r.data, "appStopped") === true) && !down) {
         down = true;
         downSince = r.at;
         timing.appDown = true;

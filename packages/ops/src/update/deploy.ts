@@ -80,6 +80,7 @@ function stopQuestion(ctx: UpdateContext, plan: UpdatePlan): string {
  */
 export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
   let step = "gate";
+  let stopBegun = false;
   let flow: Flow;
   try {
     await record(ctx, "gate", "started");
@@ -109,15 +110,25 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
     step = "stop";
     await confirm(ctx.answers, "update-stop", stopQuestion(ctx, plan));
     await record(ctx, "stop", "started");
+    stopBegun = true;
     const { stoppedAt } = await stopTarget(ctx);
     flow = { plan, from: plan.versions.from, staged: staged.droplet, stoppedAt, cutoverBackup: null, promoted: null, startedAt: null };
   } catch (error) {
     if (error instanceof Interrupted) throw error;
+    if (stopBegun) return failedStop(ctx, error);
     await record(ctx, step, "failed", { error: messageOf(error) }).catch(() => undefined);
     const exitCode = error instanceof OpsError && error.exitCode === 2 ? UPDATE_EXIT.usage : UPDATE_EXIT.refused;
     return outcomeOf(ctx, exitCode, `the deploy stopped at ${step} before the app was stopped; production is unchanged: ${messageOf(error)}`);
   }
   return afterStop(ctx, flow, "seal");
+}
+
+async function failedStop(ctx: UpdateContext, error: unknown): Promise<UpdateOutcome> {
+  const now = await ctx.target.status().catch(() => null);
+  const runs = now?.state === "started";
+  await record(ctx, "stop", "failed", { error: messageOf(error), appStopped: !runs }).catch(() => undefined);
+  if (runs) return outcomeOf(ctx, UPDATE_EXIT.refused, `the deploy stopped at stop: ${messageOf(error)}; the previous release runs, nothing else changed`);
+  return outcomeOf(ctx, UPDATE_EXIT.refused, `the deploy failed at stop: ${messageOf(error)}; the app ${now === null ? "may be stopped (its state cannot be read)" : "is stopped"} and did not start again; do not start it by hand while the run is open; run update abort --env ${ctx.envName} --run ${ctx.run.id}`);
 }
 
 async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<UpdateOutcome> {
@@ -213,7 +224,7 @@ export async function continueDeploy(ctx: UpdateContext, run: UpdateRun): Promis
   if (run.state !== "down" && run.state !== "verifying") return outcomeOf(ctx, UPDATE_EXIT.refused, `update run ${run.runId} is ${run.state}; only a deploy that stopped the app and has not concluded can be continued${run.state === "deploying" ? `; nothing changed yet, so run update abort --run ${run.runId} and deploy again` : ""}`);
   const stop = run.records.find((r) => r.phase === "deploy" && r.step === "stop" && r.state === "done");
   const stoppedAt = stop?.data.stoppedAt;
-  if (run.stagedDroplet === null || typeof stoppedAt !== "number") return outcomeOf(ctx, UPDATE_EXIT.refused, `update run ${run.runId} records no staged droplet or stop; run update rollback --run ${run.runId}`);
+  if (run.stagedDroplet === null || typeof stoppedAt !== "number") return outcomeOf(ctx, UPDATE_EXIT.refused, `update run ${run.runId} records no staged droplet or no completed stop; run update ${run.cutoverBackup === null ? "abort" : "rollback"} --env ${ctx.envName} --run ${run.runId}`);
   const startRecord = [...run.records].reverse().find((r) => r.phase === "deploy" && r.step === "start");
   const recordedStart = startRecord?.data.startedAt;
   const flow: Flow = { plan: null, from: run.versions?.from ?? null, staged: run.stagedDroplet, stoppedAt, cutoverBackup: run.cutoverBackup, promoted: run.promoted === null ? null : { ...run.promoted, at: unstamp(run.promoted.generation) }, startedAt: typeof recordedStart === "number" ? recordedStart : null };
