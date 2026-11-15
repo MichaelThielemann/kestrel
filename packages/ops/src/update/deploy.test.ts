@@ -868,6 +868,35 @@ describe("the configuration a deploy records", { timeout: 30_000 }, () => {
     for (const name of Object.keys(plain)) expect(JSON.stringify(env)).toMatch(new RegExp(`"${name}":\\{"fingerprint":"[0-9a-f]{64}"\\}`));
     expect(env).toMatchObject({ S3_BUCKET: { value: "kestrel-media" } });
   });
+
+  it.each([
+    { field: "start command", configuration: { command: `AWS_SECRET_ACCESS_KEY=${SHARED} node .output/server/index.mjs` }, secret: SHARED },
+    { field: "health check endpoint", configuration: { healthCheck: { type: "http", endpoint: "/ready?token=minioadmin", timeoutSeconds: 180, invocationTimeoutSeconds: null } }, secret: "minioadmin" },
+  ])("refuses with exit 2 before the stop to record a $field that holds a credential of the tool, since a rollback restores it verbatim", async ({ field, configuration, secret }) => {
+    const s = await scenario();
+    Object.assign(s.h.target.configuration, configuration);
+    s.ctx.redactor.add(secret);
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode, outcome.message).toBe(2);
+    expect(outcome.message).toContain("the deploy stopped at configuration before the app was stopped; production is unchanged");
+    expect(outcome.message).toContain(`the ${field} of the app holds a credential of the tool`);
+    expect(outcome.message).not.toContain(secret);
+    expect(s.h.target.actions).not.toContain("stop");
+    expect((await s.h.target.status()).state).toBe("started");
+    expect(await s.h.store.head(LOCATION + updateKeys.configuration("prod", s.ctx.run.id))).toBeNull();
+    const run = await readUpdateRun(s.ctx, s.ctx.run.id);
+    expect(deployRecords(run)).toContain("configuration:failed");
+  });
+
+  it("records a start command and a health check endpoint verbatim in which a short credential is only part of a name or a path", async () => {
+    const s = await scenario();
+    Object.assign(s.h.target.configuration, { command: "node kestrel/server.mjs --name kestrel-media", healthCheck: { type: "http", endpoint: "/kestrel/ready", timeoutSeconds: 180, invocationTimeoutSeconds: null } });
+    s.ctx.redactor.add("kestrel");
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode, outcome.message).toBe(0);
+    const recorded: unknown = JSON.parse(new TextDecoder().decode((await s.h.store.get(LOCATION + updateKeys.configuration("prod", s.ctx.run.id))) ?? new Uint8Array()));
+    expect(recorded).toMatchObject({ command: "node kestrel/server.mjs --name kestrel-media", healthCheck: { endpoint: "/kestrel/ready" } });
+  });
 });
 
 describe("a verified deploy whose retire of the previous releases does not finish", { timeout: 30_000 }, () => {

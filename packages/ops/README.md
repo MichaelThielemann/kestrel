@@ -106,7 +106,9 @@ from.
   letter, a digit, `_` or `-`, nor by a run of `.` and `/` with such a character beyond it. So `minio:minioadmin`,
   `minioadmin.` and `s3://minioadmin` are fingerprints, while `kestrel-media`, `kestrel.example.net` and
   `https://kestrel.example.net/kestrel` stay verbatim for the access key `kestrel`, and `s3://kestrel` is a
-  fingerprint. Their schema, keys, names and every other field are written as they are; only the free-text fields
+  fingerprint. A rollback restores the start command and the health check endpoint verbatim, so no fingerprint
+  can stand in for them: when one of them holds a credential by the same rule, the deploy ends with exit 2 before
+  it records anything. Their schema, keys, names and every other field are written as they are; only the free-text fields
   `message`, `error`, `failure`, `detail` and `problems` are masked, since a failed call may quote what it was
   sent. A credential that is part of a fixed text, such as an access key `kestrel`, therefore never changes a
   schema, key or name. In terminal lines, questions and messages, what the tool writes itself (questions and

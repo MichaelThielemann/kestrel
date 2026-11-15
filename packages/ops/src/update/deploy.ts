@@ -63,6 +63,13 @@ async function acceptImplicitly(ctx: UpdateContext, runId: string): Promise<void
 }
 
 function fingerprintSecrets(redactor: Redactor, recorded: RecordedConfiguration): RecordedConfiguration {
+  const verbatim: Array<[string, string, string | null]> = [
+    ["start command", "command", recorded.command],
+    ["health check endpoint", "healthCheck.endpoint", recorded.healthCheck.endpoint],
+  ];
+  for (const [field, element, value] of verbatim) {
+    if (value !== null && redactor.holds(value)) throw new OpsError(fixedText`the ${literal(field)} of the app holds a credential of the tool; the recorded configuration would keep it in the backup location, and a rollback restores it verbatim, so no fingerprint can stand in for it; move the credential into an environment variable of the app and deploy again`, 2, element);
+  }
   const env: RecordedConfiguration["env"] = {};
   for (const [name, value] of Object.entries(recorded.env)) env[name] = "value" in value && redactor.holds(value.value) ? { fingerprint: createHash("sha256").update(recorded.salt + value.value).digest("hex") } : value;
   return { ...recorded, env };
@@ -92,7 +99,8 @@ function stopQuestion(ctx: UpdateContext, plan: UpdatePlan): string {
 /**
  * Deploys the release in the order of `DEPLOY_STEPS`. While the old release serves: `gate`, `stage` (a staging
  * failure ends the run with exit 1 and the app was never stopped), `configuration` (recorded once into the backup
- * location; a plain variable whose value holds a secret of the tool is kept only as a fingerprint), `precopy`. Then `stop` (after the `update-stop` answer), `seal` (waits for the seal after STOPPED, unless the running
+ * location; a plain variable whose value holds a secret of the tool is kept only as a fingerprint, while a start
+ * command or health check endpoint that holds one ends the run with exit 2, since a rollback restores both verbatim), `precopy`. Then `stop` (after the `update-stop` answer), `seal` (waits for the seal after STOPPED, unless the running
  * versions name a replication runtime before the sealing major, or, when they are unknown, the stored data the
  * pending storage migrations convert was written by such a major ({@link sourceMajor}); the running versions are those
  * of `runningVersions`, or when it knows none, the `versions.from` of the receipt the gate matched),
