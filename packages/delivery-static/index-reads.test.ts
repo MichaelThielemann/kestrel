@@ -8,12 +8,15 @@ import { createContentDefault } from "@michaelthielemann/kestrel-content-default
 import { err, failure, isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
 import { renderFailed } from "@michaelthielemann/kestrel-contracts/helpers/renderer";
+import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { createPersistenceSqlite } from "@michaelthielemann/kestrel-persistence-sqlite/impl";
 import { createSiteDefault, createSitePaths, routesConfig } from "@michaelthielemann/kestrel-site-default/impl";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
-import { createDeliveryStatic, type Delivery } from "./impl.ts";
+import { createDeliveryStatic, STATUS, type Delivery, type StatusRow } from "./impl.ts";
+import { statusIdOf } from "./keys.ts";
 import { configSchema } from "./module.ts";
 
 const GOLDEN = join(import.meta.dirname, "__fixtures__", "index-files");
@@ -58,9 +61,11 @@ const model: ContentModel = {
 };
 
 const instances: Delivery[] = [];
+const databases: Array<{ close(): void }> = [];
 
 afterEach(async () => {
   for (const instance of instances.splice(0)) await instance.close();
+  for (const database of databases.splice(0)) database.close();
 });
 
 function memoryBlobs(): Blobstore & { files: Map<string, string> } {
@@ -329,4 +334,89 @@ describe("index files with a delivered single type", () => {
       ].join("\n"),
     });
   });
+});
+
+const largeModel: ContentModel = {
+  locales: ["de", "en"],
+  defaultLocale: "de",
+  types: {
+    pages: {
+      kind: "multi",
+      fields: {
+        slug: { type: "slug", required: true, localized: true },
+        title: { type: "text", required: true, localized: true },
+        status: { type: "enum", options: ["draft", "published"], localized: true },
+        seo: { type: "json", localized: true },
+        body: { type: "richtext", localized: true },
+      },
+    },
+  },
+};
+
+function counted(db: Persistence): { db: Persistence; calls: () => number } {
+  let calls = 0;
+  const handler: ProxyHandler<Persistence> = {
+    get(target, property, receiver) {
+      const value: unknown = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]): unknown => {
+        calls += 1;
+        return Reflect.apply(value, target, args) as unknown;
+      };
+    },
+  };
+  return { db: new Proxy(db, handler), calls: () => calls };
+}
+
+async function largeSite(pages: number) {
+  const sqlite = createPersistenceSqlite({ file: ":memory:" });
+  databases.push(sqlite);
+  const { db, calls } = counted(sqlite);
+  const content = await createContentDefault(largeModel, db);
+  const blobs = memoryBlobs();
+  const config = configSchema.parse({ types: { pages: { home: "home" } }, prefix: "site/", siteUrl: "https://example.org", robots: { policy: "allow" }, dependencies: { render: "events" } });
+  const delivery = await createDeliveryStatic(config, { content, site: createSiteDefault(content), renderer: pageRenderer(new Set()), blobs, db, logger: silentLogger, events: quietEvents });
+  instances.push(delivery);
+  const body = `<p>${"Ein Absatz mit etwas Text, damit jede Seite ein wenig wiegt. ".repeat(20)}</p>`;
+  const rows: StatusRow[] = [];
+  let published = 0;
+  const row = (docId: string, locale: string, path: string): StatusRow => ({ id: statusIdOf("pages", docId, locale), type: "pages", docId, locale, state: "live", path, writtenKeys: null, error: null, publishedAt: 1, updatedAt: 1, version: 0, depSet: null, depCount: null, staleAt: null, staleToken: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null });
+  for (let i = 0; i < pages; i++) {
+    const de = i % 7 === 0 ? "draft" : "published";
+    const en = i % 10 === 0 ? "draft" : "published";
+    published += [de, en].filter((status) => status === "published").length;
+    const id = expectOk(await content.create("pages", { slug: `seite-${i}`, title: `Seite ${i}`, status: de, seo: { description: `Beschreibung ${i}` }, body }, { locale: "de" })).id;
+    expectOk(await content.update("pages", id, { slug: `page-${i}`, title: `Page ${i}`, status: en, body }, { locale: "en" }));
+    rows.push(row(id, "de", `/seite-${i}`), row(id, "en", `/en/page-${i}`));
+  }
+  expectOk(await db.createMany<StatusRow>(STATUS, rows));
+  return { delivery, calls, candidates: rows.length, published };
+}
+
+describe("index exports over a large site", () => {
+  it("reads the documents of one export in batches, with far fewer persistence calls than candidates", async () => {
+    const s = await largeSite(1000);
+    const before = s.calls();
+    expect(expectOk(await s.delivery.exportIndexes())).toEqual({ entries: s.published });
+    const calls = s.calls() - before;
+    expect(calls).toBeLessThanOrEqual(s.candidates / 20);
+  }, 60_000);
+
+  it("gives the event loop a turn after every few persistence calls and within a bounded time while it reads a few thousand pages", async () => {
+    const s = await largeSite(3000);
+    const turns: Array<{ at: number; calls: number }> = [];
+    let running = true;
+    const tick = (): void => {
+      turns.push({ at: performance.now(), calls: s.calls() });
+      if (running) setImmediate(tick);
+    };
+    tick();
+    expectOk(await s.delivery.exportIndexes());
+    running = false;
+    tick();
+    const between = turns.slice(1).map((turn, i) => ({ ms: turn.at - (turns[i]?.at ?? turn.at), calls: turn.calls - (turns[i]?.calls ?? turn.calls) }));
+    expect(turns.length).toBeGreaterThan(s.candidates / 100);
+    expect(Math.max(...between.map((b) => b.calls))).toBeLessThanOrEqual(10);
+    expect(Math.max(...between.map((b) => b.ms))).toBeLessThan(250);
+  }, 60_000);
 });

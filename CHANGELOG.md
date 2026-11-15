@@ -1435,7 +1435,9 @@ Net changes since 5.8.2.
   `delivery.exportIndexes` writes sitemap.xml, robots.txt and llms.txt from the database alone;
   `delivery.exportLlmsFull` writes llms-full.txt from the stored HTML. Both list every output that
   serves a file — `live`, or `error` with a path, so a renderer outage empties nothing — re-checked
-  against its published document, without `noindex` pages, one entry per URL (the `live` row first),
+  against its published document (read in batches of up to 50 documents per type and locale, with a turn
+  of the event loop between two reads, so an export over a large site does not hold up requests and
+  saves), without `noindex` pages, one entry per URL (the `live` row first),
   sorted by URL; while published documents exist but none has a rendered output, sitemap.xml and
   llms.txt are left as they are and robots.txt is still written. sitemap.xml has absolute `<loc>`s,
   `<lastmod>` from the document's `updatedAt` for `live` outputs, and `hreflang` alternates with

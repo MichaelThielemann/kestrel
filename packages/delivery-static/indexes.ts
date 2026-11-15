@@ -152,6 +152,11 @@ export interface IndexFiles {
 }
 
 const REMOVED = "-";
+const READ_BATCH = 50;
+
+function nextTurn(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
 
 function sha256(body: string | Uint8Array): string {
   return createHash("sha256").update(body).digest("hex");
@@ -206,31 +211,86 @@ export function createIndexFiles(config: IndexFilesConfig, deps: IndexFilesDeps)
     return ok({ siteName, ...(siteDescription === undefined ? {} : { siteDescription }) });
   };
 
+  const entryOf = (candidate: IndexCandidate, own: ContentDocument, inherited: ContentDocument | undefined): IndexEntry | null => {
+    const field = (name: string): unknown => own[name] ?? inherited?.[name];
+    const seo = field(config.llms.seoField);
+    const meta = isRecord(seo) ? seo : {};
+    if (meta.noindex === true) return null;
+    const description = text(meta.description);
+    return {
+      ...candidate,
+      url: pageUrl(config.siteUrl, candidate.path),
+      title: text(meta.title) ?? text(field(config.llms.titleField)) ?? candidate.path,
+      ...(description === undefined ? {} : { description }),
+      updatedAt: own.updatedAt,
+    };
+  };
+
+  const fallbackSource = (locale: string): string | undefined => (deps.fallback && locale !== "" && deps.defaultLocale !== undefined && locale !== deps.defaultLocale ? deps.defaultLocale : undefined);
+
+  const publishedRows = async (type: string, locale: string, ids: string[]): Promise<Result<Map<string, ContentDocument>, KestrelError>> => {
+    const page = await content.list(type, { ...deps.filterFor(type), id: { in: ids } }, { ...(locale === "" ? {} : { locale }), limit: ids.length });
+    if (isErr(page)) return page;
+    return ok(new Map(page.value.items.map((doc) => [doc.id, doc])));
+  };
+
+  const readOneByOne = async (type: string, page: readonly IndexCandidate[], entries: IndexEntry[]): Promise<Result<void, KestrelError>> => {
+    for (const candidate of page) {
+      if (deps.stopping()) return err(stopped());
+      const read = await publishedLocale(content, type, candidate.docId, candidate.locale === "" ? undefined : candidate.locale, deps.filterFor(type), { fallback: deps.fallback, translations: false });
+      if (isErr(read)) return read;
+      const entry = read.value === null ? null : entryOf(candidate, read.value, undefined);
+      if (entry !== null) entries.push(entry);
+      await nextTurn();
+    }
+    return ok();
+  };
+
+  const readInBatches = async (type: string, page: readonly IndexCandidate[], entries: IndexEntry[]): Promise<Result<void, KestrelError>> => {
+    const byDoc = new Map<string, IndexCandidate[]>();
+    for (const candidate of page) byDoc.set(candidate.docId, [...(byDoc.get(candidate.docId) ?? []), candidate]);
+    const docIds = [...byDoc.keys()];
+    for (let start = 0; start < docIds.length; start += READ_BATCH) {
+      const batch = docIds.slice(start, start + READ_BATCH).flatMap((id) => byDoc.get(id) ?? []);
+      const wanted = new Map<string, Set<string>>();
+      const want = (locale: string, id: string): void => {
+        const ids = wanted.get(locale) ?? new Set<string>();
+        ids.add(id);
+        wanted.set(locale, ids);
+      };
+      for (const candidate of batch) {
+        want(candidate.locale, candidate.docId);
+        const source = fallbackSource(candidate.locale);
+        if (source !== undefined) want(source, candidate.docId);
+      }
+      const rows = new Map<string, Map<string, ContentDocument>>();
+      for (const [locale, ids] of wanted) {
+        if (deps.stopping()) return err(stopped());
+        const read = await publishedRows(type, locale, [...ids]);
+        if (isErr(read)) return read;
+        rows.set(locale, read.value);
+        await nextTurn();
+      }
+      for (const candidate of batch) {
+        const own = rows.get(candidate.locale)?.get(candidate.docId);
+        if (own === undefined) continue;
+        const source = fallbackSource(candidate.locale);
+        const entry = entryOf(candidate, own, source === undefined ? undefined : rows.get(source)?.get(candidate.docId));
+        if (entry !== null) entries.push(entry);
+      }
+    }
+    return ok();
+  };
+
   const collect = async (): Promise<Result<{ candidates: number; entries: IndexEntry[] }, KestrelError>> => {
     let candidates = 0;
     const entries: IndexEntry[] = [];
     for (const type of deps.types) {
+      const batched = content.model().types[type]?.kind === "multi";
       const visited = await deps.candidates(type, async (page) => {
-        for (const candidate of page) {
-          if (deps.stopping()) return err(stopped());
-          candidates += 1;
-          const read = await publishedLocale(content, type, candidate.docId, candidate.locale === "" ? undefined : candidate.locale, deps.filterFor(type), { fallback: deps.fallback, translations: false });
-          if (isErr(read)) return read;
-          const doc = read.value;
-          if (doc === null) continue;
-          const seo = doc[config.llms.seoField];
-          const meta = isRecord(seo) ? seo : {};
-          if (meta.noindex === true) continue;
-          const description = text(meta.description);
-          entries.push({
-            ...candidate,
-            url: pageUrl(config.siteUrl, candidate.path),
-            title: text(meta.title) ?? text(doc[config.llms.titleField]) ?? candidate.path,
-            ...(description === undefined ? {} : { description }),
-            updatedAt: doc.updatedAt,
-          });
-        }
-        return ok();
+        if (deps.stopping()) return err(stopped());
+        candidates += page.length;
+        return batched ? readInBatches(type, page, entries) : readOneByOne(type, page, entries);
       });
       if (isErr(visited)) return visited;
     }
