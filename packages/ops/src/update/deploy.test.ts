@@ -47,8 +47,8 @@ function fakes(): Fakes {
     retiredStates,
     rollback: vi.fn(async (ctx: UpdateContext, _run: UpdateRun, reason: RollbackReason): Promise<RollbackResult> => {
       await ctx.journal.record("rollback", "started", { phase: "rollback", reason: reason.kind });
-      await ctx.journal.record("rollback", "done", { phase: "rollback" });
-      return { ended: "stopped", generation: "", seal: "sealed", delivery: { written: [], removed: [], relisted: 0 }, originalsRestored: [], configuration: { set: [], removed: [], unrestorable: [] }, derived: { added: [], changed: [], missing: [] } };
+      await ctx.journal.record("rollback", "done", { phase: "rollback", ended: "previous-release" });
+      return { ended: "previous-release", generation: "", seal: "sealed", delivery: { written: [], removed: [], relisted: 0 }, originalsRestored: [], configuration: { set: [], removed: [], unrestorable: [] }, derived: { added: [], changed: [], missing: [] } };
     }),
     retire: vi.fn(async (_ctx: UpdateContext, run: UpdateRun) => {
       retiredStates.push(run.state);
@@ -174,6 +174,38 @@ describe("deploying 5.8.1 to 6.0 on the stand-in target", { timeout: 30_000 }, (
     const verify = (await readUpdateRun(s.ctx, s.ctx.run.id)).records.find((r) => r.step === "verify" && r.state === "done");
     expect(verify?.data.verdict).toBe("failed");
     expect(outcome.message).toContain("crashes: ");
+  });
+
+  it("ends with exit 1, says the app stays stopped and names a deploy of the previous release when the automatic rollback could start no previous droplet", async () => {
+    const s = await scenario({ to: { ready: "not-ready" } });
+    s.steps.rollback.mockImplementation(async (ctx: UpdateContext): Promise<RollbackResult> => {
+      await ctx.journal.record("rollback", "started", { phase: "rollback", reason: "automatic" });
+      await ctx.journal.record("rollback", "done", { phase: "rollback", ended: "stopped" });
+      return { ended: "stopped", generation: "", seal: "sealed", delivery: { written: [], removed: [], relisted: 0 }, originalsRestored: [], configuration: { set: [], removed: [], unrestorable: [] }, derived: { added: [], changed: [], missing: [] } };
+    });
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.state).toBe("rolled-back");
+    expect(outcome.message).toContain("stays stopped");
+    expect(outcome.message).not.toContain("rolled back to the cutover state");
+    expect((await updateStatus(s.ctx, s.ctx.run.id)).run?.next).toBe("node .kestrel-ops/run.mjs deploy --env prod");
+  });
+
+  it("ends with exit 1 and says the app stays stopped when the rollback after a failed step could start no previous droplet", async () => {
+    const s = await scenario();
+    s.steps.rollback.mockImplementation(async (ctx: UpdateContext): Promise<RollbackResult> => {
+      await ctx.journal.record("rollback", "started", { phase: "rollback", reason: "automatic" });
+      await ctx.journal.record("rollback", "done", { phase: "rollback", ended: "stopped" });
+      return { ended: "stopped", generation: "", seal: "sealed", delivery: { written: [], removed: [], relisted: 0 }, originalsRestored: [], configuration: { set: [], removed: [], unrestorable: [] }, derived: { added: [], changed: [], missing: [] } };
+    });
+    const setDroplet = s.h.target.setDroplet.bind(s.h.target);
+    s.h.target.setDroplet = async () => {
+      s.h.target.setDroplet = setDroplet;
+      throw new Error("platform error");
+    };
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.message).toContain("stays stopped");
   });
 
   it.each(["forbidden", "unreachable"] as const)("halts with exit 1 and leaves the new release running when readiness is %s", async (ready) => {

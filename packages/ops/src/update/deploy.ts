@@ -17,8 +17,8 @@ import { UPDATE_PIN_PREFIX, updateKeys } from "./layout.ts";
 import { computePlan, pinsCutover, planHash, replicaCopy } from "./plan.ts";
 import { releaseStorages } from "./storages.ts";
 import type { RecordedConfiguration } from "./target.ts";
-import { UPDATE_EXIT, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateRun, type VerifyResult, type VersionSet } from "./types.ts";
-import { concludeVerify, outcomeOf } from "./verify.ts";
+import { UPDATE_EXIT, type RollbackResult, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateRun, type VerifyResult, type VersionSet } from "./types.ts";
+import { concludeVerify, outcomeOf, stoppedAfterRollback } from "./verify.ts";
 
 type Entry = "seal" | "cutover-backup" | "migrate" | "swap" | "start" | "verify";
 
@@ -235,11 +235,13 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     const failure = `${step}: ${messageOf(error)}`;
     await record(ctx, step, "failed", { error: messageOf(error) }).catch(() => undefined);
     ctx.out.error(`the deploy failed after the stop at ${failure}; rolling back`);
+    let ended: RollbackResult["ended"];
     try {
-      await ctx.steps.rollback(ctx, known(await readUpdateRun(ctx, ctx.run.id), flow), { kind: "automatic", failure });
+      ended = (await ctx.steps.rollback(ctx, known(await readUpdateRun(ctx, ctx.run.id), flow), { kind: "automatic", failure })).ended;
     } catch (cause) {
       return outcomeOf(ctx, UPDATE_EXIT.refused, `the deploy failed at ${failure}, and the automatic rollback did not finish: ${messageOf(cause)}; the app stays stopped; do not start it by hand; run update resume --env ${ctx.envName} --run ${ctx.run.id}, which runs the rollback again`);
     }
+    if (ended === "stopped") return outcomeOf(ctx, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, `the deploy failed at ${failure}`));
     return outcomeOf(ctx, UPDATE_EXIT.rolledBack, flow.cutoverBackup === null ? `the deploy failed at ${failure} before its cutover backup; nothing was promoted, and the previous release runs again on the unchanged replica` : `the deploy failed at ${failure}; rolled back to the cutover state`);
   }
   return concludeVerify(ctx, "deploy", result, (run) => known(run, flow));

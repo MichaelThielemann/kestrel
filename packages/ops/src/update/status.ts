@@ -43,7 +43,10 @@ async function lockHosts(ctx: UpdateContext): Promise<Map<string, string>> {
   return hosts;
 }
 
-/** The command run `run`, opened by `command`, needs next, or null when it needs nothing. */
+/**
+ * The command run `run`, opened by `command`, needs next, or null when it needs nothing; for a run whose rollback left
+ * the app stopped, a deploy of the previous release.
+ */
 export function nextCommand(run: UpdateRun, command: string): string | null {
   const scope = `--env ${run.env} --run ${run.runId}`;
   if (command === "update prepare") return run.state === "prepared" ? `node .kestrel-ops/run.mjs deploy --env ${run.env}` : null;
@@ -61,6 +64,8 @@ export function nextCommand(run: UpdateRun, command: string): string | null {
       return `kestrel update accept ${scope}`;
     case "accepted":
       return `kestrel update cleanup ${scope}`;
+    case "rolled-back":
+      return run.records.filter((r) => r.step === "rollback" && r.state === "done").at(-1)?.data.ended === "stopped" ? `node .kestrel-ops/run.mjs deploy --env ${run.env}` : null;
     default:
       return null;
   }

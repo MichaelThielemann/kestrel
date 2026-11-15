@@ -130,7 +130,8 @@ that start in the same moment.
 ### Verification
 
 Verification has three outcomes. **Passed**: every hard check held; the run ends with exit 0. **Failed**: a hard
-check failed, and the automatic rollback brings back the cutover state and verifies it; exit 3. **Unverifiable**:
+check failed, and the automatic rollback brings back the cutover state and verifies it; exit 3, or exit 1 when it
+had no previous release to start and the app stays stopped. **Unverifiable**:
 the readiness check could not tell (403, 401, 404, a timeout or no connection), or a check could not read the
 store or the platform; the run halts with exit 1, leaves the new release running, rolls nothing back and names
 the next command.
@@ -249,7 +250,7 @@ cutover backup like any other.
 | Code | Meaning |
 |---|---|
 | 0 | Done; for `deploy` and `resume` with the new release verified. |
-| 1 | A gate or check refused before production changed, verification could not tell and the run halted, a question had no answer, or a rollback could not finish. The output and `update status` name the state and the next command. |
+| 1 | A gate or check refused before production changed, verification could not tell and the run halted, a question had no answer, a rollback could not finish, or a rollback brought back the cutover state with no previous release left to start, so the app stays stopped and `update status` names a deploy of the previous release. The output and `update status` name the state and the next command. |
 | 2 | A usage or configuration error, such as a target that cannot run an update. |
 | 3 | A hard failure after the stop, after which the automatic rollback brought back the cutover state and verified it. |
 
