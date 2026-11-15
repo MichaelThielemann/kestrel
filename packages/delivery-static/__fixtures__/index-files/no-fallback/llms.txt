@@ -1,0 +1,43 @@
+# Beispiel & Partner
+
+> Alles über das Beispiel
+
+## Seiten
+
+- [Start](https://example.org/)
+- [Unser Angebot](https://example.org/angebot): Preise <und> Leistungen
+- [Blog](https://example.org/blog)
+- [Home](https://example.org/en)
+- [About](https://example.org/en/about)
+- [History](https://example.org/en/about/history)
+- [Broken](https://example.org/en/broken)
+- [Contact](https://example.org/en/contact)
+- [English only](https://example.org/en/english-only)
+- [Events](https://example.org/en/events)
+- [Internal](https://example.org/en/internal)
+- [/en/new](https://example.org/en/new)
+- [News](https://example.org/en/news)
+- [Offer](https://example.org/en/offer): Prices
+- [/en/prices](https://example.org/en/prices)
+- [Services](https://example.org/en/services)
+- [Kaputt](https://example.org/kaputt)
+- [Kontakt](https://example.org/kontakt): So erreichen Sie uns
+- [Alle Leistungen](https://example.org/leistungen)
+- [Preise](https://example.org/preise)
+- [Termine](https://example.org/termine)
+- [Über uns](https://example.org/ueber-uns)
+- [Geschichte](https://example.org/ueber-uns/geschichte)
+- [Team](https://example.org/ueber-uns/team)
+
+## Beiträge
+
+- [Hallo Welt](https://example.org/blog/hallo): Ein erster Beitrag
+- [Nur Deutsch](https://example.org/blog/nur-deutsch)
+- [Hello world](https://example.org/en/news/hello)
+
+## Termine
+
+- [Autumn fair](https://example.org/en/events/autumn-fair)
+- [Winter concert](https://example.org/en/events/winter-concert)
+- [Sommerfest](https://example.org/termine/sommerfest): Im Garten
+- [Winterkonzert](https://example.org/termine/winterkonzert)

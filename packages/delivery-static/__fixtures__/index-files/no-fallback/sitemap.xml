@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://example.org/</loc>
+    <lastmod>2026-10-01T08:02:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/"/>
+  </url>
+  <url>
+    <loc>https://example.org/angebot</loc>
+    <lastmod>2026-10-01T08:08:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/angebot"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/offer"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/angebot"/>
+  </url>
+  <url>
+    <loc>https://example.org/blog</loc>
+    <lastmod>2026-10-01T08:30:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/blog"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/news"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/blog"/>
+  </url>
+  <url>
+    <loc>https://example.org/blog/hallo</loc>
+    <lastmod>2026-10-01T08:35:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/blog/hallo"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/news/hello"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/blog/hallo"/>
+  </url>
+  <url>
+    <loc>https://example.org/blog/nur-deutsch</loc>
+    <lastmod>2026-10-01T08:36:00.000Z</lastmod>
+  </url>
+  <url>
+    <loc>https://example.org/en</loc>
+    <lastmod>2026-10-01T08:02:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/"/>
+  </url>
+  <url>
+    <loc>https://example.org/en/about</loc>
+    <lastmod>2026-10-01T08:18:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/ueber-uns"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/about"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/ueber-uns"/>
+  </url>
+  <url>
+    <loc>https://example.org/en/about/history</loc>
+    <lastmod>2026-10-01T08:22:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/ueber-uns/geschichte"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/about/history"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/ueber-uns/geschichte"/>
+  </url>
+  <url>
+    <loc>https://example.org/en/broken</loc>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/kaputt"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/broken"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/kaputt"/>
+  </url>
+  <url>
+    <loc>https://example.org/en/contact</loc>
+    <lastmod>2026-10-01T08:04:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/kontakt"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/contact"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/kontakt"/>
+  </url>
+  <url>
+    <loc>https://example.org/en/english-only</loc>
+    <lastmod>2026-10-01T08:16:00.000Z</lastmod>
+  </url>
+  <url>
+    <loc>https://example.org/en/events</loc>
+    <lastmod>2026-10-01T08:32:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/termine"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/events"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/termine"/>
+  </url>
+  <url>
+    <loc>https://example.org/en/events/autumn-fair</loc>
+    <lastmod>2026-10-01T08:42:00.000Z</lastmod>
+  </url>
+  <url>
+    <loc>https://example.org/en/events/winter-concert</loc>
+    <lastmod>2026-10-01T08:44:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/termine/winterkonzert"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/events/winter-concert"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/termine/winterkonzert"/>
+  </url>
+  <url>
+    <loc>https://example.org/en/internal</loc>
+    <lastmod>2026-10-01T08:06:00.000Z</lastmod>
+  </url>
+  <url>
+    <loc>https://example.org/en/new</loc>
+    <lastmod>2026-10-01T08:14:00.000Z</lastmod>
+  </url>
+  <url>
+    <loc>https://example.org/en/news</loc>
+    <lastmod>2026-10-01T08:30:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/blog"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/news"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/blog"/>
+  </url>
+  <url>
+    <loc>https://example.org/en/news/hello</loc>
+    <lastmod>2026-10-01T08:35:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/blog/hallo"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/news/hello"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/blog/hallo"/>
+  </url>
+  <url>
+    <loc>https://example.org/en/offer</loc>
+    <lastmod>2026-10-01T08:08:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/angebot"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/offer"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/angebot"/>
+  </url>
+  <url>
+    <loc>https://example.org/en/prices</loc>
+    <lastmod>2026-10-01T08:12:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/preise"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/prices"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/preise"/>
+  </url>
+  <url>
+    <loc>https://example.org/en/services</loc>
+    <lastmod>2026-10-01T08:10:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/leistungen"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/services"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/leistungen"/>
+  </url>
+  <url>
+    <loc>https://example.org/kaputt</loc>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/kaputt"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/broken"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/kaputt"/>
+  </url>
+  <url>
+    <loc>https://example.org/kontakt</loc>
+    <lastmod>2026-10-01T08:04:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/kontakt"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/contact"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/kontakt"/>
+  </url>
+  <url>
+    <loc>https://example.org/leistungen</loc>
+    <lastmod>2026-10-01T08:10:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/leistungen"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/services"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/leistungen"/>
+  </url>
+  <url>
+    <loc>https://example.org/preise</loc>
+    <lastmod>2026-10-01T08:12:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/preise"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/prices"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/preise"/>
+  </url>
+  <url>
+    <loc>https://example.org/termine</loc>
+    <lastmod>2026-10-01T08:32:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/termine"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/events"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/termine"/>
+  </url>
+  <url>
+    <loc>https://example.org/termine/sommerfest</loc>
+    <lastmod>2026-10-01T08:40:00.000Z</lastmod>
+  </url>
+  <url>
+    <loc>https://example.org/termine/winterkonzert</loc>
+    <lastmod>2026-10-01T08:44:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/termine/winterkonzert"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/events/winter-concert"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/termine/winterkonzert"/>
+  </url>
+  <url>
+    <loc>https://example.org/ueber-uns</loc>
+    <lastmod>2026-10-01T08:18:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/ueber-uns"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/about"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/ueber-uns"/>
+  </url>
+  <url>
+    <loc>https://example.org/ueber-uns/geschichte</loc>
+    <lastmod>2026-10-01T08:22:00.000Z</lastmod>
+    <xhtml:link rel="alternate" hreflang="de" href="https://example.org/ueber-uns/geschichte"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://example.org/en/about/history"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://example.org/ueber-uns/geschichte"/>
+  </url>
+  <url>
+    <loc>https://example.org/ueber-uns/team</loc>
+    <lastmod>2026-10-01T08:20:00.000Z</lastmod>
+  </url>
+</urlset>

@@ -1,0 +1,217 @@
+# Beispiel & Partner
+
+> Alles über das Beispiel
+
+## Seiten
+
+### Start
+
+Source: https://example.org/
+
+#### Start
+
+Willkommen auf der [Startseite](https://example.org/kontakt)
+
+### Unser Angebot
+
+Source: https://example.org/angebot
+
+Preise <und> Leistungen
+
+#### Angebot
+
+### Blog
+
+Source: https://example.org/blog
+
+#### Blog
+
+### Home
+
+Source: https://example.org/en
+
+#### Home
+
+Welcome
+
+### About
+
+Source: https://example.org/en/about
+
+#### About
+
+### History
+
+Source: https://example.org/en/about/history
+
+#### History
+
+### Broken
+
+Source: https://example.org/en/broken
+
+#### Broken
+
+### Contact
+
+Source: https://example.org/en/contact
+
+#### Contact
+
+### English only
+
+Source: https://example.org/en/english-only
+
+#### English only
+
+### Events
+
+Source: https://example.org/en/events
+
+#### Events
+
+### Internal
+
+Source: https://example.org/en/internal
+
+#### Internal
+
+### /en/new
+
+Source: https://example.org/en/new
+
+#### null
+
+### News
+
+Source: https://example.org/en/news
+
+#### News
+
+### Offer
+
+Source: https://example.org/en/offer
+
+Prices
+
+#### Offer
+
+### /en/prices
+
+Source: https://example.org/en/prices
+
+#### null
+
+### Services
+
+Source: https://example.org/en/services
+
+#### Services
+
+### Kaputt
+
+Source: https://example.org/kaputt
+
+#### Kaputt
+
+### Kontakt
+
+Source: https://example.org/kontakt
+
+So erreichen Sie uns
+
+#### Kontakt
+
+Telefon und E-Mail
+
+### Alle Leistungen
+
+Source: https://example.org/leistungen
+
+#### Leistungen
+
+### Preise
+
+Source: https://example.org/preise
+
+#### Preise
+
+### Termine
+
+Source: https://example.org/termine
+
+#### Termine
+
+### Über uns
+
+Source: https://example.org/ueber-uns
+
+#### Über uns
+
+### Geschichte
+
+Source: https://example.org/ueber-uns/geschichte
+
+#### Geschichte
+
+### Team
+
+Source: https://example.org/ueber-uns/team
+
+#### Team
+
+##### Wer wir sind
+
+Ein kleines Team
+
+## Beiträge
+
+### Hallo Welt
+
+Source: https://example.org/blog/hallo
+
+Ein erster Beitrag
+
+#### Hallo Welt
+
+Der erste Beitrag
+
+### Nur Deutsch
+
+Source: https://example.org/blog/nur-deutsch
+
+#### Nur Deutsch
+
+### Hello world
+
+Source: https://example.org/en/news/hello
+
+#### Hello world
+
+## Termine
+
+### Autumn fair
+
+Source: https://example.org/en/events/autumn-fair
+
+#### Autumn fair
+
+### Winter concert
+
+Source: https://example.org/en/events/winter-concert
+
+#### Winter concert
+
+### Sommerfest
+
+Source: https://example.org/termine/sommerfest
+
+Im Garten
+
+#### Sommerfest
+
+### Winterkonzert
+
+Source: https://example.org/termine/winterkonzert
+
+#### Winterkonzert
