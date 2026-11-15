@@ -206,6 +206,11 @@ added, changed or missing against the backup's listing are printed as a warning 
 the release renders them again. Once the previous release runs verified, the run's pin on the cutover backup is
 released.
 
+The seal a rollback waits for is that of the release it stops: the run's target versions once the new release was
+started, otherwise the versions the run moved from. The target's report counts only when the run knows neither, and
+an unknown runtime is awaited for the whole `update.sealTimeoutSeconds`; so a 6.x release is awaited for its seal
+even while the target still reports an older installation, and a release before 6 is not awaited.
+
 The automatic rollback uses the cutover backup and the promotion the deploy knows, also when the journal's
 listing does not show them yet. A rollback of a run without a cutover backup starts the previous release on the
 unchanged replica; it refuses while the app's code is the staged release or while the newest generation was

@@ -1820,8 +1820,10 @@ Net changes since 5.8.2.
   the previous release and proves through `applied.json` or a marker row in its first snapshot (table
   `kestrel_ops_provenance`), within `update.syncWindowSeconds`, that it restored the cutover state; it reports the
   derived keys that differ from the
-  cutover backup and releases the pin on it. `update rollback`, and `update abort` of a run whose new release
-  started, stop the app first and take a verified safety backup of the stopped state; after `accept`, or once the
+  cutover backup and releases the pin on it. Every rollback waits for the seal of the release it stops, the run's
+  target versions once the new release started, whatever installation the target reports. `update rollback`, and
+  `update abort` of a run whose new release started, stop the app first and take a verified safety backup of the
+  stopped state; after `accept`, or once the
   stopped state holds what the new release wrote since its start, they show what would be lost and need the
   environment's name, and without it start the release again. A halted run whose verification fails again after
   its release wrote is held instead of rolled back automatically, and so is a deploy that `update resume` continues

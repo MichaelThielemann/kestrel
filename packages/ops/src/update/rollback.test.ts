@@ -154,6 +154,35 @@ describe("rolling an update back", () => {
     expect(records.find((r) => r.step === "rollback-verify")?.data).toMatchObject({ provenance: "applied" });
   });
 
+  it("waits for the seal of the started release although the target reports an older installation", async () => {
+    const s = await scenario({ from: { runtime: "6.0.0", renders: false }, to: { runtime: "6.1.0" } });
+    const deployed = await deployUntil(s, "verify");
+    expect(deployed.end.verdict).toBe("passed");
+    s.h.target.sealDelayMs = 300;
+    s.h.target.reported = { "@michaelthielemann/kestrel": "5.8.1", "@michaelthielemann/kestrel-replication-sqlite": "5.8.1" };
+    s.h.target.packagesFrom = "/srv/site-deployed";
+    const run = await runOf(s, deployed.runId);
+    const { ctx } = await continueRun(s, deployed.runId, "update rollback");
+    const result = await rollback(ctx, run, { kind: "requested" });
+    expect(result.seal).toBe("sealed");
+    expect((await runOf(s, deployed.runId)).records.filter((r) => r.step === "seal").at(-1)?.data).toMatchObject({ state: "sealed" });
+  });
+
+  it("asks no unsealed-stop question in update rollback when the target reports an older installation than the started release", async () => {
+    const s = await scenario({ from: { runtime: "6.0.0", renders: false }, to: { runtime: "6.1.0" } });
+    const deployed = await deployUntil(s, "verify");
+    s.h.target.sealDelayMs = 300;
+    s.h.target.reported = { "@michaelthielemann/kestrel": "5.8.1", "@michaelthielemann/kestrel-replication-sqlite": "5.8.1" };
+    s.h.target.packagesFrom = "/srv/site-deployed";
+    const { ctx, run } = await continueRun(s, deployed.runId, "update rollback", { yes: false });
+    const outcome = await rollbackCommand(ctx, run);
+    expect(outcome.exitCode, outcome.message).toBe(UPDATE_EXIT.done);
+    expect(s.h.output.warn.join("\n")).not.toContain("seal unsupported");
+    const safety = (await listBackups(ctx)).filter((b) => b.kind === "pre-restore");
+    expect(safety).toHaveLength(1);
+    expect(safety[0]?.verified).toBe(true);
+  });
+
   it("lists the delivery prefix again after replacing it and replaces what a late render wrote meanwhile", async () => {
     const s = await scenario();
     const deployed = await deployUntil(s, "verify");

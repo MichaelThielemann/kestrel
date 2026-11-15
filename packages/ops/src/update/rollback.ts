@@ -13,6 +13,7 @@ import { stableList, type ObjectInfo } from "../store.ts";
 import { holdsUpdatePin, releaseUpdatePin } from "./cleanup.ts";
 import { continueJournal, listUpdateRuns, readUpdateRun, reportOf } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
+import { reportedVersions, runtimeOf } from "./plan.ts";
 import { stoppedAfterRollback } from "./status.ts";
 import type { ConfigurationRestore, RecordedConfiguration } from "./target.ts";
 import { OPEN_STATES, UPDATE_EXIT, type DerivedReport, type RollbackReason, type RollbackResult, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
@@ -122,11 +123,17 @@ function derivedRecord(derived: RollbackResult["derived"]): DerivedReport {
   return { added: derived.added.length, changed: derived.changed.length, missing: derived.missing.length, keys: { added: derived.added.slice(0, DERIVED_SAMPLE), changed: derived.changed.slice(0, DERIVED_SAMPLE), missing: derived.missing.slice(0, DERIVED_SAMPLE) } };
 }
 
-async function stopAndSeal(ctx: UpdateContext): Promise<SealState> {
+const stoppedVersions = (run: UpdateRun): Readonly<Record<string, string>> | null => {
+  const start = run.records.filter((r) => r.step === "start" && r.state === "started").at(-1);
+  return start?.phase === "deploy" ? (run.versions?.to ?? null) : (run.versions?.from ?? null);
+};
+
+async function stopAndSeal(ctx: UpdateContext, run: UpdateRun): Promise<SealState> {
+  const running = stoppedVersions(run);
   const before = await ctx.target.status();
   if (before.state !== "stopped" || before.instances > 0) {
     const stop = await stopTarget(ctx);
-    const seal = await ctx.steps.waitForSeal(ctx, stop.stoppedAt).catch((cause: unknown) => {
+    const seal = await ctx.steps.waitForSeal(ctx, stop.stoppedAt, running).catch((cause: unknown) => {
       ctx.out.warn(`the stopped replica could not be read: ${messageOf(cause)}`);
       return null;
     });
@@ -134,7 +141,7 @@ async function stopAndSeal(ctx: UpdateContext): Promise<SealState> {
     return seal?.state ?? "unreadable";
   }
   await ctx.journal.record("stop", "skipped", { reason: "the app is stopped" });
-  const seal = await readSeal(ctx).catch(() => null);
+  const seal = await readSeal(ctx, runtimeOf(running) ?? runtimeOf(await reportedVersions(ctx))).catch(() => null);
   const state = seal?.state ?? "unreadable";
   await ctx.journal.record("seal", state === "sealed" ? "skipped" : "done", seal === null ? { state } : { state, generation: seal.generation });
   return state;
@@ -198,7 +205,7 @@ async function verifyPrevious(ctx: UpdateContext, promoted: Promoted, marker: st
 }
 
 async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Manifest): Promise<RollbackResult> {
-  const seal = await stopAndSeal(ctx);
+  const seal = await stopAndSeal(ctx, run);
 
   const dbFile = ctx.workspace.path(`rollback-${hex(4)}.db`);
   await downloadDb(ctx, manifest, dbFile);
@@ -302,7 +309,7 @@ async function restartPrevious(ctx: UpdateContext, run: UpdateRun, reason: Rollb
   try {
     const promoted = await promotedInPlace(ctx, run);
     if (promoted !== null) throw new OpsError(`run ${run.runId} shows no cutover backup, but ${promoted}; the previous release does not start on it. Once the journal lists the cutover backup, update resume --env ${ctx.envName} --run ${run.runId} rolls back to it`, 1, "rollback");
-    const seal = await stopAndSeal(ctx);
+    const seal = await stopAndSeal(ctx, run);
     const generation = (await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).at(-1)?.name ?? "";
     const recorded = await recordedConfiguration(ctx, run.runId);
     const result: RollbackResult = { ended: "stopped", generation, seal, delivery: { written: [], removed: [], relisted: 0 }, originalsRestored: [], configuration: { set: [], removed: [], unrestorable: [] }, derived: { added: [], changed: [], missing: [] } };
@@ -426,7 +433,7 @@ export async function guardRollback(ctx: UpdateContext, run: UpdateRun, manifest
   try {
     const stop = await stopTarget(ctx);
     stopped = stop.wasRunning;
-    const seal = await ctx.steps.waitForSeal(ctx, stop.stoppedAt);
+    const seal = await ctx.steps.waitForSeal(ctx, stop.stoppedAt, stoppedVersions(run));
     await acceptSeal(ctx, seal, stop.stoppedAt);
     const lines = await lossAfterStop(ctx, run, manifest);
     if (lines !== null) {
