@@ -8,7 +8,7 @@ import { createUpdateHarness, type UpdateHarness } from "./harness.fixture.ts";
 import { readUpdateRun } from "./journal.ts";
 import { UPDATE_PIN_PREFIX, updateKeys } from "./layout.ts";
 import { planHash } from "./plan.ts";
-import type { UpdateContext, UpdatePlan, UpdateReceipt, UpdateRun, UpdateRunState } from "./types.ts";
+import type { UpdateContext, UpdatePlan, UpdateReceipt, UpdateRecord, UpdateRun, UpdateRunState } from "./types.ts";
 import type * as Storages from "./storages.ts";
 
 vi.mock("./storages.ts", async (importOriginal) => ({ ...(await importOriginal<typeof Storages>()), releaseStorages: async () => [] }));
@@ -125,6 +125,20 @@ describe("the deploy gate", () => {
     expect((await checkGate(ctx, ordinary, [run("verified")])).accepts).toBe("earlier1");
     expect((await checkGate(ctx, ordinary, [run("accepted")])).accepts).toBeNull();
     expect((await checkGate(ctx, ordinary, [run("rolled-back")])).accepts).toBeNull();
+  });
+
+  it("refuses while an earlier verified or accepted run has not retired its previous releases, and names update resume", async () => {
+    const ctx = await harness().context();
+    const ordinary = plan({ versions: { from: NEW, to: NEW } });
+    const at = (step: string, state: UpdateRecord["state"], data: Record<string, unknown> = {}): UpdateRecord => ({ seq: 0, step, state, at: 0, phase: "deploy", data });
+    const verify = at("verify", "done", { verdict: "passed" });
+    for (const state of ["verified", "accepted"] as const) {
+      const pending = { ...run(state), records: [verify, at("retire", "failed", { error: "cf exited 1" })] };
+      const error = await refusal(checkGate(ctx, ordinary, [pending]));
+      expect(error.exitCode, state).toBe(1);
+      expect(error.message).toContain("kestrel update resume --env prod --run earlier1");
+    }
+    expect((await checkGate(ctx, ordinary, [{ ...run("verified"), records: [verify, at("retire", "done")] }])).accepts).toBe("earlier1");
   });
 
   it("refuses while any earlier run is open, also behind later runs it refused, and names the command that finishes it", async () => {

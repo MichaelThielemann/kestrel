@@ -2,6 +2,7 @@ import { OpsError } from "../errors.ts";
 import { parseJsonOrNull } from "../layout.ts";
 import { stableList } from "../store.ts";
 import { updateKeys } from "./layout.ts";
+import { retirePending } from "./journal.ts";
 import { needsReceipt, planHash as hashOf, sameVersions } from "./plan.ts";
 import { nextCommand } from "./status.ts";
 import type { TargetPreflight } from "./target.ts";
@@ -49,7 +50,8 @@ export async function findReceipt(ctx: UpdateContext, planHash: string, to: Read
  * otherwise with exit 1: a version change or a pending storage
  * migration without a matching receipt, more than one instance (desired or running), an active deployment of the
  * platform, or any of the `earlier` deploy runs of this environment (oldest first) in an open state (`deploying`,
- * `down`, `verifying`, `halted`, `rolling-back`). The newest earlier run that got past its gate, when it is `verified`,
+ * `down`, `verifying`, `halted`, `rolling-back`) or verified or accepted with its retire of the previous releases not
+ * ended ({@link retirePending}). The newest earlier run that got past its gate, when it is `verified`,
  * is accepted implicitly; the gate names it in {@link GateResult.accepts}.
  */
 export async function checkGate(ctx: UpdateContext, plan: UpdatePlan, earlier: readonly UpdateRun[]): Promise<GateResult> {
@@ -61,6 +63,8 @@ export async function checkGate(ctx: UpdateContext, plan: UpdatePlan, earlier: r
   const configuration = (await ctx.target.checkReleaseConfiguration?.({ dir: ctx.release.dir }, { resolveSources: true }))?.fingerprint ?? null;
   const open = earlier.find((run) => OPEN_STATES.has(run.state));
   if (open !== undefined) throw new OpsError(`update run ${open.runId} is ${open.state}; finish it first with ${nextCommand(open, "update deploy") ?? `kestrel update abort --env ${ctx.envName} --run ${open.runId}`}`, 1, "gate");
+  const retiring = earlier.find(retirePending);
+  if (retiring !== undefined) throw new OpsError(`update run ${retiring.runId} is ${retiring.state}, but its previous releases are not retired, so they can still start on its data; retire them first with kestrel update resume --env ${ctx.envName} --run ${retiring.runId}`, 1, "gate");
   const previous = earlier.filter((run) => run.state !== "untouched").at(-1) ?? null;
   const planHash = hashOf(plan);
   const ordinary = !needsReceipt(plan);
