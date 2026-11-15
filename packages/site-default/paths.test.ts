@@ -365,6 +365,16 @@ describe("site/default routed paths: preview", () => {
     expect(expectOk(await paths.preview("pages", { id: mine.id, locale: "en", slug: "x" }))).toMatchObject({ path: "/en/x", conflict: null, shadows: [] });
     expect(expectOk(await paths.preview("pages", { id: mine.id, slug: "neu" }))).toMatchObject({ path: "/neu", reachable: true, reason: null });
   });
+
+  it("names no reason for a free, valid path of a page that is not stored as live, and keeps it unreachable", async () => {
+    const { content, paths } = await routedSite({ model: MODEL });
+    const draft = expectOk(await content.create("pages", { slug: "entwurf", title: "Draft", status: "draft" }));
+    expect(expectOk(await paths.preview("pages", { slug: "frei", parent: null }))).toMatchObject({ path: "/frei", reachable: false, reason: null, conflict: null });
+    expect(expectOk(await paths.preview("pages", { id: draft.id, slug: "entwurf" }))).toMatchObject({ path: "/entwurf", reachable: false, reason: null, conflict: null });
+    const invalid = expectOk(await paths.preview("pages", { slug: "de" }));
+    expect(invalid.reachable).toBe(false);
+    expect(invalid.reason).toMatch(/locale/);
+  });
 });
 
 describe("site/default routed paths: configuration form", () => {

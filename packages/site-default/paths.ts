@@ -65,7 +65,9 @@ export interface RebuildReport {
 
 export interface PathPreview {
   path: string;
+  /** Whether the path is free and valid and the stored document passes its route's `liveWhen` in the locale; `false` for a document not saved yet. */
   reachable: boolean;
+  /** Why the path itself cannot be served (invalid, taken, or a page above without a slug), `null` when it can; never names the document's own status. */
   reason: string | null;
   conflict: Omit<PathConflict, "moving"> | null;
   shadows: Array<{ type: string; id: string; label: string; path: string }>;
@@ -784,9 +786,8 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
           const next = prefixSource(format, at, table.mounts);
           at = next === undefined ? undefined : table.row(next.slice(0, next.indexOf("/")), next.slice(next.indexOf("/") + 1), locale);
         }
-        const live = known?.live ?? false;
-        const reason = bad ? bad.message : conflict ? `taken by ${conflict.type} "${conflict.label}"` : live ? null : "not published in this locale";
-        return { path, reachable: reason === null, reason, conflict, shadows, exposesParentSlug };
+        const reason = bad ? bad.message : conflict ? `taken by ${conflict.type} "${conflict.label}"` : null;
+        return { path, reachable: reason === null && (known?.live ?? false), reason, conflict, shadows, exposesParentSlug };
       }),
 
     indexMounts: (runId) => guarded(() => indexMounts(runId)),

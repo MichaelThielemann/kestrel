@@ -4854,7 +4854,7 @@
     "/admin/pages/path-preview": {
       "post": {
         "operationId": "previewPagePath",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission pages.write → The public path a pages would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission pages.write → The public path a pages would get for payload { id?, locale?, slug, parent? }, whether it is reachable and what keeps the path from being served; writes nothing",
         "tags": [
           "admin"
         ],

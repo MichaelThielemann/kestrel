@@ -2334,6 +2334,11 @@ Net changes since 5.8.2.
   prefix, such as the replica listing in `replication-sqlite` on a store with many objects. The result and its
   order are unchanged. A broken symlink or an unreadable directory outside that part of the tree no longer makes
   the listing fail.
+- `site-default`: `site.previewPath` (`POST /admin/pages/path-preview`) answers `reason: null` for a free, valid
+  path. `reason` names only a problem of the path itself: invalid, taken, or a page above without a slug in the
+  locale. For a page not saved yet, and for a stored page whose saved status is not published in the locale, it
+  answered `"not published in this locale"`, although the status the caller is editing may be published.
+  `reachable` keeps its meaning: `true` only for a free, valid path of a stored page that is live in the locale.
 
 ## 5.8.2 – 2026-09-27
 

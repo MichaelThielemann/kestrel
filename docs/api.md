@@ -333,7 +333,7 @@ identical paths.
 | GET | `/pages` | `?locale=&limit=&offset=&sort=-updatedAt` | `{ items: [...], total }` – published only; `sort=-updatedAt` also orders an anonymous caller's list, whose items carry no `updatedAt` |
 | GET | `/admin/pages` | same as above | every status (permission `pages.manage`) |
 | GET | `/admin/pages/:id` | `?locale=` | document, every status, with `_paths` for every language that has a valid path, drafts included (permission `pages.manage`; `/admin/pages` carries the same per item) |
-| POST | `/admin/pages/path-preview` | `{ id?, locale?, slug }` | `{ path, reachable, reason, conflict, shadows, exposesParentSlug }` – the path a save would give, before saving (`pages.write`) |
+| POST | `/admin/pages/path-preview` | `{ id?, locale?, slug }` | `{ path, reachable, reason, conflict, shadows, exposesParentSlug }` – the path a save would give, before saving; `reason` names only a problem of the path (invalid, taken, a page above without a slug) and is `null` for a free, valid path, while `reachable` also needs the stored page to be published in that language, so it is `false` for a page not saved yet (`pages.write`) |
 | GET | `/admin/pages/tree` | – | `[{ id, parent, label, paths }]` – every page with its parent and valid paths per language (`pages.manage`) |
 | POST | `/admin/paths/rebuild` | – | `{ indexed, conflicts }` – recomputes every page path from the stored pages; also runs after migrations (`pages.manage`) |
 | GET | `/pages/:id` | `?locale=` | document (strict, no fallback) – published only, otherwise 404 |

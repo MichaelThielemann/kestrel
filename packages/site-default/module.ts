@@ -166,7 +166,7 @@ function describeSite(site: SiteDefault) {
       terminalOutput: { type: "object", properties: { route: { type: "object", properties: { type: { type: "string" } }, required: ["type"], additionalProperties: false } }, required: ["route"], additionalProperties: false },
     }),
     previewPath: (arg: string) => ({
-      summary: `The public path a ${arg} would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing`,
+      summary: `The public path a ${arg} would get for payload { id?, locale?, slug, parent? }, whether it is reachable and what keeps the path from being served; writes nothing`,
       reads: [],
       writes: ["result"],
       input: { type: "object", properties: { id: { type: "string" }, locale: { type: "string" }, slug: { type: "string", minLength: 1 }, parent: { type: ["string", "null"] } }, required: ["slug"], additionalProperties: true },

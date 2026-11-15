@@ -148,7 +148,11 @@ only while its own route publishes it. A type that declares none of the filter's
 paths and per-locale `live` state. `site.attachPaths:<t>?reachable` adds `_paths` to a list or read answer (reachable paths only; without
 `?reachable` every valid path, drafts included). `site.previewPath:<t>` answers, for a payload
 `{ id?, locale?, slug }`, the path a save would give, whether it would be reachable and the occupant of a
-taken path; `shadows` stays empty, since no page serves a path it does not hold with its own slug.
+taken path; `shadows` stays empty, since no page serves a path it does not hold with its own slug. `reason`
+names only a problem of the path itself (invalid, taken, or a page above without a slug in the locale) and is
+`null` for a free, valid path. `reachable` is `true` only when, in addition, the stored document passes its
+route's `liveWhen` in the locale, so it is `false` for a document not saved yet and does not follow a status
+the caller has not saved; a form that knows its own status decides from `reason`.
 
 **Rebuilding.** The table is stored in `site_docs`, `site_paths`, `site_runs` and `site_meta`. Setup
 rebuilds it when the routes, the locales, `prefixPrimary`, `reservedPaths` or a routed slug field
@@ -208,7 +212,7 @@ persistence settings:
 | `site.indexMounts` | Validate the stored mount assignment and move every document of each collection whose mount page changed; last step of the settings write's atomic group | – | – | – | – | 400 an invalid assignment, or a change moving more than maxCascade paths; 409 a moved document's path is taken; 503 the store is unavailable | – | yes |
 | `site.readTree:<arg>` | Every <arg> with its parent, label, valid paths and live state per locale | – | `result` | – | object[] | 503 the store is unavailable | – | no |
 | `site.route:<arg>` | End the run with { route: { type } } when params.path is reachable and belongs to a routed collection other than <arg>; pass through otherwise | `params.path` | `result?` | – | – (ends: { route: object }) | – | – | no |
-| `site.previewPath:<arg>` | The public path a <arg> would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing | – | `result` | { id?: string, locale?: string, slug: string, parent?: string \| null, … } | { path: string, reachable: boolean, reason: string \| null, conflict: object \| null, shadows: object[], exposesParentSlug: object \| null, … } | 400 slug is missing; 503 the store is unavailable | – | no |
+| `site.previewPath:<arg>` | The public path a <arg> would get for payload { id?, locale?, slug, parent? }, whether it is reachable and what keeps the path from being served; writes nothing | – | `result` | { id?: string, locale?: string, slug: string, parent?: string \| null, … } | { path: string, reachable: boolean, reason: string \| null, conflict: object \| null, shadows: object[], exposesParentSlug: object \| null, … } | 400 slug is missing; 503 the store is unavailable | – | no |
 | `site.attachPaths:<arg>` | Add _paths (locale → path) to the <arg> result, every valid path including drafts | `result` | `result` | – | { _paths: object, … } | – | – | no |
 
 Used by 13 of 111 pipelines in `examples/minimal`.

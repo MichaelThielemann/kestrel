@@ -10159,7 +10159,7 @@
       "module": "site/default",
       "factory": true,
       "description": {
-        "summary": "The public path a <arg> would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing",
+        "summary": "The public path a <arg> would get for payload { id?, locale?, slug, parent? }, whether it is reachable and what keeps the path from being served; writes nothing",
         "reads": [],
         "writes": [
           "result"
@@ -24051,7 +24051,7 @@
           "name": "site.previewPath",
           "module": "site/default",
           "description": {
-            "summary": "The public path a pages would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing",
+            "summary": "The public path a pages would get for payload { id?, locale?, slug, parent? }, whether it is reachable and what keeps the path from being served; writes nothing",
             "reads": [],
             "writes": [
               "result"
