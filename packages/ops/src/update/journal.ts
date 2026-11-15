@@ -204,7 +204,7 @@ export async function latestDeployRun(ctx: Pick<OpsContext, "backups" | "locatio
 /**
  * A journal that appends to update run `run`, continuing after its last entry. It writes through the store of
  * `ctx.journal`, which the interrupt of a command does not guard, so a signal never leaves a gap in the run; every record
- * goes through the redactor.
+ * is written as `ctx.journal` writes it.
  */
 export function continueJournal(ctx: Pick<OpsContext, "journal">, run: Pick<UpdateRun, "runId" | "lastSeq">): Journal {
   return ctx.journal.continueRun(run.runId, run.lastSeq);

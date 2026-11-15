@@ -234,7 +234,7 @@ async function writeBackup(ctx: OpsContext, options: BackupOptions, mode: Exclud
     derived: derivedTotals,
     target: facts,
   };
-  await putNew(ctx.backups, ctx.location + keys.manifest(id), new TextEncoder().encode(ctx.redactor.json(manifest, 2) + "\n"), "application/json");
+  await putNew(ctx.backups, ctx.location + keys.manifest(id), new TextEncoder().encode(ctx.redactor.document(manifest, 2) + "\n"), "application/json");
   for (const key of missing) ctx.out.warn(`original ${key} is referenced by a media row but missing in the store`);
   for (const key of mismatched.keys()) ctx.out.warn(`original ${key} does not hash to the checksum of its media row; the ${options.kind} backup keeps it as the store holds it`);
   const verification = await verifyBackup(ctx, id);
@@ -329,7 +329,7 @@ export async function verifyBackup(ctx: OpsContext, id: string): Promise<Verific
   const checked = { tables: 0, blobs: 0, site: 0, sampled: 0 };
   const finish = async (): Promise<Verification> => {
     const result: Verification = { id, at: ctx.clock(), ok: problems.length === 0, checked, problems };
-    await ctx.backups.put(ctx.location + keys.verification(id, result.at), jsonBytes(result), { contentType: "application/json" });
+    await ctx.backups.put(ctx.location + keys.verification(id, result.at), new TextEncoder().encode(ctx.redactor.document(result, 2) + "\n"), { contentType: "application/json" });
     return result;
   };
   let manifest: Manifest | null;

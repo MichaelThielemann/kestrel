@@ -126,7 +126,7 @@ export async function runUpdate(argv: readonly string[], options: RunOptions = {
   const json = argv.includes("--json");
   const out = createOutput(redactor, stdout, stderr, json);
   const emit = (schema: string, payload: Record<string, unknown>): void => {
-    if (json) stdout(redactor.json({ schema: `kestrel-ops/${schema}@1`, ...payload }, 2) + "\n");
+    if (json) stdout(redactor.document({ schema: `kestrel-ops/${schema}@1`, ...payload }, 2) + "\n");
   };
   if (argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
     stdout(`${UPDATE_USAGE}\n`);

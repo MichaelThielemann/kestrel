@@ -97,8 +97,12 @@ from.
   output taken as the value with one trailing newline removed. A command that is not on `PATH`, does not
   finish within 60 s (a password manager waiting to be unlocked), prints more than 1 MiB or exits with an
   error stops the run with exit 2, naming which of these happened but never what it printed. Values stay in
-  memory; every line the tool writes, to the terminal (questions included), the journal or a manifest,
-  passes a redactor that masks them.
+  memory. Every line the tool writes to the terminal, questions included, passes a redactor that masks them,
+  also where one is part of other text. The documents it stores (journal, manifests, verifications, receipts,
+  the recorded configuration) and the `--json` output hold names, ids, keys and hashes, never a credential's
+  value, and are written as they are; only their free-text error messages (`message`, `error`, `failure`,
+  `detail`, `problems`) are masked, since a failed call may quote what it was sent. A credential that is part
+  of a fixed text, such as an access key `kestrel`, therefore never changes a stored document.
 
 - `update` (optional) configures updates: `release.dir` (default `.`), the directory a target stages as the new
   release, relative to the environments file; `localBoot`, the start of a release on this machine that applies

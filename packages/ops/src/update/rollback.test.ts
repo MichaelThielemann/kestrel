@@ -223,7 +223,7 @@ describe("rolling an update back", () => {
 });
 
 describe("update rollback", () => {
-  it("reports a recorded value that holds the redaction mask as not restored and leaves the variable as it is", async () => {
+  it("restores a recorded plain value verbatim, also one that reads like the redaction mask", async () => {
     const s = await scenario();
     const deployed = await deployUntil(s, "verify");
     const key = LOCATION + updateKeys.configuration("prod", deployed.runId);
@@ -236,10 +236,9 @@ describe("update rollback", () => {
     const run = await runOf(s, deployed.runId);
     const { ctx } = await continueRun(s, deployed.runId, "update rollback");
     const result = await rollback(ctx, run, { kind: "requested" });
-    expect(result.configuration.unrestorable).toContain("SITE_NAME");
-    expect(result.configuration.set).not.toContain("SITE_NAME");
-    expect(s.h.target.configuration.env.SITE_NAME).toBe("Studio, renamed");
-    expect(s.h.output.warn.join("\n")).toContain("SITE_NAME holds another value than when the update began");
+    expect(result.configuration.set).toContain("SITE_NAME");
+    expect(result.configuration.unrestorable).not.toContain("SITE_NAME");
+    expect(s.h.target.configuration.env.SITE_NAME).toBe("Studio [redacted]");
   });
 
   it("rolls back before accept without a question once the stopped release wrote nothing, takes a safety backup after the stop and exits 0", async () => {

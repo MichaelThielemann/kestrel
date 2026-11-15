@@ -364,7 +364,7 @@ export async function runOps(argv: readonly string[], options: RunOptions = {}):
   const json = argv.includes("--json");
   const out = createOutput(redactor, stdout, stderr, json);
   const emit = (name: string, payload: Record<string, unknown>): void => {
-    if (json) stdout(redactor.json({ schema: `kestrel-ops/${name}@1`, ...payload }, 2) + "\n");
+    if (json) stdout(redactor.document({ schema: `kestrel-ops/${name}@1`, ...payload }, 2) + "\n");
   };
   let cmd: Command;
   let parsed: Parsed;

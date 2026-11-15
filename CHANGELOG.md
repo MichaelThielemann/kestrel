@@ -1032,7 +1032,10 @@ Net changes since 5.8.2.
   clock go through the admin client of `kestrel-blobstore-s3`. Neither a backup nor a restore holds or writes the instance-lock file
   next to the database. Also `status`, `backup list|verify|prune` with retention per
   kind, `restore --to local`, a `local` target, credentials from environment variables or commands
-  that never reach any output, a journal and lock trace in the backup location, and `writeBundle()`
+  that never reach any output (lines for a person are masked; the documents the tool stores and its `--json`
+  output hold no credential value and mask only the free text of error messages, so a credential that is part
+  of a fixed text, such as the access key `kestrel`, leaves every schema, key and name in them intact), a
+  journal and lock trace in the backup location, and `writeBundle()`
   for a self-contained runner in a deploy artifact that carries the target adapters it needs.
 - `kestrel-h3`'s `createKestrelHandler` takes a `logger` and writes one `http` line per request
   with the fields of the core server's line (`runId`, `requestId`, `method`, `path`, `pipeline`,

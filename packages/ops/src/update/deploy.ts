@@ -72,7 +72,7 @@ async function acceptImplicitly(ctx: UpdateContext, runId: string): Promise<void
 
 function fingerprintSecrets(redactor: Redactor, recorded: RecordedConfiguration): RecordedConfiguration {
   const env: RecordedConfiguration["env"] = {};
-  for (const [name, value] of Object.entries(recorded.env)) env[name] = "value" in value && redactor.apply(value.value) !== value.value ? { fingerprint: createHash("sha256").update(recorded.salt + value.value).digest("hex") } : value;
+  for (const [name, value] of Object.entries(recorded.env)) env[name] = "value" in value && redactor.holds(value.value) ? { fingerprint: createHash("sha256").update(recorded.salt + value.value).digest("hex") } : value;
   return { ...recorded, env };
 }
 
@@ -123,7 +123,7 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
     const droplet = await ctx.target.currentDroplet();
     const recorded = fingerprintSecrets(ctx.redactor, await ctx.target.readConfiguration(new Set(ctx.host.secretEnvNames ?? [])));
     const key = updateKeys.configuration(ctx.envName, ctx.run.id);
-    await putOnce(ctx, ctx.location + key, ctx.redactor.json(recorded, 2) + "\n");
+    await putOnce(ctx, ctx.location + key, ctx.redactor.document(recorded, 2) + "\n");
     await record(ctx, "configuration", "done", { droplet, key });
 
     step = "precopy";

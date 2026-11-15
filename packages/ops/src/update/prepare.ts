@@ -3,7 +3,6 @@ import { failure, err, isErr, ok } from "@michaelthielemann/kestrel-contracts/er
 import { runShapeMigrations, type BlobOps } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import { messageOf } from "../context.ts";
 import { OpsError } from "../errors.ts";
-import { jsonBytes } from "../layout.ts";
 import { MemoryBucket, memoryStore } from "../memoryStore.ts";
 import { blobstoreOf, MAX_SKEW_MS } from "../replica.ts";
 import { serverClock } from "../serverTime.ts";
@@ -257,7 +256,7 @@ export async function prepare(ctx: UpdateContext, options: PrepareOptions): Prom
     const receipt: UpdateReceipt = { schema: "kestrel-ops/update-receipt@1", env: ctx.envName, runId: ctx.run.id, createdAt: ctx.clock(), tool: ctx.tool, versions: plan.versions, planHash: hash, plan, rehearsal };
     const key = updateKeys.receipt(ctx.envName, hash, ctx.run.id);
     if ((await ctx.backups.head(ctx.location + key)) !== null) return await failed(ctx, "receipt", `refusing to overwrite ${key}`);
-    await ctx.backups.put(ctx.location + key, jsonBytes(receipt), { contentType: "application/json" });
+    await ctx.backups.put(ctx.location + key, new TextEncoder().encode(ctx.redactor.document(receipt, 2) + "\n"), { contentType: "application/json" });
     await record(ctx, "receipt", "done", { planHash: hash, key });
     const outcome = await outcomeOf(ctx, UPDATE_EXIT.done, `receipt written (versions and plan ${hash.slice(0, 12)}). Next: commit the update and run the deploy pipeline`);
     return { receipt, outcome };

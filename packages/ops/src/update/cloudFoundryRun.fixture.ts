@@ -88,6 +88,8 @@ export interface CommandOptions {
   update?: Record<string, unknown>;
   /** Extra entries of the environment's `target` block, such as a `manifest` and its `vars`. */
   target?: Record<string, unknown>;
+  /** Credentials of the tool, read from environment variables of the command, so its redactor knows them. */
+  credentials?: { accessKeyId: string; secretAccessKey: string };
 }
 
 /** A store that throws on every call once {@link KilledStore.kill} ran, as the store looks from a process that was killed. */
@@ -301,11 +303,11 @@ export class CloudFoundryRun {
     await instance?.stop();
   }
 
-  private environments(release: string, update: Record<string, unknown>, target: Record<string, unknown>): void {
+  private environments(release: string, update: Record<string, unknown>, target: Record<string, unknown>, credentials: boolean): void {
     const environment = {
       production: true,
       target: { adapter: "@michaelthielemann/kestrel-target-cloudfoundry", app: APP.name, org: "example-org", space: "dev", dir: "target", readyUrl: this.readyUrl, stopGraceSeconds: 0, ...target },
-      storage: { bucket: "kestrel-test" },
+      storage: { bucket: "kestrel-test", ...(credentials ? { credentials: { accessKeyId: { env: "RUN_ACCESS_KEY" }, secretAccessKey: { env: "RUN_SECRET_KEY" } } } : {}) },
       app: { replicaPrefix: RUN_PREFIXES.replica, mediaPrefix: RUN_PREFIXES.media, deliveryPrefix: RUN_PREFIXES.delivery, derivedPrefixes: [RUN_PREFIXES.derived] },
       backups: { prefix: RUN_LOCATION },
       update: { release: { dir: `releases/${release}` }, sealTimeoutSeconds: 2, syncWindowSeconds: 3, renderTimeoutSeconds: 3, readyTimeoutSeconds: 4, ...update },
@@ -318,7 +320,7 @@ export class CloudFoundryRun {
     const version = options.release ?? this.newest;
     const release = this.releases.get(`release ${version}`);
     if (release === undefined) throw new Error(`no release ${version}`);
-    this.environments(version, options.update ?? {}, options.target ?? {});
+    this.environments(version, options.update ?? {}, options.target ?? {}, options.credentials !== undefined);
     const answers = join(this.root, `answers-${String(Date.now())}-${String(Math.random()).slice(2, 8)}.json`);
     writeFileSync(answers, JSON.stringify({ "unsealed-stop": "accept", ...options.answers }));
     const store = options.store?.(this.store) ?? this.store;
@@ -326,7 +328,7 @@ export class CloudFoundryRun {
     let stderr = "";
     const code = await runUpdate([...args, "--env", "prod", "--json", "--yes", "--answers", answers], {
       cwd: this.root,
-      env: {},
+      env: options.credentials === undefined ? {} : { RUN_ACCESS_KEY: options.credentials.accessKeyId, RUN_SECRET_KEY: options.credentials.secretAccessKey },
       stdout: (text) => {
         stdout += text;
       },

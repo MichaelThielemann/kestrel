@@ -16,9 +16,10 @@ export interface JournalEntry {
 const TERMINAL = new Set(["run-done", "run-failed"]);
 
 /**
- * A run's journal in the backup location, one write-once object per transition, mirrored into a local file.
- * Everything written passes the redactor. `startSeq` continues the journal of a run another process began: the first
- * entry gets `startSeq + 1`, so no key of that run is written twice.
+ * A run's journal in the backup location, one write-once object per transition, mirrored into a local file. Entries
+ * are written through {@link Redactor.document}: verbatim, but for the free text of their error messages. `startSeq`
+ * continues the journal of a run another process began: the first entry gets `startSeq + 1`, so no key of that run is
+ * written twice.
  */
 export class Journal {
   #seq: number;
@@ -43,7 +44,7 @@ export class Journal {
   async record(step: string, state: JournalEntry["state"], data: Record<string, unknown> = {}): Promise<void> {
     const seq = this.#seq + 1;
     const entry: JournalEntry = { runId: this.runId, seq, step, state, at: this.clock(), data };
-    const text = this.redactor.json(entry, 2);
+    const text = this.redactor.document(entry, 2);
     const key = this.location + keys.journal(this.runId, seq, step, state);
     try {
       await this.store.put(key, new TextEncoder().encode(text + "\n"), { contentType: "application/json" });
@@ -51,7 +52,7 @@ export class Journal {
       if ((await this.store.head(key).catch(() => null)) === null) throw error;
     }
     this.#seq = seq;
-    if (this.mirror !== null) appendFileSync(this.mirror, this.redactor.json(entry) + "\n", { mode: 0o600 });
+    if (this.mirror !== null) appendFileSync(this.mirror, this.redactor.document(entry) + "\n", { mode: 0o600 });
   }
 
   /** A journal of run `runId` after its entry `lastSeq`, written through this journal's store, location, redactor, clock and mirror. */

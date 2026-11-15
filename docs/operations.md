@@ -303,7 +303,10 @@ before the update.
 | 3 | A hard failure after the stop, after which the automatic rollback brought back the cutover state and verified it. |
 
 With `--json` every command prints one document with a `schema` field such as `kestrel-ops/update-deploy@1`,
-holding `exitCode`, `state`, `message` and the run's report. The update questions are `update-stop` (before the
+holding `exitCode`, `state`, `message` and the run's report. That document and every document the tool stores
+(journal, manifests, receipts, the recorded configuration) keep their values as they are and hold no credential's
+value; only error messages are masked where they quote a credential, so a credential that is part of a fixed text,
+such as the access key `kestrel`, changes none of them. The update questions are `update-stop` (before the
 stop; `--yes` answers it), `unsealed-stop` (after the stop of a release that leaves no seal, such as one before 6;
 never answered by `--yes`; without an answer the previous release starts again and the deploy ends with exit 3),
 `break-lock` (with `--break-lock`; never answered by `--yes`), `rollback-accepted` (the environment's name, never

@@ -221,7 +221,7 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   if (current.kind === "unreadable") {
     const lines = [`the current database cannot be read: ${current.reason}`, "the restore cannot report what it discards, and its pre-restore backup holds the originals and delivery keys but no database"];
     for (const line of lines) ctx.out.warn(line);
-    await ctx.journal.record("loss-report", "failed", { reason: current.reason });
+    await ctx.journal.record("loss-report", "failed", { error: current.reason });
     await confirm(ctx.answers, "unreadable-current", lines.join("\n"));
     if (ctx.env.production) await confirm(ctx.answers, "access-changes", [...lines, "access changes cannot be listed; every login session ends; everyone signs in again"].join("\n"));
   } else {

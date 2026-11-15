@@ -101,6 +101,19 @@ describe("secrets", () => {
     }
   });
 
+  it("writes a document verbatim and masks only the free text of its messages, also where a credential is part of fixed text", () => {
+    const redactor = new Redactor();
+    redactor.add("kestrel");
+    const document = { schema: "kestrel-ops/backup@1", tool: { name: "@michaelthielemann/kestrel-ops" }, data: { key: "kestrel-backups/runs/a", error: "denied for kestrel", checks: [{ name: "ready", detail: "kestrel answered 503" }], problems: ["kestrel is gone", { element: "kestrel-backups/x", message: "kestrel" }] } };
+    expect(JSON.parse(redactor.document(document, 2))).toEqual({
+      schema: "kestrel-ops/backup@1",
+      tool: { name: "@michaelthielemann/kestrel-ops" },
+      data: { key: "kestrel-backups/runs/a", error: "denied for [redacted]", checks: [{ name: "ready", detail: "[redacted] answered 503" }], problems: ["[redacted] is gone", { element: "kestrel-backups/x", message: "[redacted]" }] },
+    });
+    expect(redactor.holds("kestrel-media")).toBe(true);
+    expect(redactor.holds("site-media")).toBe(false);
+  });
+
   it("masks a known credential in the text of a question asked at the terminal", async () => {
     const h = createHarness({ store: memoryStore(new MemoryBucket("secret-prompt")) });
     try {
