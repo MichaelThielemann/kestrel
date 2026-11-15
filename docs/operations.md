@@ -235,7 +235,8 @@ release than the run: other versions of the kestrel packages, or other content m
 (`kestrel update` passes the host plugin's facts to `prepare`, `deploy`, `verify` and `resume`, `run.mjs` those of
 the bundle; `accept`, `rollback`, `abort` and `cleanup` load no host plugin). It
 then checks the last finished step and continues after it: a plan of the cutover database that differs from the
-receipt or from the plan the gate recorded is refused, an unfinished migration starts again from the cutover
+receipt or from the plan the gate recorded is refused, an unfinished cutover backup is taken again and the
+unfinished one loses its update pin, so prune removes it, an unfinished migration starts again from the cutover
 backup, a promotion whose generation is no longer the newest is refused, after `promote` it swaps and starts,
 after `start` it verifies; an unfinished rollback runs again from its first step, a run whose failed verification
 is recorded but whose rollback did not begin goes through the same stop, question and `pre-restore` backup as

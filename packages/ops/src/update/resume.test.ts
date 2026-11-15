@@ -46,6 +46,37 @@ describe("update resume", () => {
     });
   }
 
+  it("releases the update pin of a cutover backup a killed deploy left incomplete once it takes the cutover backup again", async () => {
+    const s = await scenario();
+    const deployed = await deployUntil(s, "cutover-backup", {}, (step, ctx) => {
+      if (step !== "cutover-backup") return;
+      const store = ctx.backups;
+      const failing = new Proxy(store, {
+        get(target, property) {
+          const value: unknown = Reflect.get(target, property);
+          if (property !== "put" || typeof value !== "function") return typeof value === "function" ? value.bind(target) : value;
+          return async (key: string, ...rest: unknown[]) => {
+            if (key.endsWith("blobs.jsonl")) throw new Error("killed while it wrote the cutover backup");
+            return Reflect.apply(value, target, [key, ...rest]);
+          };
+        },
+      });
+      Object.assign(ctx, { backups: failing });
+    });
+    expect(deployed.end.failure?.message).toContain("killed");
+    const partial = (await listBackups(deployed.ctx)).filter((b) => b.kind === "cutover");
+    expect(partial).toHaveLength(1);
+    expect(partial[0]?.complete).toBe(false);
+    const { ctx, run } = await continueRun(s, deployed.runId, "update resume", { steps: { verify: verdict("passed") } });
+    expect(run.cutoverBackup).toBeNull();
+    const outcome = await resume(ctx, run);
+    expect(outcome, outcome.message).toMatchObject({ exitCode: UPDATE_EXIT.done, state: "verified" });
+    const cutovers = await listBackups(ctx);
+    const cutover = (await runOf(s, deployed.runId)).cutoverBackup;
+    expect(cutovers.find((b) => b.id === partial[0]?.id)?.pinnedBy).toEqual([]);
+    expect(cutovers.find((b) => b.id === cutover)?.pinnedBy).toEqual([`update-${deployed.runId}`]);
+  });
+
   it("verifies a halted run again and retires the previous droplet once it passes", async () => {
     const s = await scenario();
     const deployed = await deployUntil(s, "start");

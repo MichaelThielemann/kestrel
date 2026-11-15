@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ok } from "@michaelthielemann/kestrel-contracts/errors";
 import type { ModuleStorage } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
+import { listBackups } from "../backup.ts";
 import { LOCATION, PREFIXES } from "../harness.fixture.ts";
 import { Interrupted } from "../interrupt.ts";
 import { jsonBytes, keys, parseJsonOrNull, stamp } from "../layout.ts";
@@ -547,6 +548,25 @@ describe("continuing a deploy from another process than the one that started it"
 });
 
 describe("the next command a failed deploy names", { timeout: 30_000 }, () => {
+  it("releases the update pin of a cutover backup that failed to be written before it rolls back", async () => {
+    const s = await scenario();
+    const store = s.ctx.backups;
+    s.ctx.backups = new Proxy(store, {
+      get(target, property) {
+        const value: unknown = Reflect.get(target, property);
+        if (property !== "put" || typeof value !== "function") return typeof value === "function" ? value.bind(target) : value;
+        return async (key: string, ...rest: unknown[]) => {
+          if (key.includes("-cutover-") && key.endsWith("blobs.jsonl")) throw new Error("the store answered 500");
+          return Reflect.apply(value, target, [key, ...rest]);
+        };
+      },
+    });
+    const outcome = await deploy(s.ctx);
+    expect(outcome.exitCode, outcome.message).toBe(3);
+    const partial = (await listBackups(s.ctx)).filter((b) => b.kind === "cutover");
+    expect(partial.map((b) => [b.complete, b.pinnedBy])).toEqual([[false, []]]);
+  });
+
   it("names update resume when the automatic rollback before the cutover backup does not finish, and resume finishes it", async () => {
     const s = await scenario();
     const ctx = s.ctx;

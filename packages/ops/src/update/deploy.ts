@@ -11,6 +11,7 @@ import { confirm } from "../questions.ts";
 import { promote, stableGenerations } from "../replica.ts";
 import { appClock, type ServerClock } from "../serverTime.ts";
 import { sha256 } from "../sqlite.ts";
+import { releaseUpdatePin } from "./cleanup.ts";
 import { checkGate } from "./gate.ts";
 import { continueJournal, listUpdateRuns, readUpdateRun } from "./journal.ts";
 import { UPDATE_PIN_PREFIX, updateKeys } from "./layout.ts";
@@ -235,6 +236,7 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     if (error instanceof Interrupted) throw new Interrupted(error.signal, interruptedAfterStop(ctx, step));
     const failure = `${step}: ${messageOf(error)}`;
     await record(ctx, step, "failed", { error: messageOf(error) }).catch(() => undefined);
+    if (step === "cutover-backup" && flow.cutoverBackup === null) await readUpdateRun(ctx, ctx.run.id).then((run) => releaseUnfinishedBackups(ctx, run)).catch(() => undefined);
     if (flow.startedBefore) return concludeVerify(ctx, "deploy", failedStart(failure), (run) => known(run, flow), true);
     ctx.out.error(`the deploy failed after the stop at ${failure}; rolling back`);
     let ended: RollbackResult["ended"];
@@ -324,5 +326,13 @@ export async function continueDeploy(ctx: UpdateContext, run: UpdateRun): Promis
     }
     return afterStop(ctx, flow, "migrate");
   }
+  await releaseUnfinishedBackups(ctx, run);
   return afterStop(ctx, flow, "seal");
+}
+
+async function releaseUnfinishedBackups(ctx: UpdateContext, run: UpdateRun): Promise<void> {
+  for (const r of run.records) {
+    const id = r.data.backupId;
+    if (r.phase === "deploy" && r.step === "backup" && r.state === "started" && typeof id === "string" && id !== run.cutoverBackup && (await releaseUpdatePin(ctx, id, run.runId))) ctx.out.info(`released the update pin of the unfinished cutover backup ${id}`);
+  }
 }
