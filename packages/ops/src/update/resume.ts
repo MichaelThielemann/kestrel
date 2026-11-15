@@ -1,6 +1,6 @@
 import { readManifest } from "../backup.ts";
 import { messageOf } from "../context.ts";
-import { readUpdateRun, reportOf, retirePending } from "./journal.ts";
+import { readUpdateRun, reportOf, retirePending, RUN_STEP } from "./journal.ts";
 import { guardRollback } from "./rollback.ts";
 import { retireStep, verifyCommand } from "./verify.ts";
 import { UPDATE_EXIT, type RollbackReason, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRecord, type UpdateRun, type UpdateRunState } from "./types.ts";
@@ -33,6 +33,13 @@ async function rollBackAgain(ctx: UpdateContext, run: UpdateRun, reason: Rollbac
   }
 }
 
+function failedAfterStop(run: UpdateRun): string | null {
+  if (run.state !== "down" && run.state !== "verifying") return null;
+  const last = run.records.filter((r) => r.phase === "deploy" && r.step !== RUN_STEP && r.step !== "run-done" && r.step !== "run-failed").at(-1);
+  if (last === undefined || last.state !== "failed" || last.step === "stop") return null;
+  return `${last.step}: ${typeof last.data.error === "string" ? last.data.error : "failed"}`;
+}
+
 async function guardAgain(ctx: UpdateContext, run: UpdateRun): Promise<string | null> {
   if (run.cutoverBackup === null) return null;
   const manifest = await readManifest(ctx, run.cutoverBackup);
@@ -46,7 +53,8 @@ async function guardAgain(ctx: UpdateContext, run: UpdateRun): Promise<string | 
  * through `continueDeploy`; a rollback that did not finish runs again from its first step (every rollback step can be
  * repeated); a run whose verification failed before its rollback began is rolled back through `guardRollback` in mode
  * `ask`, since its new release may have served since: the stop first, the `rollback-accepted` question when it wrote,
- * and a `pre-restore` backup; a halted run is verified again. The ending is that of
+ * and a `pre-restore` backup; so is a deploy whose last step after the stop failed before its automatic rollback
+ * began; a halted run is verified again. The ending is that of
  * the step it continued: exit 0 verified, 3 rolled back, 1 halted or refused. A verified or accepted run whose retire
  * of the previous releases did not end (`retirePending`) retires them again: exit 0 once they are, 1 otherwise. A rollback that began only as a command
  * refused after `accept` is not resumed.
@@ -56,16 +64,18 @@ export async function resume(ctx: UpdateContext, run: UpdateRun): Promise<Update
   const begun = since.filter((r) => r.step === "rollback" && r.state === "started").at(-1);
   const verifyFailed = since.some((r) => r.step === "verify" && r.state === "done" && (r.phase === "deploy" || r.phase === "verify") && r.data.verdict === "failed");
   const accepted = since.length < run.records.length;
-  const action = retirePending(run) ? "retire" : run.state === "rolling-back" ? (begun !== undefined ? "rollback" : verifyFailed && !accepted ? "rollback-failed-verify" : null) : run.state === "halted" ? "verify" : run.state === "deploying" || run.state === "down" || run.state === "verifying" ? "deploy" : null;
+  const failedStep = failedAfterStop(run);
+  const action = retirePending(run) ? "retire" : run.state === "rolling-back" ? (begun !== undefined ? "rollback" : verifyFailed && !accepted ? "rollback-failed-verify" : null) : run.state === "halted" ? "verify" : failedStep !== null ? "rollback-failed-step" : run.state === "deploying" || run.state === "down" || run.state === "verifying" ? "deploy" : null;
   if (action === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is ${run.state}; there is nothing to resume${run.state === "rolling-back" ? " (no rollback began; update rollback starts one)" : ""}`, run.state);
   await ctx.journal.record("resume", "started", { phase: "resume", state: run.state, lastDone: run.lastDone });
   switch (action) {
     case "rollback":
       return rollBackAgain(ctx, run, begun === undefined ? { kind: "automatic", failure: "verification failed" } : reasonOf(begun));
-    case "rollback-failed-verify": {
+    case "rollback-failed-verify":
+    case "rollback-failed-step": {
       const refused = await guardAgain(ctx, run);
       if (refused !== null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `not rolled back: ${refused}; run update resume --env ${ctx.envName} --run ${run.runId} again with the answer`, run.state);
-      return rollBackAgain(ctx, run, { kind: "automatic", failure: "verification failed" });
+      return rollBackAgain(ctx, run, { kind: "automatic", failure: failedStep ?? "verification failed" });
     }
     case "verify":
       if (run.promoted === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is halted without a recorded promotion; run update rollback or update abort`, run.state);

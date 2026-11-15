@@ -239,8 +239,9 @@ receipt or from the plan the gate recorded is refused, an unfinished cutover bac
 unfinished one loses its update pin, so prune removes it, an unfinished migration starts again from the cutover
 backup, a promotion whose generation is no longer the newest is refused, after `promote` it swaps and starts,
 after `start` it verifies; an unfinished rollback runs again from its first step, a run whose failed verification
-is recorded but whose rollback did not begin goes through the same stop, question and `pre-restore` backup as
-`update rollback`, a halted run is verified again,
+is recorded but whose rollback did not begin, and a deploy whose step after the stop failed before its automatic
+rollback began, go through the same stop, question and `pre-restore` backup as `update rollback` and are rolled
+back, a halted run is verified again,
 and a verified run whose retire did not finish retires the older releases. A run that has not finished its stop is
 not resumed; `update abort` ends it. `kestrel update abort` ends an open run: before the promotion it starts the
 previous release on the unchanged replica and releases the pin on the cutover backup, after it it rolls back

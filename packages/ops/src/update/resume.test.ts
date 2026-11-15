@@ -218,6 +218,18 @@ describe("update resume", () => {
     expect(s.h.target.release.runtime).toBe("5.8.1");
   });
 
+  it("rolls back a deploy whose step after the stop failed and whose automatic rollback was cut off before it began, as its message says", async () => {
+    const s = await scenario();
+    const deployed = await deployUntil(s, "promote");
+    await deployed.ctx.journal.record("swap", "failed", { phase: "deploy", error: "cf exited 1" });
+    const { ctx, run } = await continueRun(s, deployed.runId, "update resume", { steps: { verify: verdict("passed") } });
+    expect(run.state).toBe("down");
+    const outcome = await resume(ctx, run);
+    expect(outcome, outcome.message).toMatchObject({ exitCode: UPDATE_EXIT.rolledBack, state: "rolled-back" });
+    expect(s.h.target.release.runtime).toBe("5.8.1");
+    expect((await runOf(s, deployed.runId)).records.find((r) => r.step === "rollback" && r.state === "started")?.data).toMatchObject({ reason: "automatic" });
+  });
+
   it("runs an interrupted rollback again from its first step", async () => {
     const s = await scenario();
     const violations = guardStarts(s);
