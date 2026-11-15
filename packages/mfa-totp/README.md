@@ -36,7 +36,9 @@ secrets and codes keep working, and each secret is sealed under the new key the 
 passes. A factor no key opens answers every code as wrong — its owner needs a reset or a recovery
 code stored under a listed key — while accounts without a factor sign in as before.
 Recovery codes are stored only as HMAC-SHA-256 digests under a key derived from `secretKey`, so a copy of
-the database gives nothing to compute. A code is accepted for the current time step and one on either side,
+the database gives nothing to compute. Blanks and hyphens in a code are ignored, so `123 456` and `123-456`
+are read as `123456` the way authenticator apps show it, and recovery and enrollment codes are read without
+regard to case. A code is accepted for the current time step and one on either side,
 and never twice: the last accepted step is kept per account, and every change to a factor is conditional on
 the version it read, so two requests with the same code cannot both pass.
 

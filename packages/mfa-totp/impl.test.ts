@@ -82,6 +82,20 @@ describe("mfa/totp checks", () => {
     expect(expectOk(await env.mfa.check(ALICE, codeAt(secret, env.now(), 1)))).toEqual({ kind: "pass" });
   });
 
+  it("accepts a time-based code typed with spaces or a hyphen between its digits, and does not count it as a wrong code", async () => {
+    const env = await setup();
+    const spaced = (code: string) => `${code.slice(0, 3)} ${code.slice(3)}`;
+    const started = expectOk(await env.mfa.startSetup(ALICE));
+    expect(expectOk(await env.mfa.check(ALICE, spaced(codeAt(started.secret, env.now()))))).toMatchObject({ kind: "pass" });
+    env.advance(30_000);
+    expect(expectOk(await env.mfa.check(ALICE, spaced(codeAt(started.secret, env.now()))))).toEqual({ kind: "pass" });
+    env.advance(30_000);
+    const code = codeAt(started.secret, env.now());
+    expect(expectOk(await env.mfa.check(ALICE, ` ${code.slice(0, 3)}-${code.slice(3)} `))).toEqual({ kind: "pass" });
+    const [row] = expectOk(await env.db.findMany<{ failures: number }>(FACTORS, {})).items;
+    expect(row?.failures).toBe(0);
+  });
+
   it("accepts a recovery code once, in any spelling", async () => {
     const env = await setup();
     const { recoveryCodes } = await enroll(env);

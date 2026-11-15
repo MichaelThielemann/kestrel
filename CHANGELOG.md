@@ -2152,6 +2152,8 @@ Net changes since 5.8.2.
   `auth.failed`.
 - `mfa-totp`: the 403 `ENROLLMENT_CODE_REQUIRED` of `mfa.startSetup` carries `details.enrollmentCodeGiven`,
   `false` when the body held no enrollment code and `true` when it held a wrong one.
+- `mfa-totp`: `mfa.check` ignores blanks and hyphens inside a time-based code, so a code typed as `123 456` or
+  `123-456`, the way authenticator apps show it, passes and does not count towards the factor's lock.
 
 ### Fixed
 

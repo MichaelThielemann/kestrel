@@ -263,7 +263,7 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
       const found = await factorOf(identity.id);
       if (isErr(found)) return found;
       const row = found.value !== null && found.value.secret !== "" ? found.value : null;
-      const given = code?.trim() ?? "";
+      const given = code?.replace(/[\s-]/g, "") ?? "";
       const known = origin.knownDevice === true;
 
       if (row !== null && given !== "") {
