@@ -98,13 +98,13 @@ export async function cleanup(ctx: UpdateContext, run: UpdateRun, options: Clean
     return outcome(ctx, run.runId, UPDATE_EXIT.refused, `cleanup cannot tell which originals are unreferenced: ${messageOf(error)}`, run.state);
   }
   const bytes = candidates.reduce((n, entry) => n + entry.size, 0);
-  const summary = fixedText`${candidates.length} original(s), ${(bytes / 1024 / 1024).toFixed(1)} MiB, that no row references and the cutover backup ${literal(cutover)} holds`;
-  ctx.out.info(`cleanup ${options.dryRun ? "would delete" : "deletes"} ${summary}`);
+  const summary = fixedText`${candidates.length} original(s), ${literal((bytes / 1024 / 1024).toFixed(1))} MiB, that no row references and the cutover backup ${literal(cutover)} holds`;
+  ctx.out.info(fixedText`cleanup ${options.dryRun ? literal("would delete") : literal("deletes")} ${summary}`);
   for (const entry of candidates.slice(0, 20)) ctx.out.info(`  ${entry.key}`);
-  if (options.dryRun) return outcome(ctx, run.runId, UPDATE_EXIT.done, `dry run: ${summary}`, run.state);
+  if (options.dryRun) return outcome(ctx, run.runId, UPDATE_EXIT.done, fixedText`dry run: ${summary}`, run.state);
   await ctx.journal.record("cleanup-check", "done", { phase: "cleanup", acceptedAt: accept.at, earliest, candidates: candidates.length, bytes });
   try {
-    if (candidates.length > 0) await confirm(ctx.answers, "cleanup-delete", `delete ${summary}`);
+    if (candidates.length > 0) await confirm(ctx.answers, "cleanup-delete", fixedText`delete ${summary}`);
     for (const entry of candidates) await ctx.app.delete(entry.key);
     await ctx.journal.record("cleanup-delete", "done", { deleted: candidates.map((entry) => entry.key) });
   } catch (error) {

@@ -81,6 +81,11 @@ export function fixedText(literals: TemplateStringsArray, ...values: ReadonlyArr
   return text;
 }
 
+/** Joins lines with line breaks into one text that keeps the fixed text of every line composed by {@link fixedText}. */
+export function fixedLines(lines: readonly string[]): string {
+  return lines.reduce((text, line, i) => (i === 0 ? fixedText`${line}` : fixedText`${text}\n${line}`), "");
+}
+
 const NAME_CHARACTER = "[\\p{L}\\p{N}_./-]";
 
 function token(secret: string): RegExp {

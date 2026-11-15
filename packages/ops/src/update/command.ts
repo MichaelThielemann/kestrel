@@ -108,7 +108,7 @@ function formatMs(ms: number): string {
 async function openRun(ctx: UpdateContext, requested: string | null): Promise<UpdateRun> {
   const run = requested === null ? await latestDeployRun(ctx, ctx.envName) : await readUpdateRun(ctx, requested);
   if (run === null) throw new OpsError(fixedText`environment ${literal(ctx.envName)} has no update run to continue; a deploy starts one`, 1, "--run");
-  if (run.env !== ctx.envName) throw usage(`update run ${run.runId} belongs to environment ${run.env}, not ${ctx.envName}`, "--run");
+  if (run.env !== ctx.envName) throw usage(fixedText`update run ${literal(run.runId)} belongs to environment ${literal(run.env)}, not ${literal(ctx.envName)}`, "--run");
   return run;
 }
 

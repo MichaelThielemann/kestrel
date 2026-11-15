@@ -1,4 +1,5 @@
 import { OpsError } from "./errors.ts";
+import { fixedText, literal } from "./redact.ts";
 
 /**
  * Stable ids of the questions the tool can ask. `confirm`, `prune-delete` and `update-stop` have a safe default that
@@ -32,19 +33,23 @@ export interface AnswerSource {
   prompt?: Prompt;
 }
 
-/** Asks question `id`; resolves when the answer is yes or accept, throws an {@link OpsError} otherwise. */
+/**
+ * Asks question `id`; resolves when the answer is yes or accept, throws an {@link OpsError} otherwise. `text` is
+ * best composed with {@link fixedText}, so a credential equal to a word of the question leaves it as written.
+ */
 export async function confirm(source: AnswerSource, id: QuestionId, text: string): Promise<void> {
   const given = source.answers[id];
   const accepted = (value: string): boolean => /^(y|yes|accept)$/i.test(value.trim());
+  const name = literal(id);
   if (given !== undefined) {
     if (accepted(given)) return;
-    throw new OpsError(`stopped: the answers file answers "${id}" with "${given}"`, 1, id);
+    throw new OpsError(fixedText`stopped: the answers file answers "${name}" with "${given}"`, 1, id);
   }
   if (!QUESTIONS[id].risky && source.yes) return;
   if (source.prompt) {
-    const answer = await source.prompt(`${text}\n${QUESTIONS[id].risky ? 'Type "accept" to continue' : "Continue? [y/N]"} (${id}): `);
+    const answer = await source.prompt(fixedText`${text}\n${QUESTIONS[id].risky ? literal('Type "accept" to continue') : literal("Continue? [y/N]")} (${name}): `);
     if (QUESTIONS[id].risky ? answer.trim().toLowerCase() === "accept" : accepted(answer)) return;
-    throw new OpsError(`stopped at "${id}"`, 1, id);
+    throw new OpsError(fixedText`stopped at "${name}"`, 1, id);
   }
-  throw new OpsError(`stopped: "${id}" needs an answer${QUESTIONS[id].risky ? ` ("${id}": "accept" in --answers; --yes does not answer it)` : " (--yes or --answers)"}. ${text}`, 1, id);
+  throw new OpsError(fixedText`stopped: "${name}" needs an answer${QUESTIONS[id].risky ? fixedText` ("${name}": "accept" in --answers; --yes does not answer it)` : literal(" (--yes or --answers)")}. ${text}`, 1, id);
 }

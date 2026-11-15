@@ -17,7 +17,7 @@ import { reportedVersions, runtimeOf } from "./plan.ts";
 import { stoppedAfterRollback } from "./status.ts";
 import type { ConfigurationRestore, RecordedConfiguration } from "./target.ts";
 import { OPEN_STATES, UPDATE_EXIT, type DerivedReport, type RollbackReason, type RollbackResult, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
-import { fixedText, literal } from "../redact.ts";
+import { fixedLines, fixedText, literal } from "../redact.ts";
 
 /** The table a rollback adds to the database it promotes for a release before 6, holding one marker row per rollback. */
 export const PROVENANCE_TABLE = "kestrel_ops_provenance";
@@ -374,13 +374,13 @@ async function writesSinceStart(ctx: UpdateContext, promoted: string, since: num
 }
 
 function lossLines(loss: LossReport | null, since: number): string[] {
-  if (loss === null) return ["what the rollback discards cannot be listed: the current database could not be read"];
-  const lines = [`changes since ${new Date(since).toISOString()} that the rollback discards or reverts:`];
-  for (const [table, d] of Object.entries(loss.tables)) lines.push(`  ${table}: ${d.added} newer row(s) dropped, ${d.changed} changed row(s) reverted, ${d.removed} deleted row(s) back`);
-  if (loss.auditEntriesAfter > 0) lines.push(`  audit entries after the cutover: ${loss.auditEntriesAfter}`);
+  if (loss === null) return [fixedText`what the rollback discards cannot be listed: the current database could not be read`];
+  const lines = [fixedText`changes since ${literal(new Date(since).toISOString())} that the rollback discards or reverts:`];
+  for (const [table, d] of Object.entries(loss.tables)) lines.push(fixedText`  ${table}: ${d.added} newer row(s) dropped, ${d.changed} changed row(s) reverted, ${d.removed} deleted row(s) back`);
+  if (loss.auditEntriesAfter > 0) lines.push(fixedText`  audit entries after the cutover: ${loss.auditEntriesAfter}`);
   const a = loss.access;
-  lines.push(`access changes: ${hasAccessChanges(loss) ? "" : "none"}`);
-  for (const [label, users] of [["created", a.created], ["deleted", a.deleted], ["deactivated", a.deactivated], ["roles changed", a.rolesChanged], ["second factor reset", a.mfaReset]] as const) if (users.length > 0) lines.push(`  ${label}: ${users.join(", ")}`);
+  lines.push(fixedText`access changes: ${hasAccessChanges(loss) ? literal("") : literal("none")}`);
+  for (const [label, users] of [["created", a.created], ["deleted", a.deleted], ["deactivated", a.deactivated], ["roles changed", a.rolesChanged], ["second factor reset", a.mfaReset]] as const) if (users.length > 0) lines.push(fixedText`  ${literal(label)}: ${users.join(", ")}`);
   return lines;
 }
 
@@ -388,21 +388,21 @@ async function typedName(ctx: UpdateContext, text: string): Promise<string | nul
   const given = ctx.answers.answers["rollback-accepted"];
   if (given !== undefined) return given.trim();
   if (ctx.answers.prompt === undefined) return null;
-  return (await ctx.answers.prompt(`${text}\nType the environment's name to roll back (rollback-accepted): `)).trim();
+  return (await ctx.answers.prompt(fixedText`${text}\nType the environment's name to roll back (rollback-accepted): `)).trim();
 }
 
 const startedRelease = (run: UpdateRun): boolean => run.records.some((r) => r.step === "accept" && r.state === "done") || (run.promoted !== null && run.records.some((r) => r.phase === "deploy" && r.step === "start"));
 
 async function lossAfterStop(ctx: UpdateContext, run: UpdateRun, manifest: Manifest): Promise<string[] | null> {
-  const sessions = "every login session ends; everyone signs in again";
+  const sessions = fixedText`every login session ends; everyone signs in again`;
   const acceptRecord = run.records.filter((r) => r.step === "accept" && r.state === "done").at(-1);
-  if (acceptRecord !== undefined) return [`run ${run.runId} was accepted ${new Date(acceptRecord.at).toISOString()}; rolling back discards everything written since the cutover backup ${manifest.id}`, ...lossLines(await liveLoss(ctx, manifest), manifest.source.lastFrameAt ?? manifest.createdAt), sessions];
+  if (acceptRecord !== undefined) return [fixedText`run ${literal(run.runId)} was accepted ${literal(new Date(acceptRecord.at).toISOString())}; rolling back discards everything written since the cutover backup ${literal(manifest.id)}`, ...lossLines(await liveLoss(ctx, manifest), manifest.source.lastFrameAt ?? manifest.createdAt), sessions];
   const start = run.records.find((r) => r.phase === "deploy" && r.step === "start");
   if (start === undefined || run.promoted === null) return null;
   const since = typeof start.data.startedAt === "number" ? start.data.startedAt : start.at;
   const loss = await writesSinceStart(ctx, run.promoted.generation, since);
   if (loss?.identical === true) return null;
-  return [`the new release of run ${run.runId} has run since ${new Date(since).toISOString()} and is not accepted; rolling back discards what it wrote since then`, ...lossLines(loss, since), sessions];
+  return [fixedText`the new release of run ${literal(run.runId)} has run since ${literal(new Date(since).toISOString())} and is not accepted; rolling back discards what it wrote since then`, ...lossLines(loss, since), sessions];
 }
 
 /**
@@ -430,7 +430,7 @@ export type LossMode = "ask" | "backup";
 export async function guardRollback(ctx: UpdateContext, run: UpdateRun, manifest: Manifest, mode: LossMode): Promise<{ ok: true } | { ok: false; message: string }> {
   if (!startedRelease(run)) return { ok: true };
   let stopped = false;
-  const restart = async (): Promise<string> => (stopped ? ((await startTarget(ctx).then(() => true, () => false)) ? "; the app was started again" : "; the app stays stopped and starting it again failed") : "");
+  const restart = async (): Promise<string> => (stopped ? ((await startTarget(ctx).then(() => true, () => false)) ? fixedText`; the app was started again` : fixedText`; the app stays stopped and starting it again failed`) : "");
   try {
     const stop = await stopTarget(ctx);
     stopped = stop.wasRunning;
@@ -440,10 +440,11 @@ export async function guardRollback(ctx: UpdateContext, run: UpdateRun, manifest
     if (lines !== null) {
       for (const line of lines) ctx.out.info(line);
       if (mode === "ask") {
-        const name = await typedName(ctx, lines.join("\n"));
+        const name = await typedName(ctx, fixedLines(lines));
         if (name !== ctx.envName) {
-          const why = name === null ? `stopped: "rollback-accepted" needs the environment's name ${ctx.envName} as its answer ("rollback-accepted": "${ctx.envName}" in --answers; --yes does not answer it)` : `stopped: "rollback-accepted" was answered with "${name}", not the environment's name`;
-          return { ok: false, message: `${why}${await restart()}` };
+          const env = literal(ctx.envName);
+          const why = name === null ? fixedText`stopped: "rollback-accepted" needs the environment's name ${env} as its answer ("rollback-accepted": "${env}" in --answers; --yes does not answer it)` : fixedText`stopped: "rollback-accepted" was answered with "${name}", not the environment's name`;
+          return { ok: false, message: fixedText`${why}${await restart()}` };
         }
       }
     }
@@ -451,7 +452,7 @@ export async function guardRollback(ctx: UpdateContext, run: UpdateRun, manifest
     ctx.out.info(fixedText`pre-restore backup ${literal(safety.id)} written and verified`);
     return { ok: true };
   } catch (error) {
-    return { ok: false, message: `the rollback stopped before it changed the store: ${messageOf(error)}${await restart()}` };
+    return { ok: false, message: fixedText`the rollback stopped before it changed the store: ${messageOf(error)}${await restart()}` };
   }
 }
 

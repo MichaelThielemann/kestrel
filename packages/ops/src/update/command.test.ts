@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -215,6 +216,20 @@ describe("kestrel update on the command line", () => {
     const result = await run(h, ["accept", "--json"], { updateCommands: { accept: async (ctx) => outcome(ctx, 0) } });
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("has no update run to continue");
+  });
+
+  it("names the environment of a run that belongs to another one as written when a credential equals it", async () => {
+    const h = harness();
+    const file = join(h.root, "kestrel.environments.json");
+    const environments = boundaryCast<{ environments: { prod: { storage: Record<string, unknown> } } }>(JSON.parse(readFileSync(file, "utf8")), "json");
+    environments.environments.prod.storage.credentials = { accessKeyId: { env: "TOOL_ACCESS_KEY" }, secretAccessKey: { env: "TOOL_SECRET_KEY" } };
+    writeFileSync(file, JSON.stringify(environments));
+    const ctx = await h.context({ run: { runId: "elsewhere", lastSeq: 0 } });
+    await ctx.journal.record(RUN_STEP, "started", { command: "update deploy", env: "staging", phase: "deploy" });
+    const result = await run(h, ["accept", "--run", "elsewhere"], { env: { TOOL_ACCESS_KEY: "update", TOOL_SECRET_KEY: "prod" } });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("error: --run: update run elsewhere belongs to environment staging, not prod");
+    expect(result.stderr).not.toContain("[redacted]");
   });
 
   it("gives every command the update steps the caller replaces", async () => {

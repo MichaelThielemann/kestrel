@@ -36,7 +36,7 @@ export async function abort(ctx: UpdateContext, run: UpdateRun): Promise<UpdateO
     const manifest = await readManifest(ctx, run.cutoverBackup);
     if (manifest === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`the cutover backup ${literal(run.cutoverBackup)} of run ${literal(run.runId)} does not exist or is incomplete`, run.state);
     const guarded = await guardRollback(ctx, run, manifest, "ask");
-    if (!guarded.ok) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `not aborted: ${guarded.message}`, run.state);
+    if (!guarded.ok) return outcome(ctx, run.runId, UPDATE_EXIT.refused, fixedText`not aborted: ${guarded.message}`, run.state);
   }
   await ctx.journal.record("abort", "started", { phase: "abort", state: run.state });
   if (promoted) {

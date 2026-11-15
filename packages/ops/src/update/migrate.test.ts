@@ -183,6 +183,8 @@ describe("the migration of the cutover copy", () => {
     const error = await migrateCopy(ctx, { cutoverBackup: backupId, plan: plan([{ module: "images/default", id: "images-default:variant-slots", kind: "auto", blobWrites: false, pending: 0, introducedIn: "6.0.0", stored: null }]), outFile: join(workDir(), "migrated.sqlite") }).catch((caught: unknown) => caught);
     expect(error instanceof OpsError ? [error.exitCode, error.message] : error).toEqual([1, expect.stringContaining("media-default:id-key-layout")]);
     expect(h.bucket?.writes.slice(writes).filter((w) => !w.key.startsWith("kestrel-backups/"))).toEqual([]);
+    for (const secret of ["update", "prepare", "layout"]) ctx.redactor.add(secret);
+    expect(ctx.redactor.apply(error instanceof Error ? error.message : "")).toMatch(/media-default:id-key-\[redacted\].*; run update prepare again$/);
   }, 120_000);
 
   it("refuses a cutover backup whose database differs from its manifest", async () => {

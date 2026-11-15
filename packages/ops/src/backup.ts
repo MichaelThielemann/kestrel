@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { messageOf, REPLICATION_PACKAGE, runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
+import { fixedLines, fixedText, literal } from "./redact.ts";
 import { openRuns, listRuns, RUN_STALE_MS } from "./journal.ts";
 import { Interrupted } from "./interrupt.ts";
 import { heldLocks } from "./lock.ts";
@@ -53,15 +54,15 @@ export async function acceptSeal(ctx: OpsContext, seal: SealReport, stoppedAt: n
   const lastFrame = new Date(seal.lastFrameAt).toISOString();
   const lines = [
     seal.state === "unsupported"
-      ? `seal unsupported (runtime ${seal.runtime ?? `before ${SEALING_MAJOR}`}): the replica cannot prove the stop shipped every frame`
+      ? fixedText`seal unsupported (runtime ${seal.runtime ?? fixedText`before ${SEALING_MAJOR}`}): the replica cannot prove the stop shipped every frame`
       : seal.state === "unknown"
-        ? `seal unknown: generation ${seal.generation} has no seal and the running replication runtime version is unknown; a runtime before ${SEALING_MAJOR} writes none, a later one stopped without teardown`
-        : `unsealed: generation ${seal.generation} has no seal; the stop went without teardown`,
-    `last shipped segment ${lastFrame}, stopped ${new Date(stoppedAt).toISOString()}`,
+        ? fixedText`seal unknown: generation ${literal(seal.generation)} has no seal and the running replication runtime version is unknown; a runtime before ${SEALING_MAJOR} writes none, a later one stopped without teardown`
+        : fixedText`unsealed: generation ${literal(seal.generation)} has no seal; the stop went without teardown`,
+    fixedText`last shipped segment ${literal(lastFrame)}, stopped ${literal(new Date(stoppedAt).toISOString())}`,
     ...evidence,
   ];
   for (const line of lines) ctx.out.warn(line);
-  await confirm(ctx.answers, "unsealed-stop", lines.join("\n"));
+  await confirm(ctx.answers, "unsealed-stop", fixedLines(lines));
 }
 
 /**
@@ -612,7 +613,7 @@ export async function prune(ctx: OpsContext, dryRun: boolean): Promise<PruneResu
   }
   const due = remove.length > 0 || objects.length > 0;
   if (due) {
-    await confirm(ctx.answers, "prune-delete", `prune removes ${remove.length} backup(s) and ${objects.length} object(s)`);
+    await confirm(ctx.answers, "prune-delete", fixedText`prune removes ${remove.length} backup(s) and ${objects.length} object(s)`);
     for (const id of remove) for (const info of await ctx.backups.list(ctx.location + keys.backupDir(id))) await ctx.backups.delete(info.key);
     for (const key of objects) await ctx.backups.delete(key);
   }

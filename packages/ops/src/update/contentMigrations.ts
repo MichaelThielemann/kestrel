@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { messageOf } from "../context.ts";
 import { OpsError } from "../errors.ts";
+import { fixedText, literal } from "../redact.ts";
 import { tables } from "../sqlite.ts";
 import type { UpdateContext } from "./types.ts";
 
@@ -96,7 +97,7 @@ export async function runContentMigrations(ctx: UpdateContext, input: ContentMig
   const pending = input.expected.filter((id) => !before.has(id));
   if (pending.length === 0) return { ran: false, applied: [], bootMs: null };
   const boot = ctx.update.localBoot;
-  if (boot === undefined) throw new OpsError(`content migrations ${pending.join(", ")} are pending, and update.localBoot of ${ctx.envName} names no local start of the release to apply them with`, 2, "update.localBoot");
+  if (boot === undefined) throw new OpsError(fixedText`content migrations ${pending.join(", ")} are pending, and update.localBoot of ${literal(ctx.envName)} names no local start of the release to apply them with`, 2, "update.localBoot");
   mkdirSync(input.blobsDir, { recursive: true });
   const dir = resolve(ctx.release.dir, boot.dir);
   const port = await freePort();

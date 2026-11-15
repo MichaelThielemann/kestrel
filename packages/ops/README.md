@@ -105,11 +105,12 @@ from.
   which it stands as a token of its own, such as `minio:minioadmin`, is kept as a fingerprint. Their schema, keys, names and every other field are written as they are; only the free-text fields
   `message`, `error`, `failure`, `detail` and `problems` are masked, since a failed call may quote what it was
   sent. A credential that is part of a fixed text, such as an access key `kestrel`, therefore never changes a
-  schema, key or name. In terminal lines and messages, what the tool writes itself (command names, flags,
-  environment names, run, backup and droplet ids) stays as written even when a credential equals one of its
-  words, so `next: kestrel update accept --env prod --run …` stays copyable with the access key `kestrel`; a
-  credential is masked wherever it occurs in text from elsewhere, such as an error of the store or an answer of
-  the platform, and a credential of 16 characters or more is masked everywhere. `run.next` of
+  schema, key or name. In terminal lines, questions and messages, what the tool writes itself (questions and
+  their ids, command names, flags, environment names, run, backup and droplet ids) stays as written even when a
+  credential equals one of its words, so `next: kestrel update accept --env prod --run …` stays copyable with
+  the access key `kestrel`; a credential is masked wherever it occurs in text from elsewhere, such as an answer
+  to a question, an error of the store, an answer of the platform or a table, user or host name read from the
+  data, and a credential of 16 characters or more is masked everywhere. `run.next` of
   `update status --json` names the next command for a pipeline.
 
 - `update` (optional) configures updates: `release.dir` (default `.`), the directory a target stages as the new

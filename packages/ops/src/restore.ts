@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { acceptSeal, createBackup, entryCountMismatch, readManifest, verifyBackup, type BackupMode } from "./backup.ts";
 import { messageOf, recordQuietly, runtimeVersion, startTarget, stopTarget, type OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
+import { fixedLines, fixedText, literal } from "./redact.ts";
 import { Interrupted } from "./interrupt.ts";
 import { fromJsonl, hex, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
@@ -121,9 +122,9 @@ export async function restoreDelivery(ctx: OpsContext, site: readonly SiteEntry[
 }
 
 function describeLoss(ctx: OpsContext, loss: LossReport): string[] {
-  const lines = [`changes since ${new Date(loss.since).toISOString()} that the restore discards or reverts:`];
-  for (const [table, d] of Object.entries(loss.tables)) lines.push(`  ${table}: ${d.added} newer row(s) dropped, ${d.changed} changed row(s) reverted, ${d.removed} deleted row(s) back`);
-  if (loss.auditEntriesAfter > 0) lines.push(`  audit entries after the backup: ${loss.auditEntriesAfter}`);
+  const lines = [fixedText`changes since ${literal(new Date(loss.since).toISOString())} that the restore discards or reverts:`];
+  for (const [table, d] of Object.entries(loss.tables)) lines.push(fixedText`  ${table}: ${d.added} newer row(s) dropped, ${d.changed} changed row(s) reverted, ${d.removed} deleted row(s) back`);
+  if (loss.auditEntriesAfter > 0) lines.push(fixedText`  audit entries after the backup: ${loss.auditEntriesAfter}`);
   const a = loss.access;
   const access: Array<[string, string[]]> = [
     ["users created after the backup, removed", a.created],
@@ -132,9 +133,9 @@ function describeLoss(ctx: OpsContext, loss: LossReport): string[] {
     ["users whose roles changed, old roles back", a.rolesChanged],
     ["second factors reset after the backup, old factor back", a.mfaReset],
   ];
-  lines.push("access changes:");
-  if (!hasAccessChanges(loss)) lines.push("  none");
-  for (const [label, users] of access) if (users.length > 0) lines.push(`  ${label}: ${users.join(", ")}`);
+  lines.push(fixedText`access changes:`);
+  if (!hasAccessChanges(loss)) lines.push(fixedText`  none`);
+  for (const [label, users] of access) if (users.length > 0) lines.push(fixedText`  ${literal(label)}: ${users.join(", ")}`);
   for (const line of lines) ctx.out.info(line);
   return lines;
 }
@@ -156,7 +157,7 @@ export async function restoreBackup(ctx: OpsContext, options: RestoreOptions): P
   if (!check.ok) throw new OpsError(`backup ${manifest.id} failed verification: ${check.problems.map((p) => `${p.element}: ${p.message}`).join("; ")}`, 1, check.problems[0]?.element);
   await ctx.journal.record("restore", "started", { backupId: manifest.id });
 
-  await confirm(ctx.answers, "confirm", `restore ${manifest.id} (${new Date(manifest.createdAt).toISOString()}) over ${ctx.envName}: the app stops now`);
+  await confirm(ctx.answers, "confirm", fixedText`restore ${literal(manifest.id)} (${literal(new Date(manifest.createdAt).toISOString())}) over ${literal(ctx.envName)}: the app stops now`);
   const stop = await stopTarget(ctx);
   const state: RestoreState = { changed: false, started: false, safetyBackup: null };
   try {
@@ -219,17 +220,17 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   const unchangedStore = originals.length === 0 && delivery.written.length === 0 && delivery.removed.length === 0;
   let loss: LossReport | null = null;
   if (current.kind === "unreadable") {
-    const lines = [`the current database cannot be read: ${current.reason}`, "the restore cannot report what it discards, and its pre-restore backup holds the originals and delivery keys but no database"];
+    const lines = [fixedText`the current database cannot be read: ${current.reason}`, fixedText`the restore cannot report what it discards, and its pre-restore backup holds the originals and delivery keys but no database`];
     for (const line of lines) ctx.out.warn(line);
     await ctx.journal.record("loss-report", "failed", { error: current.reason });
-    await confirm(ctx.answers, "unreadable-current", lines.join("\n"));
-    if (ctx.env.production) await confirm(ctx.answers, "access-changes", [...lines, "access changes cannot be listed; every login session ends; everyone signs in again"].join("\n"));
+    await confirm(ctx.answers, "unreadable-current", fixedLines(lines));
+    if (ctx.env.production) await confirm(ctx.answers, "access-changes", fixedLines([...lines, fixedText`access changes cannot be listed; every login session ends; everyone signs in again`]));
   } else {
     loss = lossReport(current.file, restoredDb, manifest.source.lastFrameAt ?? manifest.createdAt);
     const lines = describeLoss(ctx, loss);
     await ctx.journal.record("loss-report", "done", { tables: loss.tables, auditEntriesAfter: loss.auditEntriesAfter, access: loss.access });
     const noop = loss.identical && unchangedStore && current.unfinished.length === 0;
-    if (!noop && (ctx.env.production || hasAccessChanges(loss))) await confirm(ctx.answers, "access-changes", [...lines, "every login session ends; everyone signs in again"].join("\n"));
+    if (!noop && (ctx.env.production || hasAccessChanges(loss))) await confirm(ctx.answers, "access-changes", fixedLines([...lines, fixedText`every login session ends; everyone signs in again`]));
   }
 
   const referenced = new Set(blobs.map((b) => b.key));
@@ -451,7 +452,7 @@ export async function restoreToLocal(ctx: OpsContext, options: LocalRestoreOptio
     const first = twins[0];
     if (first !== undefined && ignoresCase(dir)) throw new OpsError(`${dir} does not tell apart names that differ only in case, and the backup holds originals whose keys do: ${twins.map((pair) => pair.join(" and ")).join("; ")}; restore them into a directory on a case-sensitive file system`, 1, first[0]);
     const bytes = blobs.reduce((n, b) => n + b.size, 0);
-    await confirm(ctx.answers, "confirm", `download ${blobs.length} original(s), ${(bytes / 1024 / 1024).toFixed(1)} MiB, into ${dir}/blobs`);
+    await confirm(ctx.answers, "confirm", fixedText`download ${blobs.length} original(s), ${literal((bytes / 1024 / 1024).toFixed(1))} MiB, into ${dir}/blobs`);
   }
   const createdDirs: string[] = [];
   const makeDir = (path: string): void => {

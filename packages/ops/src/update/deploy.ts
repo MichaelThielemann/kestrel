@@ -151,7 +151,7 @@ async function failedStop(ctx: UpdateContext, error: unknown): Promise<UpdateOut
   const now = await ctx.target.status().catch(() => null);
   const runs = now?.state === "started";
   await record(ctx, "stop", "failed", { error: messageOf(error), appStopped: !runs }).catch(() => undefined);
-  if (runs) return outcomeOf(ctx, UPDATE_EXIT.refused, `the deploy stopped at stop: ${messageOf(error)}; the previous release runs, nothing else changed`);
+  if (runs) return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`the deploy stopped at stop: ${messageOf(error)}; the previous release runs, nothing else changed`);
   return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`the deploy failed at stop: ${messageOf(error)}; the app ${now === null ? literal("may be stopped (its state cannot be read)") : literal("is stopped")} and did not start again; do not start it by hand while the run is open; run update abort --env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}`);
 }
 
@@ -335,6 +335,6 @@ export async function continueDeploy(ctx: UpdateContext, run: UpdateRun): Promis
 async function releaseUnfinishedBackups(ctx: UpdateContext, run: UpdateRun): Promise<void> {
   for (const r of run.records) {
     const id = r.data.backupId;
-    if (r.phase === "deploy" && r.step === "backup" && r.state === "started" && typeof id === "string" && id !== run.cutoverBackup && (await releaseUpdatePin(ctx, id, run.runId))) ctx.out.info(`released the update pin of the unfinished cutover backup ${id}`);
+    if (r.phase === "deploy" && r.step === "backup" && r.state === "started" && typeof id === "string" && id !== run.cutoverBackup && (await releaseUpdatePin(ctx, id, run.runId))) ctx.out.info(fixedText`released the update pin of the unfinished cutover backup ${literal(id)}`);
   }
 }

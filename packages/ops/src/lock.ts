@@ -3,6 +3,7 @@ import type { OpsContext } from "./context.ts";
 import { OpsError } from "./errors.ts";
 import { confirm } from "./questions.ts";
 import { jsonBytes, keys } from "./layout.ts";
+import { fixedText, literal } from "./redact.ts";
 import type { ObjectStore } from "./store.ts";
 
 /** A held lock as the trace in the backup location shows it. */
@@ -47,6 +48,8 @@ export async function heldLocks(store: ObjectStore, location: string, now: numbe
   return out;
 }
 
+const holder = (lock: HeldLock): string => fixedText`${literal(lock.runId)} (${literal(lock.command)}) on ${lock.host}, pid ${lock.pid}`;
+
 /** A lock this run took. */
 export interface Lock {
   release(): Promise<void>;
@@ -60,7 +63,7 @@ export interface Lock {
 export async function acquireLock(store: ObjectStore, location: string, runId: string, command: string, clock: () => number): Promise<Lock> {
   const others = (await heldLocks(store, location, clock())).filter((l) => l.runId !== runId);
   const other = others[0];
-  if (other) throw new OpsError(`another run holds the lock: ${other.runId} (${other.command}) on ${other.host}, pid ${other.pid}, since ${new Date(other.since).toISOString()}; once that process no longer runs, run the command again with --break-lock and the answer "break-lock": "accept"`, 1, "lock");
+  if (other) throw new OpsError(fixedText`another run holds the lock: ${holder(other)}, since ${literal(new Date(other.since).toISOString())}; once that process no longer runs, run the command again with --break-lock and the answer "break-lock": "accept"`, 1, "lock");
   await store.put(location + keys.lock(runId, clock(), "start"), jsonBytes({ runId, command, host: hostname(), pid: process.pid, at: clock() }), { contentType: "application/json" });
   const timer = setInterval(() => {
     store.put(location + keys.lock(runId, clock(), "beat"), jsonBytes({ runId, at: clock() }), { contentType: "application/json" }).catch(() => undefined);
@@ -81,7 +84,7 @@ export async function acquireLock(store: ObjectStore, location: string, runId: s
 export async function breakLocks(ctx: Pick<OpsContext, "backups" | "location" | "clock" | "answers" | "journal">, runId: string): Promise<string[]> {
   const others = (await heldLocks(ctx.backups, ctx.location, ctx.clock())).filter((l) => l.runId !== runId);
   for (const other of others) {
-    await confirm(ctx.answers, "break-lock", `release the lock of run ${other.runId} (${other.command}) on ${other.host}, pid ${other.pid}, last heartbeat ${new Date(other.lastBeat).toISOString()}; only when that run is no longer running`);
+    await confirm(ctx.answers, "break-lock", fixedText`release the lock of run ${holder(other)}, last heartbeat ${literal(new Date(other.lastBeat).toISOString())}; only when that run is no longer running`);
     await ctx.backups.put(ctx.location + keys.lock(other.runId, ctx.clock(), "released"), jsonBytes({ runId: other.runId, brokenBy: runId, at: ctx.clock() }), { contentType: "application/json" });
     await ctx.journal.record("break-lock", "done", { runId: other.runId });
   }

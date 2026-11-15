@@ -9,6 +9,7 @@ import { runShapeMigrations, STORAGE_VERSIONS, type BlobOps, type ModuleRun, typ
 import { readManifest } from "../backup.ts";
 import { messageOf } from "../context.ts";
 import { OpsError } from "../errors.ts";
+import { fixedText } from "../redact.ts";
 import { keys } from "../layout.ts";
 import { sha256, sha256File, tables } from "../sqlite.ts";
 import type { ObjectStore } from "../store.ts";
@@ -170,7 +171,7 @@ export async function migrateCopy(ctx: UpdateContext, input: MigrateInput): Prom
   const planned = new Set(input.plan.storage.map((m) => m.id));
   const preview = await shapeRun(ctx, storages, outFile, false);
   const unplanned = pendingIds(preview).filter((id) => !planned.has(id));
-  if (unplanned.length > 0) throw new OpsError(`the copy needs storage migrations the plan does not name: ${unplanned.join(", ")}; run update prepare again`, 1, "storage-migrations");
+  if (unplanned.length > 0) throw new OpsError(fixedText`the copy needs storage migrations the plan does not name: ${unplanned.join(", ")}; run update prepare again`, 1, "storage-migrations");
   await refuseUnsanitizedSvgs(ctx, storages, preview);
   const storage = await shapeRun(ctx, storages, outFile, true);
   const unfinished = storage.filter((m) => !FINISHED.has(m.state));

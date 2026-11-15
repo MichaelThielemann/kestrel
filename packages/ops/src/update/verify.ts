@@ -135,7 +135,7 @@ export async function concludeVerify(ctx: UpdateContext, phase: UpdatePhase, res
     const failure = result.checks.filter((c) => c.hard && !c.ok).map((c) => `${c.name}: ${c.detail}`).join("; ");
     if (guarded && run.cutoverBackup !== null) {
       const manifest = await readManifest(ctx, run.cutoverBackup);
-      const guard = manifest === null ? { ok: false as const, message: `the cutover backup ${run.cutoverBackup} does not exist or is incomplete` } : await guardRollback(ctx, run, manifest, "backup");
+      const guard = manifest === null ? { ok: false as const, message: fixedText`the cutover backup ${literal(run.cutoverBackup)} does not exist or is incomplete` } : await guardRollback(ctx, run, manifest, "backup");
       if (!guard.ok) return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`verification failed (${failure}) and the automatic rollback did not begin: ${guard.message}; run update resume --env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}, which stops the app again, asks before it discards what the release wrote and takes a safety backup first`);
     }
     let ended: RollbackResult["ended"];
