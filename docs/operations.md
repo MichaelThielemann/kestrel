@@ -43,7 +43,7 @@ prefix its credentials need:
 | `app.mediaPrefix` | yes | storage migrations write new keys, also as server-side copies (deploy); changed originals are copied back (rollback, restore) | no; only `update cleanup` removes originals |
 | `app.deliveryPrefix` | yes | the backup's keys are written back (rollback, restore) | yes: a rollback or restore removes the keys the backup does not hold |
 | `app.derivedPrefixes` | yes | no | no |
-| `backups.prefix` | yes | every command but `backup list`; `status` writes only short-lived probes under `probes/` and `.kestrel-clock/` | yes: the `retire` step of a verified deploy removes the code an earlier, closed run saved (`updates/<env>/runs/<run>/droplet-*`), and a copy into `objects/` that failed is removed again; `backup prune` and `update cleanup` remove backups, objects and saved code; the clock and protection probes under `.kestrel-clock/` and `probes/` are deleted again |
+| `backups.prefix` | yes | every command but `backup list` and `update status`; `status` writes only short-lived probes under `probes/` and `.kestrel-clock/` | yes: `backup prune` removes the backups that are due (`backups/<id>/`) and the objects no backup refers to (`objects/`), and on every run without `--dry-run`, before its `prune-delete` question and also when nothing is due, the entries under `recent/<day>/` older than a day; `update cleanup` and the `retire` step of a verified deploy remove the code saved for a closed run (`updates/<env>/runs/<run>/droplet-*`); a copy into `objects/` that failed is removed again; the clock and protection probes under `.kestrel-clock/` and `probes/` are deleted again |
 
 The store's clock is measured with a probe object that is written, listed and deleted again, under
 `.kestrel-clock/` on an S3-compatible store and `probes/` on any other. `update prepare` measures the clock of the
@@ -351,9 +351,12 @@ before the update.
 
 With `--json` every command prints one document with a `schema` field such as `kestrel-ops/update-deploy@1`,
 holding `exitCode`, `state`, `message` and the run's report. That document and every document the tool stores
-(journal, manifests, receipts, the recorded configuration) keep their values as they are and hold no credential's
-value; only error messages are masked where they quote a credential, so a credential that is part of a fixed text,
-such as the access key `kestrel`, changes none of them. The update questions are `update-stop` (before the
+(journal, manifests, receipts, the recorded configuration) hold no credential's value. Their schema, keys, names
+and every other field stay as they are; only the free-text fields `message`, `error`, `failure`, `detail` and
+`problems` are masked wherever a credential occurs in them as a string, also inside fixed text and in a message of
+success: with the access key `update`, the message of a verified deploy reads `verified; accept it with
+[redacted] accept --env prod, …`. A pipeline therefore takes the next command from `run.next` of
+`update status --json`, never from `message`. The update questions are `update-stop` (before the
 stop; `--yes` answers it), `unsealed-stop` (after the stop of a release that leaves no seal, such as one before 6;
 never answered by `--yes`; without an answer the previous release starts again and the deploy ends with exit 3),
 `break-lock` (with `--break-lock`; never answered by `--yes`), `rollback-accepted` (the environment's name, never

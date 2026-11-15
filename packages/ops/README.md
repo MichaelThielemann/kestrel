@@ -100,9 +100,12 @@ from.
   memory. Every line the tool writes to the terminal, questions included, passes a redactor that masks them,
   also where one is part of other text. The documents it stores (journal, manifests, verifications, receipts,
   the recorded configuration) and the `--json` output hold names, ids, keys and hashes, never a credential's
-  value, and are written as they are; only their free-text error messages (`message`, `error`, `failure`,
-  `detail`, `problems`) are masked, since a failed call may quote what it was sent. A credential that is part
-  of a fixed text, such as an access key `kestrel`, therefore never changes a stored document.
+  value. Their schema, keys, names and every other field are written as they are; only the free-text fields
+  `message`, `error`, `failure`, `detail` and `problems` are masked, since a failed call may quote what it was
+  sent, and there every occurrence of a credential is, also inside fixed text and in a message of success. A
+  credential that is part of a fixed text, such as an access key `kestrel`, therefore never changes a schema, key
+  or name; read the next command from `run.next` of
+  `update status --json`, not from `message`.
 
 - `update` (optional) configures updates: `release.dir` (default `.`), the directory a target stages as the new
   release, relative to the environments file; `localBoot`, the start of a release on this machine that applies
