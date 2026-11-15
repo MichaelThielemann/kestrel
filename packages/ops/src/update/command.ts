@@ -170,7 +170,7 @@ export async function runUpdate(argv: readonly string[], options: RunOptions = {
       ...base,
       target,
       update,
-      release: { dir: resolve(options.releaseRoot ?? root, update.release.dir), versions: releaseVersions(project.versions), lockfileSha256: project.lockfileSha256 },
+      release: { dir: resolve(options.releaseRoot ?? root, update.release.dir), projectDir: resolve(options.releaseRoot ?? root), versions: releaseVersions(project.versions), lockfileSha256: project.lockfileSha256 },
       host: options.host ?? {},
       run: { id: runId },
       steps: { ...defaultSteps(), ...options.updateSteps },

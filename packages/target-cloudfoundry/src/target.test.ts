@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { OpsError, writeBundle } from "@michaelthielemann/kestrel-ops";
@@ -455,13 +455,15 @@ describe("Cloud Foundry target", { timeout: 60_000 }, () => {
     expect(error.message).toContain("space");
   });
 
-  it("describes the app by guid, droplet and the names of its variables, never their values, and the installed runtime versions", async () => {
+  it("describes the app by guid, droplet and the names of its variables, never their values, and the installed runtime versions with the directory it read them from", async () => {
     mkdirSync(join(root, "node_modules", "@michaelthielemann", "kestrel-replication-sqlite"), { recursive: true });
     writeFileSync(join(root, "package.json"), JSON.stringify({ dependencies: { "@michaelthielemann/kestrel-replication-sqlite": "^6.0.0" } }));
     writeFileSync(join(root, "node_modules", "@michaelthielemann", "kestrel-replication-sqlite", "package.json"), JSON.stringify({ name: "@michaelthielemann/kestrel-replication-sqlite", version: "6.0.0" }));
     const facts = await (await target()).describe();
     expect(facts).toMatchObject({ kind: "cloudfoundry", app: API.name, appGuid: API.guid, org: "example-org", space: "dev", droplet: "d7c1a3e0-0000-4000-8000-000000000001", revision: { guid: "e2a4c6f8-0000-4000-8000-000000000003", version: 3 }, envNames: ["NODE_ENV", "STORAGE_SECRET"], packages: { "@michaelthielemann/kestrel-replication-sqlite": "6.0.0" } });
     expect(JSON.stringify(facts)).not.toContain(SECRET);
+    expect(facts.packagesFrom).toBe(resolve(root));
+    expect((await (await target({ dir: "deployed" })).describe()).packagesFrom).toBe(resolve(root, "deployed"));
     expect(namesOtherApp()).toEqual([]);
     cf.app(API.name).revision = null;
     expect((await (await target()).describe()).revision).toBeNull();

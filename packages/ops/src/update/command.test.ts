@@ -140,10 +140,11 @@ describe("kestrel update on the command line", () => {
     expect(deployed.stdout).toContain("rolled back\ndowntime 6 min 12 s\n");
     const [prepareCtx, deployCtx] = seen;
     expect(prepareCtx?.run.id).toBe(prepareCtx?.runId);
-    expect(prepareCtx?.release).toEqual({ dir: h.releaseDir, versions: { "@michaelthielemann/kestrel": "6.0.0", "@michaelthielemann/kestrel-ops": "6.0.0" }, lockfileSha256: "ab".repeat(32) });
+    expect(prepareCtx?.release).toEqual({ dir: h.releaseDir, projectDir: h.root, versions: { "@michaelthielemann/kestrel": "6.0.0", "@michaelthielemann/kestrel-ops": "6.0.0" }, lockfileSha256: "ab".repeat(32) });
     expect(prepareCtx?.host).toEqual(host);
     expect(prepareCtx?.update.sealTimeoutSeconds).toBe(1);
     expect(deployCtx?.release.dir).toBe(join(h.root, "artifact", "release"));
+    expect(deployCtx?.release.projectDir).toBe(join(h.root, "artifact"));
     const journal = await readUpdateRun(reader(h), deployCtx?.run.id ?? "");
     expect(journal.records[0]).toMatchObject({ step: RUN_STEP, data: { command: "update deploy", env: "prod", phase: "deploy", process: deployCtx?.runId } });
     expect(journal.records.at(-1)).toMatchObject({ step: "run-done", data: { exitCode: 3 } });

@@ -1800,7 +1800,8 @@ Net changes since 5.8.2.
   check the release's readiness, a release that cannot clean the stored SVGs, which prepare refuses as well, a release
   configuration the target cannot apply (`UpdateTarget.checkReleaseConfiguration`, optional; prepare checks it
   without resolving the sources), and pending content migrations without `update.localBoot`; stages the release while the old one serves (a staging failure never stops the app); records
-  the app's configuration, secret values only as salted fingerprints; stops the app and waits for the seal; takes
+  the app's configuration, secret values only as salted fingerprints; stops the app and waits for the seal, except
+  when the running versions name a runtime before 6, which writes none; takes
   a verified cutover backup that records the running versions, pinned until `update cleanup` for a change of the
   major, unknown running versions or a pending storage migration, so no migration starts without one; migrates a copy
   of its database; promotes it, swaps the code and starts the release as one step; and verifies it with three
@@ -1838,7 +1839,12 @@ Net changes since 5.8.2.
   later deploy the gate refused does not hide it) or the one `--run` names;
   `resume` refuses with exit 2 to continue a deploy from a process with another release than the run's (its
   versions or the content migrations of its host facts) and refuses a cutover plan that differs from the gate's.
-  Every command but `status` takes the lock; `--json` prints `kestrel-ops/update-<command>@1`.
+  Every command but `status` takes the lock; `--json` prints `kestrel-ops/update-<command>@1`. The running
+  versions are those the newest verified deploy put there, else those the target reports, else, in a deploy, the
+  `versions.from` of the receipt its gate matched; a target's report never counts when it read the packages
+  installed in the project the command runs from or inside a release directory of its own (`TargetFacts.packagesFrom`
+  names the directory a target read them from), so `prepare` with the new release installed records them as
+  unknown instead of as the new release's.
   `kestrel.environments.json` takes an optional `update` block (`release.dir`, `localBoot`, the waits and
   `cleanupAfterDays`). `update bundle` writes `.kestrel-ops/` with the release's versions, the host facts, every
   target manifest the environments name and the module packages whose storage migrations a deploy runs;

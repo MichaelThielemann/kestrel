@@ -71,7 +71,12 @@ A deploy that changes package versions or finds a storage migration pending need
 environment with the same target versions and the same plan. An ordinary deploy, with neither, runs without a
 receipt and still takes a verified cutover backup first; no migration starts without one. The versions the app
 runs are those the newest verified deploy of the environment put there; before the first one, those the target
-reports, and when it reports none, the deploy counts as a version change.
+reports, and when it reports none, `prepare` counts the update as a version change and the deploy takes them from
+the receipt its gate matched. A target's report never counts when it read the packages installed in the project the
+command runs from or inside a release directory of its own, since those are the new release's: the Cloud Foundry
+target reads its `dir`, `.` by default, which during an update holds the new release. Point `dir` at an
+installation of the running release, such as a checkout of the deployed state with its dependencies installed, to
+have prepare record the running versions in the receipt.
 
 ### prepare
 
@@ -123,7 +128,9 @@ the run stops at that question. `deploy-answers.json` answers the stop:
 { "update-stop": "accept" }
 ```
 
-The deploy from a release before 6 also needs `unsealed-stop`, since that release leaves no seal. Give that one
+The deploy from a release before 6 also needs `unsealed-stop`, since that release leaves no seal. When the
+running versions name that release, the deploy asks at once after the stop; when they are unknown, it waits the
+whole `update.sealTimeoutSeconds` for a seal first, which a lower value for that one deploy shortens. Give that one
 deploy a file of its own and remove it once the deploy has run: a standing answer would also accept a later stop
 of a 6.x release that went without its teardown, and its cutover backup would then lack the frames that stop did
 not ship.
@@ -156,7 +163,7 @@ two runs that start in the same moment.
 | `configuration` | serving | The app's configuration is recorded once: plain values verbatim, secret values only as salted fingerprints (also a plain value that contains one of the tool's own credentials), the health check, memory, disk, start command and instance count. |
 | `precopy` | serving | Originals and the delivery prefix are copied into the backup location, so only the difference is copied after the stop. |
 | `stop` | **down** | After the `update-stop` answer. From here on the run is never cancelled, only resumed or aborted. When the stop itself fails after it stopped the app, the app is started again; if that fails too, the run stays open with exit 1 and `update abort` starts the previous release. A hard failure before the cutover backup is written makes the previous release current again and starts it on the unchanged replica; exit 3. A signal (SIGINT, SIGTERM) after the stop ends the process with exit 1 and a message that says what state the app is in and which command continues or ends the run; never start the app by hand while the run is open. |
-| `seal` | down | Waits until the stopped replica's newest generation shows its seal, at most `update.sealTimeoutSeconds`; a runtime before 6 writes none, which needs the `unsealed-stop` answer. Without it the previous release starts again; exit 3. |
+| `seal` | down | Waits until the stopped replica's newest generation shows its seal, at most `update.sealTimeoutSeconds`; a runtime before 6 writes none, which needs the `unsealed-stop` answer. When the running versions name such a runtime, nothing is awaited and the question follows at once; when they are unknown, the whole timeout is awaited. Without the answer the previous release starts again; exit 3. |
 | `cutover-backup` | down | A verified backup of the stopped state. Its manifest records the running versions; when they are unknown, the major the pending storage migrations convert from, so `backup prune` keeps the newest backup of that major. A deploy that changes the major of Kestrel, runs on unknown versions or has a storage migration pending pins it for this run until `update cleanup`; otherwise the retention of `cutover` backups keeps it. |
 | `migrate` | down | The migration of a copy of the cutover database, see below. |
 | `promote`, `swap`, `start` | down | The migrated copy becomes the newest replica generation, the staged release becomes the app's code with its own configuration, and the app starts; one step with no question between them, so no old release starts on converted data. |

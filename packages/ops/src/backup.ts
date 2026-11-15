@@ -63,13 +63,17 @@ export async function acceptSeal(ctx: OpsContext, seal: SealReport, stoppedAt: n
   await confirm(ctx.answers, "unsealed-stop", lines.join("\n"));
 }
 
-/** Reads the newest generation of the stopped replica and classifies its seal. */
-export async function readSeal(ctx: OpsContext): Promise<SealReport> {
+/**
+ * Reads the newest generation of the stopped replica and classifies its seal, for the replication runtime version
+ * `runtime` (null when it is unknown), or by default the one the target reports.
+ */
+export async function readSeal(ctx: OpsContext, runtime?: string | null): Promise<SealReport> {
   const gens = await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll);
   const newest = gens.at(-1);
   if (!newest) throw new OpsError(`the replica under ${ctx.env.app.replicaPrefix} has no generation`, 1, ctx.env.app.replicaPrefix);
   await refuseUnfinishedPlacement(ctx, gens);
-  return sealOf(ctx.app, ctx.env.app.replicaPrefix, newest, runtimeVersion(await ctx.target.describe()), ctx.poll, (generation) => placedUnstarted(ctx, generation));
+  const known = runtime === undefined ? runtimeVersion(await ctx.target.describe()) : runtime;
+  return sealOf(ctx.app, ctx.env.app.replicaPrefix, newest, known, ctx.poll, (generation) => placedUnstarted(ctx, generation));
 }
 
 type CopiedEntry = { key: string; size: number; etag: string; object: string; objectEtag: string };

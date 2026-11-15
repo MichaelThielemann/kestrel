@@ -84,6 +84,10 @@ export class FakeUpdateTarget implements UpdateTarget {
   dropletBits: boolean = true;
   /** Names the platform fills from credential sources, fingerprinted like the host's secret names. */
   vaultNames: Set<string> = new Set<string>();
+  /** The packages `describe` reports instead of the current droplet's, such as none for a target that cannot tell. */
+  reported: Record<string, string> | null = null;
+  /** The directory `describe` names as the one it read the packages from. */
+  packagesFrom: string | undefined = undefined;
   app: FakeApp | null = null;
   #state: "started" | "stopped" = "stopped";
   #crashed = false;
@@ -109,7 +113,8 @@ export class FakeUpdateTarget implements UpdateTarget {
   }
 
   async describe(): Promise<TargetFacts> {
-    return { kind: "fake-update", packages: { ...this.release.versions, "@michaelthielemann/kestrel-replication-sqlite": this.release.runtime }, droplet: this.current };
+    const packages = this.reported ?? { ...this.release.versions, "@michaelthielemann/kestrel-replication-sqlite": this.release.runtime };
+    return { kind: "fake-update", packages: { ...packages }, droplet: this.current, ...(this.packagesFrom === undefined ? {} : { packagesFrom: this.packagesFrom }) };
   }
 
   async status(): Promise<TargetStatus> {

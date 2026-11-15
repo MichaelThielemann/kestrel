@@ -206,7 +206,7 @@ export async function cloudFoundryTarget(raw: Record<string, unknown>, deps: Tar
       const revisions = await api(`/v3/apps/${guid}/revisions?order_by=-created_at&per_page=1`, revisionsSchema);
       const latest = revisions.resources[0];
       const variables = await api(`/v3/apps/${guid}/environment_variables`, envSchema);
-      return { kind: "cloudfoundry", packages: installedPackages(resolve(deps.root, config.dir)), org: config.org, space: config.space, app, appGuid: guid, droplet: droplet?.guid ?? null, revision: latest === undefined ? null : { guid: latest.guid, version: latest.version }, envNames: Object.keys(variables.var ?? {}).sort() };
+      return { kind: "cloudfoundry", packages: installedPackages(resolve(deps.root, config.dir)), packagesFrom: resolve(deps.root, config.dir), org: config.org, space: config.space, app, appGuid: guid, droplet: droplet?.guid ?? null, revision: latest === undefined ? null : { guid: latest.guid, version: latest.version }, envNames: Object.keys(variables.var ?? {}).sort() };
     },
 
     status,

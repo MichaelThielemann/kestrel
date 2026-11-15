@@ -18,7 +18,7 @@ import { UPDATE_PIN_PREFIX, updateKeys } from "./layout.ts";
 import { computePlan, pinsCutover, planHash, releaseContentMigrations, replicaCopy, sameVersions, versionSet } from "./plan.ts";
 import { releaseStorages } from "./storages.ts";
 import type { RecordedConfiguration } from "./target.ts";
-import { UPDATE_EXIT, type RollbackResult, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateRecord, type UpdateRun, type VerifyResult, type VersionSet } from "./types.ts";
+import { UPDATE_EXIT, type RollbackResult, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateReceipt, type UpdateRecord, type UpdateRun, type VerifyResult, type VersionSet } from "./types.ts";
 import { stoppedAfterRollback } from "./status.ts";
 import { concludeVerify, outcomeOf } from "./verify.ts";
 
@@ -87,6 +87,11 @@ async function waitUntilStartable(ctx: UpdateContext, at: number, clock: ServerC
   while (behind() > 0) await sleep(Math.min(1000, behind()));
 }
 
+function withReceiptVersions(plan: UpdatePlan, receipt: UpdateReceipt | null): UpdatePlan {
+  const from = plan.versions.from ?? receipt?.versions.from ?? null;
+  return from === plan.versions.from ? plan : { ...plan, versions: { ...plan.versions, from } };
+}
+
 function stopQuestion(ctx: UpdateContext, plan: UpdatePlan): string {
   const migrations = plan.storage.length + plan.content.length;
   return `stop ${ctx.envName} now for the cutover backup${migrations > 0 ? `, ${migrations} migration(s)` : ""} and the start of the new release; the app stays down until the new release is verified`;
@@ -95,7 +100,9 @@ function stopQuestion(ctx: UpdateContext, plan: UpdatePlan): string {
 /**
  * Deploys the release in the order of `DEPLOY_STEPS`. While the old release serves: `gate`, `stage` (a staging
  * failure ends the run with exit 1 and the app was never stopped), `configuration` (recorded once into the backup
- * location; a plain variable whose value holds a secret of the tool is kept only as a fingerprint), `precopy`. Then `stop` (after the `update-stop` answer), `seal` (waits for the seal after STOPPED),
+ * location; a plain variable whose value holds a secret of the tool is kept only as a fingerprint), `precopy`. Then `stop` (after the `update-stop` answer), `seal` (waits for the seal after STOPPED, unless the running
+ * versions name a replication runtime before the sealing major; they are those of `runningVersions`, or when it knows
+ * none, the `versions.from` of the receipt the gate matched),
  * `cutover-backup` (verified; it records the running versions, or without them the major the pending storage
  * migrations convert from; pinned for this run until `update cleanup` when {@link pinsCutover} says so), `migrate` (on a copy of the cutover
  * database), and `promote`, `swap` and `start` as one step without a question between them. `verify` decides: passed
@@ -108,8 +115,9 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
   let flow: Flow;
   try {
     await record(ctx, "gate", "started");
-    const plan = await computePlan(ctx, await replicaCopy(ctx, ctx.workspace.path("plan.db")));
-    const gate = await checkGate(ctx, plan, await earlierDeploys(ctx));
+    const planned = await computePlan(ctx, await replicaCopy(ctx, ctx.workspace.path("plan.db")));
+    const gate = await checkGate(ctx, planned, await earlierDeploys(ctx));
+    const plan = withReceiptVersions(planned, gate.receipt);
     if (gate.accepts !== null) await acceptImplicitly(ctx, gate.accepts);
     await record(ctx, "gate", "done", { receipt: gate.receipt === null ? null : `${gate.planHash}/${gate.receipt.runId}`, versions: plan.versions, planHash: gate.planHash, ordinary: gate.ordinary, pin: pinsCutover(plan), releaseContent: releaseContentMigrations(ctx), configuration: gate.configuration });
 
@@ -176,7 +184,7 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     if (at("seal")) {
       step = "seal";
       await record(ctx, "seal", "started");
-      const seal = await ctx.steps.waitForSeal(ctx, flow.stoppedAt);
+      const seal = await ctx.steps.waitForSeal(ctx, flow.stoppedAt, flow.from);
       await acceptSeal(ctx, seal, flow.stoppedAt);
       await record(ctx, "seal", "done", { state: seal.state, generation: seal.generation });
       step = "cutover-backup";

@@ -181,6 +181,12 @@ export interface UpdateReceipt {
 export interface ReleaseFacts {
   /** Absolute directory the target stages. */
   dir: string;
+  /**
+   * Absolute directory of the project the release's versions were read from: the one the command runs in, or the one
+   * a bundle was written from. Packages a target reads there, or inside {@link ReleaseFacts.dir}, are the release's
+   * own, never the running ones.
+   */
+  projectDir: string;
   versions: VersionSet;
   lockfileSha256: string | null;
 }
@@ -326,7 +332,7 @@ export interface UpdateOutcome {
  * the real ones.
  */
 export interface UpdateSteps {
-  waitForSeal(ctx: UpdateContext, stoppedAt: number): Promise<SealReport>;
+  waitForSeal(ctx: UpdateContext, stoppedAt: number, running?: Readonly<Record<string, string>> | null): Promise<SealReport>;
   migrateCopy(ctx: UpdateContext, input: MigrateInput): Promise<MigrateResult>;
   verify(ctx: UpdateContext, input: VerifyInput): Promise<VerifyResult>;
   rollback(ctx: UpdateContext, run: UpdateRun, reason: RollbackReason): Promise<RollbackResult>;

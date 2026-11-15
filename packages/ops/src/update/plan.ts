@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isAbsolute, relative, resolve } from "node:path";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
@@ -6,6 +7,7 @@ import { failure, err, isErr, ok } from "@michaelthielemann/kestrel-contracts/er
 import { runShapeMigrations, type BlobOps, type ModuleRun, type ModuleStorage } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { PERSISTENCE_PACKAGE, SANITIZE_SVG_PACKAGE } from "../bundle.ts";
+import { REPLICATION_PACKAGE } from "../context.ts";
 import { OpsError } from "../errors.ts";
 import { refuseUnfinishedPlacement } from "../placements.ts";
 import { blobstoreOf, buildDatabase, completeGeneration, stableGenerations } from "../replica.ts";
@@ -46,10 +48,31 @@ export function sameVersions(a: Readonly<Record<string, string>> | null, b: Read
   return left.length === right.length && left.every(([name, version], i) => right[i]?.[0] === name && right[i]?.[1] === version);
 }
 
+function within(dir: string, base: string): boolean {
+  const path = relative(resolve(base), resolve(dir));
+  return path === "" || (!path.startsWith("..") && !isAbsolute(path));
+}
+
+function readsRelease(release: UpdateContext["release"], from: string): boolean {
+  const project = resolve(release.projectDir);
+  return resolve(from) === project || (resolve(release.dir) !== project && within(from, release.dir));
+}
+
+/**
+ * The packages the target reports for the running app, or none when it read them from the installation of the release
+ * this command deploys (`TargetFacts.packagesFrom` is the release's project directory, or lies inside a release
+ * directory other than the project), since those are the new release's versions, not the running ones.
+ */
+export async function reportedVersions(ctx: Pick<UpdateContext, "target" | "release">): Promise<Record<string, string>> {
+  const facts = await ctx.target.describe();
+  return facts.packagesFrom !== undefined && readsRelease(ctx.release, facts.packagesFrom) ? {} : facts.packages;
+}
+
 /**
  * The versions the app runs: the `versions.to` of the newest verified deploy of this environment, which is what the
- * tool put there; before the first one, those the target reports when it reports any of {@link VERSIONED_PACKAGES};
- * null when neither exists, which counts as a version change.
+ * tool put there; before the first one, those the target reports ({@link reportedVersions}) when it reports any of
+ * {@link VERSIONED_PACKAGES}; null when neither exists, which counts as a version change. A deploy falls back to the
+ * `versions.from` of the receipt its gate matched.
  */
 export async function runningVersions(ctx: UpdateContext): Promise<VersionSet | null> {
   const deploys = (await listUpdateRuns(ctx, ctx.envName)).filter((r) => r.command === "update deploy" && r.runId !== ctx.run.id);
@@ -57,8 +80,13 @@ export async function runningVersions(ctx: UpdateContext): Promise<VersionSet | 
     const run = await readUpdateRun(ctx, entry.runId);
     if ((run.state === "verified" || run.state === "accepted" || run.state === "cleaned") && run.versions !== null) return versionSet(run.versions.to);
   }
-  const reported = versionSet((await ctx.target.describe()).packages);
+  const reported = versionSet(await reportedVersions(ctx));
   return Object.keys(reported).length > 0 ? reported : null;
+}
+
+/** The replication runtime version a set of versions names, or the core's of the same release when it names none. */
+export function runtimeOf(versions: Readonly<Record<string, string>> | null): string | null {
+  return versions?.[REPLICATION_PACKAGE] ?? versions?.["@michaelthielemann/kestrel"] ?? null;
 }
 
 /** The content-migration ids the host contributes for the release (`contentMigrations` of its facts), sorted. */

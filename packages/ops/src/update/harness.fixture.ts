@@ -121,7 +121,7 @@ export function createUpdateHarness(options: UpdateHarnessOptions = {}): UpdateH
         readyTimeoutMs: 1000,
         generationWaitMs: 1000,
         update: updateSettings(env),
-        release: { dir: releaseDir, versions: fakeRelease(options.to).versions, lockfileSha256: null },
+        release: { dir: releaseDir, projectDir: root, versions: fakeRelease(options.to).versions, lockfileSha256: null },
         host: {},
         run: { id: run.runId },
         steps: { ...defaultSteps(), ...ctxOptions.steps },

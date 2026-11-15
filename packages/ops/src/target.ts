@@ -20,6 +20,8 @@ export interface TargetFacts {
   kind: string;
   /** Installed versions of the app's packages by name, as far as the target can tell. */
   packages: Record<string, string>;
+  /** The directory on this machine whose installed packages `packages` names, when the target reads them there. */
+  packagesFrom?: string;
   [fact: string]: unknown;
 }
 
@@ -193,7 +195,7 @@ export const localTarget: TargetFactory = (raw, deps) => {
   const target: Target = {
     transport: config.disk === "ephemeral" ? "promote" : "file",
     async describe() {
-      return { kind: "local", packages: installedPackages(dir), dir: config.dir, database: config.database, disk: config.disk };
+      return { kind: "local", packages: installedPackages(dir), packagesFrom: dir, dir: config.dir, database: config.database, disk: config.disk };
     },
     async status() {
       const app = running();
