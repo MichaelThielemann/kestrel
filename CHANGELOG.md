@@ -1724,6 +1724,10 @@ Net changes since 5.8.2.
   `WalChecksum` type; `createReplicationSqlite` takes an optional fourth argument,
   `ReplicationOptions` (`checkIntervalMs`, how often the WAL is compared with `checkpointBytes`
   between syncs).
+- `replication-sqlite`: `ReplicationOptions` of `./impl` gains `copyBackBytes`, how many bytes of WAL frames
+  not yet copied back into the database file a checkpoint leaves to a worker thread before it copies back
+  the rest on the event loop's thread; 8 MiB by default. 0 leaves any such frames to a worker thread,
+  `Infinity` none; a negative value or `NaN` makes `createReplicationSqlite` throw a `RangeError`.
 - `blobstore-s3` has an `./admin` entry, `createS3Admin(config)`, for what `blobstore@1` does not
   offer. `listDetailed(prefix)` returns key, size, ETag (without quotes) and the server's
   modification time in milliseconds. `head(key)` returns the same for one key, or `Ok(null)`; a bucket
@@ -2121,8 +2125,7 @@ Net changes since 5.8.2.
   and the other way round. When a snapshot upload fails, its key is removed again, and while that removal
   fails, every later sync, snapshot, checkpoint and seal tries it again first and fails with `TRANSIENT`
   before it uploads anything, also before the first generation, so a restore never picks a generation whose
-  process went on shipping frames into the one before it or uploaded a later snapshot. `ReplicationOptions`
-  of `./impl` gains `copyBackBytes`.
+  process went on shipping frames into the one before it or uploaded a later snapshot.
 - `replication-sqlite`: a restore applies the WAL segments into one image that grows in place, instead of
   copying the image at every commit that changes the database size, so restoring a generation of a growing
   database takes time in proportion to its segments.

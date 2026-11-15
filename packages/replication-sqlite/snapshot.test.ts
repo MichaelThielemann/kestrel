@@ -799,6 +799,42 @@ describe("replication/sqlite copy-back beside a writer on the event loop's threa
   }, 60_000);
 });
 
+describe("replication/sqlite copyBackBytes", () => {
+  function writeLocks(app: DatabaseSync): { count: () => number; stop: () => void } {
+    let count = 0;
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- called only through apply, with the connection as this
+    const exec = DatabaseSync.prototype.exec;
+    const spy = vi.spyOn(DatabaseSync.prototype, "exec").mockImplementation(function (this: DatabaseSync, ...args: Parameters<typeof exec>) {
+      exec.apply(this, args);
+      if (this !== app && args[0] === "BEGIN IMMEDIATE") count += 1;
+    });
+    return { count: () => count, stop: () => spy.mockRestore() };
+  }
+
+  it("at 0 leaves the frames not yet copied back to one worker round, and a checkpoint with nothing to copy back takes the write lock once", async () => {
+    const l = live();
+    l.insert(50, 900);
+    const repl = l.start({ checkpointSeconds: 0 }, { copyBackBytes: 0 });
+    expectOk(await repl.sync());
+    const locks = writeLocks(l.app);
+    try {
+      expect(expectOk(await repl.sync())).toMatchObject({ checkpointed: true });
+      expect(locks.count()).toBe(1);
+      l.insert(5, 900);
+      expect(expectOk(await repl.sync())).toMatchObject({ checkpointed: true });
+      expect(locks.count()).toBe(3);
+    } finally {
+      locks.stop();
+    }
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ ...fingerprint(l.app), check: "ok" });
+  });
+
+  it("is refused when negative or not a number", () => {
+    const l = live();
+    for (const copyBackBytes of [-1, Number.NaN]) expect(() => l.start({}, { copyBackBytes })).toThrow(RangeError);
+  });
+});
+
 describe("replication/sqlite snapshot while other connections commit", () => {
   it("captures a state that one transaction left behind, loses no frame committed after it, and restores the same bytes with the plain rebuild", async () => {
     const l = live();

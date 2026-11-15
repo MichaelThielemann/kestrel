@@ -28,7 +28,11 @@ export interface Config {
 export interface ReplicationOptions {
   /** How often the WAL size is compared with `checkpointBytes` between syncs, in milliseconds. Default 1000. */
   checkIntervalMs?: number;
-  /** How many bytes of WAL frames not yet copied back into the database file a checkpoint leaves to a worker thread before it copies back the rest itself. Default 8 MiB. */
+  /**
+   * How many bytes of WAL frames not yet copied back into the database file a checkpoint leaves to a worker thread
+   * before it copies back the rest itself. Default 8 MiB. 0 leaves any such frames to a worker thread, `Infinity`
+   * copies them back on the event loop's thread; a negative number or `NaN` throws a `RangeError`.
+   */
   copyBackBytes?: number;
   /** Receives the warning when another process is found writing to the same replica, and the messages about acknowledging a reported restore from a placed generation. Default: nothing is logged. */
   logger?: Logger;
@@ -462,6 +466,8 @@ async function copyBackOnWorker(file: string): Promise<void> {
 }
 
 export function createReplicationSqlite(config: Config, blobs: Blobstore, now: () => number = Date.now, options: ReplicationOptions = {}): Replication {
+  const copyBackBytes = options.copyBackBytes ?? COPY_BACK_BYTES;
+  if (Number.isNaN(copyBackBytes) || copyBackBytes < 0) throw new RangeError(`replication/sqlite: copyBackBytes is ${String(copyBackBytes)}, but has to be 0 or more`);
   const file = resolve(config.file);
   const walFile = `${file}-wal`;
   mkdirSync(dirname(file), { recursive: true });
@@ -497,7 +503,6 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   let orphan: { snapshot: string; origin: string | null } | null = null;
   const onStop = new Set<() => void>();
   const logger = options.logger ?? silentLogger;
-  const copyBackBytes = options.copyBackBytes ?? COPY_BACK_BYTES;
   const startedAt = now();
   const own = new Set<string>();
   let newestListed = 0;
@@ -739,9 +744,10 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     return { bytes: tail.frames > 0 ? tail.segment.byteLength : 0, frames: tail.frames };
   };
 
-  const uncopiedBytes = (): number => {
+  const copyBackDue = (): boolean => {
     const state = walState();
-    return state.busy !== 0 || state.log < 0 ? 0 : (state.log - Math.max(0, state.checkpointed)) * frameSize(pageSize);
+    const uncopied = state.busy !== 0 || state.log < 0 ? 0 : (state.log - Math.max(0, state.checkpointed)) * frameSize(pageSize);
+    return uncopied > 0 && uncopied >= copyBackBytes;
   };
 
   const checkpoint = async (): Promise<Result<{ done: boolean; bytes: number; frames: number }, BlobstoreError>> => {
@@ -760,7 +766,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       if (isErr(flushed)) return flushed;
       return ok({ done, bytes, frames });
     };
-    for (let round = 0; round < COPY_BACK_ROUNDS && !stopping && uncopiedBytes() >= copyBackBytes; round++) {
+    for (let round = 0; round < COPY_BACK_ROUNDS && !stopping && copyBackDue(); round++) {
       const copyBack = await prepareCopyBack(file);
       if (copyBack === null) break;
       try {
