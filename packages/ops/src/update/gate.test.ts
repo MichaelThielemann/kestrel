@@ -1,12 +1,16 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpsError } from "../errors.ts";
-import { jsonBytes } from "../layout.ts";
+import { jsonBytes, keys } from "../layout.ts";
 import { LOCATION } from "../harness.fixture.ts";
+import { deploy } from "./deploy.ts";
 import { checkGate, findReceipt } from "./gate.ts";
 import { createUpdateHarness, type UpdateHarness } from "./harness.fixture.ts";
-import { updateKeys } from "./layout.ts";
+import { readUpdateRun } from "./journal.ts";
+import { UPDATE_PIN_PREFIX, updateKeys } from "./layout.ts";
 import { planHash } from "./plan.ts";
 import type { UpdateContext, UpdatePlan, UpdateReceipt, UpdateRun, UpdateRunState } from "./types.ts";
+
+vi.mock("./storages.ts", () => ({ releaseStorages: async () => [] }));
 
 const harnesses: UpdateHarness[] = [];
 afterEach(async () => {
@@ -96,5 +100,24 @@ describe("the deploy gate", () => {
     expect((await checkGate(ctx, ordinary, run("verified"))).accepts).toBe("earlier1");
     expect((await checkGate(ctx, ordinary, run("accepted"))).accepts).toBeNull();
     expect((await checkGate(ctx, ordinary, run("rolled-back"))).accepts).toBeNull();
+  });
+});
+
+describe("an ordinary deploy", { timeout: 30_000 }, () => {
+  it("runs without a receipt and still takes a verified cutover backup pinned for the run", async () => {
+    const h = harness({ from: { runtime: "6.0.0" }, to: { runtime: "6.0.0" } });
+    await h.target.start();
+    await h.target.app?.seed();
+    const retire = vi.fn(async () => ({ droplets: [], revisions: [], savedDroplet: null }));
+    const ctx = await h.context({ steps: { retire } });
+    const outcome = await deploy(ctx);
+    expect(outcome.exitCode).toBe(0);
+    const { receipt, cutoverBackup } = await readUpdateRun(ctx, ctx.run.id);
+    expect(receipt).toBeNull();
+    if (cutoverBackup === null) throw new Error("no cutover backup");
+    expect(cutoverBackup).toMatch(/-cutover-/);
+    expect(await h.store.head(LOCATION + keys.pin(cutoverBackup, UPDATE_PIN_PREFIX + ctx.run.id))).not.toBeNull();
+    expect((await h.store.list(LOCATION + `backups/${cutoverBackup}/verify/`)).length).toBeGreaterThan(0);
+    expect(await h.store.head(LOCATION + keys.manifest(cutoverBackup))).not.toBeNull();
   });
 });
