@@ -191,7 +191,8 @@ function isDerivedReport(value: unknown): value is DerivedReport {
 /**
  * The timings of a run from its journal: one entry per step from its `started` record (or the record before it, for a
  * step recorded only as `done`) to its `done`, `failed` or `skipped` record. The app counts as down from a `stop` until
- * a `start` that became ready; `downtimeMs` sums those periods and is null while the app is still down. `derived` is
+ * a `start` that became ready, a `verify` that passed or a `rollback-verify`; `downtimeMs` sums those periods and is
+ * null while the app is still down. `derived` is
  * the comparison of the derived prefixes the last rollback recorded.
  */
 export function reportOf(run: Pick<UpdateRun, "runId" | "records">): UpdateReport {
@@ -223,7 +224,7 @@ export function reportOf(run: Pick<UpdateRun, "runId" | "records">): UpdateRepor
         down = true;
         downSince = r.at;
         timing.appDown = true;
-      } else if (r.step === "start" && r.state === "done" && down && field(r.data, "ready") !== false) {
+      } else if (down && r.state === "done" && ((r.step === "start" && field(r.data, "ready") !== false) || (r.step === "verify" && field(r.data, "verdict") === "passed") || r.step === "rollback-verify")) {
         down = false;
         total += r.at - downSince;
         timing.appDown = true;

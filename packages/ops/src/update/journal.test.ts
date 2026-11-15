@@ -165,4 +165,29 @@ describe("update run journal", () => {
     await down.record("stop", "done", {});
     expect(reportOf(await readUpdateRun(ctxOf(bucket), "down")).downtimeMs).toBeNull();
   });
+
+  it("ends the downtime of a halted run once a later verification passed, and once a rollback verified the previous release", async () => {
+    const bucket = new MemoryBucket("journal-verified");
+    let now = 0;
+    const record = async (journal: Journal, ms: number, step: string, state: "started" | "done", data: Record<string, unknown> = {}): Promise<void> => {
+      now = ms;
+      await journal.record(step, state, data);
+    };
+    const halted = journalOn(bucket, "halted", () => now);
+    await record(halted, 0, RUN_STEP, "started", { command: "update deploy", env: "prod" });
+    await record(halted, 1_000, "stop", "done", { phase: "deploy" });
+    await record(halted, 2_000, "start", "started", { phase: "deploy" });
+    await record(halted, 3_000, "start", "done", { phase: "deploy", ready: false });
+    await record(halted, 4_000, "verify", "done", { phase: "deploy", verdict: "unverifiable" });
+    expect(reportOf(await readUpdateRun(ctxOf(bucket), "halted")).downtimeMs).toBeNull();
+    await record(halted, 9_000, "verify", "done", { phase: "verify", verdict: "passed" });
+    expect(reportOf(await readUpdateRun(ctxOf(bucket), "halted")).downtimeMs).toBe(8_000);
+
+    const rolled = journalOn(bucket, "rolled", () => now);
+    await record(rolled, 0, RUN_STEP, "started", { command: "update deploy", env: "prod" });
+    await record(rolled, 1_000, "stop", "done", { phase: "deploy" });
+    await record(rolled, 2_000, "start", "done", { phase: "rollback", ready: false });
+    await record(rolled, 5_000, "rollback-verify", "done", { phase: "rollback" });
+    expect(reportOf(await readUpdateRun(ctxOf(bucket), "rolled")).downtimeMs).toBe(4_000);
+  });
 });
