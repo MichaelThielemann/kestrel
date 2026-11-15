@@ -242,8 +242,10 @@ every other run in an open state. It takes no lock and writes nothing.
 `kestrel update accept` closes a verified run; from then on a rollback discards what was written since. A pinned
 cutover backup stays pinned. `kestrel update cleanup [--dry-run]`, at least `update.cleanupAfterDays` (default 14)
 after the accept, removes the originals under the media prefix that no row of the current replica references and
-that the cutover backup holds, after the `cleanup-delete` answer, and releases the pin, so prune treats the
-cutover backup like any other.
+that the cutover backup holds, after the `cleanup-delete` answer, releases the pin, so prune treats the
+cutover backup like any other, and deletes the replaced release's code the run saved. A later deploy that passes
+verification deletes the saved code of every earlier deploy run that is no longer open as well, so the backup
+location holds the code of at most the open runs and the newest verified one.
 
 ### Exit codes and questions
 

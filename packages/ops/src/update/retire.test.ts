@@ -105,4 +105,17 @@ describe("retiring the previous releases after an update", () => {
     await expect(retire(deployed.ctx, await runOf(s, deployed.runId))).rejects.toThrow("not the droplet run");
     expect(s.h.target.droplets.size).toBe(2);
   });
+
+  it("removes the droplet bits of earlier deploy runs that are no longer open once a later deploy passed verification", async () => {
+    const s = await scenario();
+    const first = await deployUntil(s, "retire");
+    const bits = LOCATION + updateKeys.droplet("prod", first.runId, s.previousDroplet);
+    expect(await s.h.store.head(bits)).not.toBeNull();
+    const second = await deployUntil(s, "verify");
+    expect(second.end.verdict).toBe("passed");
+    await retire(second.ctx, await runOf(s, second.runId));
+    expect(await s.h.store.head(bits)).toBeNull();
+    const replaced = (await runOf(s, first.runId)).stagedDroplet ?? "";
+    expect(await s.h.store.head(LOCATION + updateKeys.droplet("prod", second.runId, replaced))).not.toBeNull();
+  });
 });

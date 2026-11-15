@@ -8,7 +8,7 @@ export const UPDATE_PIN_PREFIX = "update-";
 
 /**
  * Keys an update writes in the backup location, besides the journal (`runs/<run>/…`), the lock trace and the cutover
- * backup itself. Every key is written once and never overwritten.
+ * backup itself. Every key is written once and never overwritten; only saved droplet bits are deleted again.
  */
 export const updateKeys = {
   /** The receipt of a prepare run, found by the plan hash it rehearsed. */
@@ -18,6 +18,8 @@ export const updateKeys = {
   configuration: (env: string, runId: string) => `updates/${env}/runs/${runId}/configuration.json`,
   /** The bits of the droplet a deploy replaced, saved before the droplet was deleted. */
   droplet: (env: string, runId: string, guid: string) => `updates/${env}/runs/${runId}/droplet-${guid}.tgz`,
+  /** The prefix of every droplet's bits a deploy saved; `update cleanup` of the run, or `retire` of a later verified deploy once the run is closed, removes them. */
+  droplets: (env: string, runId: string) => `updates/${env}/runs/${runId}/droplet-`,
   /** The update pin on a backup: a `pins/` key of the backup with the run id behind {@link UPDATE_PIN_PREFIX}. */
   pin: (backupId: string, runId: string) => backupKeys.pin(backupId, UPDATE_PIN_PREFIX + runId),
   unpin: (backupId: string, runId: string) => backupKeys.unpin(backupId, UPDATE_PIN_PREFIX + runId),

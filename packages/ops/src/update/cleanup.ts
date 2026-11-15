@@ -42,6 +42,13 @@ async function orphans(ctx: UpdateContext, cutover: string): Promise<BlobEntry[]
   });
 }
 
+/** Deletes the droplet bits run `runId` saved into the backup location and resolves to their keys. */
+export async function removeSavedDroplets(ctx: Pick<UpdateContext, "backups" | "location" | "envName" | "poll">, runId: string): Promise<string[]> {
+  const saved = (await stableList(ctx.backups, ctx.location + updateKeys.droplets(ctx.envName, runId), ctx.poll)).map((info) => info.key);
+  for (const key of saved) await ctx.backups.delete(key);
+  return saved;
+}
+
 /** Releases the update pin of run `runId` on backup `backupId`, if it holds one; prune then treats the backup like any other. */
 export async function releaseUpdatePin(ctx: Pick<UpdateContext, "backups" | "location" | "clock">, backupId: string, runId: string): Promise<boolean> {
   if ((await ctx.backups.head(ctx.location + updateKeys.pin(backupId, runId))) === null) return false;
@@ -54,7 +61,8 @@ export async function releaseUpdatePin(ctx: Pick<UpdateContext, "backups" | "loc
  * `update cleanup`: ends an accepted deploy run at least `update.cleanupAfterDays` after its `accept`. Steps
  * `cleanup-check` (refuses before that, or for a run that is not accepted), `cleanup-delete` (originals under the media
  * prefix that no row of the current replica references and that the cutover backup holds, after the `cleanup-delete`
- * answer) and `unpin` (releases the update pin of the cutover backup, so prune treats it like any other). An original
+ * answer) and `unpin` (releases the update pin of the cutover backup, so prune treats it like any other, and deletes
+ * the droplet bits the run saved). An original
  * whose live bytes differ from the cutover backup's copy, or whose copy is gone, stays.
  */
 export async function cleanup(ctx: UpdateContext, run: UpdateRun, options: CleanupOptions): Promise<UpdateOutcome> {
@@ -85,6 +93,7 @@ export async function cleanup(ctx: UpdateContext, run: UpdateRun, options: Clean
     return outcome(ctx, run.runId, UPDATE_EXIT.refused, messageOf(error), run.state);
   }
   await releaseUpdatePin(ctx, cutover, run.runId);
-  await ctx.journal.record("unpin", "done", { backupId: cutover });
+  const bits = await removeSavedDroplets(ctx, run.runId);
+  await ctx.journal.record("unpin", "done", { backupId: cutover, droplets: bits.length });
   return outcome(ctx, run.runId, UPDATE_EXIT.done, `cleaned: deleted ${candidates.length} original(s); the cutover backup ${cutover} is no longer pinned`, "cleaned");
 }

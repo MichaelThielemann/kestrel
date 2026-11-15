@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { listBackups } from "../backup.ts";
-import { PREFIXES } from "../harness.fixture.ts";
+import { LOCATION, PREFIXES } from "../harness.fixture.ts";
 import { cleanup } from "./cleanup.ts";
-import { UPDATE_PIN_PREFIX } from "./layout.ts";
+import { UPDATE_PIN_PREFIX, updateKeys } from "./layout.ts";
 import { acceptRun, blobsOf, continueRun, CONVERTED_PREFIX, createScenario, deployUntil, runOf, type Scenario } from "./scenario.fixture.ts";
 import { UPDATE_EXIT } from "./types.ts";
 
@@ -77,5 +77,19 @@ describe("update cleanup", () => {
     const records = (await runOf(s, runId)).records;
     const last = records.map((r) => r.step).lastIndexOf("run");
     expect(records.slice(last).map((r) => `${r.step} ${r.state} ${r.phase}`)).toEqual(["run started cleanup", "cleanup-check done cleanup", "cleanup-delete done cleanup", "unpin done cleanup"]);
+  });
+
+  it("removes the droplet bits the run saved when it releases the pin", async () => {
+    const s = await createScenario({ from: { renders: false } });
+    scenarios.push(s);
+    const deployed = await deployUntil(s, "retire");
+    const bits = LOCATION + updateKeys.droplet("prod", deployed.runId, s.previousDroplet);
+    expect(await s.h.store.head(bits)).not.toBeNull();
+    await acceptRun(s, deployed.runId);
+    const { ctx, run } = await continueRun(s, deployed.runId, "update cleanup", { answers: { "cleanup-delete": "accept" } });
+    ctx.clock = later(15);
+    expect(await cleanup(ctx, run, { dryRun: false })).toMatchObject({ exitCode: UPDATE_EXIT.done, state: "cleaned" });
+    expect(await s.h.store.head(bits)).toBeNull();
+    expect(await s.h.store.head(LOCATION + updateKeys.configuration("prod", deployed.runId))).not.toBeNull();
   });
 });
