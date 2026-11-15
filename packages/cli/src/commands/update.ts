@@ -52,9 +52,9 @@ async function projectRunUpdate(root: string): Promise<UpdateRunner | null> {
 
 /**
  * `kestrel update`: the update assistant of the installed kestrel-ops. `--help` lists the seven commands an operator
- * runs. `prepare` and `bundle` hand the facts the project's host plugin contributes (its readiness path, secret
+ * runs. Every command but `status` hands the facts the project's host plugin contributes (its readiness path, secret
  * variable names, migration switches, export checks, local start variables, the ids of its content migrations) to
- * kestrel-ops; exit 2 when kestrel-ops
+ * kestrel-ops, so a run continued on this machine plans with the same facts as the bundle; exit 2 when kestrel-ops
  * is missing or has no update assistant.
  */
 export async function run(argv: readonly string[]): Promise<number> {
@@ -63,7 +63,7 @@ export async function run(argv: readonly string[]): Promise<number> {
     process.stdout.write(`${COMMAND_USAGE.update}\n`);
     return 0;
   }
-  if (sub !== "prepare" && sub !== "bundle") return runOpsCommand("update", argv);
+  if (sub === undefined || sub === "status") return runOpsCommand("update", argv);
   const root = process.cwd();
   const runUpdate = await projectRunUpdate(root);
   if (runUpdate === null) return runOpsCommand("update", argv);

@@ -147,6 +147,26 @@ describe("kestrel status, backup, restore and update", () => {
     expect(info.hostFacts).toEqual({ readyPath: "/ready", secretEnvNames: ["SESSION_SECRET"], contentMigrations: ["pages-mark-migrated"] });
   }, 120_000);
 
+  it("hands the host plugin's facts to every update command that continues a run, and loads no plugin for update status", async () => {
+    const dir = project("update-resume-facts", true);
+    const host = join(dir, "node_modules", "example-host");
+    mkdirSync(host, { recursive: true });
+    const version = boundaryCast<{ version: string }>(JSON.parse(readFileSync(join(CLI_DIR, "package.json"), "utf8")), "json").version;
+    writeFileSync(join(host, "package.json"), JSON.stringify({ name: "example-host", version: "1.0.0", type: "module", kestrel: { plugin: "./plugin.mjs", pluginApi: 6, engine: `^${version.split(".")[0] ?? "0"}.0.0` } }));
+    writeFileSync(join(host, "plugin.mjs"), `import { appendFileSync } from "node:fs";\nexport default () => ({ kind: "example", detect: async () => true, load: async () => ({ issues: [] }), ops: (root) => { appendFileSync(root + "/ops-facts.log", "asked\\n"); return { contentMigrations: ["pages-mark-migrated"], blobstoreFromEnv: () => undefined }; } });\n`);
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "example-site", private: true, dependencies: { "example-host": "1.0.0", [OPS]: "*" } }));
+    writeFileSync(join(dir, "kestrel.environments.json"), JSON.stringify({ environments: { prod: { target: { adapter: "local", dir: ".", database: "data/kestrel.db", command: ["node", "server.mjs"], disk: "ephemeral" }, storage: { bucket: "b" }, app: { replicaPrefix: "database/", mediaPrefix: "media/", deliveryPrefix: "www/" }, backups: { prefix: "kestrel-backups/" } } } }));
+    const asked = (): number => (existsSync(join(dir, "ops-facts.log")) ? readFileSync(join(dir, "ops-facts.log"), "utf8").split("\n").filter((line) => line !== "").length : 0);
+    await runCli(["update", "status", "--env", "prod"], { cwd: dir, nodeArgs: TRANSFORM, env: { XDG_STATE_HOME: join(dir, "state") } });
+    expect(asked()).toBe(0);
+    for (const sub of ["resume", "verify", "rollback", "abort"]) {
+      const before = asked();
+      const result = await runCli(["update", sub, "--env", "prod"], { cwd: dir, nodeArgs: TRANSFORM, env: { XDG_STATE_HOME: join(dir, "state") } });
+      expect(result.code, `${sub}: ${result.stderr}`).toBe(2);
+      expect(asked(), sub).toBe(before + 1);
+    }
+  }, 120_000);
+
   it("keeps kestrel-ops and every @aws-sdk package out of the CLI's production dependency tree", () => {
     const manifest = readManifest(CLI_DIR);
     expect(manifest.dependencies?.[OPS]).toBeUndefined();

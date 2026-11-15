@@ -14,10 +14,10 @@ import { sha256 } from "../sqlite.ts";
 import { checkGate } from "./gate.ts";
 import { continueJournal, listUpdateRuns, readUpdateRun } from "./journal.ts";
 import { UPDATE_PIN_PREFIX, updateKeys } from "./layout.ts";
-import { computePlan, pinsCutover, planHash, replicaCopy } from "./plan.ts";
+import { computePlan, pinsCutover, planHash, releaseContentMigrations, replicaCopy, sameVersions, versionSet } from "./plan.ts";
 import { releaseStorages } from "./storages.ts";
 import type { RecordedConfiguration } from "./target.ts";
-import { UPDATE_EXIT, type RollbackResult, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateRun, type VerifyResult, type VersionSet } from "./types.ts";
+import { UPDATE_EXIT, type RollbackResult, type UpdateContext, type UpdateOutcome, type UpdatePlan, type UpdateRecord, type UpdateRun, type VerifyResult, type VersionSet } from "./types.ts";
 import { concludeVerify, outcomeOf, stoppedAfterRollback } from "./verify.ts";
 
 type Entry = "seal" | "cutover-backup" | "migrate" | "swap" | "start" | "verify";
@@ -107,7 +107,7 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
     const plan = await computePlan(ctx, await replicaCopy(ctx, ctx.workspace.path("plan.db")));
     const gate = await checkGate(ctx, plan, await earlierDeploys(ctx));
     if (gate.accepts !== null) await acceptImplicitly(ctx, gate.accepts);
-    await record(ctx, "gate", "done", { receipt: gate.receipt === null ? null : `${gate.planHash}/${gate.receipt.runId}`, versions: plan.versions, planHash: gate.planHash, ordinary: gate.ordinary, pin: pinsCutover(plan) });
+    await record(ctx, "gate", "done", { receipt: gate.receipt === null ? null : `${gate.planHash}/${gate.receipt.runId}`, versions: plan.versions, planHash: gate.planHash, ordinary: gate.ordinary, pin: pinsCutover(plan), releaseContent: releaseContentMigrations(ctx) });
 
     step = "stage";
     await record(ctx, "stage", "started");
@@ -247,12 +247,27 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
   return concludeVerify(ctx, "deploy", result, (run) => known(run, flow));
 }
 
+const isTextList = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
+
+function releaseMismatch(ctx: UpdateContext, run: UpdateRun, gate: UpdateRecord | undefined): string | null {
+  const here = versionSet(ctx.release.versions);
+  if (run.versions !== null && !sameVersions(run.versions.to, here)) return `the run deploys ${describeVersions(run.versions.to)}, but this process has the release ${describeVersions(here)}`;
+  const recorded: unknown = gate?.data.releaseContent;
+  const content = releaseContentMigrations(ctx);
+  if (isTextList(recorded) && (recorded.length !== content.length || recorded.some((id, i) => content[i] !== id))) return `the run's release brings the content migrations [${recorded.join(", ")}], but this process knows [${content.join(", ")}]`;
+  return null;
+}
+
+const describeVersions = (versions: Readonly<Record<string, string>>): string => Object.entries(versionSet(versions)).map(([name, version]) => `${name}@${version}`).join(", ") || "no kestrel package";
+
 const doneStep = (run: UpdateRun, step: string): boolean => run.records.some((r) => r.phase === "deploy" && r.step === step && r.state === "done");
 const startedStep = (run: UpdateRun, step: string): boolean => run.records.some((r) => r.phase === "deploy" && r.step === step);
 
 /**
- * Continues deploy run `run` after its last done step (see `UpdateRun.lastDone`), checking that step's postcondition
- * first: a migration that did not finish starts again from the cutover backup's database; a promotion whose generation
+ * Continues deploy run `run` after its last done step (see `UpdateRun.lastDone`). It refuses with exit 2 when this
+ * process deploys another release than the run, by its versions or by the content migrations the host facts name
+ * (the gate records both), and checks the last step's postcondition first: a plan of the cutover database that
+ * differs from the receipt or from the plan the gate recorded is refused; a migration that did not finish starts again from the cutover backup's database; a promotion whose generation
  * is not the newest any more is refused; after `promote` it swaps and starts; after `start` it verifies. A run whose
  * `start` began keeps its recorded start time, so verification counts the render and every crash since that start.
  */
@@ -263,7 +278,10 @@ export async function continueDeploy(ctx: UpdateContext, run: UpdateRun): Promis
   if (run.stagedDroplet === null || typeof stoppedAt !== "number") return outcomeOf(ctx, UPDATE_EXIT.refused, `update run ${run.runId} records no staged droplet or no completed stop; run update ${run.cutoverBackup === null ? "abort" : "rollback"} --env ${ctx.envName} --run ${run.runId}`);
   const startRecord = [...run.records].reverse().find((r) => r.phase === "deploy" && r.step === "start");
   const recordedStart = startRecord?.data.startedAt;
-  const pin = run.records.find((r) => r.phase === "deploy" && r.step === "gate" && r.state === "done")?.data.pin;
+  const gate = run.records.find((r) => r.phase === "deploy" && r.step === "gate" && r.state === "done");
+  const mismatch = releaseMismatch(ctx, run, gate);
+  if (mismatch !== null) return outcomeOf(ctx, UPDATE_EXIT.usage, `refusing to continue update run ${run.runId}: ${mismatch}; continue it with the bundle or checkout that started it (node .kestrel-ops/run.mjs update resume --env ${ctx.envName} --run ${run.runId}), or roll it back`);
+  const pin = gate?.data.pin;
   const flow: Flow = { plan: null, from: run.versions?.from ?? null, pin: pin !== false, staged: run.stagedDroplet, stoppedAt, cutoverBackup: run.cutoverBackup, promoted: run.promoted === null ? null : { ...run.promoted, at: unstamp(run.promoted.generation) }, startedAt: typeof recordedStart === "number" ? recordedStart : null };
   if (flow.promoted !== null) {
     if (!startedStep(run, "start")) {
@@ -274,10 +292,12 @@ export async function continueDeploy(ctx: UpdateContext, run: UpdateRun): Promis
     return afterStop(ctx, flow, doneStep(run, "start") ? "verify" : "start");
   }
   if (flow.cutoverBackup !== null) {
-    if (run.receipt !== null) {
+    const recorded: unknown = gate?.data.planHash;
+    const expected = run.receipt?.split("/")[0] ?? (typeof recorded === "string" ? recorded : null);
+    if (expected !== null) {
       const plan = await computePlan(ctx, await cutoverDatabase(ctx, flow.cutoverBackup, ctx.workspace.path("cutover-plan.db")));
       const hash = planHash(plan);
-      if (!run.receipt.startsWith(`${hash}/`)) return outcomeOf(ctx, UPDATE_EXIT.refused, `the plan of the cutover database (${hash.slice(0, 12)}) differs from the receipt the gate matched; run update rollback --env ${ctx.envName} --run ${run.runId}`);
+      if (hash !== expected) return outcomeOf(ctx, UPDATE_EXIT.refused, `the plan of the cutover database (${hash.slice(0, 12)}) differs from the ${run.receipt === null ? "plan" : "receipt"} the gate ${run.receipt === null ? "recorded" : "matched"} (${expected.slice(0, 12)}); run update rollback --env ${ctx.envName} --run ${run.runId}`);
       flow.plan = plan;
     }
     return afterStop(ctx, flow, "migrate");

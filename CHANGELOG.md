@@ -1778,8 +1778,8 @@ Net changes since 5.8.2.
   the CLI; without it they print how to install it and exit 2, and the other commands, `upgrade` included,
   never load kestrel-ops. `update` answers 2 while the installed kestrel-ops brings no update assistant,
   and 3 for an update that was rolled back. `kestrel --help` lists the four commands; `kestrel update --help`
-  lists `prepare`, `accept`, `rollback`, `status`, `resume`, `abort` and `cleanup`, and `update prepare` and
-  `update bundle` pass the facts the project's host plugin returns from `ops()` to kestrel-ops.
+  lists `prepare`, `accept`, `rollback`, `status`, `resume`, `abort` and `cleanup`, and every `update` command
+  but `status` passes the facts the project's host plugin returns from `ops()` to kestrel-ops.
 - The update assistant of `@michaelthielemann/kestrel-ops` (`runUpdate` from `./run`, `kestrel update`, and
   `node .kestrel-ops/run.mjs deploy` in a deploy job) moves a deployed environment with one instance to a new
   release. `update prepare` checks the environment read-only, plans the update on a copy of the newest replica
@@ -1815,7 +1815,9 @@ Net changes since 5.8.2.
   `localBootEnv`, never a variable of the tool's own environment, and a build identity of its own. `update
   status` reads every update run of the environment from the backup location, so a deploy job's run shows on any
   machine, with the hosts it ran on, its state, the next command and the time and downtime of each step;
-  `accept`, `rollback`, `resume`, `abort` and `cleanup` work on the newest deploy run or the one `--run` names.
+  `accept`, `rollback`, `resume`, `abort` and `cleanup` work on the newest deploy run or the one `--run` names;
+  `resume` refuses with exit 2 to continue a deploy from a process with another release than the run's (its
+  versions or the content migrations of its host facts) and refuses a cutover plan that differs from the gate's.
   Every command but `status` takes the lock; `--json` prints `kestrel-ops/update-<command>@1`.
   `kestrel.environments.json` takes an optional `update` block (`release.dir`, `localBoot`, the waits and
   `cleanupAfterDays`). `update bundle` writes `.kestrel-ops/` with the release's versions, the host facts, every

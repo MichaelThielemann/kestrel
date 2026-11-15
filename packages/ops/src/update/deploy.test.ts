@@ -447,6 +447,65 @@ describe("continuing an interrupted deploy", { timeout: 30_000 }, () => {
   });
 });
 
+describe("continuing a deploy from another process than the one that started it", { timeout: 30_000 }, () => {
+  async function killedInMigration(options: UpdateHarnessOptions): Promise<{ h: UpdateHarness; steps: Fakes; run: UpdateRun }> {
+    const h = createUpdateHarness(options);
+    harnesses.push(h);
+    await h.target.start();
+    await h.target.app?.seed();
+    const steps = fakes();
+    const real = steps.migrateCopy.getMockImplementation();
+    steps.migrateCopy.mockImplementationOnce(async () => {
+      throw new Interrupted("SIGTERM");
+    });
+    const ctx = await h.context({ answers: ANSWERS, steps: { rollback: steps.rollback, retire: steps.retire, migrateCopy: steps.migrateCopy } });
+    ctx.host = { contentMigrations: ["count-hits"] };
+    await expect(deploy(ctx)).rejects.toBeInstanceOf(Interrupted);
+    if (real !== undefined) steps.migrateCopy.mockImplementation(real);
+    const run = await readUpdateRun(ctx, ctx.run.id);
+    expect(run.lastDone).toEqual({ phase: "deploy", step: "cutover-backup" });
+    return { h, steps, run };
+  }
+
+  it("refuses with exit 2 to continue an ordinary run without the content migrations the gate planned, so the unmigrated copy is never promoted, and continues it with them", async () => {
+    const { h, steps, run } = await killedInMigration({ from: { runtime: "6.0.0" }, to: { runtime: "6.0.0" } });
+    expect(run.receipt).toBeNull();
+    const bare = await h.context({ run, answers: ANSWERS, steps: { rollback: steps.rollback, retire: steps.retire, migrateCopy: steps.migrateCopy } });
+    const refused = await continueDeploy(bare, run);
+    expect(refused.exitCode, refused.message).toBe(2);
+    expect(refused.state).toBe("down");
+    expect(refused.message).toContain("count-hits");
+    expect(refused.message).toContain("node .kestrel-ops/run.mjs update resume");
+    expect(steps.migrateCopy).toHaveBeenCalledTimes(1);
+    expect(steps.retire).not.toHaveBeenCalled();
+    const withFacts = await h.context({ run, answers: ANSWERS, steps: { rollback: steps.rollback, retire: steps.retire, migrateCopy: steps.migrateCopy } });
+    withFacts.host = { contentMigrations: ["count-hits"] };
+    const outcome = await continueDeploy(withFacts, run);
+    expect(outcome.exitCode, outcome.message).toBe(0);
+    expect(steps.migrateCopy).toHaveBeenCalledTimes(2);
+    expect(steps.migrateCopy.mock.calls[1]?.[1].plan.content).toEqual(["count-hits"]);
+  });
+
+  it("refuses with exit 2 to continue a promoted run from a process whose release has other versions, before it swaps", async () => {
+    const s = await scenario();
+    const setDroplet = s.h.target.setDroplet.bind(s.h.target);
+    s.h.target.setDroplet = async () => {
+      s.h.target.setDroplet = setDroplet;
+      throw new Interrupted("SIGTERM");
+    };
+    await expect(deploy(s.ctx)).rejects.toBeInstanceOf(Interrupted);
+    const run = await readUpdateRun(s.ctx, s.ctx.run.id);
+    expect(run.lastDone).toEqual({ phase: "deploy", step: "promote" });
+    const other = await s.h.context({ run, answers: ANSWERS, steps: { rollback: s.steps.rollback, retire: s.steps.retire } });
+    other.release = { ...other.release, versions: { "@michaelthielemann/kestrel": "5.8.1", "@michaelthielemann/kestrel-replication-sqlite": "5.8.1" } };
+    const refused = await continueDeploy(other, run);
+    expect(refused.exitCode, refused.message).toBe(2);
+    expect(refused.message).toContain("5.8.1");
+    expect(afterStop(s)).toEqual([]);
+    expect(s.steps.retire).not.toHaveBeenCalled();
+  });
+});
+
 describe("the next command a failed deploy names", { timeout: 30_000 }, () => {
   it("names update resume when the automatic rollback before the cutover backup does not finish, and resume finishes it", async () => {
     const s = await scenario();
