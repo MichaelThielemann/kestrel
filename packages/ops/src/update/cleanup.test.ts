@@ -42,6 +42,15 @@ describe("update cleanup", () => {
     expect([...(other.h.bucket?.objects.keys() ?? [])].filter((k) => k.startsWith(`${PREFIXES.media}m`)).length).toBe(3);
   });
 
+  it("names an accepted run that still holds its pin when it refuses a later run that is not accepted", async () => {
+    const { s, runId } = await accepted();
+    const second = await deployUntil(s, "verify");
+    const { ctx, run } = await continueRun(s, second.runId, "update cleanup");
+    const refused = await cleanup(ctx, run, { dryRun: false });
+    expect(refused).toMatchObject({ exitCode: UPDATE_EXIT.refused, state: "verified" });
+    expect(refused.message).toContain(`kestrel update cleanup --env prod --run ${runId}`);
+  });
+
   it("deletes only originals that no row references and that the cutover backup holds, after the cleanup-delete answer, and releases the pin", async () => {
     const { s, runId, cutover } = await accepted();
     const app = s.h.target.app;

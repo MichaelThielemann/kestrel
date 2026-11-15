@@ -6,7 +6,7 @@ import { confirm } from "../questions.ts";
 import { buildDatabase, completeGeneration, stableGenerations } from "../replica.ts";
 import { referencedBlobs } from "../sqlite.ts";
 import { stableList } from "../store.ts";
-import { readUpdateRun, reportOf } from "./journal.ts";
+import { listUpdateRuns, readUpdateRun, reportOf } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
 import { UPDATE_EXIT, type UpdateContext, type UpdateExitCode, type UpdateOutcome, type UpdateRun, type UpdateRunState } from "./types.ts";
 
@@ -64,9 +64,20 @@ export async function holdsUpdatePin(ctx: Pick<UpdateContext, "backups" | "locat
   return (await ctx.backups.head(ctx.location + updateKeys.unpin(run.cutoverBackup, run.runId))) === null;
 }
 
+async function pinnedElsewhere(ctx: UpdateContext, runId: string): Promise<string> {
+  const held: string[] = [];
+  for (const entry of await listUpdateRuns(ctx, ctx.envName)) {
+    if (entry.command !== "update deploy" || entry.runId === runId) continue;
+    const other = await readUpdateRun(ctx, entry.runId);
+    if (other.state === "accepted" && (await holdsUpdatePin(ctx, other))) held.push(`kestrel update cleanup --env ${ctx.envName} --run ${other.runId}`);
+  }
+  return held.length === 0 ? "" : `; accepted runs that still pin their cutover backup: ${held.join(", ")}`;
+}
+
 /**
  * `update cleanup`: ends an accepted deploy run at least `update.cleanupAfterDays` after its `accept`. Steps
- * `cleanup-check` (refuses before that, or for a run that is not accepted), `cleanup-delete` (originals under the media
+ * `cleanup-check` (refuses before that, or for a run that is not accepted, naming the accepted runs that still pin
+ * their cutover backup), `cleanup-delete` (originals under the media
  * prefix that no row of the current replica references and that the cutover backup holds, after the `cleanup-delete`
  * answer) and `unpin` (releases the update pin of the cutover backup, so prune treats it like any other, and deletes
  * the droplet bits the run saved). An original
@@ -74,7 +85,7 @@ export async function holdsUpdatePin(ctx: Pick<UpdateContext, "backups" | "locat
  */
 export async function cleanup(ctx: UpdateContext, run: UpdateRun, options: CleanupOptions): Promise<UpdateOutcome> {
   const accept = run.records.filter((r) => r.step === "accept" && r.state === "done").at(-1);
-  if (run.state !== "accepted" || accept === undefined) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is ${run.state}; cleanup needs an accepted run`, run.state);
+  if (run.state !== "accepted" || accept === undefined) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is ${run.state}; cleanup needs an accepted run${await pinnedElsewhere(ctx, run.runId)}`, run.state);
   const earliest = accept.at + ctx.update.cleanupAfterDays * DAY_MS;
   if (ctx.clock() < earliest) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} was accepted ${new Date(accept.at).toISOString()}; cleanup runs ${ctx.update.cleanupAfterDays} day(s) after that, from ${new Date(earliest).toISOString()}`, run.state);
   const cutover = run.cutoverBackup;

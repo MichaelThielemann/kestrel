@@ -269,7 +269,9 @@ after the accept, removes the originals under the media prefix that no row of th
 that the cutover backup holds, after the `cleanup-delete` answer, releases the pin, so prune treats the
 cutover backup like any other, and deletes the replaced release's code the run saved. A later deploy that passes
 verification deletes the saved code of every earlier deploy run that is no longer open and holds no pin on its
-cutover backup as well, so the code of the release before a major change stays until that run's cleanup.
+cutover backup as well, so the code of the release before a major change stays until that run's cleanup. A deploy
+that accepts such a run on the way names its `update cleanup --run <id>`, and so does `update cleanup` when it
+refuses a later run that is not accepted.
 
 `kestrel update rollback` of a run that a later verified deploy superseded rolls back only while the run holds
 the pin on its cutover backup, the way back across a major change, and never while a later deploy is open. The

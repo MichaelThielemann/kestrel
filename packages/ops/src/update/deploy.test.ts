@@ -581,6 +581,17 @@ describe("the next command a failed deploy names", { timeout: 30_000 }, () => {
     expect(partial.map((b) => [b.complete, b.pinnedBy])).toEqual([[false, []]]);
   });
 
+  it("names the cleanup of a run it accepts implicitly whose cutover backup stays pinned", async () => {
+    const s = await scenario();
+    const first = await deploy(s.ctx);
+    expect(first.exitCode, first.message).toBe(0);
+    const next = await s.h.context({ answers: ANSWERS, steps: { rollback: s.steps.rollback, retire: s.steps.retire, migrateCopy: s.steps.migrateCopy } });
+    const again = await deploy(next);
+    expect(again.exitCode, again.message).toBe(0);
+    expect(s.h.output.info.join("\n")).toContain(`update run ${s.ctx.run.id} is accepted by this deploy; its cutover backup`);
+    expect(s.h.output.info.join("\n")).toContain(`stays pinned until kestrel update cleanup --env prod --run ${s.ctx.run.id}`);
+  });
+
   it("names update resume when the automatic rollback before the cutover backup does not finish, and resume finishes it", async () => {
     const s = await scenario();
     const ctx = s.ctx;

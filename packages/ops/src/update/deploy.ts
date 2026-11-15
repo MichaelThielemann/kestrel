@@ -66,7 +66,8 @@ async function earlierDeploys(ctx: UpdateContext): Promise<UpdateRun[]> {
 async function acceptImplicitly(ctx: UpdateContext, runId: string): Promise<void> {
   const earlier = await readUpdateRun(ctx, runId);
   await continueJournal(ctx, earlier).record("accept", "done", { phase: "accept", implicit: true, by: ctx.run.id });
-  ctx.out.info(`update run ${runId} is accepted by this deploy`);
+  const pinned = earlier.records.find((r) => r.step === "cutover-backup" && r.state === "done")?.data.pinned !== false;
+  ctx.out.info(`update run ${runId} is accepted by this deploy${pinned && earlier.cutoverBackup !== null ? `; its cutover backup ${earlier.cutoverBackup} stays pinned until kestrel update cleanup --env ${ctx.envName} --run ${runId}` : ""}`);
 }
 
 function fingerprintSecrets(redactor: Redactor, recorded: RecordedConfiguration): RecordedConfiguration {
