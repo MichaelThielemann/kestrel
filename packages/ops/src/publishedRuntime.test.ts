@@ -1,11 +1,14 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createReplicationSqlite, restoreFromBlobs } from "@michaelthielemann/kestrel-replication-sqlite/impl";
+import { isErr } from "@michaelthielemann/kestrel/result";
 import { keys } from "./layout.ts";
 import { MemoryBucket, memoryStore } from "./memoryStore.ts";
 import { PUBLISHED_RUNTIME_ENV, PublishedRuntimeApp, loadPublishedReplication } from "./publishedRuntime.fixture.ts";
-import { listGenerations } from "./replica.ts";
+import { blobstoreOf, listGenerations } from "./replica.ts";
 import { allRows, copyFixtureDatabase, fixture, FIXTURE_LOCATION, FIXTURE_REPLICA, fixtureProject, loadFixtureBlobs } from "./upgradeFixture.fixture.ts";
 import { CloudFoundryRun, killAfterPut, type KilledStore } from "./update/cloudFoundryRun.fixture.ts";
 import { UPDATE_EXIT } from "./update/types.ts";
@@ -129,4 +132,104 @@ describe.skipIf(runtimeDir === undefined)("an update hop from the fixture with t
     expect(aborted.code, aborted.stderr).toBe(UPDATE_EXIT.done);
     await expectCutoverStateOnThePublishedRelease(String(deployed.json.runId));
   }, 300_000);
+});
+
+describe.skipIf(runtimeDir === undefined)("replicas between this version and the published replication package of the fixture's release", () => {
+  let work: string;
+  beforeEach(() => {
+    work = mkdtempSync(join(tmpdir(), "kestrel-ops-published-replica-"));
+  });
+  afterEach(() => {
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  const config = (file: string) => ({ file, prefix: "replica/", checkpointBytes: 4 * 1024 * 1024, checkpointSeconds: 300, snapshotSeconds: 86400, retentionSeconds: 172800, restoreOnStart: true });
+
+  function liveDatabase(): { file: string; db: DatabaseSync; write: (rounds: number) => void } {
+    const file = join(work, "live.db");
+    const db = new DatabaseSync(file);
+    db.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+    const insert = db.prepare("INSERT INTO t (v) VALUES (?)");
+    const update = db.prepare("UPDATE t SET v = ? WHERE id = ?");
+    let next = 0;
+    const write = (rounds: number) => {
+      for (let round = 0; round < rounds; round++) {
+        db.exec("BEGIN");
+        for (let i = 0; i < 40; i++) insert.run(`${next++}-`.padEnd(3000, "r"));
+        for (let i = 1; i <= 20; i++) update.run(`${next}-${i}-`.padEnd(2000, "u"), 1 + ((next * 7 + i) % next));
+        db.exec("COMMIT");
+      }
+    };
+    return { file, db, write };
+  }
+
+  async function restoredRows(restore: (out: string) => Promise<unknown>): Promise<{ rows: Record<string, unknown[]>; bytes: Uint8Array }> {
+    const out = join(work, `restored-${Math.random().toString(36).slice(2)}.db`);
+    await restore(out);
+    return { rows: allRows(out), bytes: new Uint8Array(readFileSync(out)) };
+  }
+
+  it("restores with the published package, byte for byte as this version does, the snapshot and segments this version wrote, under a generation named by its time alone", async () => {
+    const published = await loadPublishedReplication(runtimeDir ?? "");
+    const bucket = new MemoryBucket("published-replica");
+    const blobs = blobstoreOf(memoryStore(bucket));
+    const { file, db, write } = liveDatabase();
+    const replication = createReplicationSqlite(config(file), blobs);
+    try {
+      write(30);
+      const first = await replication.sync();
+      if (isErr(first)) throw new Error(first.error.message);
+      write(20);
+      const snapshot = await replication.snapshot();
+      if (isErr(snapshot)) throw new Error(snapshot.error.message);
+      write(10);
+      const last = await replication.sync();
+      if (isErr(last)) throw new Error(last.error.message);
+    } finally {
+      replication.close();
+    }
+    const current = await restoredRows(async (out) => {
+      const restored = await restoreFromBlobs(blobs, "replica/", {}, out);
+      if (isErr(restored)) throw new Error(restored.error.message);
+    });
+    const newest = (await listGenerations(memoryStore(bucket), "replica/")).at(-1)?.name ?? "";
+    for (const [key, object] of [...bucket.objects]) if (key.startsWith(`replica/gen/${newest}/`)) bucket.objects.set(key.replace(`/gen/${newest}/`, `/gen/${newest.slice(0, 16)}/`), object);
+    const old = await restoredRows(async (out) => {
+      const restored = await published.restoreFromBlobs(blobs, "replica/", { generation: newest.slice(0, 16) }, out);
+      if (isErr(restored)) throw new Error(restored.error.message);
+    });
+    db.close();
+    expect(newest.length).toBeGreaterThan(16);
+    expect(old.rows).toEqual(allRows(file));
+    expect(Buffer.from(old.bytes).equals(Buffer.from(current.bytes))).toBe(true);
+  }, 60_000);
+
+  it("restores with this version, byte for byte as the published package does, what the published package wrote", async () => {
+    const published = await loadPublishedReplication(runtimeDir ?? "");
+    const bucket = new MemoryBucket("published-replica");
+    const blobs = blobstoreOf(memoryStore(bucket));
+    const { file, db, write } = liveDatabase();
+    const replication = published.createReplicationSqlite(config(file), blobs);
+    try {
+      write(30);
+      const first = await replication.sync();
+      if (isErr(first)) throw new Error(first.error.message);
+      write(20);
+      const last = await replication.sync();
+      if (isErr(last)) throw new Error(last.error.message);
+    } finally {
+      replication.close();
+    }
+    const current = await restoredRows(async (out) => {
+      const restored = await restoreFromBlobs(blobs, "replica/", {}, out);
+      if (isErr(restored)) throw new Error(restored.error.message);
+    });
+    const old = await restoredRows(async (out) => {
+      const restored = await published.restoreFromBlobs(blobs, "replica/", {}, out);
+      if (isErr(restored)) throw new Error(restored.error.message);
+    });
+    db.close();
+    expect(current.rows).toEqual(allRows(file));
+    expect(Buffer.from(current.bytes).equals(Buffer.from(old.bytes))).toBe(true);
+  }, 60_000);
 });
