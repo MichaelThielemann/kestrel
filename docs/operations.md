@@ -166,8 +166,11 @@ its `applied.json` names the generation and its nonce, or the first snapshot it 
 the marker row the rollback put into the promoted database. Releases before 6 write no `applied.json`, so the
 marker row proves it for them; it stays in the table `kestrel_ops_provenance`, one row per rollback.
 
-`kestrel update rollback` before `accept` loses nothing and asks nothing more. After `accept` it shows what would
-be lost since and needs the environment's name as the answer to `rollback-accepted`.
+`kestrel update rollback` before `accept` asks nothing more while the new release never started or wrote
+nothing but login sessions since its start. After `accept`, or once the new release wrote since its start
+(compared with the promoted generation, also while the run is halted), it shows what would be lost, needs the
+environment's name as the answer to `rollback-accepted` and takes a verified `pre-restore` backup of the stopped
+app before it changes the store.
 
 ### Migrating the cutover copy
 

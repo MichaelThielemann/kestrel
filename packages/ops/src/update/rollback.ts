@@ -352,6 +352,24 @@ async function liveLoss(ctx: UpdateContext, manifest: Manifest): Promise<LossRep
   }
 }
 
+async function writesSinceStart(ctx: UpdateContext, promoted: string, since: number): Promise<LossReport | null> {
+  try {
+    const prefix = ctx.env.app.replicaPrefix;
+    const gens = await stableGenerations(ctx.app, prefix, ctx.poll);
+    const placed = gens.find((g) => g.name === promoted);
+    const newest = gens.at(-1);
+    if (placed === undefined || newest === undefined) throw new Error(`the promoted generation ${promoted} is not in the replica any more`);
+    const current = ctx.workspace.path("current.db");
+    await buildDatabase(ctx.app, prefix, await completeGeneration(ctx.app, prefix, newest, ctx.poll), current);
+    const start = ctx.workspace.path("promoted.db");
+    await buildDatabase(ctx.app, prefix, await completeGeneration(ctx.app, prefix, placed, ctx.poll), start);
+    return lossReport(current, start, since);
+  } catch (cause) {
+    ctx.out.warn(`what the new release wrote since its start could not be read: ${messageOf(cause)}`);
+    return null;
+  }
+}
+
 function lossLines(loss: LossReport | null, since: number): string[] {
   if (loss === null) return ["what the rollback discards cannot be listed: the current database could not be read"];
   const lines = [`changes since ${new Date(since).toISOString()} that the rollback discards or reverts:`];
@@ -370,19 +388,31 @@ async function typedName(ctx: UpdateContext, text: string): Promise<string | nul
   return (await ctx.answers.prompt(`${text}\nType the environment's name to roll back (rollback-accepted): `)).trim();
 }
 
+async function lossToConfirm(ctx: UpdateContext, run: UpdateRun, manifest: Manifest): Promise<string[] | null> {
+  const sessions = "every login session ends; everyone signs in again";
+  const acceptRecord = run.records.filter((r) => r.step === "accept" && r.state === "done").at(-1);
+  if (acceptRecord !== undefined) return [`run ${run.runId} was accepted ${new Date(acceptRecord.at).toISOString()}; rolling back discards everything written since the cutover backup ${manifest.id}`, ...lossLines(await liveLoss(ctx, manifest), manifest.source.lastFrameAt ?? manifest.createdAt), sessions];
+  const start = run.records.find((r) => r.phase === "deploy" && r.step === "start");
+  if (start === undefined || run.promoted === null) return null;
+  const since = typeof start.data.startedAt === "number" ? start.data.startedAt : start.at;
+  const loss = await writesSinceStart(ctx, run.promoted.generation, since);
+  if (loss?.identical === true) return null;
+  return [`the new release of run ${run.runId} has run since ${new Date(since).toISOString()} and is not accepted; rolling back discards what it wrote since then`, ...lossLines(loss, since), sessions];
+}
+
 /**
- * `update rollback`: rolls deploy run `run` back on request. Before `accept` it is lossless and asks nothing more; after
- * `accept` it shows the loss report and needs the environment's name as the answer to `rollback-accepted`. Exit 0 once
- * the previous release runs verified, 1 when the rollback could not finish.
+ * `update rollback`: rolls deploy run `run` back on request. Before `accept` it asks nothing more while the new release
+ * never started or wrote nothing but login sessions since its start. After `accept`, or once the new release wrote
+ * since its start, it shows the loss report, needs the environment's name as the answer to `rollback-accepted` and
+ * takes a verified `pre-restore` backup of the stopped app first. Exit 0 once the previous release runs verified, 1
+ * when the rollback could not finish.
  */
 export async function rollbackCommand(ctx: UpdateContext, run: UpdateRun): Promise<UpdateOutcome> {
   if (!ROLLBACK_FROM.has(run.state) || run.cutoverBackup === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `run ${run.runId} is ${run.state}${run.cutoverBackup === null ? " without a cutover backup" : ""}; there is nothing to roll back${run.state === "deploying" || run.state === "down" ? " (update abort ends a run before its cutover backup)" : ""}`, run.state);
   const manifest = await readManifest(ctx, run.cutoverBackup);
   if (manifest === null) return outcome(ctx, run.runId, UPDATE_EXIT.refused, `the cutover backup ${run.cutoverBackup} of run ${run.runId} does not exist or is incomplete`, run.state);
-  const acceptRecord = run.records.filter((r) => r.step === "accept" && r.state === "done").at(-1);
-  if (acceptRecord !== undefined) {
-    const accepted = acceptRecord.at;
-    const lines = [`run ${run.runId} was accepted ${new Date(accepted).toISOString()}; rolling back discards everything written since the cutover backup ${manifest.id}`, ...lossLines(await liveLoss(ctx, manifest), manifest.source.lastFrameAt ?? manifest.createdAt), "every login session ends; everyone signs in again"];
+  const lines = await lossToConfirm(ctx, run, manifest);
+  if (lines !== null) {
     for (const line of lines) ctx.out.info(line);
     const name = await typedName(ctx, lines.join("\n"));
     if (name !== ctx.envName) {

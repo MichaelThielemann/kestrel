@@ -252,6 +252,29 @@ describe("update rollback", () => {
     expect((await listBackups(ctx)).find((b) => b.id === run.cutoverBackup)?.pinnedBy).toEqual([]);
   });
 
+  it("before accept asks like after accept once the new release wrote since its start, reports what it wrote and takes a safety backup", async () => {
+    const s = await scenario();
+    const deployed = await deployUntil(s, "verify");
+    await writeAfterUpdate(s);
+
+    const first = await continueRun(s, deployed.runId, "update rollback", { yes: false });
+    const refused = await rollbackCommand(first.ctx, first.run);
+    expect(refused.exitCode).toBe(UPDATE_EXIT.refused);
+    expect(refused.message).toContain("rollback-accepted");
+    expect(s.h.output.info.join("\n")).toContain("pages: 1 newer row(s) dropped, 1 changed row(s) reverted");
+    expect((await s.h.target.status()).state).toBe("started");
+    expect(s.h.target.release.runtime).toBe("6.0.0");
+    expect((await listBackups(first.ctx)).filter((b) => b.kind === "pre-restore")).toEqual([]);
+
+    const { ctx, run } = await continueRun(s, deployed.runId, "update rollback", { answers: { "rollback-accepted": "prod" }, yes: false });
+    const outcome = await rollbackCommand(ctx, run);
+    expect(outcome).toMatchObject({ exitCode: UPDATE_EXIT.done, state: "rolled-back" });
+    const safety = (await listBackups(ctx)).filter((b) => b.kind === "pre-restore");
+    expect(safety).toHaveLength(1);
+    expect(safety[0]?.verified).toBe(true);
+    await expectCutoverState(s, run.cutoverBackup ?? "");
+  });
+
   it("after accept refuses with exit 1 without the environment's name as the answer, also with --yes, and with it reports the loss and takes a safety backup", async () => {
     const s = await scenario();
     const deployed = await deployUntil(s, "verify");

@@ -81,7 +81,7 @@ export function updateEndToEnd(fresh: () => ScenarioStore): void {
     expect(await s.differencesFrom(backup)).toEqual({ originals: [], delivery: [] });
   }
 
-  scenarioTest("prepares, deploys, verifies and accepts N+1 through the stub cf, and rolls an ordinary deploy back to its cutover backup byte for byte", async (task) => {
+  scenarioTest("prepares, deploys, verifies and accepts N+1 through the stub cf, and rolls an ordinary deploy back to its cutover backup byte for byte once the loss of what it wrote is confirmed", async (task) => {
     const s = await scenario(task, { version: "6.0.0" }, { version: "6.0.1" });
     const prepared = await s.update(["prepare"]);
     expectOk(prepared);
@@ -125,7 +125,11 @@ export function updateEndToEnd(fresh: () => ScenarioStore): void {
     await app.export();
     await app.sync();
 
-    const rolled = await s.update(["rollback"]);
+    const unanswered = await s.update(["rollback"]);
+    expectOk(unanswered, UPDATE_EXIT.refused);
+    expect(unanswered.stdout + unanswered.stderr).toContain("rollback-accepted");
+    expect(s.current().version).toBe("6.0.1");
+    const rolled = await s.update(["rollback"], { answers: { "rollback-accepted": "prod" } });
     expectOk(rolled);
     const back = await s.run(second.runId);
     await expectCutoverState(s, back);

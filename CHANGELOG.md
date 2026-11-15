@@ -1802,7 +1802,8 @@ Net changes since 5.8.2.
   originals, replaces the delivery prefix and lists it again, restores the recorded configuration verbatim, starts
   the previous release and proves through `applied.json` or a marker row in its first snapshot (table
   `kestrel_ops_provenance`) that it restored the cutover state; it reports the derived keys that differ from the
-  cutover backup and releases the pin on it. The migration of the cutover copy downloads the cutover database again on every run, so a kill inside
+  cutover backup and releases the pin on it. `update rollback` shows what would be lost, needs the environment's
+  name and takes a safety backup first after `accept`, or once the new release wrote since its start. The migration of the cutover copy downloads the cutover database again on every run, so a kill inside
   a content migration that is not idempotent is resumed from the same state; it refuses a migration the plan does
   not name, writes blobs to the app's store only as server-side copies or new keys and never over, or instead of,
   an existing key, cleans stored SVGs with the release's sanitize package, and applies content migrations through
