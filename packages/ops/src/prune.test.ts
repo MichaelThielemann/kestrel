@@ -139,6 +139,7 @@ describe("backup prune", () => {
       const result = await h.run(["backup", "create"]);
       expect(result.code).toBe(1);
       expect(result.stderr).toContain("another run holds the lock: busy (restore) on laptop, pid 7");
+      expect(result.stderr).toContain(`once that process no longer runs, run the command again with --break-lock and the answer "break-lock": "accept"`);
       expect((await h.run(["backup", "create", "--break-lock", "--yes"])).stderr).toContain('"break-lock" needs an answer');
       const broken = await h.run(["backup", "create", "--break-lock", "--answers", h.answers({ "break-lock": "accept" })]);
       expect(broken.code).toBe(0);

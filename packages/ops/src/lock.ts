@@ -60,7 +60,7 @@ export interface Lock {
 export async function acquireLock(store: ObjectStore, location: string, runId: string, command: string, clock: () => number): Promise<Lock> {
   const others = (await heldLocks(store, location, clock())).filter((l) => l.runId !== runId);
   const other = others[0];
-  if (other) throw new OpsError(`another run holds the lock: ${other.runId} (${other.command}) on ${other.host}, pid ${other.pid}, since ${new Date(other.since).toISOString()}`, 1, "lock");
+  if (other) throw new OpsError(`another run holds the lock: ${other.runId} (${other.command}) on ${other.host}, pid ${other.pid}, since ${new Date(other.since).toISOString()}; once that process no longer runs, run the command again with --break-lock and the answer "break-lock": "accept"`, 1, "lock");
   await store.put(location + keys.lock(runId, clock(), "start"), jsonBytes({ runId, command, host: hostname(), pid: process.pid, at: clock() }), { contentType: "application/json" });
   const timer = setInterval(() => {
     store.put(location + keys.lock(runId, clock(), "beat"), jsonBytes({ runId, at: clock() }), { contentType: "application/json" }).catch(() => undefined);
