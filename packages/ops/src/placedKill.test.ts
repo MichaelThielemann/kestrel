@@ -32,7 +32,7 @@ async function expectUnsealedQuestion(h: Harness, backupId: string): Promise<voi
 
 describe("a kill without teardown after a restore", () => {
   it("is reported as unsealed when the app had started its own generation, which carries a copied origin.json", async () => {
-    const h = createHarness({ store: memoryStore(new MemoryBucket("kill-own-generation")) });
+    const h = createHarness({ store: memoryStore(new MemoryBucket("kill-own-generation")), update: { syncWindowSeconds: 1 } });
     try {
       const { backupId, promoted } = await restoredWithoutAcknowledgement(h);
       const own = (await listGenerations(h.store, PREFIXES.replica)).at(-1);
@@ -51,7 +51,7 @@ describe("a kill without teardown after a restore", () => {
 
   it("is reported as unsealed when the app was killed before it started a generation of its own", async () => {
     const bucket = new MemoryBucket("kill-before-first-sync");
-    const h = createHarness({ store: memoryStore(bucket) });
+    const h = createHarness({ store: memoryStore(bucket), update: { syncWindowSeconds: 1 } });
     try {
       const { backupId, promoted } = await restoredWithoutAcknowledgement(h);
       h.app.kill();

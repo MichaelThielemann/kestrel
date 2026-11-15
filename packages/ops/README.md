@@ -124,7 +124,8 @@ from.
   content migrations to a database copy (`command`, `dir`, `env` with the placeholders `{database}`, `{blobs}`,
   `{port}` and `{build}`, `readyPath`, `timeoutSeconds`); and the waits `sealTimeoutSeconds` (60),
   `syncWindowSeconds` (120), `renderTimeoutSeconds` (600), `readyTimeoutSeconds` (300) and `cleanupAfterDays`
-  (14). See [Update](#update).
+  (14). See [Update](#update). `restore --backup` also waits up to `syncWindowSeconds` for the app to
+  acknowledge the restored generation (see [Promotion](#promotion)).
 
 ## Targets
 A target stops, starts and describes the app. `local` runs it on this machine: `command` is started in `dir`
@@ -281,9 +282,13 @@ name. Next to it, written after the snapshot as the last file of the placement, 
 source, requestedAt, nonce }`, `requestedAt` as ISO 8601) lets a runtime that understands it
 report the restore through `replication.checkRestored`, so `delivery.checkBuild` renders every output again,
 and acknowledge it with an `applied.json` in the promoted generation carrying the same nonce once the run that
-read the report ended without failure. The tool reads that file after the start and reports `applied`, or
-`unconfirmed` when it does not appear; the runtime then reports the restore once more on its next start, which
-renders the output one more time. The three files follow the formats `replication-sqlite` defines (its README,
+read the report ended without failure. A runtime writes it at the end of its first successful `replication.sync`
+after the start, which a cron trigger runs up to a minute later. Once the app is ready, the tool reads that file
+for up to `update.syncWindowSeconds` of the environment (120 s by default, also without an `update` block) and
+reports `applied`, or `unconfirmed` with a warning that names the key to look for when it does not appear in that
+time; the runtime then reports the restore once more on its next start, which renders the output one more time.
+For a target whose runtime is before 6, which writes no `applied.json`, the tool does not wait: it reports
+`unconfirmed` at once with a warning that the app does not render its output again. The three files follow the formats `replication-sqlite` defines (its README,
 "Replica layout"). A runtime that ignores
 `origin.json` still restores the generation; the restored delivery prefix then stands for the rendered
 output.

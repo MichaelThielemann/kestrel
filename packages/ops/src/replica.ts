@@ -153,7 +153,8 @@ export interface SealReport {
 /** The first major of the replication runtime that seals its replica at teardown. */
 export const SEALING_MAJOR = 6;
 
-const majorOf = (version: string | null): number | null => {
+/** The major of a version such as `6.0.1`, or null when there is none or it does not start with one. */
+export const majorOf = (version: string | null): number | null => {
   const m = version === null ? null : /^(\d+)\./.exec(version);
   return m ? Number(m[1]) : null;
 };

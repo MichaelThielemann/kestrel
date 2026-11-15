@@ -1029,7 +1029,10 @@ Net changes since 5.8.2.
   back without deleting any, sets the delivery prefix to the backup's, ends every login session and
   promotes the database as the newest replica generation under a plain time name from the store's
   clock, with `origin.json` next to it, and reports `applied` once the runtime writes `applied.json` into that
-  generation with the same nonce. The seal, origin and acknowledgement files use the formats
+  generation with the same nonce, which it waits for up to `update.syncWindowSeconds` (default 120 s) after the
+  app is ready; when none appears in that time it reports `unconfirmed` with exit 0 and a warning naming the key
+  to look for and the app's log to check, and for a runtime before 6, which writes no `applied.json`, it reports
+  `unconfirmed` at once with a warning that the app does not render its output again. The seal, origin and acknowledgement files use the formats
   `replication-sqlite` defines; listings, server-side copies into the backup location and the store's
   clock go through the admin client of `kestrel-blobstore-s3`. Neither a backup nor a restore holds or writes the instance-lock file
   next to the database. Also `status`, `backup list|verify|prune` with retention per

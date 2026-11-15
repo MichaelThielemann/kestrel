@@ -47,7 +47,7 @@ describe("restore onto a runtime that understands origin.json", () => {
 
   it("renders once more on the next start when the first start wrote no acknowledgement, and reports the restore as unconfirmed", async () => {
     const bucket = new MemoryBucket("unacknowledged");
-    const h = createHarness({ store: memoryStore(bucket) });
+    const h = createHarness({ store: memoryStore(bucket), update: { syncWindowSeconds: 1 } });
     try {
       await h.app.start();
       await h.app.seed();

@@ -8,7 +8,8 @@ import { Interrupted } from "./interrupt.ts";
 import { fromJsonl, hex, keys, type BlobEntry, type Manifest, type SiteEntry } from "./layout.ts";
 import { confirm } from "./questions.ts";
 import { placedUnstarted, recordPlacement, unfinishedPlacements } from "./placements.ts";
-import { acknowledgement, buildDatabase, checkPromotable, completeGeneration, listGenerations, markerKey, namesAfterListed, promote, promotionName, sealOf, stableGenerations, type Acknowledgement, type Generation, type Promoted, type SealReport } from "./replica.ts";
+import { buildDatabase, checkPromotable, completeGeneration, listGenerations, majorOf, markerKey, namesAfterListed, promote, promotionName, readAcknowledgement, sealOf, SEALING_MAJOR, stableGenerations, type Acknowledgement, type Generation, type Promoted, type SealReport } from "./replica.ts";
+import { updateSettings } from "./environments.ts";
 import { appClock, type ServerClock } from "./serverTime.ts";
 import { deleteSessions, hasAccessChanges, integrityCheck, lossReport, sha256, vacuumInto, type LossReport } from "./sqlite.ts";
 import { listMap, stableList, transfer, type ObjectInfo, type ObjectStore } from "./store.ts";
@@ -312,8 +313,7 @@ async function restoreStopped(ctx: OpsContext, manifest: Manifest, stop: { stopp
   let own: string | null = null;
   if (promoted !== null && order !== null) {
     try {
-      ack = await acknowledgement(ctx.app, ctx.env.app.replicaPrefix, promoted, ctx.poll);
-      ctx.out.info(ack === "applied" ? `the app reports the restore of ${promoted.generation}` : `the app did not acknowledge ${promoted.generation}; a runtime without restore reporting renders nothing again by itself`);
+      ack = await awaitAcknowledgement(ctx, promoted, order.runtime);
     } catch (cause) {
       if (cause instanceof Interrupted) {
         orderUnconfirmed(ctx, order, `checking whether the app acknowledged ${promoted.generation} failed: ${messageOf(cause)}`);
@@ -344,12 +344,36 @@ interface OrderCheck {
   promoted: string;
   before: ReadonlySet<string>;
   waitMs: number;
+  runtime: string | null;
 }
 
 async function orderCheck(ctx: OpsContext, promoted: string): Promise<OrderCheck> {
   const before = new Set((await stableGenerations(ctx.app, ctx.env.app.replicaPrefix, ctx.poll)).map((g) => g.name));
-  const waitMs = namesAfterListed(runtimeVersion(await ctx.target.describe())) ? 0 : ctx.generationWaitMs;
-  return { promoted, before, waitMs };
+  const runtime = runtimeVersion(await ctx.target.describe());
+  return { promoted, before, waitMs: namesAfterListed(runtime) ? 0 : ctx.generationWaitMs, runtime };
+}
+
+async function awaitAcknowledgement(ctx: OpsContext, promoted: Promoted, runtime: string | null): Promise<Acknowledgement> {
+  const prefix = ctx.env.app.replicaPrefix;
+  const major = majorOf(runtime);
+  if (major !== null && major < SEALING_MAJOR) {
+    ctx.out.warn(`the app runs replication runtime ${runtime}, which writes no applied.json: it restores ${promoted.generation} but does not render its output again by itself, so the restored delivery prefix stands for the rendered output`);
+    return "unconfirmed";
+  }
+  const seconds = updateSettings(ctx.env).syncWindowSeconds;
+  const deadline = ctx.clock() + seconds * 1000;
+  const sleep = ctx.poll.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+  for (;;) {
+    if ((await readAcknowledgement(ctx.app, prefix, promoted)) === "applied") {
+      ctx.out.info(`the app reports the restore of ${promoted.generation}`);
+      return "applied";
+    }
+    if (ctx.clock() >= deadline) break;
+    await sleep(Math.min(ctx.poll.delayMs ?? 1000, Math.max(0, deadline - ctx.clock())));
+  }
+  const unknown = major === null ? "the target does not report its replication runtime version, and a runtime before 6 writes no applied.json; " : "";
+  ctx.out.warn(`the app did not acknowledge ${promoted.generation} within ${seconds} s (update.syncWindowSeconds) after it became ready: ${unknown}a runtime from 6 on writes ${markerKey(prefix, promoted.generation, "applied")} at the end of its first successful replication.sync after a boot run that reported the restore, and reports the restore again at every start until it is written. Look for that key later; when it does not appear, check the app's log for a failed boot run or replication.sync`);
+  return "unconfirmed";
 }
 
 function orderUnconfirmed(ctx: OpsContext, order: OrderCheck, reason: string): void {

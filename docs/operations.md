@@ -29,7 +29,10 @@ A backup holds the database rebuilt from the replica, every original the media r
 the delivery prefix; it is verified from what the backup location holds before the command ends. A restore
 verifies the backup again, stops the app, shows what it would drop and bring back, promotes the backup's
 database as a new replica generation, copies back changed originals, sets the delivery prefix to the backup's
-and starts the app. Schedule `backup create --kind scheduled` and `backup prune` in the pipeline.
+and starts the app. Once the app is ready, it waits up to `update.syncWindowSeconds` (120 s) for the
+`applied.json` a runtime from 6 on writes into the promoted generation at its first successful
+`replication.sync`, and reports `applied` or `unconfirmed`; raise the window when the app's sync runs less often
+than once a minute or its first boot run takes long. Schedule `backup create --kind scheduled` and `backup prune` in the pipeline.
 
 ## Permissions of the tool's credentials
 
@@ -380,4 +383,5 @@ answered by `--yes`) and `cleanup-delete` (never answered by `--yes`); `--answer
 pipeline.
 
 The `update` block of an environment also sets the waits: `sealTimeoutSeconds` (60), `syncWindowSeconds` (120),
-`renderTimeoutSeconds` (600) and `readyTimeoutSeconds` (300).
+`renderTimeoutSeconds` (600) and `readyTimeoutSeconds` (300). `restore --backup` waits up to `syncWindowSeconds`
+for the app's acknowledgement as well.

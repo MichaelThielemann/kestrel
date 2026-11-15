@@ -44,6 +44,8 @@ export interface HarnessOptions {
   production?: boolean;
   /** The backup location; default {@link LOCATION}. */
   location?: string;
+  /** The environment's `update` block, such as a short `syncWindowSeconds` for a restore the app does not acknowledge. */
+  update?: Record<string, unknown>;
 }
 
 /** Builds a harness whose tool and app share `store`. */
@@ -58,6 +60,7 @@ export function createHarness(options: HarnessOptions): Harness {
         storage: { bucket: "kestrel-test", credentials: { accessKeyId: { env: "OPS_ACCESS_KEY" }, secretAccessKey: { env: "OPS_SECRET_KEY" } } },
         app: { replicaPrefix: PREFIXES.replica, mediaPrefix: PREFIXES.media, deliveryPrefix: PREFIXES.delivery, derivedPrefixes: [PREFIXES.derived] },
         backups: { prefix: options.location ?? LOCATION },
+        ...(options.update === undefined ? {} : { update: options.update }),
       },
     },
   };
