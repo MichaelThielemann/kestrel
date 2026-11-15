@@ -96,7 +96,7 @@ export async function concludeVerify(ctx: UpdateContext, phase: UpdatePhase, res
     try {
       await ctx.steps.rollback(ctx, run, { kind: "automatic", failure });
     } catch (cause) {
-      return outcomeOf(ctx, UPDATE_EXIT.refused, `verification failed (${failure}) and the automatic rollback did not finish: ${messageOf(cause)}; run update rollback --env ${ctx.envName} --run ${ctx.run.id}`);
+      return outcomeOf(ctx, UPDATE_EXIT.refused, `verification failed (${failure}) and the automatic rollback did not finish: ${messageOf(cause)}; run update resume --env ${ctx.envName} --run ${ctx.run.id}, which runs the rollback again`);
     }
     return outcomeOf(ctx, UPDATE_EXIT.rolledBack, `verification failed (${failure}); rolled back to the cutover state`);
   }

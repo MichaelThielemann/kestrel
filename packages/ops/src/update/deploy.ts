@@ -206,7 +206,7 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     try {
       await ctx.steps.rollback(ctx, await readUpdateRun(ctx, ctx.run.id), { kind: "automatic", failure });
     } catch (cause) {
-      return outcomeOf(ctx, UPDATE_EXIT.refused, `the deploy failed at ${failure}, and the automatic rollback did not finish: ${messageOf(cause)}; the app stays stopped; run update rollback --env ${ctx.envName} --run ${ctx.run.id}`);
+      return outcomeOf(ctx, UPDATE_EXIT.refused, `the deploy failed at ${failure}, and the automatic rollback did not finish: ${messageOf(cause)}; the app stays stopped; do not start it by hand; run update resume --env ${ctx.envName} --run ${ctx.run.id}, which runs the rollback again`);
     }
     return outcomeOf(ctx, UPDATE_EXIT.rolledBack, flow.cutoverBackup === null ? `the deploy failed at ${failure} before its cutover backup; nothing was promoted, and the previous release runs again on the unchanged replica` : `the deploy failed at ${failure}; rolled back to the cutover state`);
   }
@@ -221,7 +221,7 @@ const startedStep = (run: UpdateRun, step: string): boolean => run.records.some(
  * is not the newest any more is refused; after `promote` it swaps and starts; after `start` it verifies.
  */
 export async function continueDeploy(ctx: UpdateContext, run: UpdateRun): Promise<UpdateOutcome> {
-  if (run.state !== "down" && run.state !== "verifying") return outcomeOf(ctx, UPDATE_EXIT.refused, `update run ${run.runId} is ${run.state}; only a deploy that stopped the app and has not concluded can be continued${run.state === "deploying" ? `; nothing changed yet, so run update abort --run ${run.runId} and deploy again` : ""}`);
+  if (run.state !== "down" && run.state !== "verifying") return outcomeOf(ctx, UPDATE_EXIT.refused, `update run ${run.runId} is ${run.state}; only a deploy that stopped the app and has not concluded can be continued${run.state === "deploying" ? `; ${startedStep(run, "stop") ? "its stop began, so the app may be stopped" : "nothing changed yet"}: run update abort --env ${ctx.envName} --run ${run.runId} and deploy again` : ""}`);
   const stop = run.records.find((r) => r.phase === "deploy" && r.step === "stop" && r.state === "done");
   const stoppedAt = stop?.data.stoppedAt;
   if (run.stagedDroplet === null || typeof stoppedAt !== "number") return outcomeOf(ctx, UPDATE_EXIT.refused, `update run ${run.runId} records no staged droplet or no completed stop; run update ${run.cutoverBackup === null ? "abort" : "rollback"} --env ${ctx.envName} --run ${run.runId}`);

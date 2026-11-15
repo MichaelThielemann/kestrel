@@ -12,6 +12,8 @@ import { abort } from "./abort.ts";
 import { continueDeploy, deploy } from "./deploy.ts";
 import { createUpdateHarness, type UpdateHarness, type UpdateHarnessOptions } from "./harness.fixture.ts";
 import { readUpdateRun } from "./journal.ts";
+import { resume } from "./resume.ts";
+import { rollback } from "./rollback.ts";
 import { updateKeys } from "./layout.ts";
 import { planHash, versionSet } from "./plan.ts";
 import { updateStatus } from "./status.ts";
@@ -289,5 +291,48 @@ describe("continuing an interrupted deploy", { timeout: 30_000 }, () => {
     expect(outcome.exitCode).toBe(0);
     expect(steps.migrateCopy).toHaveBeenCalledTimes(2);
     expect(steps.migrateCopy.mock.calls.map((call) => call[1].cutoverBackup)).toEqual([run.cutoverBackup, run.cutoverBackup]);
+  });
+});
+
+describe("the next command a failed deploy names", { timeout: 30_000 }, () => {
+  it("names update resume when the automatic rollback before the cutover backup does not finish, and resume finishes it", async () => {
+    const s = await scenario();
+    const ctx = s.ctx;
+    ctx.steps = {
+      ...ctx.steps,
+      rollback,
+      waitForSeal: async () => {
+        throw new Error("seal timeout");
+      },
+    };
+    const start = s.h.target.start.bind(s.h.target);
+    s.h.target.start = async () => {
+      s.h.target.start = start;
+      throw new Error("start refused");
+    };
+    const outcome = await deploy(ctx);
+    expect(outcome.exitCode, outcome.message).toBe(1);
+    expect(outcome.state, outcome.message).toBe("rolling-back");
+    expect(outcome.message).toContain(`run update resume --env prod --run ${ctx.run.id}`);
+    expect(outcome.message).not.toContain("update rollback");
+    expect((await updateStatus(ctx, ctx.run.id)).run?.next).toBe(`kestrel update resume --env prod --run ${ctx.run.id}`);
+    const run = await readUpdateRun(ctx, ctx.run.id);
+    const resumed = await resume(await s.h.context({ run, answers: ANSWERS }), run);
+    expect(resumed).toMatchObject({ exitCode: 3, state: "rolled-back" });
+    expect((await s.h.target.status()).state).toBe("started");
+  });
+
+  it("names update abort, without claiming nothing changed, for a run that began its stop and was cut off", async () => {
+    const s = await scenario();
+    await s.ctx.journal.record("gate", "done", { phase: "deploy" });
+    await s.ctx.journal.record("stage", "done", { phase: "deploy", droplet: "staged-droplet" });
+    await s.ctx.journal.record("stop", "started", { phase: "deploy" });
+    const run = await readUpdateRun(s.ctx, s.ctx.run.id);
+    expect(run.state).toBe("deploying");
+    expect((await updateStatus(s.ctx, run.runId)).run?.next).toBe(`kestrel update abort --env prod --run ${run.runId}`);
+    const outcome = await continueDeploy(await s.h.context({ run, answers: ANSWERS }), run);
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.message).toContain(`update abort --env prod --run ${run.runId}`);
+    expect(outcome.message).not.toContain("nothing changed yet");
   });
 });
