@@ -2114,7 +2114,9 @@ Net changes since 5.8.2.
   event loop's thread has next to nothing left to copy. A checkpoint that finds 8 MiB or more of frames not
   yet copied back, as after a snapshot that took a while to read and upload while other connections
   committed, takes its read transaction again at the end of the WAL and leaves those frames to a worker
-  thread as well, before it copies back the rest on the event loop's thread. The image is byte for byte the
+  thread as well, before it copies back the rest on the event loop's thread. The worker takes the checkpoint
+  lock before the event loop runs again, so the checkpoint SQLite runs by itself after a commit on the event
+  loop's thread leaves the copy to it. The image is byte for byte the
   one written before, so the replica format is unchanged: earlier releases restore what this one writes,
   and the other way round. When a snapshot upload fails, its key is removed again, and while that removal
   fails, every later sync, snapshot, checkpoint and seal tries it again first and fails with `TRANSIENT`

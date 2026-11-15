@@ -706,6 +706,99 @@ describe("replication/sqlite checkpoint after a snapshot while another thread wr
   }, 60_000);
 });
 
+describe("replication/sqlite copy-back beside a writer on the event loop's thread with SQLite's own checkpoints", () => {
+  function writerOnThisThread(l: ReturnType<typeof live>): { stop: () => Promise<{ commits: number; largestFramesCopiedBack: number; longestCommitMs: number }> } {
+    const { backfilled } = walIndex(l.file);
+    const insert = l.app.prepare("INSERT INTO t (v) VALUES (?)");
+    let writing = true;
+    let commits = 0;
+    let largest = 0;
+    let longestMs = 0;
+    const loop = (async () => {
+      while (writing) {
+        await sleep(2);
+        const before = backfilled();
+        const started = performance.now();
+        insert.run("app-".padEnd(600, "a"));
+        longestMs = Math.max(longestMs, performance.now() - started);
+        largest = Math.max(largest, backfilled() - before);
+        commits += 1;
+      }
+    })();
+    return {
+      stop: async () => {
+        writing = false;
+        await loop;
+        return { commits, largestFramesCopiedBack: largest, longestCommitMs: longestMs };
+      },
+    };
+  }
+
+  function uncopiedFrames(file: string): number {
+    const index = walIndex(file);
+    return index.frames() - index.backfilled();
+  }
+
+  it("copies the WAL back on the worker thread at the first snapshot, so no commit of that writer after the module's read transaction began copies it back", async () => {
+    const l = live();
+    const copyBackBytes = MB;
+    const repl = l.start({ checkpointBytes: copyBackBytes }, { copyBackBytes });
+    await repl.settled();
+    l.app.exec("PRAGMA wal_autocheckpoint = 0");
+    for (let i = 0; i < 40; i++) l.insert(150, 3800);
+    l.app.exec("PRAGMA wal_autocheckpoint = 1000");
+    expect(uncopiedFrames(l.file)).toBeGreaterThan(5000);
+    const started: { writer: ReturnType<typeof writerOnThisThread> | null } = { writer: null };
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- called only through apply, with the connection as this
+    const exec = DatabaseSync.prototype.exec;
+    const began = vi.spyOn(DatabaseSync.prototype, "exec").mockImplementation(function (this: DatabaseSync, ...args: Parameters<typeof exec>) {
+      exec.apply(this, args);
+      if (started.writer === null && this !== l.app && args[0] === "BEGIN") started.writer = writerOnThisThread(l);
+    });
+    let synced: Awaited<ReturnType<Replication["sync"]>>;
+    let written: Awaited<ReturnType<ReturnType<typeof writerOnThisThread>["stop"]>> | null;
+    try {
+      synced = await repl.sync();
+      await sleep(50);
+    } finally {
+      began.mockRestore();
+      written = (await started.writer?.stop()) ?? null;
+    }
+    if (written === null) throw new Error("the module never began its read transaction");
+    const generation = expectOk(synced).generation;
+    reportMeasurement("first snapshot beside a writer on this thread", { commits: written.commits, largestFramesCopiedBackByACommit: written.largestFramesCopiedBack, longestCommitMs: written.longestCommitMs });
+    expect(written.commits).toBeGreaterThan(5);
+    expect(written.largestFramesCopiedBack).toBeLessThanOrEqual(Math.floor(copyBackBytes / (4096 + 24)));
+    expectOk(await repl.sync());
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation, ...fingerprint(l.app), check: "ok" });
+  }, 60_000);
+
+  it("leaves the frames committed since the generation began to worker threads, so no commit of that writer copies back more than copyBackBytes", async () => {
+    const l = live();
+    l.insert(200, 900);
+    const copyBackBytes = MB;
+    const repl = l.start({ checkpointBytes: copyBackBytes }, { copyBackBytes });
+    const generation = expectOk(await repl.sync()).generation;
+    for (let i = 0; i < 40; i++) l.insert(150, 3800);
+    expect(uncopiedFrames(l.file)).toBeGreaterThan(5000);
+    const writer = writerOnThisThread(l);
+    let synced: Awaited<ReturnType<Replication["sync"]>>;
+    let written: Awaited<ReturnType<typeof writer.stop>>;
+    try {
+      synced = await repl.sync();
+      await sleep(50);
+    } finally {
+      written = await writer.stop();
+    }
+    reportMeasurement("checkpoint beside a writer on this thread", { commits: written.commits, largestFramesCopiedBackByACommit: written.largestFramesCopiedBack, longestCommitMs: written.longestCommitMs });
+    expect(expectOk(synced).checkpointed).toBe(true);
+    expect(written.commits).toBeGreaterThan(5);
+    expect(written.largestFramesCopiedBack).toBeLessThanOrEqual(Math.floor(copyBackBytes / (4096 + 24)));
+    expectOk(await repl.sync());
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation, ...fingerprint(l.app), check: "ok" });
+  }, 60_000);
+});
+
 describe("replication/sqlite snapshot while other connections commit", () => {
   it("captures a state that one transaction left behind, loses no frame committed after it, and restores the same bytes with the plain rebuild", async () => {
     const l = live();

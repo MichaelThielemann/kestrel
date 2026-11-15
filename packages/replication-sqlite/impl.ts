@@ -393,28 +393,70 @@ const chunkBytes = (header: WalHeader): number => Math.max(1, Math.floor(READ_CH
 const COPY_BACK = `
 const { DatabaseSync } = require("node:sqlite");
 const { parentPort, workerData } = require("node:worker_threads");
+const signal = new Int32Array(workerData.signal);
 const db = new DatabaseSync(workerData.file);
 try {
-  db.prepare("PRAGMA wal_checkpoint(PASSIVE)").get();
+  const checkpoint = db.prepare("PRAGMA wal_checkpoint(PASSIVE)");
+  parentPort.postMessage("ready");
+  Atomics.wait(signal, 0, 0);
+  if (Atomics.load(signal, 0) === 1) {
+    Atomics.store(signal, 1, 1);
+    Atomics.notify(signal, 1);
+    checkpoint.get();
+  }
 } finally {
   db.close();
 }
-parentPort.postMessage(true);
 `;
 
-function copyBackOnWorker(file: string): Promise<void> | null {
+const RUN = 1;
+const CANCEL = 2;
+const START_WAIT_MS = 50;
+
+interface CopyBack {
+  start(): void;
+  cancel(): void;
+  done: Promise<void>;
+}
+
+function prepareCopyBack(file: string): Promise<CopyBack | null> {
+  const signal = new Int32Array(new SharedArrayBuffer(8));
   let worker: Worker;
   try {
-    worker = new Worker(COPY_BACK, { eval: true, workerData: { file }, execArgv: ["--disable-warning=ExperimentalWarning"] });
+    worker = new Worker(COPY_BACK, { eval: true, workerData: { file, signal: signal.buffer }, execArgv: ["--disable-warning=ExperimentalWarning"] });
   } catch {
-    return null;
+    return Promise.resolve(null);
   }
   worker.unref();
-  return new Promise<void>((resolve) => {
-    worker.once("message", () => resolve());
+  const done = new Promise<void>((resolve) => {
     worker.once("error", () => resolve());
     worker.once("exit", () => resolve());
   });
+  const wake = (command: number): boolean => {
+    if (Atomics.compareExchange(signal, 0, 0, command) !== 0) return false;
+    Atomics.notify(signal, 0);
+    return true;
+  };
+  const copyBack: CopyBack = {
+    start: () => {
+      if (wake(RUN)) Atomics.wait(signal, 1, 0, START_WAIT_MS);
+    },
+    cancel: () => {
+      wake(CANCEL);
+    },
+    done,
+  };
+  return new Promise<CopyBack | null>((resolve) => {
+    worker.once("message", () => resolve(copyBack));
+    void done.then(() => resolve(null));
+  });
+}
+
+async function copyBackOnWorker(file: string): Promise<void> {
+  const copyBack = await prepareCopyBack(file);
+  if (copyBack === null) return;
+  copyBack.start();
+  await copyBack.done;
 }
 
 export function createReplicationSqlite(config: Config, blobs: Blobstore, now: () => number = Date.now, options: ReplicationOptions = {}): Replication {
@@ -577,11 +619,18 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     }
     if (settling) await settling;
     if (closed) return ok(null);
+    const halted = (): boolean => closed || (stopping && generation !== null);
     reading = true;
+    let copyBack: CopyBack | null = null;
     try {
+      if (walBytes() >= config.checkpointBytes) copyBack = await prepareCopyBack(file);
+      if (closed) return ok(null);
       if (!holding) holdRead();
-      if (walBytes() >= config.checkpointBytes) await copyBackOnWorker(file);
-      const read = await readSnapshot({ file, walFile, probe: walState, now, stopped: () => closed || (stopping && generation !== null) });
+      if (copyBack !== null) {
+        copyBack.start();
+        await copyBack.done;
+      }
+      const read = await readSnapshot({ file, walFile, probe: walState, now, stopped: halted });
       if (read === "stopped") return ok(null);
       if (read === "unsettled") return err(failure("TRANSIENT", "replication/sqlite: the WAL kept starting over while the snapshot read it; the next run tries again"));
       const { image, position, at } = read;
@@ -608,6 +657,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       lastSnapshotAt = at;
       return ok({ generation: gen, bytes: image.byteLength });
     } finally {
+      copyBack?.cancel();
       reading = false;
       if (generation === null && holding && !closed) release();
     }
@@ -709,17 +759,23 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       return ok({ done, bytes, frames });
     };
     for (let round = 0; round < COPY_BACK_ROUNDS && uncopiedBytes() >= copyBackBytes; round++) {
-      const tail = underWriteLock(() => {
-        const read = readCommittedSync(continueFrom);
-        release();
-        holdRead();
-        return read;
-      });
-      if (tail === "busy") return ended(false);
-      kept(tail);
-      const copying = copyBackOnWorker(file);
-      if (copying === null) break;
-      await copying;
+      const copyBack = await prepareCopyBack(file);
+      if (copyBack === null) break;
+      try {
+        if (closed) return ok({ done: false, bytes, frames });
+        const tail = underWriteLock(() => {
+          const read = readCommittedSync(continueFrom);
+          release();
+          holdRead();
+          copyBack.start();
+          return read;
+        });
+        if (tail === "busy") return ended(false);
+        kept(tail);
+        await copyBack.done;
+      } finally {
+        copyBack.cancel();
+      }
       if (closed) return ok({ done: false, bytes, frames });
     }
     const finished = underWriteLock(() => {
