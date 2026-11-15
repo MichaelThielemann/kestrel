@@ -15,7 +15,7 @@ export interface WalPosition {
 
 /** The answer of `PRAGMA wal_checkpoint(PASSIVE)`. */
 export interface WalState {
-  /** 1 when another connection held the checkpoint lock. */
+  /** 1 when another connection held the checkpoint lock, or, for a blocking checkpoint, when it could not finish. */
   busy: number;
   /** How many frames the WAL holds, -1 when unknown. */
   log: number;
@@ -49,6 +49,7 @@ export interface SnapshotRead {
 
 const CHUNK_BYTES = 1024 * 1024;
 const ATTEMPTS = 10;
+const BUSY_ATTEMPTS = 3;
 const RETRY_MS = 20;
 
 const u32 = (d: Uint8Array, at: number): number => new DataView(d.buffer, d.byteOffset, d.byteLength).getUint32(at);
@@ -98,13 +99,46 @@ async function copyFile(db: FileHandle, image: Uint8Array, bytes: number, source
   return "done";
 }
 
-async function readImage(source: SnapshotSource, db: FileHandle, wal: FileHandle | null): Promise<SnapshotRead | "stopped" | "moved"> {
+async function lastCommitted(wal: FileHandle, head: Omit<WalPosition, "frame">, source: SnapshotSource): Promise<{ frames: number; commitSize: number; checksum: WalChecksum } | "stopped"> {
+  const { pageSize, magic, salt1, salt2 } = head.header;
+  const size = frameSize(pageSize);
+  const perChunk = Math.max(1, Math.floor(CHUNK_BYTES / size));
+  const chunk = new Uint8Array(perChunk * size);
+  const view = new DataView(chunk.buffer);
+  let running: WalChecksum = head.checksum;
+  let last = { frames: 0, commitSize: 0, checksum: head.checksum };
+  for (let frame = 0; ; ) {
+    const { bytesRead } = await wal.read(chunk, 0, chunk.byteLength, WAL_HEADER_SIZE + frame * size);
+    const whole = Math.floor(bytesRead / size);
+    for (let i = 0; i < whole; i++) {
+      const offset = i * size;
+      const info = parseFrameHeader(chunk, offset);
+      running = walChecksum(magic, chunk.subarray(offset + FRAME_HEADER_SIZE, offset + size), walChecksum(magic, chunk.subarray(offset, offset + 8), running));
+      if (info.salt1 !== salt1 || info.salt2 !== salt2 || running[0] !== view.getUint32(offset + 16) || running[1] !== view.getUint32(offset + 20)) return last;
+      if (info.commitSize > 0) last = { frames: frame + i + 1, commitSize: info.commitSize, checksum: running };
+    }
+    frame += whole;
+    if (whole < perChunk) return last;
+    if (source.stopped()) return "stopped";
+  }
+}
+
+async function readImage(source: SnapshotSource, db: FileHandle, wal: FileHandle | null, attempt: number): Promise<SnapshotRead | "stopped" | "moved"> {
   const before = wal ? await readAt(wal, 0, WAL_HEADER_SIZE) : null;
   const state = source.probe();
-  const at = source.now();
-  if (state.busy !== 0 || state.log < 0) return "moved";
+  let at = source.now();
   const head = headOf(before);
-  const frames = state.log;
+  const probed = state.busy === 0 && state.log >= 0;
+  if (!probed && attempt < BUSY_ATTEMPTS) return "moved";
+  let frames = probed ? state.log : 0;
+  let scanned: { commitSize: number; checksum: WalChecksum } | null = null;
+  if (!probed && wal !== null && head !== null) {
+    const end = await lastCommitted(wal, head, source);
+    if (end === "stopped") return "stopped";
+    frames = end.frames;
+    scanned = end;
+    at = source.now();
+  }
   if (frames === 0) {
     if (!sameBytes(before, wal ? await readAt(wal, 0, WAL_HEADER_SIZE) : null)) return "moved";
     const size = (await db.stat()).size;
@@ -116,9 +150,9 @@ async function readImage(source: SnapshotSource, db: FileHandle, wal: FileHandle
   if (wal === null || head === null) return "moved";
   const { pageSize, magic } = head.header;
   const size = frameSize(pageSize);
-  const last = await frameAt(wal, head, frames);
+  const last = scanned ?? (await frameAt(wal, head, frames));
   if (last === null || last.commitSize === 0) return "moved";
-  let from = Math.min(Math.max(state.checkpointed, 0), frames);
+  let from = probed ? Math.min(Math.max(state.checkpointed, 0), frames) : 0;
   let base = from > 0 ? await frameAt(wal, head, from) : null;
   if (base === null || base.commitSize === 0) {
     from = 0;
@@ -169,7 +203,9 @@ async function readImage(source: SnapshotSource, db: FileHandle, wal: FileHandle
  * loop on more than one chunk of 1 MiB at a time and with one buffer of the image's size. A passive checkpoint
  * tells how many frames the WAL holds and how many of them are copied back into the database file; the image is
  * the database file up to the size after the last copied frame, with the frames after it applied, which is what
- * the whole file with every committed frame applied holds. Answers `"stopped"` once `source.stopped()` is true,
+ * the whole file with every committed frame applied holds. When another connection still holds the checkpoint lock
+ * at the third try, the WAL is read twice instead: once to find its last committed frame along the checksum chain,
+ * then to apply every frame up to it, from the first, to the whole database file. Answers `"stopped"` once `source.stopped()` is true,
  * and `"unsettled"` when the WAL kept starting over while it was read.
  */
 export async function readSnapshot(source: SnapshotSource): Promise<SnapshotRead | "stopped" | "unsettled"> {
@@ -180,7 +216,7 @@ export async function readSnapshot(source: SnapshotSource): Promise<SnapshotRead
     try {
       const wal = await openExisting(source.walFile);
       try {
-        read = await readImage(source, db, wal);
+        read = await readImage(source, db, wal, attempt);
       } finally {
         await wal?.close();
       }

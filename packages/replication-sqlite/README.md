@@ -23,13 +23,19 @@ frame the read transaction does not see, so the pages the snapshot reads from th
 frame it applies overwrites them, and the WAL cannot start over beneath frames it still has to read. The
 frames it applies have to continue the WAL's checksum chain up to the last committed frame, and the WAL
 header has to read the same before and after; otherwise the snapshot is read again, up to ten times, and
-the run fails with `TRANSIENT` after that. Frames committed while the snapshot is read are not in it and
-are shipped after it. When the upload of a snapshot fails, the module removes its key again; while that
-removal fails, every later sync, snapshot, checkpoint and seal tries it again first and fails with
-`TRANSIENT` before it uploads anything, also while the process has no generation yet, so no frame is
-shipped into the generation before it and no later snapshot is uploaded while a restore would pick the
-failed one. A process killed while it reads or uploads a snapshot leaves the replica as its last sync left
-it, or with the new generation, whose snapshot holds every frame that sync shipped.
+the run fails with `TRANSIENT` after that. When another connection holds the checkpoint lock, as a blocking
+checkpoint on another thread or in another process does while it waits for the module's read transaction,
+the passive checkpoint cannot run; when that is still so at the third try, the snapshot reads the WAL twice
+instead, once along the checksum chain to find the last committed frame, and once to apply every frame up
+to it, from the first, to the whole database file. That gives the same image, since such a checkpoint
+copies back only frames the read transaction sees, and the snapshot applies each of them again. Frames
+committed while the snapshot is read are not in it and are shipped after it. When the upload of a
+snapshot fails, the module removes its key again; while that removal fails, every later sync, snapshot,
+checkpoint and seal tries it again first and fails with `TRANSIENT` before it uploads anything, also while
+the process has no generation yet, so no frame is shipped into the generation before it and no later
+snapshot is uploaded while a restore would pick the failed one. A process killed while it reads or uploads
+a snapshot leaves the replica as its last sync left it, or with the new generation, whose snapshot holds
+every frame that sync shipped.
 
 A generation is named by a time, then 12 hex digits of the same time in milliseconds, 12 hex digits of
 the time the snapshot was taken in milliseconds and 20 random hex digits (`20260927T101500Z-0192…9f…`),

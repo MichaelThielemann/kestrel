@@ -211,6 +211,19 @@ function killedWriter(file: string, imageMb: number, walMb: number): void {
   if (run.signal !== "SIGKILL") throw new Error(`the writer was not killed: ${run.stderr}`);
 }
 
+async function whileCheckpointLockIsHeld<T>(task: () => Promise<T>): Promise<T> {
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- called only through apply, with the statement as this
+  const original = StatementSync.prototype.get;
+  const busy = vi.spyOn(StatementSync.prototype, "get").mockImplementation(function (this: StatementSync, ...args: Parameters<typeof original>) {
+    return this.sourceSQL.includes("wal_checkpoint(PASSIVE)") ? { busy: 1, log: -1, checkpointed: -1 } : original.apply(this, args);
+  });
+  try {
+    return await task();
+  } finally {
+    busy.mockRestore();
+  }
+}
+
 function copiedBackOnThisThread(file: string): { frames: () => number; stop: () => void } {
   const little = endianness() === "LE";
   const backfilled = (): number => {
@@ -232,6 +245,32 @@ function copiedBackOnThisThread(file: string): { frames: () => number; stop: () 
     return row;
   });
   return { frames: () => frames, stop: () => spy.mockRestore() };
+}
+
+function checkpointWaitingOnAnotherThread(file: string, busyMs: number): { started: Promise<void>; done: Promise<void> } {
+  const source = `
+    const { DatabaseSync } = require("node:sqlite");
+    const { workerData, parentPort } = require("node:worker_threads");
+    const db = new DatabaseSync(workerData.file);
+    db.exec("PRAGMA busy_timeout = " + workerData.busyMs);
+    parentPort.postMessage("started");
+    db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    db.close();
+    parentPort.postMessage("done");
+  `;
+  const worker = new Worker(source, { eval: true, workerData: { file, busyMs } });
+  workers.push(worker);
+  const message = (expected: string) =>
+    new Promise<void>((resolve, reject) => {
+      const listen = (value: unknown): void => {
+        if (value !== expected) return;
+        worker.off("message", listen);
+        resolve();
+      };
+      worker.on("message", listen);
+      worker.once("error", reject);
+    });
+  return { started: message("started"), done: message("done") };
 }
 
 async function measured<T>(task: () => Promise<T>): Promise<{ value: T; ms: number; longestMs: number; p99Ms: number; peakBuffers: number; peakRss: number }> {
@@ -346,6 +385,15 @@ describe("replication/sqlite snapshot image", () => {
     expect(await restored(l.blobs, l.dir, { generation })).toMatchObject({ ...fingerprint(l.app), check: "ok" });
   });
 
+  it.each(states)("is the same image, byte for byte, when another connection holds the checkpoint lock, for %s", async (_name, prepare) => {
+    const l = live();
+    const repl = await prepare(l);
+    const generation = expectOk(await whileCheckpointLockIsHeld(() => repl.snapshot())).generation;
+    io.beforeRead = null;
+    expect(same(snapshotOf(l.blobs, generation), referenceSnapshot(l.file))).toBe(true);
+    expect(await restored(l.blobs, l.dir, { generation })).toMatchObject({ ...fingerprint(l.app), check: "ok" });
+  });
+
   it("is the database file with every committed frame applied, byte for byte, after transactions that shrink and grow the database", async () => {
     const l = live({ autoVacuum: true });
     l.insert(100, 2000);
@@ -360,6 +408,11 @@ describe("replication/sqlite snapshot image", () => {
     const generation = expectOk(await repl.snapshot()).generation;
     expect(same(snapshotOf(l.blobs, generation), referenceSnapshot(l.file))).toBe(true);
     expect(await restored(l.blobs, l.dir, { generation })).toMatchObject({ ...fingerprint(l.app), check: "ok" });
+    l.app.exec("DELETE FROM t WHERE id % 2 = 0; PRAGMA incremental_vacuum");
+    l.insert(20, 2500);
+    const busy = expectOk(await whileCheckpointLockIsHeld(() => repl.snapshot())).generation;
+    expect(same(snapshotOf(l.blobs, busy), referenceSnapshot(l.file))).toBe(true);
+    expect(await restored(l.blobs, l.dir, { generation: busy })).toMatchObject({ ...fingerprint(l.app), check: "ok" });
   });
 });
 
@@ -459,6 +512,27 @@ describe("replication/sqlite first sync after the process before it was killed",
     apps.push(app);
     expect(await restored(blobs, dir)).toMatchObject({ generation, n: fingerprint(app).n, s: fingerprint(app).s, check: "ok" });
   }, 600_000);
+});
+
+describe("replication/sqlite snapshot while a checkpoint on another thread waits for the module's read transaction", () => {
+  it("reads the WAL from its first frame and takes the snapshot, byte for byte, instead of failing", async () => {
+    const l = live();
+    l.insert(200, 900);
+    const repl = l.start();
+    const first = expectOk(await repl.sync()).generation;
+    for (let i = 0; i < 20; i++) l.insert(10, 1800);
+    const waiting = checkpointWaitingOnAnotherThread(l.file, 1_500);
+    await waiting.started;
+    await sleep(100);
+    const generation = expectOk(await repl.snapshot()).generation;
+    expect(generation > first).toBe(true);
+    expect(same(snapshotOf(l.blobs, generation), referenceSnapshot(l.file))).toBe(true);
+    expect(await restored(l.blobs, l.dir, { generation })).toMatchObject({ ...fingerprint(l.app), check: "ok" });
+    await waiting.done;
+    l.insert(5, 900);
+    expectOk(await repl.sync());
+    expect(await restored(l.blobs, l.dir)).toMatchObject({ generation, ...fingerprint(l.app), check: "ok" });
+  }, 30_000);
 });
 
 describe("replication/sqlite snapshot while other connections commit", () => {
