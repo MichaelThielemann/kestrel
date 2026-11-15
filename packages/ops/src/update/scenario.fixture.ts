@@ -98,7 +98,7 @@ async function migrateCopy(ctx: UpdateContext, cutover: string, file: string): P
   }
 }
 
-async function runSteps(ctx: UpdateContext, scenario: Scenario, run: UpdateRun | null, until: DeployStep): Promise<StepEnd> {
+async function runSteps(ctx: UpdateContext, scenario: Scenario, run: UpdateRun | null, until: DeployStep, before: (step: DeployStep, ctx: UpdateContext) => void = () => undefined): Promise<StepEnd> {
   const state = run === null ? { from: 0, stoppedAt: null } : stateOf(run);
   let stoppedAt = state.stoppedAt;
   let staged = run?.stagedDroplet ?? null;
@@ -175,6 +175,7 @@ async function runSteps(ctx: UpdateContext, scenario: Scenario, run: UpdateRun |
   };
   for (const step of DEPLOY_STEPS.slice(state.from, stepIndex(until) + 1)) {
     try {
+      before(step, ctx);
       await steps[step]();
     } catch (error) {
       end.failure = error instanceof Error ? error : new Error(String(error));
@@ -186,10 +187,13 @@ async function runSteps(ctx: UpdateContext, scenario: Scenario, run: UpdateRun |
   return end;
 }
 
-/** Starts a deploy run in a new process context and runs it up to and including `until`, or to the step that throws. */
-export async function deployUntil(scenario: Scenario, until: DeployStep, options: ContextOptions = {}): Promise<ScenarioRun> {
+/**
+ * Starts a deploy run in a new process context and runs it up to and including `until`, or to the step that throws;
+ * `before` sees each step and the context just before the step runs.
+ */
+export async function deployUntil(scenario: Scenario, until: DeployStep, options: ContextOptions = {}, before?: (step: DeployStep, ctx: UpdateContext) => void): Promise<ScenarioRun> {
   const ctx = await scenario.h.context({ command: "update deploy", answers: { "unsealed-stop": "accept" }, ...options });
-  const end = await runSteps(ctx, scenario, null, until);
+  const end = await runSteps(ctx, scenario, null, until, before);
   return { runId: ctx.run.id, ctx, end };
 }
 
