@@ -216,7 +216,7 @@ export function exactPathPatternSource(path: string): string {
 
 /**
  * Normalize an authored `to` into a `Location` value. A path gets its leading slash; an absolute
- * http(s) URL is kept verbatim (a moved domain is a legitimate target). Everything else is rejected —
+ * http(s) URL is kept as written with its scheme in lower case (a moved domain is a legitimate target). Everything else is rejected —
  * a `javascript:`/`data:` scheme or a protocol-relative `//host` would turn a redirect into a hazard.
  */
 export function normalizeTarget(to: string): string {
@@ -238,7 +238,7 @@ export function normalizeTarget(to: string): string {
   }
   if (!url.host) throw new RedirectRuleError(`"To" is not a valid URL: ${raw}`, { field: "to", reason: "invalid-url" });
   if (url.username || url.password) throw new RedirectRuleError('"To" must not embed credentials', { field: "to", reason: "embedded-credentials" });
-  return raw;
+  return raw.replace(SCHEME, (scheme) => scheme.toLowerCase());
 }
 
 function assertPlaceholdersAfterHost(target: string): void {

@@ -60,6 +60,10 @@ localized message: `{ row, field, reason, path? }`. `row` is the 1-based positio
 | `to` | `redirect-loop` | following the editor rules from a source comes back to a path already passed, or takes more than 20 redirects | the target |
 | `status` | `invalid-status` | not 301, 302, 307 or 308 | |
 
+An absolute target keeps its host and path as written, and its scheme is compiled in lower case: a rule
+saved with `HTTPS://example.org/x` answers `https://example.org/x` in `redirects.lookup`,
+`redirects.render` and `redirects.json`, while the stored list keeps what the editor typed.
+
 ## Redirect loops
 
 `redirects.validate` follows the editor rules the way `redirects.lookup` does, starting at the source of

@@ -2436,6 +2436,10 @@ Net changes since 5.8.2.
   catches a target that reaches the source of an automatic redirect with a trailing slash, query or fragment,
   and its `path` is that source. `REDIRECT_RULE_REASONS` and the `reason` enum of the published schema list
   `redirect-loop`.
+- `redirects-default`: the scheme of an absolute redirect target is compiled in lower case: a rule with
+  `HTTPS://Example.org/x` answers `https://Example.org/x` in `redirects.lookup`, `redirects.render` and
+  `redirects.json`; host and path stay as written, and so does the stored list. A consumer that tells an
+  absolute target by `http:` or `https:` recognises it, where it treated it as a path before.
 
 ## 5.8.2 – 2026-09-27
 

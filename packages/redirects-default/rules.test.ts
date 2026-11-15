@@ -26,6 +26,11 @@ describe("normalizeTarget", () => {
     expect(normalizeTarget("neu")).toBe("/neu");
     expect(normalizeTarget("https://neu.example/a")).toBe("https://neu.example/a");
   });
+  it("writes the scheme of an absolute target in lower case and keeps the rest as written", () => {
+    expect(normalizeTarget("HTTPS://Example.org/x")).toBe("https://Example.org/x");
+    expect(normalizeTarget("Http://example.org/")).toBe("http://example.org/");
+    expect(compileRedirects([{ from: "/gross", to: "HTTPS://Example.org/x", status: 302 }])[0]?.target).toBe("https://Example.org/x");
+  });
   it("rejects dangerous targets", () => {
     for (const bad of ["javascript:alert(1)", "data:text/html,x", "//evil.example", "/a\\b", "https://user:pw@x.example/", "ftp://x.example/", ""]) {
       expect(() => normalizeTarget(bad)).toThrow(RedirectRuleError);
