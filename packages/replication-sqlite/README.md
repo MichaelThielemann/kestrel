@@ -95,9 +95,11 @@ lands meanwhile and the next writer starts the WAL over; `lastCheckpointAt` is s
 The check pauses from the moment a snapshot starts reading until it is uploaded or given up, since the
 frames committed meanwhile belong to the generation it starts. A WAL of `checkpointBytes` or more that the
 file already has when the module opens it, left behind by a process that ended without closing the
-database, is copied back on a worker thread with a connection of its own; the check, the first snapshot
-and a seal wait for it, and a checkpoint that SQLite starts after a commit on another connection meanwhile
-finds the WAL busy and leaves it to the worker.
+database, is copied back on a worker thread with a connection of its own, and `setup()` returns only once
+that is done, so `persistence/sqlite`, which is set up after this module, finds it copied back.
+`createReplicationSqlite` of `./impl` returns at once instead, and its `settled()` resolves once the copy
+is done; until then a commit on another connection may copy the WAL back itself, on its own thread, while
+the check, the first snapshot and a seal wait for it.
 
 If an upload fails after a checkpoint, the frames stay in memory and go out first on the next run;
 a new snapshot supersedes them, as does the snapshot a restarted process takes on its first sync.

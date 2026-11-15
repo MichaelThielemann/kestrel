@@ -2132,9 +2132,10 @@ Net changes since 5.8.2.
   runs a passive checkpoint as well, and a restarting one, which holds the write lock while it copies, when
   the WAL still holds `checkpointBytes` of frames after it. A WAL of `checkpointBytes` or more that a
   process left behind when it ended without closing the database is copied back on a worker thread when
-  the module opens the file, and the first snapshot waits for it. A seal before the first generation takes
-  the first snapshot whenever another connection committed since the module opened the file, also when the
-  WAL was truncated since.
+  the module opens the file, and `setup()` returns once that is done, before `persistence-sqlite` opens the
+  file; the `Replication` interface of `./impl` gains `settled()`, which resolves then. A seal before the
+  first generation takes the first snapshot whenever another connection committed since the module opened
+  the file, also when the WAL was truncated since.
 - `replication-sqlite`: `stop()` no longer waits for a periodic snapshot, a checkpoint or a prune that a
   running sync has still to do. The module now declares `quiesce`: from the start of `stop()` a sync ships
   its frames but skips the checkpoint, the periodic snapshot and the prune, a periodic snapshot or

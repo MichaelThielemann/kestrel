@@ -7,12 +7,17 @@ import { monitorEventLoopDelay } from "node:perf_hooks";
 import { DatabaseSync, StatementSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { createContext } from "@michaelthielemann/kestrel/context";
+import type { Contract } from "@michaelthielemann/kestrel/defineContract";
+import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { failure } from "@michaelthielemann/kestrel/errors";
+import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import { createReplicationSqlite, restoreFromBlobs, type Replication, type ReplicationOptions } from "./impl.ts";
+import replication from "./module.ts";
 import { referenceRestore, referenceSnapshot } from "./reference.fixture.ts";
 
 const io = vi.hoisted(() => ({ beforeRead: null as null | ((path: string) => Promise<void> | void) }));
@@ -550,6 +555,39 @@ describe("replication/sqlite first sync after the process before it was killed",
     apps.push(app);
     expect(await restored(blobs, dir)).toMatchObject({ generation, n: fingerprint(app).n, s: fingerprint(app).s, check: "ok" });
   }, 600_000);
+
+  it("copies the WAL that process left behind back into the database before setup() returns, so a commit right after it starts the WAL over instead of copying it back on this thread", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-snap-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    killedWriter(file, 4, 24);
+    const blobs = memoryBlobs();
+    const deps: Deps = {
+      get: <T>(contract: Contract<T>): T => {
+        if (contract.name !== BLOBSTORE.name) throw new Error(`no provider for "${contract.name}"`);
+        return boundaryCast<T>(blobs, "host");
+      },
+      find: <T>(): T | undefined => undefined,
+      logger: silentLogger,
+      root: dir,
+      eventTriggers: [],
+    };
+    const instance = await replication.setup(replication.configSchema.parse({ file, restoreOnStart: false }), deps);
+    try {
+      const index = walIndex(file);
+      const left = index.frames();
+      expect(left).toBeGreaterThan(1000);
+      expect(index.backfilled()).toBe(left);
+      const app = new DatabaseSync(file);
+      apps.push(app);
+      app.exec("INSERT INTO t (v) VALUES ('after the start')");
+      expect(index.frames()).toBeLessThan(10);
+      expectOk(await replication.steps!(instance).sync(createContext({ trigger: { kind: "cron", name: "* * * * *" }, payload: {} })));
+      expect(await restored(blobs, dir)).toMatchObject({ ...fingerprint(app), check: "ok" });
+    } finally {
+      await replication.teardown!(instance);
+    }
+  }, 120_000);
 });
 
 describe("replication/sqlite snapshot while a checkpoint on another thread waits for the module's read transaction", () => {

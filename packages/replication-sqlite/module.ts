@@ -143,7 +143,9 @@ async function start(config: Config, deps: Deps, lock: ProcessLock): Promise<Rep
       if (unacknowledgedRestore(config.file)?.applied.generation === placed.applied.generation) markRestoredThisBoot(config.file, placed.applied.restoredAt, true);
     };
   }
-  return { ...createReplicationSqlite(config, blobs, Date.now, options), logger: deps.logger, lock, reportedRestoreAt: () => reportedRestoreAt(config.file), reportRuns: placed === null ? null : new Set<string>() };
+  const replication = createReplicationSqlite(config, blobs, Date.now, options);
+  await replication.settled();
+  return { ...replication, logger: deps.logger, lock, reportedRestoreAt: () => reportedRestoreAt(config.file), reportRuns: placed === null ? null : new Set<string>() };
 }
 
 export default defineModule({

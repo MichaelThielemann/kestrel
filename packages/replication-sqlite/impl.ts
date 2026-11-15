@@ -132,6 +132,12 @@ export interface Replication {
   /** Synchronous, no I/O: reports a prepared restore informationally, since the instance keeps serving until a host restarts it to apply it. */
   health(): ModuleHealth;
   /**
+   * Resolves once the WAL the file already held when the instance was created is copied back into the database
+   * file on a worker thread, which happens when that WAL is `checkpointBytes` or larger; at once otherwise. A
+   * commit on another connection before then may copy that WAL back itself, on its own thread.
+   */
+  settled(): Promise<void>;
+  /**
    * Says that the reported restore of {@link ReplicationOptions.placedRestore} has been acted on: the next sync or
    * seal that starts afterwards and succeeds writes its `applied.json`, into the placed generation and into every
    * generation this process started meanwhile. Does nothing without a placed restore.
@@ -943,6 +949,9 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     },
     restoreHandled() {
       handled = true;
+    },
+    settled: async () => {
+      if (settling) await settling;
     },
     quiesce() {
       stopping = true;
