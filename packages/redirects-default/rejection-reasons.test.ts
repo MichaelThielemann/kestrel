@@ -71,6 +71,18 @@ describe("redirect rule rejection reasons", () => {
     expect(error.message).toMatch(/^Row 3: /);
   });
 
+  it("rejects a status that cannot be turned into text as an invalid status", () => {
+    const rows: unknown = JSON.parse('[{"from":"/a","to":"/b","status":{"toString":1}}]');
+    expect(rejection(() => compileRedirects(rows)).toDetails()).toEqual({ row: 1, field: "status", reason: "invalid-status" });
+  });
+
+  it("skips a row with such a status and keeps the others when publishing", () => {
+    const rows: unknown = JSON.parse('[{"from":"/ok","to":"/t"},{"from":"/a","to":"/b","status":{"toString":1}}]');
+    const { rules, skippedRules } = compilePublishableRedirects(rows);
+    expect(rules.map((rule) => rule.from)).toEqual(["/ok"]);
+    expect(skippedRules).toEqual([{ row: 2, field: "status", reason: "invalid-status" }]);
+  });
+
   it("tags a list-level rejection without a row or field", () => {
     expect(rejection(() => compileRedirects("nope")).toDetails()).toEqual({ reason: "not-a-list" });
     const rows = Array.from({ length: MAX_RULES + 1 }, (_, i) => ({ from: `/old/${i}`, to: `/new/${i}` }));

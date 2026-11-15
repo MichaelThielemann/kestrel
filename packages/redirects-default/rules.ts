@@ -244,8 +244,8 @@ function assertPlaceholdersAfterHost(target: string): void {
 }
 
 function readStatus(value: unknown): number {
-  // eslint-disable-next-line @typescript-eslint/no-base-to-string -- value is row data of arbitrary shape; a mis-stringified object just fails the status check below
-  const s = value === undefined || value === null || value === "" ? "301" : String(value);
+  if (value === undefined || value === null || value === "") return 301;
+  const s = typeof value === "string" || typeof value === "number" ? String(value) : typeof value;
   if (!(REDIRECT_STATUSES as readonly string[]).includes(s)) {
     throw new RedirectRuleError(`Status must be one of ${REDIRECT_STATUSES.join(", ")} (got ${s})`, { field: "status", reason: "invalid-status" });
   }

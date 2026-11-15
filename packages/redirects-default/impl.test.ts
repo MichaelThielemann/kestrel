@@ -104,6 +104,18 @@ describe("reserved paths", () => {
   });
 });
 
+describe("stored rows that cannot be read", () => {
+  it("lookup and export leave out a row whose status is not text or a number", async () => {
+    const stored: unknown = JSON.parse('[{"from":"/ok","to":"/t"},{"from":"/a","to":"/b","status":{"toString":1}}]');
+    const r = await createRedirects(config, { content: fakeContent(stored).content, blobs: fakeBlobs(), db: createFakePersistence(), logger: stubLogger().logger });
+    expect(expectOk(await r.lookup("/ok"))).toEqual({ to: "/t", status: 301 });
+    expect(expectOk(await r.lookup("/a"))).toBeNull();
+    const exported = expectOk(await r.export());
+    expect(exported.rules).toBe(1);
+    expect(exported.skippedRules).toEqual([{ row: 2, field: "status", reason: "invalid-status" }]);
+  });
+});
+
 describe("lookup", () => {
   it("matches first-wins, substitutes $n, returns null without a hit or without a singleton", async () => {
     const c = fakeContent(rules);
