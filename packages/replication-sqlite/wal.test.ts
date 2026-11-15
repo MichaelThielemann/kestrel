@@ -11,6 +11,7 @@ import { ok } from "@michaelthielemann/kestrel/result";
 import { restoreFromBlobs } from "./impl.ts";
 import { referenceApplySegment, referenceRestore } from "./reference.fixture.ts";
 import { applySegment, frameSize, parseFrameHeader, parseWalHeader, WAL_HEADER_SIZE } from "./wal.ts";
+import { emptyWalHeader } from "./walHeader.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -98,6 +99,29 @@ describe("applySegment", () => {
     const ends = commitsOf(wal);
     const cut = wal.subarray(0, (ends.at(-2) ?? 0) + frameSize(parseWalHeader(wal)?.pageSize ?? 0));
     expect(Buffer.from(applySegment(base.slice(), cut)).equals(Buffer.from(referenceApplySegment(base.slice(), cut)))).toBe(true);
+  });
+
+  it("leaves the image as it is for a segment that holds a WAL header alone, also between segments that grow the image in place", () => {
+    const { base, wal, rows } = capturedWal({ seed: (db) => insertEach(db, 20, 500), write: (db) => insertEach(db, 120, 3800, 1000) });
+    const header = wal.subarray(0, WAL_HEADER_SIZE);
+    const ends = commitsOf(wal);
+    const middle = ends[Math.floor(ends.length / 2)] ?? WAL_HEADER_SIZE;
+    const segment = (from: number, to: number): Uint8Array => {
+      const bytes = new Uint8Array(WAL_HEADER_SIZE + to - from);
+      bytes.set(header);
+      bytes.set(wal.subarray(from, to), WAL_HEADER_SIZE);
+      return bytes;
+    };
+    const pageSize = parseWalHeader(wal)?.pageSize ?? 0;
+    for (const alone of [header.slice(), emptyWalHeader(pageSize)]) expect(Buffer.from(applySegment(base.slice(), alone)).equals(Buffer.from(base))).toBe(true);
+    let image = applySegment(base.slice(), segment(WAL_HEADER_SIZE, middle));
+    expect(image.byteLength).toBeGreaterThan(base.byteLength);
+    const grown = image.slice();
+    image = applySegment(image, header.slice());
+    expect(Buffer.from(image).equals(Buffer.from(grown))).toBe(true);
+    image = applySegment(applySegment(image, emptyWalHeader(pageSize)), segment(middle, ends.at(-1) ?? middle));
+    expect(Buffer.from(image).equals(Buffer.from(referenceApplySegment(base.slice(), wal)))).toBe(true);
+    expect(opened(image)).toEqual({ check: "ok", rows });
   });
 
   it("applies a segment whose commits grow the database thousands of times without copying the image for each of them", () => {

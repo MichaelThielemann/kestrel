@@ -19,6 +19,7 @@ import { err, ok } from "@michaelthielemann/kestrel/result";
 import { createReplicationSqlite, restoreFromBlobs, type Replication, type ReplicationOptions } from "./impl.ts";
 import replication from "./module.ts";
 import { referenceRestore, referenceSnapshot } from "./reference.fixture.ts";
+import { WAL_HEADER_SIZE } from "./wal.ts";
 
 const io = vi.hoisted(() => ({ beforeRead: null as null | ((path: string) => Promise<void> | void) }));
 
@@ -588,6 +589,60 @@ describe("replication/sqlite first sync after the process before it was killed",
       await replication.teardown!(instance);
     }
   }, 120_000);
+});
+
+describe("replication/sqlite first syncs of a process on which nothing is written", () => {
+  it("reads the first snapshot in chunks with the event loop running between them, writes the segment without frames only at the next sync, after that snapshot is uploaded, and restores byte for byte to the snapshot", async () => {
+    const l = live();
+    l.app.exec("PRAGMA wal_autocheckpoint = 0");
+    for (let i = 0; i < 8; i++) l.insert(150, 3800);
+    expect(l.walSize()).toBeGreaterThan(4 * MB);
+    const repl = l.start({ checkpointBytes: MB });
+    await repl.settled();
+    const put = l.blobs.put.bind(l.blobs);
+    const uploads: string[] = [];
+    l.blobs.put = async (key, data, options) => {
+      const result = await put(key, data, options);
+      uploads.push(key.replace(/^replica\/gen\/[^/]+\//, ""));
+      return result;
+    };
+    let turns = 0;
+    let turning = true;
+    const turn = (): void => {
+      turns += 1;
+      if (turning) setImmediate(turn);
+    };
+    setImmediate(turn);
+    const reads: number[] = [];
+    io.beforeRead = (path) => {
+      if (path === l.file) reads.push(turns);
+    };
+    let first: Awaited<ReturnType<Replication["sync"]>>;
+    try {
+      first = await repl.sync();
+    } finally {
+      turning = false;
+      io.beforeRead = null;
+    }
+    const { generation } = expectOk(first);
+    expect(reads.length).toBeGreaterThan(2);
+    expect(reads.every((at, i) => i === 0 || at > (reads[i - 1] ?? at))).toBe(true);
+    expect(uploads).toEqual(["snapshot.db"]);
+
+    expect(expectOk(await repl.sync()).frames).toBe(0);
+    expect(uploads).toHaveLength(2);
+    expect(uploads[1]).toMatch(/^wal\/\d{6}-000000-\d{8}T\d{6}Z\.wal$/);
+    const segment = l.blobs.blobs.get(`replica/gen/${generation}/${uploads[1] ?? ""}`) ?? new Uint8Array();
+    expect(same(segment, new Uint8Array(readFileSync(`${l.file}-wal`)).subarray(0, WAL_HEADER_SIZE))).toBe(true);
+    expectOk(await repl.sync());
+    expect(uploads).toHaveLength(2);
+
+    const snapshot = snapshotOf(l.blobs, generation);
+    expect(same(snapshot, referenceSnapshot(l.file))).toBe(true);
+    const state = await restored(l.blobs, l.dir);
+    expect(state).toMatchObject({ generation, ...fingerprint(l.app), check: "ok" });
+    expect(same(state.bytes, snapshot)).toBe(true);
+  }, 60_000);
 });
 
 describe("replication/sqlite snapshot while a checkpoint on another thread waits for the module's read transaction", () => {
