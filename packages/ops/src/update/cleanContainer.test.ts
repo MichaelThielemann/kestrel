@@ -143,7 +143,7 @@ afterEach(async () => {
 });
 
 describe("a deploy job in a clean container", () => {
-  it("runs the bundle with only node, the platform CLI and HOME: deploy opens its run in the backup location and update status shows it", async () => {
+  it("runs the bundle with only node, the platform CLI and HOME: deploy reaches its gate, which refuses an empty replica before it changes anything, and update status shows the run", async () => {
     const address = server.address();
     const port = typeof address === "object" && address !== null ? address.port : 0;
     const project = join(base, "project");
@@ -183,6 +183,11 @@ describe("a deploy job in a clean container", () => {
     expect(journal[0]).toBe(`${LOCATION}runs/${runId}/000001-run-started.json`);
     const opening = boundaryCast<{ data: Record<string, unknown> }>(JSON.parse(new TextDecoder().decode(bucket.objects.get(journal[0] ?? "")?.data)), "json");
     expect(opening.data).toMatchObject({ command: "update deploy", env: "prod", phase: "deploy" });
+    expect(journal.some((key) => key.endsWith("-gate-started.json"))).toBe(true);
+    expect(journal.some((key) => key.endsWith("-gate-failed.json"))).toBe(true);
+    expect(deploy.code).toBe(1);
+    expect(document).toMatchObject({ state: "untouched" });
+    expect(cf.actions).toEqual([]);
     const locks = [...bucket.objects.keys()].filter((key) => key.startsWith(`${LOCATION}locks/${runId}/`));
     expect(locks.some((key) => key.includes("-start-"))).toBe(true);
     expect(locks.some((key) => key.includes("-released-"))).toBe(true);
