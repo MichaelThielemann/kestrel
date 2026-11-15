@@ -82,6 +82,16 @@ describe("mfa/totp steps", () => {
     expect((await runPipeline(login, { body: { username: "alice", password: "long-enough" } }, options)).code).toBe("SECOND_FACTOR_SETUP_REQUIRED");
   });
 
+  it("answers whether an enrollment code was given when setup needs one", async () => {
+    const { options } = await boot();
+    const issue = definePipeline({ name: "issueEnrollmentCode", steps: ["mfa.reset"] });
+    expect((await runPipeline(issue, { params: { id: "alice" } }, options)).status).toBe(200);
+    const missing = await runPipeline(setup, { body: { username: "alice", password: "long-enough" } }, options);
+    expect(missing).toMatchObject({ status: 403, code: "ENROLLMENT_CODE_REQUIRED", details: { enrollmentCodeGiven: false } });
+    const wrong = await runPipeline(setup, { body: { username: "alice", password: "long-enough", enrollmentCode: "AAAAA-AAAAA-AAAAA-AAAAA-AAAAA" } }, options);
+    expect(wrong).toMatchObject({ status: 403, code: "ENROLLMENT_CODE_REQUIRED", details: { enrollmentCodeGiven: true } });
+  });
+
   it("resets another account's factor, but not the caller's own", async () => {
     const { options } = await boot("none");
     const signedIn = await runPipeline(login, { body: { username: "alice", password: "long-enough" } }, options);

@@ -10,7 +10,7 @@ export const configSchema = z
   .object({
     retentionDays: z.number().int().positive().optional().describe("How long an entry is kept; without it `audit.prune` has no rule to apply and fails"),
     securityEvents: z.boolean().default(true).describe("Record failed sign-ins and password checks, 403 and 429 answers of HTTP runs as entries"),
-    failedSteps: z.array(z.string().min(1)).default([...DEFAULT_FAILED_STEPS]).describe("The steps whose failure is recorded as `auth.failed`"),
+    failedSteps: z.array(z.string().min(1)).default([...DEFAULT_FAILED_STEPS]).describe("The steps whose failure is recorded as `auth.failed`, or as `auth.secondFactorRequested` when it only asks for a second factor"),
   })
   .strict();
 

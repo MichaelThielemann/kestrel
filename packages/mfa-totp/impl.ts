@@ -325,9 +325,10 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
         codeNeeded = anyFactor.value !== null;
       }
       if (codeNeeded) {
-        const given = enrollmentCode === undefined || enrollmentCode.trim() === "" ? [] : enrollmentDigests(enrollmentCode);
+        const blank = enrollmentCode === undefined || enrollmentCode.trim() === "";
+        const given = blank ? [] : enrollmentDigests(enrollmentCode);
         if (expected === null || !given.some((digest) => sameText(digest, expected))) {
-          return err(customFailure("ENROLLMENT_CODE_REQUIRED", ENROLLMENT_CODE_STATUS, "mfa/totp: setting up this account's second factor needs the enrollment code an administrator issued"));
+          return err(customFailure("ENROLLMENT_CODE_REQUIRED", ENROLLMENT_CODE_STATUS, "mfa/totp: setting up this account's second factor needs the enrollment code an administrator issued", { details: { enrollmentCodeGiven: !blank } }));
         }
       }
       const secret = randomBytes(20);

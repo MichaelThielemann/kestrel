@@ -19,7 +19,11 @@ user, to leave a trace of who ran the repair without undoing the anonymisation.
 **Security entries.** With `securityEvents` (default on) the module watches every HTTP run and records,
 without any pipeline: `auth.failed` when one of `failedSteps` failed (default: `authn.login`,
 `authn.confirmPassword`, `authn.changePassword`, `mfa.check`, `mfa.startSetup`), with the attempted
-`username` when the step reported one;
+`username` when the step reported one; `auth.secondFactorRequested`, with the same params, when such a step
+only asks for the next part of a sign-in after a correct password: a second-factor code
+(`SECOND_FACTOR_REQUIRED`), its setup (`SECOND_FACTOR_SETUP_REQUIRED`) or an enrollment code the request did
+not carry (`ENROLLMENT_CODE_REQUIRED` with `details.enrollmentCodeGiven: false`), so a sign-in with a second
+factor leaves no `auth.failed`, while a wrong code or a wrong enrollment code does;
 `access.denied` for a 403 and `access.rateLimited` for a 429, each at most once a minute per
 address, identity, pipeline and step — the entry after a quiet minute says in `params.suppressed` how
 many it left out. Each carries `at`, `ip`, the `identityId` known when the run ended and `params`

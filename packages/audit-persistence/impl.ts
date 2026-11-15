@@ -110,20 +110,30 @@ export const DEFAULT_FAILED_STEPS: readonly string[] = ["authn.login", "authn.co
 
 const THROTTLE_MS = 60_000;
 
+const SECOND_FACTOR_PROMPTS = new Set(["SECOND_FACTOR_REQUIRED", "SECOND_FACTOR_SETUP_REQUIRED"]);
+
+function asksForSecondFactor(event: RunEndEvent): boolean {
+  if (event.code === undefined) return false;
+  if (SECOND_FACTOR_PROMPTS.has(event.code)) return true;
+  return event.code === "ENROLLMENT_CODE_REQUIRED" && event.details?.enrollmentCodeGiven === false;
+}
+
 /**
  * Turns the end of an HTTP run into a security entry, or `null` when it is none: `auth.failed` when one of
- * `failedSteps` failed (with the attempted `username` when the step reported one), `access.denied` for a
- * 403 and `access.rateLimited` for a 429. The entry carries the client address, the identity known at the
- * end of the run and the pipeline, step and code; never a body.
+ * `failedSteps` failed (with the attempted `username` when the step reported one), `auth.secondFactorRequested`
+ * instead when that failure only asks for a second factor, its setup or a missing enrollment code,
+ * `access.denied` for a 403 and `access.rateLimited` for a 429. The entry carries the client address, the
+ * identity known at the end of the run and the pipeline, step and code; never a body.
  */
 export function securityEntry(event: RunEndEvent, failedSteps: readonly string[]): AuditEntry | null {
   if (event.trigger.kind !== "http" || event.status < 400) return null;
   const step = event.step ?? "";
-  const name = event.step !== undefined && failedSteps.includes(event.step) ? "auth.failed" : event.status === 403 ? "access.denied" : event.status === 429 ? "access.rateLimited" : null;
+  const signIn = event.step !== undefined && failedSteps.includes(event.step);
+  const name = signIn ? (asksForSecondFactor(event) ? "auth.secondFactorRequested" : "auth.failed") : event.status === 403 ? "access.denied" : event.status === 429 ? "access.rateLimited" : null;
   if (name === null) return null;
   const params: Record<string, string> = { pipeline: event.pipeline, step, code: event.code ?? "" };
   const username = event.details?.username;
-  if (name === "auth.failed" && typeof username === "string") params.username = loggable(username);
+  if (signIn && typeof username === "string") params.username = loggable(username);
   return { eventId: null, event: name, at: event.at, identityId: event.identityId ?? null, ip: event.ip ?? null, params };
 }
 

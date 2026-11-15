@@ -2106,6 +2106,14 @@ Net changes since 5.8.2.
   pages of different sizes share one statement. A `findMany` whose page holds every match no longer
   runs a second `COUNT(*)`.
 - Docs: the pipelines guide, the `events-queue` and `delivery-static` READMEs and the pages API table now describe how to answer a save before its page is rendered (a lane of its own for `publishPage`), what that decouples and what it does not. The API table no longer says the `publishPage` run always happens after the response.
+- `audit-persistence`: a step of `failedSteps` that only asks for the next part of a sign-in after a correct
+  password records `auth.secondFactorRequested` instead of `auth.failed`, with the same params (`pipeline`,
+  `step`, `code`, `username` when the step reported one). That covers `SECOND_FACTOR_REQUIRED`,
+  `SECOND_FACTOR_SETUP_REQUIRED` and an `ENROLLMENT_CODE_REQUIRED` for a request without an enrollment code, so a
+  sign-in with a second factor leaves no `auth.failed` entry. A wrong code and a wrong enrollment code remain
+  `auth.failed`.
+- `mfa-totp`: the 403 `ENROLLMENT_CODE_REQUIRED` of `mfa.startSetup` carries `details.enrollmentCodeGiven`,
+  `false` when the body held no enrollment code and `true` when it held a wrong one.
 
 ### Fixed
 

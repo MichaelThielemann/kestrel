@@ -103,8 +103,9 @@ describe("mfa/totp checks", () => {
     expect(enrollmentCode).toMatch(/^[A-Z2-7]{5}(-[A-Z2-7]{5}){4}$/);
     expect(JSON.stringify(expectOk(await env.db.findMany(FACTORS, {})).items)).not.toContain(enrollmentCode.replaceAll("-", ""));
     expect(expectOk(await env.mfa.check(ALICE, undefined))).toEqual({ kind: "refuse", reason: "setup-required" });
-    expectErr(await env.mfa.startSetup(ALICE), "ENROLLMENT_CODE_REQUIRED");
-    expectErr(await env.mfa.startSetup(ALICE, "AAAAA-AAAAA-AAAAA-AAAAA-AAAAA"), "ENROLLMENT_CODE_REQUIRED");
+    expect(expectErr(await env.mfa.startSetup(ALICE), "ENROLLMENT_CODE_REQUIRED").details).toEqual({ enrollmentCodeGiven: false });
+    expect(expectErr(await env.mfa.startSetup(ALICE, "  "), "ENROLLMENT_CODE_REQUIRED").details).toEqual({ enrollmentCodeGiven: false });
+    expect(expectErr(await env.mfa.startSetup(ALICE, "AAAAA-AAAAA-AAAAA-AAAAA-AAAAA"), "ENROLLMENT_CODE_REQUIRED").details).toEqual({ enrollmentCodeGiven: true });
     const started = expectOk(await env.mfa.startSetup(ALICE, enrollmentCode.toLowerCase()));
     expectErr(await env.mfa.startSetup(ALICE), "ENROLLMENT_CODE_REQUIRED");
     expect(expectOk(await env.mfa.check(ALICE, codeAt(started.secret, env.now()))).kind).toBe("pass");

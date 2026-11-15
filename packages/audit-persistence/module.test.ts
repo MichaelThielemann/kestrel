@@ -204,6 +204,34 @@ describe("audit/persistence security entries stay small", () => {
     end({ status: 401, outcome: "fail", code: "UNAUTHENTICATED", step: "mfa.check", ip: "198.51.100.6", details: { username: "alice" } });
     expect((await entries())[0]).toMatchObject({ event: "auth.failed", params: { step: "mfa.check", username: "alice" } });
   });
+
+  it("records the request for a second factor or an enrollment code as auth.secondFactorRequested, not as a failed sign-in", async () => {
+    const { instance, db } = await boot();
+    const { end, entries } = attach(db, instance);
+    end({ status: 401, outcome: "fail", code: "SECOND_FACTOR_REQUIRED", step: "mfa.check", ip: "198.51.100.6", identityId: "u1", details: { username: "alice" } });
+    end({ status: 401, outcome: "fail", code: "SECOND_FACTOR_SETUP_REQUIRED", step: "mfa.check", ip: "198.51.100.6", identityId: "u2", details: { username: "bob" } });
+    end({ pipeline: "setupSecondFactor", status: 403, outcome: "fail", code: "ENROLLMENT_CODE_REQUIRED", step: "mfa.startSetup", ip: "198.51.100.6", details: { enrollmentCodeGiven: false } });
+    const found = await entries();
+    expect(found.map((row) => row.event)).toEqual(["auth.secondFactorRequested", "auth.secondFactorRequested", "auth.secondFactorRequested"]);
+    expect(found[0]).toMatchObject({ ip: "198.51.100.6", identityId: "u1", params: { pipeline: "login", step: "mfa.check", code: "SECOND_FACTOR_REQUIRED", username: "alice" } });
+    expect(found[1]).toMatchObject({ identityId: "u2", params: { code: "SECOND_FACTOR_SETUP_REQUIRED", username: "bob" } });
+    expect(found[2]).toMatchObject({ params: { pipeline: "setupSecondFactor", step: "mfa.startSetup", code: "ENROLLMENT_CODE_REQUIRED" } });
+  });
+
+  it("counts a wrong enrollment code as a failed sign-in", async () => {
+    const { instance, db } = await boot();
+    const { end, entries } = attach(db, instance);
+    end({ pipeline: "setupSecondFactor", status: 403, outcome: "fail", code: "ENROLLMENT_CODE_REQUIRED", step: "mfa.startSetup", details: { enrollmentCodeGiven: true } });
+    end({ pipeline: "setupSecondFactor", status: 403, outcome: "fail", code: "ENROLLMENT_CODE_REQUIRED", step: "mfa.startSetup" });
+    expect((await entries()).map((row) => row.event)).toEqual(["auth.failed", "auth.failed"]);
+  });
+
+  it("records a prompt code from a step outside failedSteps as no sign-in entry", async () => {
+    const { instance, db } = await boot();
+    const { end, entries } = attach(db, instance);
+    end({ status: 401, outcome: "fail", code: "SECOND_FACTOR_REQUIRED", step: "custom.check" });
+    expect(await entries()).toHaveLength(0);
+  });
 });
 
 describe("audit/persistence entries from events", () => {

@@ -128,7 +128,7 @@ export default defineModule({
       writes: ["identity", "result"],
       input: CREDENTIALS_INPUT,
       output: { type: "object", properties: { secret: { type: "string" }, uri: { type: "string" } }, required: ["secret", "uri"] },
-      errors: { 401: "invalid credentials", 403: "the account needs the enrollment code a reset issued (`ENROLLMENT_CODE_REQUIRED`)", 409: "the account already has a second factor" },
+      errors: { 401: "invalid credentials", 403: "the account needs the enrollment code a reset issued (`ENROLLMENT_CODE_REQUIRED`, `details.enrollmentCodeGiven` false when the body carried none)", 409: "the account already has a second factor" },
     },
     reset: {
       summary: "Remove another user's second factor and answer the one-time enrollment code its owner needs to set up a new one; run it after a step that ends that user's sessions",

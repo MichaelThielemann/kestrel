@@ -3453,7 +3453,7 @@
                 "mfa.check",
                 "mfa.startSetup"
               ],
-              "description": "The steps whose failure is recorded as `auth.failed`"
+              "description": "The steps whose failure is recorded as `auth.failed`, or as `auth.secondFactorRequested` when it only asks for a second factor"
             }
           },
           "additionalProperties": false
