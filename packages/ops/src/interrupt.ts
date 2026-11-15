@@ -6,12 +6,18 @@ export interface SignalSource {
   off(signal: "SIGINT" | "SIGTERM", listener: () => void): unknown;
 }
 
-/** What a run raises at its next store operation after SIGINT or SIGTERM, so the cleanup of the step it is in runs. */
+/**
+ * What a run raises at its next store operation after SIGINT or SIGTERM, so the cleanup of the step it is in runs.
+ * `detail`, when given, follows the signal in the message, such as the state the app is left in and the command to run next.
+ */
 export class Interrupted extends Error {
   override readonly name = "Interrupted";
 
-  constructor(readonly signal: "SIGINT" | "SIGTERM") {
-    super(`interrupted by ${signal}`);
+  constructor(
+    readonly signal: "SIGINT" | "SIGTERM",
+    detail?: string,
+  ) {
+    super(detail === undefined ? `interrupted by ${signal}` : `interrupted by ${signal}; ${detail}`);
   }
 }
 

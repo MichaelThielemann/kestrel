@@ -114,7 +114,7 @@ export async function deploy(ctx: UpdateContext): Promise<UpdateOutcome> {
     const { stoppedAt } = await stopTarget(ctx);
     flow = { plan, from: plan.versions.from, staged: staged.droplet, stoppedAt, cutoverBackup: null, promoted: null, startedAt: null };
   } catch (error) {
-    if (error instanceof Interrupted) throw error;
+    if (error instanceof Interrupted) throw stopBegun ? new Interrupted(error.signal, `the stop began, so the app may be stopped; do not start it by hand; run update abort --env ${ctx.envName} --run ${ctx.run.id}`) : error;
     if (stopBegun) return failedStop(ctx, error);
     await record(ctx, step, "failed", { error: messageOf(error) }).catch(() => undefined);
     const exitCode = error instanceof OpsError && error.exitCode === 2 ? UPDATE_EXIT.usage : UPDATE_EXIT.refused;
@@ -129,6 +129,12 @@ async function failedStop(ctx: UpdateContext, error: unknown): Promise<UpdateOut
   await record(ctx, "stop", "failed", { error: messageOf(error), appStopped: !runs }).catch(() => undefined);
   if (runs) return outcomeOf(ctx, UPDATE_EXIT.refused, `the deploy stopped at stop: ${messageOf(error)}; the previous release runs, nothing else changed`);
   return outcomeOf(ctx, UPDATE_EXIT.refused, `the deploy failed at stop: ${messageOf(error)}; the app ${now === null ? "may be stopped (its state cannot be read)" : "is stopped"} and did not start again; do not start it by hand while the run is open; run update abort --env ${ctx.envName} --run ${ctx.run.id}`);
+}
+
+function interruptedAfterStop(ctx: UpdateContext, step: string): string {
+  const scope = `--env ${ctx.envName} --run ${ctx.run.id}`;
+  const state = step === "verify" ? "the new release runs and is not verified" : step === "start" ? "the new release may be starting and is not verified" : "the app is stopped; do not start it by hand";
+  return `${state}; run update resume ${scope} to continue the run, or update abort ${scope} to end it`;
 }
 
 async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<UpdateOutcome> {
@@ -199,7 +205,7 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
     const result = await ctx.steps.verify(ctx, { promoted: { generation: promoted.generation, nonce: promoted.nonce }, startedAt: flow.startedAt ?? ctx.clock() });
     return await concludeVerify(ctx, "deploy", result);
   } catch (error) {
-    if (error instanceof Interrupted) throw error;
+    if (error instanceof Interrupted) throw new Interrupted(error.signal, interruptedAfterStop(ctx, step));
     const failure = `${step}: ${messageOf(error)}`;
     await record(ctx, step, "failed", { error: messageOf(error) }).catch(() => undefined);
     ctx.out.error(`the deploy failed after the stop at ${failure}; rolling back`);
