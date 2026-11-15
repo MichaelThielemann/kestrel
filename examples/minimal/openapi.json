@@ -5353,7 +5353,7 @@
     "/admin/publish-all/pages": {
       "post": {
         "operationId": "publishAllPages",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission pages.manage → Re-render every pages → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result) → Ask for a sitemap.xml, robots.txt and llms.txt export (and an llms-full.txt export with `llms.full`) without running it here",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission pages.manage → Re-render every pages → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped, skippedRules }` to the result) → Ask for a sitemap.xml, robots.txt and llms.txt export (and an llms-full.txt export with `llms.full`) without running it here",
         "tags": [
           "admin"
         ],
@@ -5395,11 +5395,40 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "skippedRules": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "row": {
+                                "type": "integer"
+                              },
+                              "field": {
+                                "type": "string",
+                                "enum": [
+                                  "from",
+                                  "to",
+                                  "status"
+                                ]
+                              },
+                              "reason": {
+                                "type": "string"
+                              },
+                              "path": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "reason"
+                            ]
+                          }
                         }
                       },
                       "required": [
                         "rules",
-                        "skipped"
+                        "skipped",
+                        "skippedRules"
                       ]
                     }
                   },
@@ -5775,7 +5804,7 @@
     "/admin/redirects/auto/{path}": {
       "delete": {
         "operationId": "removeAutoRedirect",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission redirects.write → Turn the automatic redirect at params.path into a removed tombstone; a replay of the move that created it cannot restore it → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission redirects.write → Turn the automatic redirect at params.path into a removed tombstone; a replay of the move that created it cannot restore it → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped, skippedRules }` to the result)",
         "tags": [
           "admin"
         ],
@@ -5817,11 +5846,40 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "skippedRules": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "row": {
+                                "type": "integer"
+                              },
+                              "field": {
+                                "type": "string",
+                                "enum": [
+                                  "from",
+                                  "to",
+                                  "status"
+                                ]
+                              },
+                              "reason": {
+                                "type": "string"
+                              },
+                              "path": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "reason"
+                            ]
+                          }
                         }
                       },
                       "required": [
                         "rules",
-                        "skipped"
+                        "skipped",
+                        "skippedRules"
                       ]
                     }
                   },
@@ -14076,7 +14134,7 @@
       },
       "put": {
         "operationId": "setRedirects",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission redirects.write → Validate payload field redirects.rules against its JSON Schema → Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect → Replace the redirects document → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names → Requires permission redirects.write → Validate payload field redirects.rules against its JSON Schema → Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect → Replace the redirects document → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped, skippedRules }` to the result)",
         "tags": [
           "redirects"
         ],
@@ -14154,11 +14212,40 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "skippedRules": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "row": {
+                                "type": "integer"
+                              },
+                              "field": {
+                                "type": "string",
+                                "enum": [
+                                  "from",
+                                  "to",
+                                  "status"
+                                ]
+                              },
+                              "reason": {
+                                "type": "string"
+                              },
+                              "path": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "reason"
+                            ]
+                          }
                         }
                       },
                       "required": [
                         "rules",
-                        "skipped"
+                        "skipped",
+                        "skippedRules"
                       ]
                     }
                   },

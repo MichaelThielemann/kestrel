@@ -24,6 +24,7 @@ export const configSchema = z
 
 const RULE_SCHEMA = { type: "object", properties: { from: { type: "string" }, pattern: { type: "string" }, target: { type: "string" }, status: { type: "integer", enum: [301, 302, 307, 308] } }, required: ["from", "pattern", "target", "status"] };
 const ROW_SCHEMA = { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, status: { type: ["string", "number"] } } };
+const SKIPPED_RULE_SCHEMA = { type: "object", properties: { row: { type: "integer" }, field: { type: "string", enum: ["from", "to", "status"] }, reason: { type: "string" }, path: { type: "string" } }, required: ["reason"] };
 const MOVE_SCHEMA = { type: "object", properties: { type: { type: "string" }, id: { type: "string" }, locale: { type: "string" }, from: { type: ["string", "null"] }, to: { type: ["string", "null"] }, seq: { type: "number" } }, required: ["type", "id", "locale", "from", "to", "seq"] };
 const AUTO_REDIRECT_SCHEMA = { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, type: { type: "string" }, docId: { type: "string" }, locale: { type: "string" }, seq: { type: "number" } }, required: ["from", "to", "type", "docId", "locale", "seq"] };
 
@@ -72,8 +73,7 @@ export default defineModule({
         if (isErr(validated)) return ctx.fail(validated.error);
       } catch (e) {
         if (!(e instanceof RedirectRuleError)) throw e;
-        const row = /^Row (\d+):/.exec(e.message);
-        return row ? ctx.fail("VALIDATION", `redirects: ${e.message}`, { row: Number(row[1]) }) : ctx.fail("VALIDATION", `redirects: ${e.message}`);
+        return ctx.fail("VALIDATION", `redirects: ${e.message}`, { ...e.toDetails() });
       }
       return ok(ctx);
     },
@@ -120,7 +120,7 @@ export default defineModule({
       reads: [],
       writes: [],
       input: { type: "object", properties: { [redirects.field]: { type: "array", items: ROW_SCHEMA } }, additionalProperties: false },
-      errors: { 400: "Row N: <reason>" },
+      errors: { 400: "Row N: <reason>; details carries { row, field, reason, path? }" },
     },
     recordMoves: {
       summary: "Apply site.pathsMoved moves to the automatic-redirect state: per document the highest seq wins, a tie inside one run favours the destination path",
@@ -142,10 +142,10 @@ export default defineModule({
       },
     },
     export: {
-      summary: "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
+      summary: "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped, skippedRules }` to the result)",
       reads: [],
       writes: ["result.redirects"],
-      extendsOutput: { type: "object", properties: { redirects: { type: "object", properties: { rules: { type: "integer" }, skipped: { type: "array", items: { type: "string" } } }, required: ["rules", "skipped"] } }, required: ["redirects"] },
+      extendsOutput: { type: "object", properties: { redirects: { type: "object", properties: { rules: { type: "integer" }, skipped: { type: "array", items: { type: "string" } }, skippedRules: { type: "array", items: SKIPPED_RULE_SCHEMA } }, required: ["rules", "skipped", "skippedRules"] } }, required: ["redirects"] },
     },
     render: { summary: "The compiled redirect list (same content as redirects.json)", reads: [], writes: ["result"], output: { type: "array", items: RULE_SCHEMA } },
     listAuto: {

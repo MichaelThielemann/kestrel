@@ -12511,7 +12511,7 @@
           "additionalProperties": false
         },
         "errors": {
-          "400": "Row N: <reason>"
+          "400": "Row N: <reason>; details carries { row, field, reason, path? }"
         }
       }
     },
@@ -12647,7 +12647,7 @@
       "module": "redirects/default",
       "factory": false,
       "description": {
-        "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
+        "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped, skippedRules }` to the result)",
         "reads": [],
         "writes": [
           "result.redirects"
@@ -12666,11 +12666,40 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "skippedRules": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "row": {
+                        "type": "integer"
+                      },
+                      "field": {
+                        "type": "string",
+                        "enum": [
+                          "from",
+                          "to",
+                          "status"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "reason"
+                    ]
+                  }
                 }
               },
               "required": [
                 "rules",
-                "skipped"
+                "skipped",
+                "skippedRules"
               ]
             }
           },
@@ -23853,7 +23882,7 @@
           "name": "redirects.export",
           "module": "redirects/default",
           "description": {
-            "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
+            "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped, skippedRules }` to the result)",
             "reads": [],
             "writes": [
               "result.redirects"
@@ -23872,11 +23901,40 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "skippedRules": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "row": {
+                            "type": "integer"
+                          },
+                          "field": {
+                            "type": "string",
+                            "enum": [
+                              "from",
+                              "to",
+                              "status"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "reason"
+                        ]
+                      }
                     }
                   },
                   "required": [
                     "rules",
-                    "skipped"
+                    "skipped",
+                    "skippedRules"
                   ]
                 }
               },
@@ -24345,7 +24403,7 @@
           "name": "redirects.export",
           "module": "redirects/default",
           "description": {
-            "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
+            "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped, skippedRules }` to the result)",
             "reads": [],
             "writes": [
               "result.redirects"
@@ -24364,11 +24422,40 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "skippedRules": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "row": {
+                            "type": "integer"
+                          },
+                          "field": {
+                            "type": "string",
+                            "enum": [
+                              "from",
+                              "to",
+                              "status"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "reason"
+                        ]
+                      }
                     }
                   },
                   "required": [
                     "rules",
-                    "skipped"
+                    "skipped",
+                    "skippedRules"
                   ]
                 }
               },
@@ -26425,7 +26512,7 @@
           "name": "redirects.export",
           "module": "redirects/default",
           "description": {
-            "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
+            "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped, skippedRules }` to the result)",
             "reads": [],
             "writes": [
               "result.redirects"
@@ -26444,11 +26531,40 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "skippedRules": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "row": {
+                            "type": "integer"
+                          },
+                          "field": {
+                            "type": "string",
+                            "enum": [
+                              "from",
+                              "to",
+                              "status"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "reason"
+                        ]
+                      }
                     }
                   },
                   "required": [
                     "rules",
-                    "skipped"
+                    "skipped",
+                    "skippedRules"
                   ]
                 }
               },
@@ -30644,7 +30760,7 @@
               "additionalProperties": false
             },
             "errors": {
-              "400": "Row N: <reason>"
+              "400": "Row N: <reason>; details carries { row, field, reason, path? }"
             }
           }
         },
@@ -30740,7 +30856,7 @@
           "name": "redirects.export",
           "module": "redirects/default",
           "description": {
-            "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
+            "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped, skippedRules }` to the result)",
             "reads": [],
             "writes": [
               "result.redirects"
@@ -30759,11 +30875,40 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "skippedRules": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "row": {
+                            "type": "integer"
+                          },
+                          "field": {
+                            "type": "string",
+                            "enum": [
+                              "from",
+                              "to",
+                              "status"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "reason"
+                        ]
+                      }
                     }
                   },
                   "required": [
                     "rules",
-                    "skipped"
+                    "skipped",
+                    "skippedRules"
                   ]
                 }
               },

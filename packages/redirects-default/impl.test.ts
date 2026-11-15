@@ -100,6 +100,7 @@ describe("reserved paths", () => {
     const exported = expectOk(await r.export());
     expect(exported.rules).toBe(1);
     expect(exported.skipped).toEqual([expect.stringMatching(/^Row 1: .*reserved path/)]);
+    expect(exported.skippedRules).toEqual([{ row: 1, field: "from", reason: "reserved-path", path: "/admin" }]);
   });
 });
 
@@ -158,7 +159,7 @@ describe("export", () => {
     const { logger, errors } = stubLogger();
     const r = await createRedirects(config, { content: c.content, blobs, db: createFakePersistence(), logger });
     const out = expectOk(await r.export());
-    expect(out).toEqual({ rules: 2, skipped: [expect.stringMatching(/^Row 3:/)] });
+    expect(out).toEqual({ rules: 2, skipped: [expect.stringMatching(/^Row 3:/)], skippedRules: [{ row: 3, field: "from", reason: "query-or-fragment" }] });
     expect(errors).toHaveLength(1);
     const blob = blobs.blobs.get("site/redirects.json");
     expect(blob?.contentType).toBe("application/json");
@@ -168,7 +169,7 @@ describe("export", () => {
   it("writes [] when the singleton is absent and passes a blobstore failure through as TRANSIENT", async () => {
     const blobs = fakeBlobs();
     const r = await createRedirects(config, { content: fakeContent().content, blobs, db: createFakePersistence(), logger: stubLogger().logger });
-    expect(expectOk(await r.export())).toEqual({ rules: 0, skipped: [] });
+    expect(expectOk(await r.export())).toEqual({ rules: 0, skipped: [], skippedRules: [] });
     expect(new TextDecoder().decode(blobs.blobs.get("site/redirects.json")?.data)).toBe("[]");
     const failing = await createRedirects(config, { content: fakeContent(rules).content, blobs: fakeBlobs(true), db: createFakePersistence(), logger: stubLogger().logger });
     const error = expectErr(await failing.export(), "TRANSIENT");
@@ -232,15 +233,15 @@ describe("module steps", () => {
     const error = expectErr(await s.validate(ctx({}, { rules: [{ from: "/a", to: "/$1" }] })), "VALIDATION");
     expect(error.status).toBe(400);
     expect(error.message).toMatch(/^redirects: Row 1/);
-    expect(error.details).toEqual({ row: 1 });
+    expect(error.details).toEqual({ row: 1, field: "to", reason: "placeholder-out-of-range" });
     expect(expectOk(await s.validate(ctx({}, {}))).result).toBeUndefined();
   });
   it("export returns a summary and passes a blobstore TRANSIENT failure through", async () => {
     const ok1 = await steps(rules);
-    expect(expectOk(await ok1.export(ctx())).result).toMatchObject({ redirects: { rules: 2, skipped: [] } });
+    expect(expectOk(await ok1.export(ctx())).result).toMatchObject({ redirects: { rules: 2, skipped: [], skippedRules: [] } });
     const withPrevious = { ...ctx(), result: { documents: 3 } };
     const merged = expectOk(await ok1.export(withPrevious));
-    expect(merged.result).toEqual({ documents: 3, redirects: { rules: 2, skipped: [] } });
+    expect(merged.result).toEqual({ documents: 3, redirects: { rules: 2, skipped: [], skippedRules: [] } });
     const bad = await steps(rules, fakeBlobs(true));
     const error = expectErr(await bad.export(ctx()), "TRANSIENT");
     expect(error.status).toBe(503);

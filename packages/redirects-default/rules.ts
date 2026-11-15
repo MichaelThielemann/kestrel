@@ -39,8 +39,88 @@ export interface CompileOptions {
   reservedPaths?: readonly string[];
 }
 
-/** A rule the editor has to fix. The message names the 1-based row so it is actionable in the UI. */
-export class RedirectRuleError extends Error {}
+/** The field of a rule row a rejection is about. */
+export type RedirectRuleField = "from" | "to" | "status";
+
+/**
+ * Why a rule or a rule list was rejected. The value is stable: a client can switch on it to show a
+ * localized message instead of the English one.
+ *
+ * Source (`from`): `blank`, `too-long`, `scheme-or-host`, `query-or-fragment`, `control-characters`,
+ * `backslash`, `dot-segments`, `adjacent-double-wildcards`, `too-many-wildcards`, `reserved-path`.
+ * Target (`to`): `blank`, `control-characters`, `backslash`, `protocol-relative`, `unsupported-scheme`,
+ * `invalid-url`, `embedded-credentials`, `placeholder-in-host`, `placeholder-out-of-range`,
+ * `placeholder-syntax`, `automatic-redirect-loop`. Status: `invalid-status`. Whole list: `not-a-list`,
+ * `too-many-rules`, which is also the reason of each row beyond the limit when a list is published.
+ */
+export type RedirectRuleReason =
+  | "blank"
+  | "too-long"
+  | "scheme-or-host"
+  | "query-or-fragment"
+  | "control-characters"
+  | "backslash"
+  | "dot-segments"
+  | "adjacent-double-wildcards"
+  | "too-many-wildcards"
+  | "reserved-path"
+  | "protocol-relative"
+  | "unsupported-scheme"
+  | "invalid-url"
+  | "embedded-credentials"
+  | "placeholder-in-host"
+  | "placeholder-out-of-range"
+  | "placeholder-syntax"
+  | "automatic-redirect-loop"
+  | "invalid-status"
+  | "not-a-list"
+  | "too-many-rules";
+
+/**
+ * The structured form of a rejection, as clients receive it in `details` and in the skipped rows of an export.
+ * `row` is the 1-based position in the list. It is absent when saving a list that is rejected as a whole
+ * (`not-a-list`, `too-many-rules`); `field` is absent for those and for a row skipped as `too-many-rules`
+ * because it lies beyond the limit. `path` is the offending path where one exists: the reserved prefix for
+ * `reserved-path`, the target for `automatic-redirect-loop`.
+ */
+export interface RedirectRuleDetails {
+  row?: number;
+  field?: RedirectRuleField;
+  reason: RedirectRuleReason;
+  path?: string;
+}
+
+/** A rule the editor has to fix. The message names the 1-based row so it is actionable in the UI; the same facts are in `reason`, `field`, `path` and `row`. */
+export class RedirectRuleError extends Error {
+  readonly reason: RedirectRuleReason;
+  readonly field: RedirectRuleField | undefined;
+  readonly path: string | undefined;
+  readonly row: number | undefined;
+
+  constructor(message: string, info: RedirectRuleDetails) {
+    super(message);
+    this.name = "RedirectRuleError";
+    this.reason = info.reason;
+    this.field = info.field;
+    this.path = info.path;
+    this.row = info.row;
+  }
+
+  /** The structured facts of this rejection, without the keys that do not apply. */
+  toDetails(): RedirectRuleDetails {
+    return {
+      ...(this.row === undefined ? {} : { row: this.row }),
+      ...(this.field === undefined ? {} : { field: this.field }),
+      reason: this.reason,
+      ...(this.path === undefined ? {} : { path: this.path }),
+    };
+  }
+
+  /** The same rejection located at the 1-based `row`, its message prefixed with `Row <row>: `. */
+  atRow(row: number): RedirectRuleError {
+    return new RedirectRuleError(`Row ${row}: ${this.message}`, { ...this.toDetails(), row });
+  }
+}
 
 const ESCAPE = /[.*+?^${}()|[\]\\-]/g;
 // eslint-disable-next-line no-control-regex -- deliberately rejects control characters headed for a Location header
@@ -85,21 +165,21 @@ export function reservedPathOf(path: string, reservedPaths: readonly string[]): 
  */
 export function canonicalFrom(from: string, reservedPaths: readonly string[] = []): string {
   const raw = from.trim();
-  if (!raw) throw new RedirectRuleError('"From" must not be blank');
-  if (raw.length > MAX_FROM_LENGTH) throw new RedirectRuleError(`"From" is longer than ${MAX_FROM_LENGTH} characters`);
+  if (!raw) throw new RedirectRuleError('"From" must not be blank', { field: "from", reason: "blank" });
+  if (raw.length > MAX_FROM_LENGTH) throw new RedirectRuleError(`"From" is longer than ${MAX_FROM_LENGTH} characters`, { field: "from", reason: "too-long" });
   if (SCHEME.test(raw) || raw.startsWith("//")) {
-    throw new RedirectRuleError('"From" matches the request path only — drop the scheme and host');
+    throw new RedirectRuleError('"From" matches the request path only — drop the scheme and host', { field: "from", reason: "scheme-or-host" });
   }
-  if (/[?#]/.test(raw)) throw new RedirectRuleError('"From" must not contain a query string or fragment');
-  if (CONTROL.test(raw)) throw new RedirectRuleError('"From" must not contain control characters');
-  if (raw.includes("\\")) throw new RedirectRuleError('"From" must not contain a backslash');
-  if (raw.split("/").some((seg) => seg === "..")) throw new RedirectRuleError('"From" must not contain ".."');
-  if (/\*\*\/?\*\*/.test(raw)) throw new RedirectRuleError('"From" has two `**` in a row — one already matches any number of segments');
+  if (/[?#]/.test(raw)) throw new RedirectRuleError('"From" must not contain a query string or fragment', { field: "from", reason: "query-or-fragment" });
+  if (CONTROL.test(raw)) throw new RedirectRuleError('"From" must not contain control characters', { field: "from", reason: "control-characters" });
+  if (raw.includes("\\")) throw new RedirectRuleError('"From" must not contain a backslash', { field: "from", reason: "backslash" });
+  if (raw.split("/").some((seg) => seg === "..")) throw new RedirectRuleError('"From" must not contain ".."', { field: "from", reason: "dot-segments" });
+  if (/\*\*\/?\*\*/.test(raw)) throw new RedirectRuleError('"From" has two `**` in a row — one already matches any number of segments', { field: "from", reason: "adjacent-double-wildcards" });
   const wildcards = wildcardCount(raw);
-  if (wildcards > MAX_WILDCARDS) throw new RedirectRuleError(`"From" has ${wildcards} wildcards, at most ${MAX_WILDCARDS} are allowed`);
+  if (wildcards > MAX_WILDCARDS) throw new RedirectRuleError(`"From" has ${wildcards} wildcards, at most ${MAX_WILDCARDS} are allowed`, { field: "from", reason: "too-many-wildcards" });
   const canonical = `/${raw.replace(/^\/+/, "").replace(/\/+$/, "")}`;
   const taken = reservedPathOf(canonical, reservedPaths);
-  if (taken !== undefined) throw new RedirectRuleError(`"From" can match the reserved path ${taken}, which the application serves itself`);
+  if (taken !== undefined) throw new RedirectRuleError(`"From" can match the reserved path ${taken}, which the application serves itself`, { field: "from", reason: "reserved-path", path: taken });
   return canonical;
 }
 
@@ -133,23 +213,23 @@ export function exactPathPatternSource(path: string): string {
  */
 export function normalizeTarget(to: string): string {
   const raw = to.trim();
-  if (!raw) throw new RedirectRuleError('"To" must not be blank');
-  if (CONTROL.test(raw)) throw new RedirectRuleError('"To" must not contain control characters');
-  if (raw.includes("\\")) throw new RedirectRuleError('"To" must not contain a backslash');
+  if (!raw) throw new RedirectRuleError('"To" must not be blank', { field: "to", reason: "blank" });
+  if (CONTROL.test(raw)) throw new RedirectRuleError('"To" must not contain control characters', { field: "to", reason: "control-characters" });
+  if (raw.includes("\\")) throw new RedirectRuleError('"To" must not contain a backslash', { field: "to", reason: "backslash" });
   if (raw.startsWith("//")) {
-    throw new RedirectRuleError('"To" must not be protocol-relative — write the full https:// URL');
+    throw new RedirectRuleError('"To" must not be protocol-relative — write the full https:// URL', { field: "to", reason: "protocol-relative" });
   }
   if (!SCHEME.test(raw)) return `/${raw.replace(/^\/+/, "")}`;
 
-  if (!/^https?:\/\//i.test(raw)) throw new RedirectRuleError('"To" may only use http:// or https://');
+  if (!/^https?:\/\//i.test(raw)) throw new RedirectRuleError('"To" may only use http:// or https://', { field: "to", reason: "unsupported-scheme" });
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
-    throw new RedirectRuleError(`"To" is not a valid URL: ${raw}`);
+    throw new RedirectRuleError(`"To" is not a valid URL: ${raw}`, { field: "to", reason: "invalid-url" });
   }
-  if (!url.host) throw new RedirectRuleError('"To" is missing a host');
-  if (url.username || url.password) throw new RedirectRuleError('"To" must not embed credentials');
+  if (!url.host) throw new RedirectRuleError(`"To" is not a valid URL: ${raw}`, { field: "to", reason: "invalid-url" });
+  if (url.username || url.password) throw new RedirectRuleError('"To" must not embed credentials', { field: "to", reason: "embedded-credentials" });
   return raw;
 }
 
@@ -159,7 +239,7 @@ function assertPlaceholdersAfterHost(target: string): void {
   if (firstPlaceholder === -1) return;
   const pathStart = target.indexOf("/", target.indexOf("://") + 3);
   if (pathStart === -1 || firstPlaceholder < pathStart) {
-    throw new RedirectRuleError('"To" may only use $1, $2, … after the host — a placeholder in the host lets a visitor pick the destination');
+    throw new RedirectRuleError('"To" may only use $1, $2, … after the host — a placeholder in the host lets a visitor pick the destination', { field: "to", reason: "placeholder-in-host" });
   }
 }
 
@@ -167,13 +247,13 @@ function readStatus(value: unknown): number {
   // eslint-disable-next-line @typescript-eslint/no-base-to-string -- value is row data of arbitrary shape; a mis-stringified object just fails the status check below
   const s = value === undefined || value === null || value === "" ? "301" : String(value);
   if (!(REDIRECT_STATUSES as readonly string[]).includes(s)) {
-    throw new RedirectRuleError(`Status must be one of ${REDIRECT_STATUSES.join(", ")} (got ${s})`);
+    throw new RedirectRuleError(`Status must be one of ${REDIRECT_STATUSES.join(", ")} (got ${s})`, { field: "status", reason: "invalid-status" });
   }
   return Number(s);
 }
 
-function readText(value: unknown, what: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new RedirectRuleError(`${what} must not be blank`);
+function readText(value: unknown, field: "from" | "to"): string {
+  if (typeof value !== "string" || !value.trim()) throw new RedirectRuleError(`"${field === "from" ? "From" : "To"}" must not be blank`, { field, reason: "blank" });
   return value.trim();
 }
 
@@ -184,27 +264,28 @@ function readText(value: unknown, what: string): string {
  */
 export function compileRedirects(rows: unknown, options: CompileOptions = {}): RedirectRule[] {
   if (rows === null || rows === undefined) return [];
-  if (!Array.isArray(rows)) throw new RedirectRuleError("Redirect rules must be a list");
-  if (rows.length > MAX_RULES) throw new RedirectRuleError(`at most ${MAX_RULES} redirect rules are allowed, got ${rows.length}`);
+  if (!Array.isArray(rows)) throw new RedirectRuleError("Redirect rules must be a list", { reason: "not-a-list" });
+  if (rows.length > MAX_RULES) throw new RedirectRuleError(`at most ${MAX_RULES} redirect rules are allowed, got ${rows.length}`, { reason: "too-many-rules" });
 
   return rows.map((raw, i) => {
     try {
       const entry = boundaryCast<Record<string, unknown>>(raw ?? {}, "json");
-      const from = readText(entry.from, '"From"');
-      const target = normalizeTarget(readText(entry.to, '"To"'));
+      const from = readText(entry.from, "from");
+      const target = normalizeTarget(readText(entry.to, "to"));
       const groups = wildcardCount(from);
       for (const [, n] of target.matchAll(/\$(\d+)/g)) {
         if (Number(n) < 1 || Number(n) > groups) {
-          throw new RedirectRuleError(`"To" references $${n} but "From" has ${groups} wildcard(s)`);
+          throw new RedirectRuleError(`"To" references $${n} but "From" has ${groups} wildcard(s)`, { field: "to", reason: "placeholder-out-of-range" });
         }
       }
       if (/\$\{/.test(target)) {
-        throw new RedirectRuleError('"To" writes a placeholder as $1, $2, … — not ${1}');
+        throw new RedirectRuleError('"To" writes a placeholder as $1, $2, … — not ${1}', { field: "to", reason: "placeholder-syntax" });
       }
       assertPlaceholdersAfterHost(target);
       return { from: canonicalFrom(from, options.reservedPaths), pattern: patternToRegexSource(from), target, status: readStatus(entry.status) };
     } catch (err) {
-      throw new RedirectRuleError(`Row ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
+      if (err instanceof RedirectRuleError) throw err.atRow(i + 1);
+      throw err;
     }
   });
 }
@@ -216,25 +297,30 @@ export function compileRedirects(rows: unknown, options: CompileOptions = {}): R
  * the rest and naming what was dropped is the lesser failure.
  *
  * A malformed `rows` still throws: that is a read bug, not a bad row, and `[]` would be a lie.
+ * `skipped` holds one English line per dropped row; `skippedRules` the same rows in structured form, in the same order.
  */
-export function compilePublishableRedirects(rows: unknown, options: CompileOptions = {}): { rules: RedirectRule[]; skipped: string[] } {
-  if (rows === null || rows === undefined) return { rules: [], skipped: [] };
-  if (!Array.isArray(rows)) throw new RedirectRuleError("Redirect rules must be a list");
+export function compilePublishableRedirects(rows: unknown, options: CompileOptions = {}): { rules: RedirectRule[]; skipped: string[]; skippedRules: RedirectRuleDetails[] } {
+  if (rows === null || rows === undefined) return { rules: [], skipped: [], skippedRules: [] };
+  if (!Array.isArray(rows)) throw new RedirectRuleError("Redirect rules must be a list", { reason: "not-a-list" });
 
   const rules: RedirectRule[] = [];
   const skipped: string[] = [];
+  const skippedRules: RedirectRuleDetails[] = [];
   rows.forEach((row, i) => {
     if (i >= MAX_RULES) {
       skipped.push(`Row ${i + 1}: beyond the limit of ${MAX_RULES} rules`);
+      skippedRules.push({ row: i + 1, reason: "too-many-rules" });
       return;
     }
     try {
       rules.push(...compileRedirects([row], options));
     } catch (error) {
-      skipped.push(`Row ${i + 1}: ${(error instanceof Error ? error.message : String(error)).replace(/^Row 1: /, "")}`);
+      if (!(error instanceof RedirectRuleError)) throw error;
+      skipped.push(`Row ${i + 1}: ${error.message.replace(/^Row 1: /, "")}`);
+      skippedRules.push({ ...error.toDetails(), row: i + 1 });
     }
   });
-  return { rules, skipped };
+  return { rules, skipped, skippedRules };
 }
 
 /** The artifact body. An empty list is a valid document (`[]`), never an absent file. */

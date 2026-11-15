@@ -81,14 +81,34 @@ describe("redirects/default module steps", () => {
     const bad = await run(["redirects.validate"], { body: { rules: [{ from: "/a", to: "/b/$1" }] } }, instance);
     expect(bad.status).toBe(400);
     expect(bad.code).toBe("VALIDATION");
-    expect(bad.details).toEqual({ row: 1 });
+    expect(bad.details).toEqual({ row: 1, field: "to", reason: "placeholder-out-of-range" });
+  });
+
+  it("validate reports the reason, field and reserved prefix of a rejected rule", async () => {
+    const { instance } = await boot();
+    const res = await run(["redirects.validate"], { body: { rules: [{ from: "/ok", to: "/t" }, { from: "/admin/x", to: "/team", status: "301" }] } }, instance);
+    expect(res).toMatchObject({ status: 400, code: "VALIDATION", retryable: false, step: "redirects.validate", details: { row: 2, field: "from", reason: "reserved-path", path: "/admin" } });
+    expect(res.error).toBe('redirects: Row 2: "From" can match the reserved path /admin, which the application serves itself');
+  });
+
+  it("validate reports a status rejection against the status field", async () => {
+    const { instance } = await boot();
+    const res = await run(["redirects.validate"], { body: { rules: [{ from: "/a", to: "/b", status: "303" }] } }, instance);
+    expect(res.details).toEqual({ row: 1, field: "status", reason: "invalid-status" });
+  });
+
+  it("validate reports a list-level rejection with its reason only", async () => {
+    const { instance } = await boot();
+    const rows = Array.from({ length: 1001 }, (_, i) => ({ from: `/old/${i}`, to: `/new/${i}` }));
+    const res = await run(["redirects.validate"], { body: { rules: rows } }, instance);
+    expect(res).toMatchObject({ status: 400, code: "VALIDATION", details: { reason: "too-many-rules" } });
   });
 
   it("validate rejects a source under a reserved path, by default and as configured", async () => {
     const { instance } = await boot();
     for (const from of ["/admin", "/admin/login", "/api/x", "/media/a.png"]) {
       const res = await run(["redirects.validate"], { body: { rules: [{ from, to: "/b" }] } }, instance);
-      expect(res, from).toMatchObject({ status: 400, code: "VALIDATION", details: { row: 1 } });
+      expect(res, from).toMatchObject({ status: 400, code: "VALIDATION", details: { row: 1, field: "from", reason: "reserved-path" } });
     }
     expect((await run(["redirects.validate"], { body: { rules: [{ from: "/administration", to: "/b" }] } }, instance)).status).toBe(200);
     const custom = await boot(undefined, { reservedPaths: ["/shop"] });
@@ -125,7 +145,7 @@ describe("redirects/default module steps", () => {
     const { instance } = await boot(rules);
     const res = await run(["redirects.export"], {}, instance);
     expect(res.status).toBe(200);
-    expect(res.result).toEqual({ redirects: { rules: 2, skipped: [] } });
+    expect(res.result).toEqual({ redirects: { rules: 2, skipped: [], skippedRules: [] } });
   });
 
   it("render answers the compiled rule list", async () => {

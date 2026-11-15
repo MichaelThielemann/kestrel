@@ -18,6 +18,7 @@ import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import { createRedirects, type Move } from "./impl.ts";
 import module from "./module.ts";
+import { RedirectRuleError } from "./rules.ts";
 
 const config = { type: "redirects", field: "rules", prefix: "site/", key: "redirects.json", reservedPaths: ["/admin", "/api"] };
 
@@ -150,7 +151,7 @@ describe("automatic redirects: reserved paths", () => {
     expect(expectOk(await r.lookup("/administration"))).toEqual({ to: "/office", status: 301 });
 
     expect(expectOk(await r.render()).map((rule) => rule.from)).toEqual(["/administration"]);
-    expect(expectOk(await r.export())).toEqual({ rules: 1, skipped: [] });
+    expect(expectOk(await r.export())).toEqual({ rules: 1, skipped: [], skippedRules: [] });
     const published: unknown = JSON.parse(new TextDecoder().decode(blobs.blobs.get("site/redirects.json")));
     expect(published).toEqual([expect.objectContaining({ from: "/administration" })]);
     expect(infos.filter((message) => message.includes("reserved path"))).toHaveLength(4);
@@ -165,6 +166,9 @@ describe("automatic redirects: reserved paths", () => {
 
     expect(expectOk(await r.validate([{ from: "/old", to: "/admin" }]))).toBeUndefined();
     await expect(r.validate([{ from: "/older", to: "/old-news" }])).rejects.toThrow(/redirect loop/);
+    const loop = await r.validate([{ from: "/older", to: "/old-news" }]).catch((error: unknown) => error);
+    expect(loop).toBeInstanceOf(RedirectRuleError);
+    expect(loop instanceof RedirectRuleError && loop.toDetails()).toEqual({ row: 1, field: "to", reason: "automatic-redirect-loop", path: "/old-news" });
   });
 });
 

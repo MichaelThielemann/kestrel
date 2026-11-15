@@ -5,7 +5,10 @@ import type { Document, Filter, Persistence, PersistenceError, Schema } from "@m
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { unobserved } from "@michaelthielemann/kestrel/reads";
 import { matchWildcardPath } from "./match.ts";
-import { compilePublishableRedirects, compileRedirects, exactPathPatternSource, matchRedirect, reservedPathOf, serializeRedirects, RedirectRuleError, type RedirectRule } from "./rules.ts";
+import { compilePublishableRedirects, compileRedirects, exactPathPatternSource, matchRedirect, reservedPathOf, serializeRedirects, RedirectRuleError, type RedirectRule, type RedirectRuleDetails } from "./rules.ts";
+
+export type { RedirectRuleDetails, RedirectRuleField, RedirectRuleReason } from "./rules.ts";
+export { RedirectRuleError } from "./rules.ts";
 
 export interface Config {
   type: string;
@@ -41,7 +44,7 @@ export interface Redirects {
   validate(rules: unknown): Promise<Result<void, RedirectsError>>;
   recordMoves(moves: Move[]): Promise<Result<{ recorded: number }, RedirectsError>>;
   lookup(path: string): Promise<Result<{ to: string; status: number } | null, RedirectsError>>;
-  export(): Promise<Result<{ rules: number; skipped: string[] }, RedirectsError>>;
+  export(): Promise<Result<{ rules: number; skipped: string[]; skippedRules: RedirectRuleDetails[] }, RedirectsError>>;
   render(): Promise<Result<RedirectRule[], RedirectsError>>;
   listAuto(): Promise<Result<AutoRedirect[], RedirectsError>>;
   removeAuto(path: string): Promise<Result<void, RedirectsError | KestrelError<"NOT_FOUND">>>;
@@ -112,13 +115,13 @@ export async function createRedirects(config: Config, deps: { content: Content; 
     return run;
   };
 
-  async function publishable(): Promise<Result<{ updatedAt: number; rules: RedirectRule[]; skipped: string[] }, RedirectsError>> {
+  async function publishable(): Promise<Result<{ updatedAt: number; rules: RedirectRule[]; skipped: string[]; skippedRules: RedirectRuleDetails[] }, RedirectsError>> {
     const found = await content.get(config.type);
     if (isErr(found)) return err(transientOnly(found.error, "content@1"));
     const doc = found.value;
-    if (!doc) return ok({ updatedAt: -1, rules: [], skipped: [] });
-    const { rules, skipped } = compilePublishableRedirects(doc[config.field], { reservedPaths: config.reservedPaths });
-    return ok({ updatedAt: doc.updatedAt, rules, skipped });
+    if (!doc) return ok({ updatedAt: -1, rules: [], skipped: [], skippedRules: [] });
+    const { rules, skipped, skippedRules } = compilePublishableRedirects(doc[config.field], { reservedPaths: config.reservedPaths });
+    return ok({ updatedAt: doc.updatedAt, rules, skipped, skippedRules });
   }
 
   function logSkipped(skipped: string[]): void {
@@ -256,7 +259,7 @@ export async function createRedirects(config: Config, deps: { content: Content; 
       const sources = new Set(effective.value.filter((auto) => reservedPathOf(auto.from, config.reservedPaths) === undefined).map((auto) => auto.from));
       compiled.forEach((rule, i) => {
         if (rule.target.startsWith("/") && sources.has(rule.target)) {
-          throw new RedirectRuleError(`Row ${i + 1}: "To" points at ${rule.target}, which is itself an automatic redirect – this would create a redirect loop`);
+          throw new RedirectRuleError(`Row ${i + 1}: "To" points at ${rule.target}, which is itself an automatic redirect – this would create a redirect loop`, { row: i + 1, field: "to", reason: "automatic-redirect-loop", path: rule.target });
         }
       });
       return ok(undefined);
@@ -288,14 +291,14 @@ export async function createRedirects(config: Config, deps: { content: Content; 
     async export() {
       const pub = await publishable();
       if (isErr(pub)) return pub;
-      const { rules, skipped } = pub.value;
+      const { rules, skipped, skippedRules } = pub.value;
       logSkipped(skipped);
       const auto = await autoRules(rules);
       if (isErr(auto)) return auto;
       const combined = [...rules, ...auto.value];
       const put = await blobs.put(`${config.prefix}${config.key}`, new TextEncoder().encode(serializeRedirects(combined)), { contentType: "application/json" });
       if (isErr(put)) return err(transientOnly(put.error, "blobstore@1"));
-      return ok({ rules: combined.length, skipped });
+      return ok({ rules: combined.length, skipped, skippedRules });
     },
     async render() {
       const pub = await publishable();
