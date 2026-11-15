@@ -948,7 +948,11 @@ Net changes since 5.8.2.
     missing (unless the one `.svg` file in its `<prefix><id>/` folder that no item uses as its key is a cleaned copy an earlier run
     wrote, which the sanitizer answers unchanged), and every 5.x SVG without a sanitizer becomes `<stem>-svg.bin`, served as
     `application/octet-stream`; the run lists each one with the reason (`svgDemoted`), and uploading it
-    again through `sanitize.svg` serves it as an image.
+    again through `sanitize.svg` serves it as an image. An item stored with a type `EXTENSION_BY_TYPE`
+    does not list, other than `application/octet-stream`, becomes `<stem>-<ext>.bin`, served as
+    `application/octet-stream`; the run lists each one with its stored type (`typeDemoted`),
+    `kestrel upgrade migrate` adds a note with their number, and the plan of `kestrel update` warns
+    with their number and ids.
   - `images-default:variant-slots` fills in the `slot` of 5.x variant and retired rows, keeping the
     newest finished row of a slot and reporting the rows it drops.
   - Both modules take `storageMigrations: "check" | "apply"` (default `check`). `check` refuses to

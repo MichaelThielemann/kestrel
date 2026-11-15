@@ -266,6 +266,20 @@ copy: the one `.svg` file in the item's `<id>/` folder that no other item uses a
   A `sanitize/*` module whose `describe()` cannot be read without its instance is set up to find
   out; when that fails, it counts as an entry that does not load.
 
+### Files of an unlisted type
+
+5.x stored the content type the client declared. 6.0.0 serves a file as its own type only when the
+type is listed in `EXTENSION_BY_TYPE` (`image/jpeg`, `image/png`, `image/webp`, `application/pdf` and
+the other common ones); an item stored as `image/apng`, `image/jpg`, `image/x-png` or another unlisted
+type becomes `<id>/<stem>-<ext>.bin` and is served as `application/octet-stream`, so an `<img>` no
+longer shows it. An item stored as `application/octet-stream` is not affected.
+
+- `migrate --plan` and the report count these items as `typeDemoted`, name each with its stored type
+  and its new name, and say how many there are in a note. `kestrel update prepare` and `deploy` warn
+  with the count and the item ids.
+- To show one as an image again, upload the file again with a listed type and point everything that
+  uses the old item at the new one, as for an SVG above.
+
 ### Leftovers
 
 The conversion leaves these in place on purpose:

@@ -615,6 +615,26 @@ describe("kestrel upgrade migrate on the 5.8.1 data", () => {
     expect(rows(copy.db, `SELECT key, svgSanitized FROM media_items WHERE id = '${SVG_ITEM}'`)).toEqual([{ key: `media/${SVG_ITEM}/mark-svg.bin`, svgSanitized: null }]);
   });
 
+  it("names each 5.x item of a type media/default does not publish as itself in the plan, which keeps it as a .bin download", async () => {
+    const copy = fixtureCopy();
+    const item = "5cc26e56-ae71-45a0-b0ac-6ea57b0336cb";
+    const db = new DatabaseSync(copy.db);
+    try {
+      db.prepare("UPDATE media_items SET contentType = 'image/apng' WHERE id = ?").run(item);
+    } finally {
+      db.close();
+    }
+    const plan = await cli(["migrate", "--plan", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(plan.code, plan.errors).toBe(1);
+    expect(plan.out).toContain("note: 1 5.x item(s) of a type media/default does not publish as itself would be kept as a .bin download and served as application/octet-stream");
+    expect(plan.out).toMatch(/would: .*typeDemoted 1/);
+    expect(plan.out).toContain(`${item}: media/logo.png is stored as image/apng, a type media/default does not publish as itself: it is kept as logo-png.bin`);
+    const run = await cli(["migrate", "--root", PROJECT, "--db", copy.db, "--blobs-dir", copy.blobs, "--answers", keepFile(copy)]);
+    expect(run.code, run.errors).toBe(0);
+    expect(run.out).toContain("note: 1 5.x item(s) of a type media/default does not publish as itself are kept as a .bin download and served as application/octet-stream");
+    expect(rows(copy.db, `SELECT key FROM media_items WHERE id = '${item}'`)).toEqual([{ key: `media/${item}/logo-png.bin` }]);
+  });
+
   it("serves every 5.x SVG as a download when no module of the project registers sanitize.svg, and says so", async () => {
     const copy = fixtureCopy();
     const project = projectOf(copy, []);

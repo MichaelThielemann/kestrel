@@ -289,6 +289,24 @@ describe("media-default storage: converting 5.x items to the id key layout", () 
     expect((await rowsOf(db)).map((r) => [r.id, r.key])).toEqual([["p1", "media/p1/photo.png"], ["s1", "media/s1/logo-svg.bin"]]);
   });
 
+  it("reports each item of a type it does not publish as itself that becomes a .bin download, in the plan and in the outcome", async () => {
+    const items: OldItem[] = [
+      { id: "t1", folder: "anim", filename: "spin.apng", contentType: "image/apng", blob: "apng bytes" },
+      { id: "t2", folder: "", filename: "photo.jpg", contentType: "image/jpg", blob: "jpg bytes" },
+      { id: "t3", folder: "", filename: "ok.jpg", contentType: "image/jpeg", blob: "jpeg bytes" },
+      { id: "t4", folder: "", filename: "blob.bin", contentType: "application/octet-stream", blob: "raw bytes" },
+    ];
+    const { db, blobs } = await oldStore(items, false);
+    const plan = expectOk(await runShapeMigrations({ storages: [storage()], db, blobs, apply: false, blobWrites: true })).modules[0]!.migrations[0]!.plan!;
+    expect(plan.counts).toMatchObject({ items: 4, typeDemoted: 2, svgDemoted: 0 });
+    expect(plan.notes.map((n) => n.item)).toEqual(["t1", "t2"]);
+    expect(plan.notes[0]!.reason).toMatch(/image\/apng.*spin-apng\.bin.*application\/octet-stream/);
+    const outcome = expectOk(await migrate(db, blobs)).modules[0]!.migrations[0]!.outcome!;
+    expect(outcome.counts).toMatchObject({ typeDemoted: 2, svgDemoted: 0 });
+    expect(outcome.notes.map((n) => n.item)).toEqual(["t1", "t2"]);
+    expect((await rowsOf(db)).map((r) => [r.id, r.key])).toEqual([["t1", "media/t1/spin-apng.bin"], ["t2", "media/t2/photo-jpg.bin"], ["t3", "media/t3/ok.jpg"], ["t4", "media/t4/blob-bin.bin"]]);
+  });
+
   it("plans on data that needs nothing without writing the version row", async () => {
     const { db, blobs } = await oldStore([], false);
     const counter = { writes: 0, crashAt: null };

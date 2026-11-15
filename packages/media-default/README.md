@@ -468,6 +468,9 @@ for `helpers/shape-migrations` of `kestrel-contracts`, and `migrations`. `deps.s
   5.x SVG without `deps.sanitizeSvg` becomes `<stem>-svg.bin` and is served as
   `application/octet-stream`; the run lists each one with the reason (`svgDemoted`), and uploading the
   file again through `sanitize.svg` serves it as an image;
+- an item stored with a type that `EXTENSION_BY_TYPE` does not list, other than
+  `application/octet-stream`, becomes `<stem>-<ext>.bin` and is served as `application/octet-stream`;
+  the run lists each one with its stored type (`typeDemoted`);
 - the original (for a cleaned SVG, its cleaned bytes) is written to `<prefix><id>/<name>`, and the
   copy's size and sha256 are checked before the item switches to it; the item records the copy's size and sha256,
   and when they differ from what the 5.x row recorded the run reports the item; an item whose

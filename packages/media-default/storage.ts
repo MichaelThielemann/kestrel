@@ -1,6 +1,7 @@
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { answerOf, blobSha256, sha256Of, type Detection, type MigrationContext, type MigrationNote, type MigrationQuestion, type ModuleStorage, type ShapeMigration, storageMigrationFailed, type ShapeMigrationError } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
+import { canonicalMediaType, NEUTRAL_EXTENSION, NEUTRAL_TYPE, publicFormOf } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
 import { COLLECTION, ITEMS_SCHEMA, LEGACY_KEYS, LEGACY_KEYS_SCHEMA, canonicalIdOf, keyFor, nameFor, suffixedName, urlNameOf } from "./impl.ts";
 
 /** The module name the storage version row is kept under. */
@@ -75,6 +76,14 @@ function nameOf(row: Row): string {
 
 function isDemotedSvg(row: Row): boolean {
   return nameFor(row.filename ?? urlNameOf(row.key), row.contentType, true) !== nameOf(row);
+}
+
+function isDemotedType(row: Row): boolean {
+  return publicFormOf(row.contentType, true).extension === NEUTRAL_EXTENSION && canonicalMediaType(row.contentType) !== NEUTRAL_TYPE;
+}
+
+function demotedTypeNote(row: Row, name: string): MigrationNote {
+  return { item: row.id, reason: `${row.key} is stored as ${row.contentType}, a type media/default does not publish as itself: it is kept as ${name} and served as ${NEUTRAL_TYPE}; upload it again as a listed type to serve it as its own type` };
 }
 
 type SvgOutcome = { sanitized: Uint8Array } | { refused: string };
@@ -290,6 +299,7 @@ export function storage(config: StorageConfig = {}, deps: StorageDeps = {}): Mod
       let missing = 0;
       let svgDemoted = 0;
       let svgSanitized = 0;
+      let typeDemoted = 0;
       for (const { row, name, key } of work.pending) {
         if (key === row.key) continue;
         const source = await exists.value(row.key);
@@ -307,8 +317,12 @@ export function storage(config: StorageConfig = {}, deps: StorageDeps = {}): Mod
           svgDemoted += 1;
           notes.push(demotedNote(row, name, demotionReason(svgs, row)));
         } else if (svgs?.has(row.id) === true) svgSanitized += 1;
+        if (isDemotedType(row)) {
+          typeDemoted += 1;
+          notes.push(demotedTypeNote(row, name));
+        }
       }
-      return ok({ counts: { items: work.pending.length, copies, renamed, missingOriginals: missing, trashed: decision.value.lost.size, svgSanitized, svgDemoted, conflicts: work.conflicts.length }, notes });
+      return ok({ counts: { items: work.pending.length, copies, renamed, missingOriginals: missing, trashed: decision.value.lost.size, svgSanitized, svgDemoted, typeDemoted, conflicts: work.conflicts.length }, notes });
     },
 
     async apply(ctx) {
@@ -329,6 +343,7 @@ export function storage(config: StorageConfig = {}, deps: StorageDeps = {}): Mod
       let trashed = 0;
       let svgDemoted = 0;
       let svgSanitized = 0;
+      let typeDemoted = 0;
       for (const { row, name, key, location } of work.pending) {
         const patch: Record<string, unknown> = { key, filename: name, location };
         const svg = svgs?.get(row.id);
@@ -336,6 +351,10 @@ export function storage(config: StorageConfig = {}, deps: StorageDeps = {}): Mod
         if (key !== row.key && isDemotedSvg(row)) {
           svgDemoted += 1;
           notes.push(demotedNote(row, name, demotionReason(svgs, row)));
+        }
+        if (key !== row.key && isDemotedType(row)) {
+          typeDemoted += 1;
+          notes.push(demotedTypeNote(row, name));
         }
         if (cleaned !== null) {
           Object.assign(patch, { contentType: SVG, svgSanitized: true, updatedAt: ctx.now() });
@@ -392,7 +411,7 @@ export function storage(config: StorageConfig = {}, deps: StorageDeps = {}): Mod
         const switched = await ctx.db.updateOne(COLLECTION, row.id, patch);
         if (isErr(switched)) return switched;
       }
-      return ok({ counts: { items: work.pending.length, copied, missingOriginals: notes.filter((n) => n.reason.endsWith("is missing")).length, trashed, svgSanitized, svgDemoted, legacyKeys: recorded.value }, notes });
+      return ok({ counts: { items: work.pending.length, copied, missingOriginals: notes.filter((n) => n.reason.endsWith("is missing")).length, trashed, svgSanitized, svgDemoted, typeDemoted, legacyKeys: recorded.value }, notes });
     },
   };
 

@@ -169,7 +169,7 @@ function originalsNowhere(modules: readonly ModuleRun[]): boolean {
   return modules.some((m) => m.migrations.some((r) => r.id === MISSING_ORIGINALS.migration && (r.plan?.counts.missingOriginals ?? 0) > 0 && (r.plan?.counts.copies ?? 0) === 0));
 }
 
-function svgCounts(modules: readonly ModuleRun[]): Record<string, number> | undefined {
+function layoutCounts(modules: readonly ModuleRun[]): Record<string, number> | undefined {
   const layout = modules.flatMap((m) => m.migrations).find((m) => m.id === MISSING_ORIGINALS.migration);
   return (layout?.outcome ?? layout?.plan)?.counts;
 }
@@ -182,7 +182,7 @@ interface ProjectConfig {
 }
 
 function unknownSanitizer(modules: readonly ModuleRun[], project: ProjectConfig): string | undefined {
-  const demoted = svgCounts(modules)?.svgDemoted ?? 0;
+  const demoted = layoutCounts(modules)?.svgDemoted ?? 0;
   const { sanitizer, problem } = project;
   if (sanitizer?.from !== undefined || demoted === 0) return undefined;
   const head = `${demoted} 5.x SVG(s) would be kept as a .bin download, but`;
@@ -196,7 +196,7 @@ function unknownSanitizer(modules: readonly ModuleRun[], project: ProjectConfig)
 }
 
 function svgNotes(modules: readonly ModuleRun[], project: ProjectConfig): string[] {
-  const counts = svgCounts(modules);
+  const counts = layoutCounts(modules);
   const { sanitizer } = project;
   if (counts === undefined) return [];
   if (sanitizer?.from !== undefined && (counts.svgSanitized ?? 0) > 0) return [`media/default cleans each 5.x SVG with the sanitize.svg step of ${sanitizer.from} and keeps it an image`];
@@ -204,6 +204,12 @@ function svgNotes(modules: readonly ModuleRun[], project: ProjectConfig): string
     return ["no module of the project registers sanitize.svg, so every 5.x SVG is kept as a .bin download"];
   }
   return [];
+}
+
+function typeNotes(modules: readonly ModuleRun[], applied: boolean): string[] {
+  const demoted = layoutCounts(modules)?.typeDemoted ?? 0;
+  if (demoted === 0) return [];
+  return [`${demoted} 5.x item(s) of a type media/default does not publish as itself ${applied ? "are" : "would be"} kept as a .bin download and served as application/octet-stream; each is named below`];
 }
 
 function finished(run: ModuleRun): boolean {
@@ -281,6 +287,7 @@ export async function runMigrateStep(options: MigrateStepOptions): Promise<Migra
       if (unknown !== undefined) notes.push(`${unknown}; migrate without --plan refuses to convert anything until then`);
     }
     notes.push(...svgNotes(run.value.modules, project));
+    notes.push(...typeNotes(run.value.modules, options.plan !== true));
     const report: MigrateReport = { schema: 1, tool: { name: "kestrel-upgrade", version: toolVersion() }, command: "migrate", db: dbFile, blobsDir, applied: options.plan !== true, modules: run.value.modules, notes };
     return { exitCode: run.value.modules.every(finished) ? 0 : 1, report };
   } finally {
