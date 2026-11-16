@@ -683,12 +683,14 @@ Every pipeline an anonymous caller reaches over HTTP must end with `authz.fields
 and `authz-roles`' `anonymousFields` must grant fields of that resource, or boot fails. The rule takes
 the pipelines and shapes from boot's own message and the resource from the step that reads the answer
 (`content.get`/`content.list`/`site.resolve:<type>` → `<type>`, `media.get`/`media.list` → `media`, a
-file step → `mediaFile`, `redirects.render` → `redirectRules`). It proposes the grants from the loaded
-project: `id` and every model field of a content type, `_locales` and `_translations` with locales,
-`_locale` and `_links` behind `site.resolve`, `redirect` behind `redirects.lookup`; the public media
-fields, and `focus` and the variant fields behind `images.attach`; the file headers `cache-control`,
-`x-content-provenance` and, with `images-default`, `x-kestrel-variant`; the redirect rules' `pattern`,
-`target` and `status`. It asks once, with no default, since every granted field is served to callers
+file step → `mediaFile`, `redirects.render` → `redirectRules`, `delivery.readIndexFile` → `indexFile`).
+It proposes the grants from the loaded project: `id` and every model field of a content type,
+`_locales` and `_translations` with locales, `_locale` and `_links` behind `site.resolve`, `redirect`
+behind `redirects.lookup`, `_paths` behind `site.attachPaths` or behind `site.resolve` of a type in
+`site-default`'s `routes`, `route.type` behind `site.route`; the public media fields, and `focus` and
+the variant fields behind `images.attach`; the file headers `cache-control`, `x-content-provenance`
+and, with `images-default`, `x-kestrel-variant`; the redirect rules' `from`, `pattern`, `target` and
+`status`; the index file headers `cache-control` and `etag`. It asks once, with no default, since every granted field is served to callers
 without a session: "yes" appends the step to each pipeline file and sets `anonymousFields` (existing
 grants kept), "manual" leaves both to you. A pipeline whose resource it cannot tell stays manual.
 

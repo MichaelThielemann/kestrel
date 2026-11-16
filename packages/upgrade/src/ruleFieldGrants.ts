@@ -24,6 +24,7 @@ const OTHER_FIELD_PROBLEMS = [
 
 const MEDIA_FIELDS = ["id", "path", "filename", "contentType", "size", "width", "height", "alt", "title", "description", "provenance"];
 const VARIANT_FIELDS = ["focus", "variants[].size", "variants[].width", "variants[].height", "variants[].format", "variants[].path", "variants[].crop"];
+const INDEX_FILE_HEADERS = ["headers.cache-control", "headers.etag"];
 
 function authzLines(ctx: RuleContext): string[] {
   return ctx.bootCheck.errors
@@ -45,6 +46,7 @@ export function readingResource(steps: readonly string[]): string | undefined {
     if (name === "media.get" || name === "media.list") return "media";
     if (["media.download", "media.serve", "images.serve"].includes(name)) return "mediaFile";
     if (name === "redirects.render") return "redirectRules";
+    if (name === "delivery.readIndexFile") return "indexFile";
   }
   return undefined;
 }
@@ -65,11 +67,17 @@ function contentModel(ctx: RuleContext): { types: Record<string, unknown>; local
   return { types, localized: Array.isArray(config.locales) && config.locales.length > 0 };
 }
 
+function routedTypes(ctx: RuleContext): Set<string> {
+  const config = moduleEntry(ctx, "site-default")?.config;
+  return new Set(isRecord(config) && isRecord(config.routes) ? Object.keys(config.routes) : []);
+}
+
 function proposedGrant(ctx: RuleContext, resource: string, pipelines: ReadonlyArray<readonly string[]>): string[] | undefined {
   const all = pipelines.flat();
   if (resource === "media") return [...MEDIA_FIELDS, ...(hasModule(ctx, "images-default") && runs(all, "images.attach") ? VARIANT_FIELDS : [])];
   if (resource === "mediaFile") return ["headers.cache-control", "headers.x-content-provenance", ...(hasModule(ctx, "images-default") ? ["headers.x-kestrel-variant"] : [])];
-  if (resource === "redirectRules") return ["pattern", "target", "status"];
+  if (resource === "redirectRules") return ["from", "pattern", "target", "status"];
+  if (resource === "indexFile") return [...INDEX_FILE_HEADERS];
   const model = contentModel(ctx);
   const type = model.types[resource];
   if (!isRecord(type) || !isRecord(type.fields)) return undefined;
@@ -78,6 +86,8 @@ function proposedGrant(ctx: RuleContext, resource: string, pipelines: ReadonlyAr
   if (runs(all, "site.resolve")) paths.push("_locale", "_links");
   if (runs(all, "site.resolveLinks")) paths.push("_links");
   if (runs(all, "redirects.lookup")) paths.push("redirect");
+  if (runs(all, "site.attachPaths") || (runs(all, "site.resolve") && routedTypes(ctx).has(resource))) paths.push("_paths");
+  if (runs(all, "site.route")) paths.push("route.type");
   return [...new Set(paths)];
 }
 
@@ -194,7 +204,7 @@ function granted(grants: readonly string[], permission: string): boolean {
 
 function droppedMembers(resource: string | undefined, steps: readonly string[]): string {
   if (resource === "media") return `folder, createdAt, updatedAt${runs(steps, "images.attach") ? ", available, variantCounts, framing, variants[].bytes, variants[].state" : ""}`;
-  if (resource === "mediaFile") return "every response header the grant does not name";
+  if (resource === "mediaFile" || resource === "indexFile") return "every response header the grant does not name";
   if (resource === undefined) return "every member the grant does not name";
   return "createdAt, updatedAt";
 }

@@ -140,6 +140,60 @@ describe("pipelines/field-step", () => {
     expect(unknown?.suggestion).toContain('custom: the resource of its answer');
   });
 
+  it("proposes the index file's etag and cache-control headers next to the other grants, and writes all of them on yes", async () => {
+    const pipelines: PipelineDefinition[] = [
+      { name: "serveRobotsTxt", steps: ["delivery.readIndexFile:robots.txt", "authz.fields:indexFile?shape=file"] },
+      { name: "resolvePage", steps: ["authn.identifyUser", "authz.require:pages.read", "site.resolve:pages?home=home&status=published&fallback=true", "authz.fields:pages?shape=item"] },
+      { name: "getMedia", steps: ["authn.identifyUser", "authz.require:media.read", "media.get", "authz.fields:media?shape=item"] },
+    ];
+    const p = await project({ pipelines });
+    const grantLine = (pipeline: string, resource: string) => `authz/roles: pipeline "${pipeline}" answers anonymous callers and ends with authz.fields:${resource}, but anonymousFields grants nothing for "${resource}"`;
+    const lines = attachFailed([grantLine("serveRobotsTxt", "indexFile"), grantLine("resolvePage", "pages"), grantLine("getMedia", "media")]);
+    const [asked] = await fieldStepRule.check(contextFor(p, [lines]));
+    expect(asked?.fix).toMatchObject({ kind: "ask", question: "field-step" });
+    expect(asked?.suggestion).toContain("indexFile: headers.cache-control, headers.etag");
+    expect(asked?.suggestion).toContain("pages: id, slug, title, _locales, _translations, _locale, _links");
+    expect(asked?.suggestion).toContain("media: id, path, filename");
+    const [finding] = await fieldStepRule.check(contextFor(p, [lines], { "field-step": "yes" }));
+    expect(finding?.fix.kind).toBe("auto");
+    const edits = finding!.fix.kind === "auto" ? finding!.fix.edits : [];
+    const config = applyEdits(readFileOrUndefined(p.configFile) ?? "", edits.filter((e) => e.file === p.configFile)).text;
+    expect(config).toContain('indexFile: ["headers.cache-control", "headers.etag"]');
+    expect(config).toContain('pages: ["id", "slug", "title", "_locales", "_translations", "_locale", "_links"]');
+    expect(config).toContain('media: ["id", "path", "filename"');
+  });
+
+  it("ends a pipeline that reads an index file with the indexFile cut", async () => {
+    const p = await project({ pipelines: [{ name: "serveSitemap", steps: ["delivery.readIndexFile:sitemap.xml"] }] });
+    const [finding] = await fieldStepRule.check(contextFor(p, [attachFailed([missingStepLine("serveSitemap", "file")])], { "field-step": "yes" }));
+    expect(finding?.fix.kind).toBe("auto");
+    expect(finding?.suggestion).toContain('serveSitemap → "authz.fields:indexFile?shape=file"');
+    expect(finding?.suggestion).toContain("indexFile: headers.cache-control, headers.etag");
+  });
+
+  it("proposes every member the redirect rules carry", async () => {
+    const p = await project({ pipelines: [{ name: "renderRedirects", steps: ["redirects.render"] }] });
+    const [finding] = await fieldStepRule.check(contextFor(p, [attachFailed([missingStepLine("renderRedirects", "array")])]));
+    expect(finding?.suggestion).toContain("redirectRules: from, pattern, target, status");
+  });
+
+  it("proposes the public paths of a routed type and the route a reachable path of another routed type answers with", async () => {
+    const modules: ModuleEntry[] = [
+      { use: "@michaelthielemann/kestrel-content-default", config: { types: { pages: { kind: "multi", fields: { slug: "slug", title: "text" } }, articles: { kind: "multi", fields: { slug: "slug", headline: "text" } }, notes: { kind: "multi", fields: { body: "text" } } } } },
+      { use: "@michaelthielemann/kestrel-site-default", config: { routes: { pages: { home: "home" }, articles: {} } } },
+      { use: AUTHZ, config: { roles: { admin: ["*"] }, anonymous: ["pages.read", "articles.read", "notes.read"] } },
+    ];
+    const pipelines: PipelineDefinition[] = [
+      { name: "resolvePage", steps: ["authn.identifyUser", "authz.require:pages.read", "site.route:pages?home=home", "site.resolve:pages?home=home"] },
+      { name: "listArticles", steps: ["authn.identifyUser", "authz.require:articles.read", "content.list:articles", "site.attachPaths:articles?reachable"] },
+      { name: "listNotes", steps: ["authn.identifyUser", "authz.require:notes.read", "site.resolve:notes"] },
+    ];
+    const [finding] = await fieldStepRule.check(contextFor(await project({ modules, pipelines }), [attachFailed([missingStepLine("resolvePage", "item"), missingStepLine("listArticles", "list"), missingStepLine("listNotes", "item")])]));
+    expect(finding?.suggestion).toContain("pages: id, slug, title, _locale, _links, _paths, route.type;");
+    expect(finding?.suggestion).toContain("articles: id, slug, headline, _paths;");
+    expect(finding?.suggestion).toMatch(/notes: id, body, _locale, _links(?:;|$)/);
+  });
+
   it("does not fire without a field-step problem from authz-roles", async () => {
     expect(await fieldStepRule.check(contextFor(await project()))).toEqual([]);
     expect(await fieldStepRule.check(contextFor(await project(), [attachFailed(['authz/roles: pipeline "serveMediaFile" runs media.serve, whose output is also published without an access check, but anonymous callers lack "media.read"'])]))).toEqual([]);
@@ -175,6 +229,13 @@ describe("responses/anonymous-fields", () => {
     expect(findings[0]?.message).toContain("folder, createdAt, updatedAt, available, variantCounts, framing, variants[].bytes, variants[].state");
     expect(findings[1]?.message).toContain("createdAt, updatedAt");
     expect(findings[2]?.message).toContain("every response header the grant does not name");
+  });
+
+  it("names the response headers, not document members, for a public read of an index file", async () => {
+    const pipelines = [{ name: "serveRobotsTxt", steps: ["delivery.readIndexFile:robots.txt"] }];
+    const [finding] = await anonymousFieldsRule.check(contextFor(await project({ pipelines, triggers: [{ http: "GET /robots.txt", pipeline: "serveRobotsTxt" }] })));
+    expect(finding?.message).toContain("every response header the grant does not name");
+    expect(finding?.message).not.toContain("createdAt");
   });
 
   it("reads anonymous grants from host-supplied defaults", async () => {
