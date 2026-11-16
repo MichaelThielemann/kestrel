@@ -66,4 +66,46 @@ describe("redirect loops in the editor rules", () => {
     assertNoRedirectLoop(compileRedirects(rows));
     expect(performance.now() - started).toBeLessThan(2000);
   });
+
+  it("refuses a chain that passes too many redirects when its tail was already followed from an earlier row", () => {
+    const chain = Array.from({ length: MAX_REDIRECT_HOPS }, (_, i) => ({ from: `/c${i}`, to: `/c${i + 1}` }));
+    const error = rejection([...chain, { from: "/start", to: "/c0" }]);
+    expect(error.message).toBe(`Row ${MAX_REDIRECT_HOPS}: "To" /c${MAX_REDIRECT_HOPS} leads on through more than ${MAX_REDIRECT_HOPS} redirects without ending: /start → /c0 → /c1 → … (rows ${Array.from({ length: MAX_REDIRECT_HOPS + 1 }, (_, i) => i + 1).join(", ")})`);
+  });
+
+  it("checks a full list of wildcard rules under the root with a long chain quickly", () => {
+    const chain = Array.from({ length: 18 }, (_, i) => ({ from: `/p${i}`, to: `/p${i + 1}` }));
+    const rows = [...Array.from({ length: 1000 - chain.length }, (_, i) => ({ from: `/*/never-${i}-*`, to: "/p0" })), ...chain];
+    const started = performance.now();
+    assertNoRedirectLoop(compileRedirects(rows));
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it("checks a full list of wildcard rules that each move one page quickly", () => {
+    const rows = Array.from({ length: 1000 }, (_, i) => ({ from: `/*/old-${i}`, to: `/new/page-${i}` }));
+    const started = performance.now();
+    assertNoRedirectLoop(compileRedirects(rows));
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it("checks chains that pass a new path on every hop next to wildcard rules under the root quickly", () => {
+    const chain = Array.from({ length: 18 }, (_, i) => ({ from: `/l${i}/**`, to: `/l${i + 1}/$1` }));
+    const starts = Array.from({ length: 491 }, (_, i) => ({ from: `/s-${i}`, to: `/l0/${i}` }));
+    const others = Array.from({ length: 491 }, (_, i) => ({ from: `/*/never-${i}-*`, to: "/elsewhere" }));
+    const started = performance.now();
+    assertNoRedirectLoop(compileRedirects([...others, ...starts, ...chain]));
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it("refuses a list whose loop check would take more than the step limit, and does so quickly", () => {
+    const long = "a".repeat(2000);
+    const nearMisses = Array.from({ length: 491 }, () => ({ from: "/*/Y*z-*", to: "/elsewhere" }));
+    const starts = Array.from({ length: 491 }, (_, i) => ({ from: `/s-${i}`, to: `/l0/Yz-${long}${i}` }));
+    const chain = Array.from({ length: 18 }, (_, i) => ({ from: `/l${i}/*`, to: `/l${i + 1}/$1` }));
+    const started = performance.now();
+    const error = rejection([...nearMisses, ...starts, ...chain]);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(error.toDetails()).toEqual({ reason: "too-complex" });
+    expect(error.message).toBe("Redirect rules are too complex to check for redirect loops: use fewer wildcard rules that can match the same paths, or shorter targets");
+  });
 });

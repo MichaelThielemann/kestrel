@@ -84,8 +84,14 @@ following after about as many. Only the sample path is followed, so a loop that 
 capture reaches is not found. Rows that a stored list holds already are not checked when it is
 published; the next save checks the whole list.
 
-A list that is not a list (`not-a-list`) or holds more than 1000 rules (`too-many-rules`) is rejected as
-a whole: `details` is `{ reason }` without `row` and `field`. Duplicate rules are not rejected: the first
+Each path a chain reaches is matched against the rules once, and a chain already followed from an
+earlier source is not followed again. The check stops after a fixed amount of matching work: a list
+that needs more, for instance hundreds of wildcard rules that come close to every one of many long
+targets, is refused as a whole with `too-complex`. A list of 1000 wildcard rules under `/` with chains
+of 20 redirects stays well below that limit and is checked in a fraction of a second.
+
+A list that is not a list (`not-a-list`), holds more than 1000 rules (`too-many-rules`) or is too complex
+to check for redirect loops (`too-complex`) is rejected as a whole: `details` is `{ reason }` without `row` and `field`. Duplicate rules are not rejected: the first
 match wins. The first failing check of a row is reported. A row is checked in this order: `from` blank, the form of `to` and its placeholders, the other checks of `from` including reserved paths, then the status; a rule that fails more than one check is reported with the field of the first one in that order.
 
 `redirects.export` reports each row it leaves out when publishing: as a line in `skipped` and as an

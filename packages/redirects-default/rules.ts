@@ -1,5 +1,5 @@
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { matchWildcardPath } from "./match.ts";
+import { compileWildcardPath, matchWildcardPath, type MatchMeter } from "./match.ts";
 
 /**
  * One entry of the published artifact. `from` is the canonical wildcard path (leading slash, no trailing
@@ -29,6 +29,12 @@ export const MAX_LOOKUP_PATH_LENGTH = 2048;
 
 /** The most redirects one request may pass through the editor rules; browsers give up after about as many. */
 export const MAX_REDIRECT_HOPS = 20;
+
+/**
+ * The most matching work one loop check of the editor rules may take, counted as `MatchMeter` steps. A list that
+ * needs more is refused as `too-complex`; the lists the editor offers stay far below it.
+ */
+export const MAX_LOOP_CHECK_STEPS = 20_000_000;
 
 /**
  * The path prefixes a redirect source may not take unless the configuration says otherwise: the admin
@@ -69,6 +75,7 @@ export const REDIRECT_RULE_REASONS = [
   "invalid-status",
   "not-a-list",
   "too-many-rules",
+  "too-complex",
 ] as const;
 
 /**
@@ -80,14 +87,15 @@ export const REDIRECT_RULE_REASONS = [
  * Target (`to`): `blank`, `control-characters`, `backslash`, `protocol-relative`, `unsupported-scheme`,
  * `invalid-url`, `embedded-credentials`, `placeholder-in-host`, `placeholder-out-of-range`,
  * `placeholder-syntax`, `automatic-redirect-loop`, `redirect-loop`. Status: `invalid-status`. Whole list: `not-a-list`,
- * `too-many-rules`, which is also the reason of each row beyond the limit when a list is published.
+ * `too-many-rules`, which is also the reason of each row beyond the limit when a list is published, and `too-complex`,
+ * a list whose loop check would take more than `MAX_LOOP_CHECK_STEPS`.
  */
 export type RedirectRuleReason = (typeof REDIRECT_RULE_REASONS)[number];
 
 /**
  * The structured form of a rejection, as clients receive it in `details` and in the skipped rows of an export.
  * `row` is the 1-based position in the list. It is absent when saving a list that is rejected as a whole
- * (`not-a-list`, `too-many-rules`); `field` is absent for those and for a row skipped as `too-many-rules`
+ * (`not-a-list`, `too-many-rules`, `too-complex`); `field` is absent for those and for a row skipped as `too-many-rules`
  * because it lies beyond the limit. `path` is the offending path where one exists: the reserved prefix for
  * `reserved-path`, the source of the automatic redirect for `automatic-redirect-loop`, the target for `redirect-loop`.
  */
@@ -337,11 +345,6 @@ export function targetPath(target: string): string {
   return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
 }
 
-function literalPrefix(from: string): string {
-  const wildcard = from.indexOf("*");
-  return wildcard === -1 ? from : from.slice(0, wildcard);
-}
-
 function rowList(rows: number[]): string {
   const sorted = [...new Set(rows)].sort((a, b) => a - b);
   return `${sorted.length === 1 ? "row" : "rows"} ${sorted.join(", ")}`;
@@ -352,27 +355,50 @@ function rowList(rows: number[]): string {
  * sample segment, the rules are followed first match first, as `matchRedirect` does: a path target that
  * comes back to a path already passed, or a chain longer than `MAX_REDIRECT_HOPS`, throws `redirect-loop`
  * at the row whose target closes it, naming the paths and the rows involved. Absolute URL targets end a chain.
+ * Each path is matched against the rules once; a list whose matching would take more than `MAX_LOOP_CHECK_STEPS`
+ * throws `too-complex` for the whole list.
  */
 export function assertNoRedirectLoop(rules: readonly RedirectRule[]): void {
-  const prefixes = rules.map((rule) => literalPrefix(rule.from));
-  const firstMatch = (path: string): { index: number; target: string } | undefined => {
-    for (const [index, rule] of rules.entries()) {
-      if (!path.startsWith(prefixes[index] ?? "")) continue;
-      const hit = matchRedirect([rule], path);
-      if (hit) return { index, target: hit.target };
+  const matchers = rules.map((rule) => compileWildcardPath(rule.from));
+  const meter: MatchMeter = { steps: 0 };
+  const hops = new Map<string, { index: number; next: string } | null>();
+  const hopFrom = (path: string): { index: number; next: string } | null => {
+    const known = hops.get(path);
+    if (known !== undefined) return known;
+    let hop: { index: number; next: string } | null = null;
+    if (path.length <= MAX_LOOKUP_PATH_LENGTH) {
+      for (const [index, matcher] of matchers.entries()) {
+        const captures = matcher(path, meter);
+        if (meter.steps > MAX_LOOP_CHECK_STEPS) {
+          throw new RedirectRuleError("Redirect rules are too complex to check for redirect loops: use fewer wildcard rules that can match the same paths, or shorter targets", { reason: "too-complex" });
+        }
+        if (!captures) continue;
+        const target = fillTarget(rules[index]?.target ?? "", captures);
+        hop = target.startsWith("/") ? { index, next: targetPath(target) } : null;
+        break;
+      }
     }
-    return undefined;
+    hops.set(path, hop);
+    return hop;
   };
+  const remaining = new Map<string, number>();
   for (const rule of rules) {
     const passed = [targetPath(rule.from.replace(/\*\*|\*/g, "sample"))];
     const rows: number[] = [];
+    let after = 0;
     for (;;) {
-      const hit = firstMatch(passed[passed.length - 1] ?? "/");
-      if (!hit || !hit.target.startsWith("/")) break;
-      rows.push(hit.index + 1);
-      const next = targetPath(hit.target);
-      const target = rules[hit.index]?.target ?? hit.target;
-      const row = hit.index + 1;
+      const current = passed[passed.length - 1] ?? "/";
+      const known = remaining.get(current);
+      if (known !== undefined && rows.length + known <= MAX_REDIRECT_HOPS) {
+        after = known;
+        break;
+      }
+      const hop = hopFrom(current);
+      if (!hop) break;
+      const row = hop.index + 1;
+      rows.push(row);
+      const next = hop.next;
+      const target = rules[hop.index]?.target ?? next;
       const back = passed.indexOf(next);
       if (back !== -1) {
         const loop = [...passed.slice(back), next];
@@ -383,7 +409,12 @@ export function assertNoRedirectLoop(rules: readonly RedirectRule[]): void {
         throw new RedirectRuleError(`"To" ${target} leads on through more than ${MAX_REDIRECT_HOPS} redirects without ending: ${passed.slice(0, 3).join(" → ")} → … (${rowList(rows)})`, { field: "to", reason: "redirect-loop", path: target }).atRow(row);
       }
     }
+    passed.forEach((path, i) => remaining.set(path, rows.length - i + after));
   }
+}
+
+function fillTarget(target: string, captures: readonly string[]): string {
+  return target.replace(/\$(\d+)/g, (_, n: string) => captures[Number(n) - 1] ?? "");
 }
 
 /** The artifact body. An empty list is a valid document (`[]`), never an absent file. */
@@ -402,7 +433,7 @@ export function matchRedirect(rules: RedirectRule[], path: string): { target: st
   for (const rule of rules) {
     const captures = matchWildcardPath(rule.from, path);
     if (!captures) continue;
-    return { target: rule.target.replace(/\$(\d+)/g, (_, n: string) => captures[Number(n) - 1] ?? ""), status: rule.status };
+    return { target: fillTarget(rule.target, captures), status: rule.status };
   }
   return null;
 }

@@ -27,11 +27,53 @@ function tokenize(from: string): Token[] {
  * but the work grows only in proportion to the path length for every rule, so no path can make a rule expensive.
  */
 export function matchWildcardPath(from: string, path: string): string[] | null {
-  if (from === "/") return path === "/" ? [] : null;
-  const tokens = tokenize(from);
-  const first = tokens[0];
-  if (first?.kind === "literal" && !path.startsWith(first.text)) return null;
+  return compileWildcardPath(from)(path);
+}
 
+function countSlashes(text: string): number {
+  let count = 0;
+  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 0x2f) count++;
+  return count;
+}
+
+/**
+ * Counts the work of the matchers that share it: for every path a matcher compares in full, `steps` grows by the
+ * path length plus 64 for the fixed cost of a comparison, times the tokens of the rule plus one.
+ */
+export interface MatchMeter {
+  steps: number;
+}
+
+/**
+ * Prepare a matcher for a canonical `from` once and use it for many paths: it returns what
+ * `matchWildcardPath(from, path)` returns. A path that is shorter than the literals and wildcards of `from` need,
+ * that lacks one of its literals, holds too few or, without `**`, too many slashes, or does not end with its
+ * last literal is refused before the full comparison.
+ */
+export function compileWildcardPath(from: string): (path: string, meter?: MatchMeter) => string[] | null {
+  if (from === "/") return (path) => (path === "/" ? [] : null);
+  const tokens = tokenize(from);
+  const literals = tokens.flatMap((token) => (token.kind === "literal" ? [token.text] : []));
+  const first = tokens[0]?.kind === "literal" ? tokens[0].text : undefined;
+  const lastToken = tokens[tokens.length - 1];
+  const last = lastToken?.kind === "literal" ? lastToken.text : undefined;
+  const minLength = tokens.reduce((sum, token) => sum + (token.kind === "literal" ? token.text.length : 1), 0);
+  const slashes = countSlashes(from);
+  const deep = tokens.some((token) => token.kind === "many");
+  return (path, meter) => {
+    if (path.length < minLength) return null;
+    if (first !== undefined && !path.startsWith(first)) return null;
+    if (last !== undefined && !path.endsWith(last) && !path.endsWith(`${last}/`)) return null;
+    if (!literals.every((literal) => path.includes(literal))) return null;
+    const pathSlashes = countSlashes(path);
+    if (pathSlashes < slashes) return null;
+    if (!deep && pathSlashes !== slashes && !(path.endsWith("/") && pathSlashes === slashes + 1)) return null;
+    if (meter) meter.steps += (path.length + 64) * (tokens.length + 1);
+    return matchTokens(tokens, path);
+  };
+}
+
+function matchTokens(tokens: Token[], path: string): string[] | null {
   const n = path.length;
   const segmentRun = new Int32Array(n + 2);
   const pathRun = new Int32Array(n + 2);

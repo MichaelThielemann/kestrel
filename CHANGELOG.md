@@ -2434,8 +2434,11 @@ Net changes since 5.8.2.
   the loop, for instance `Row 3: "To" /a leads back to /a, a redirect loop: /a → /b → /a (rows 1, 3)`. Such a
   list was saved and answered every visitor of the path with a redirect loop. `automatic-redirect-loop` also
   catches a target that reaches the source of an automatic redirect with a trailing slash, query or fragment,
-  and its `path` is that source. `REDIRECT_RULE_REASONS` and the `reason` enum of the published schema list
-  `redirect-loop`.
+  and its `path` is that source. The check matches each path a chain reaches once and stops after a fixed
+  amount of matching work: a list that needs more is refused as a whole with the new reason `too-complex`
+  (`details` is `{ reason }`); a list of 1000 wildcard rules under `/` with chains of 20 redirects is checked
+  in a fraction of a second. `REDIRECT_RULE_REASONS` and the `reason` enum of the published schema list
+  `redirect-loop` and `too-complex`.
 - `redirects-default`: the scheme of an absolute redirect target is compiled in lower case: a rule with
   `HTTPS://Example.org/x` answers `https://Example.org/x` in `redirects.lookup`, `redirects.render` and
   `redirects.json`; host and path stay as written, and so does the stored list. A consumer that tells an

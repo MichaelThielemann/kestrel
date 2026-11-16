@@ -5436,7 +5436,8 @@
                                   "redirect-loop",
                                   "invalid-status",
                                   "not-a-list",
-                                  "too-many-rules"
+                                  "too-many-rules",
+                                  "too-complex"
                                 ]
                               },
                               "path": {
@@ -5912,7 +5913,8 @@
                                   "redirect-loop",
                                   "invalid-status",
                                   "not-a-list",
-                                  "too-many-rules"
+                                  "too-many-rules",
+                                  "too-complex"
                                 ]
                               },
                               "path": {
@@ -14303,7 +14305,8 @@
                                   "redirect-loop",
                                   "invalid-status",
                                   "not-a-list",
-                                  "too-many-rules"
+                                  "too-many-rules",
+                                  "too-complex"
                                 ]
                               },
                               "path": {
