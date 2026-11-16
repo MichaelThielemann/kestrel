@@ -256,7 +256,7 @@ async function afterStop(ctx: UpdateContext, flow: Flow, entry: Entry): Promise<
       ended = (await ctx.steps.rollback(ctx, known(await readUpdateRun(ctx, ctx.run.id), flow), { kind: "automatic", failure })).ended;
     } catch (cause) {
       const scope = fixedText`--env ${literal(ctx.envName)} --run ${literal(ctx.run.id)}`;
-      if (isClockRefusal(cause)) return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`the deploy failed at ${failure}, and the automatic rollback did not begin: ${messageOf(cause)}; the app stays stopped; do not start it by hand; run update resume ${scope} from a machine whose clock is within ${MAX_SKEW_MS / 1000} s of the store's, which rolls back${flow.promoted === null ? fixedText`, or update abort ${scope}, which starts the previous release on the unchanged replica` : literal("")}`);
+      if (isClockRefusal(cause)) return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`the deploy failed at ${failure}, and the automatic rollback stopped before it changed anything: ${messageOf(cause)}; the app stays stopped; do not start it by hand; run update resume ${scope} from a machine whose clock is within ${MAX_SKEW_MS / 1000} s of the store's, which rolls back${flow.promoted === null ? fixedText`, or update abort ${scope}, which starts the previous release on the unchanged replica` : literal("")}`);
       return outcomeOf(ctx, UPDATE_EXIT.refused, fixedText`the deploy failed at ${failure}, and the automatic rollback did not finish: ${messageOf(cause)}; the app stays stopped; do not start it by hand; run update resume ${scope}, which runs the rollback again`);
     }
     if (ended === "stopped") return outcomeOf(ctx, UPDATE_EXIT.refused, stoppedAfterRollback(ctx, fixedText`the deploy failed at ${failure}`, flow.from));

@@ -263,8 +263,9 @@ async function rollBackStopped(ctx: UpdateContext, run: UpdateRun, manifest: Man
 
 /**
  * Brings back the cutover state of deploy run `run`, in the order of `ROLLBACK_STEPS`, opened by a `rollback`
- * started record and closed by `rollback` done, after `checkClockForPromotion` let it through, so a machine whose
- * clock a promotion would refuse changes nothing: stops the app if it runs and waits for the seal after STOPPED;
+ * started record and closed by `rollback` done. Its first step is `checkClockForPromotion`, so on a machine whose clock
+ * a promotion would refuse it changes nothing but the journal, which reads `rolling-back` for `update resume`. Then it
+ * stops the app if it runs and waits for the seal after STOPPED;
  * promotes the cutover backup's database again (before any old droplet can start); copies back originals whose
  * key holds other bytes; sets the delivery prefix to the backup's and lists it again until no key is newer than the
  * start of the replacement; checks the derived prefixes against the backup's ETag listing; restores the recorded
@@ -284,10 +285,10 @@ export async function rollback(ctx: UpdateContext, run: UpdateRun, reason: Rollb
   }
   const manifest = await readManifest(ctx, run.cutoverBackup);
   if (manifest === null) throw new OpsError(fixedText`the cutover backup ${literal(run.cutoverBackup)} of run ${literal(run.runId)} does not exist or is incomplete`, 1, run.cutoverBackup);
-  await checkClockForPromotion(ctx);
   await ctx.journal.record("rollback", "started", { phase: "rollback", reason: reason.kind, ...(reason.kind === "automatic" ? { failure: reason.failure } : {}), cutoverBackup: manifest.id });
   const progress = { started: false };
   try {
+    await checkClockForPromotion(ctx);
     return await rollBackStopped(ctx, run, manifest, progress);
   } catch (error) {
     await recordQuietly(ctx, "rollback", "failed", { message: messageOf(error) });

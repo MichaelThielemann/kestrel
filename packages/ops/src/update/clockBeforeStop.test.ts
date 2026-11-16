@@ -11,8 +11,9 @@ import { createUpdateHarness, type UpdateHarness } from "./harness.fixture.ts";
 import { readUpdateRun } from "./journal.ts";
 import { updateKeys } from "./layout.ts";
 import { planHash, versionSet } from "./plan.ts";
+import { resume } from "./resume.ts";
 import { rollbackCommand } from "./rollback.ts";
-import { continueRun, createScenario, deployUntil, runOf, type Scenario } from "./scenario.fixture.ts";
+import { continueRun, createScenario, deployUntil, runOf, scenarioContinue, type Scenario } from "./scenario.fixture.ts";
 import { UPDATE_EXIT, type MigrateInput, type MigrateResult, type UpdateContext, type UpdatePlan, type UpdateReceipt } from "./types.ts";
 import type * as Storages from "./storages.ts";
 
@@ -85,6 +86,7 @@ describe("the store's clock, checked before an update stops the app", { timeout:
     expect((await h.target.status()).state).toBe("stopped");
     const run = await readUpdateRun(base, base.run.id);
     expect(run.promoted).toBeNull();
+    expect(run.state).toBe("rolling-back");
     const next = await h.context({ run, answers: {} });
     await next.journal.record("run", "started", { command: "update abort", env: "prod", phase: "abort" });
     const aborted = await abort(skewed(next, 60_000), run);
@@ -106,6 +108,29 @@ describe("the store's clock, checked before an update stops the app", { timeout:
     expect((await listBackups(ctx)).filter((b) => b.kind === "pre-restore")).toEqual([]);
     expect((await runOf(s, deployed.runId)).records.some((r) => r.phase === "rollback" && r.step === "stop")).toBe(false);
   });
+
+  for (const command of ["update rollback", "update abort"] as const) {
+    it(`leaves a promoted run whose release never started rolling back when the clock refuses ${command}, so update resume from a correct clock rolls it back`, async () => {
+      const s = await createScenario({ from: { renders: false } });
+      scenarios.push(s);
+      const deployed = await deployUntil(s, "promote");
+      const first = await continueRun(s, deployed.runId, command);
+      expect(first.run.state).toBe("down");
+      const off = skewed(first.ctx, 60_000);
+      const refused = command === "update rollback" ? await rollbackCommand(off, first.run) : await abort(off, first.run);
+      expect(refused, refused.message).toMatchObject({ exitCode: UPDATE_EXIT.refused, state: "rolling-back" });
+      expect(refused.message).toContain("60 s off the store's");
+      expect(refused.message).toContain("update resume");
+      expect((await s.h.target.status()).state).toBe("stopped");
+      expect((await runOf(s, deployed.runId)).records.some((r) => r.phase === "rollback" && r.step === "re-promote")).toBe(false);
+
+      const { ctx, run } = await continueRun(s, deployed.runId, "update resume", { steps: { continueDeploy: scenarioContinue(s) } });
+      const resumed = await resume(ctx, run);
+      expect(resumed, resumed.message).toMatchObject({ exitCode: UPDATE_EXIT.done, state: "rolled-back" });
+      expect(s.h.target.release.runtime).toBe("5.8.1");
+      expect((await s.h.target.status()).state).toBe("started");
+    });
+  }
 
   it("refuses update abort of a started release from a machine whose clock is off before it stops it", async () => {
     const s = await createScenario({ from: { renders: false } });

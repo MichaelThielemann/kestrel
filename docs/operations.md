@@ -60,8 +60,11 @@ prefix its credentials need:
 A deploy, `update rollback`, `update abort` and an `update resume` that rolls back refuse with exit 1 before they
 stop the app, with production unchanged, when this machine's clock is more than 30 s off the store's or the newest
 replica generation is stamped more than 30 s after the store's time, since the promotion would refuse later with the
-app down; run them from a machine whose clock is within the limit. A deploy that the clock check refuses after its
-stop, such as one `update resume` continues on another machine, names that, and `update abort` while nothing was
+app down; run them from a machine whose clock is within the limit. When the check refuses a rollback while the app is
+already stopped, as for a run whose new release never started or for the automatic rollback of a deploy whose clock
+went off after its stop, such as one `update resume` continues on another machine, the rollback records its start
+and changes nothing else: the run reads `rolling-back`, the app stays stopped, and `update resume` from a machine
+within the limit rolls it back. The refusal of such a deploy names that, and `update abort` while nothing was
 promoted, which starts the previous release on the unchanged replica.
 
 The store's clock is measured with a probe object that is written, listed and deleted again, under
