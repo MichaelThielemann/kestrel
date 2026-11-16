@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-cli",
-  "version": "5.8.1",
+  "version": "6.0.0",
   "description": "The kestrel command: starts a Kestrel project and checks, explains, describes, documents and upgrades it.",
   "type": "module",
   "license": "Apache-2.0",

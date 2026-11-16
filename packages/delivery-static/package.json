@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-delivery-static",
-  "version": "5.8.1",
+  "version": "6.0.0",
   "description": "Steps delivery.publish/unpublish/readStatus/publishAll: renders published documents per locale via renderer@1, stores them in blobstore@1, tracks a publish status and writes sitemap.xml, robots.txt and llms.txt.",
   "type": "module",
   "license": "Apache-2.0",

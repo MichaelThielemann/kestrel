@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 6.0.0 – 2026-11-16
+
 Net changes since 5.8.2.
 
 ### Breaking

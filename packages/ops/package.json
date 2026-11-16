@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-ops",
-  "version": "5.8.1",
+  "version": "6.0.0",
   "description": "Verified backups, restore and replica promotion for a Kestrel instance with SQLite replication and S3-compatible storage.",
   "type": "module",
   "license": "Apache-2.0",
