@@ -154,10 +154,13 @@ and answered by `delivery.readStaleStatus` as `exports: { indexes, llmsFull }`. 
 
 **Reading a file back.** `delivery.readIndexFile:<file>` answers one of the four files, named by its argument
 (`sitemap.xml`, `robots.txt`, `llms.txt` or `llms-full.txt`), as a binary result: the bytes stored at
-`<prefix><file>`, the content type listed above for that file, the sha256 of the bytes as a strong `ETag` and
-`Cache-Control: no-cache`. Any other argument fails boot with `step-argument`, so no request can name another key.
-A file that is not there (no export has run yet, `sitemap: false` or no `siteUrl`, `llms.full` off) answers
-`NOT_FOUND` (404), and a failed blob store read `TRANSIENT` (503). A file of the site's own at one of these keys is
+`<prefix><file>`, the content type the export writes it with (`application/xml; charset=utf-8` for sitemap.xml,
+`text/plain; charset=utf-8` for the other three), the sha256 of the bytes as a strong `ETag` and
+`Cache-Control: no-cache`. The hash is computed in slices of 1 MiB with a turn of the event loop between them.
+Any other argument fails boot with `step-argument`, so no request can name another key.
+A file that is not there (no export has run yet, `sitemap: false` or no `siteUrl`, no published entry for the
+sitemap, `robots: false` without a robots.txt of the site's own, `llms.full` off) answers `NOT_FOUND` (404), and a
+failed blob store read `TRANSIENT` (503). A file of the site's own at one of these keys is
 answered the same way. The step reads the blob store and nothing else: it checks no permission, since the files
 are public on the static host anyway, and it never starts an export. An origin that serves the site without a
 static host in front answers the four paths with it, byte for byte what the static host would serve:

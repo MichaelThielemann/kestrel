@@ -22,7 +22,7 @@ import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { isKestrelBootError } from "@michaelthielemann/kestrel/errors";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
-import type { Delivery } from "./impl.ts";
+import { INDEX_FILE_NAMES, INDEX_FILE_TYPES, isIndexFileName, type Delivery } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
 
 const model: ContentModel = {
@@ -185,6 +185,13 @@ describe("delivery.readIndexFile", () => {
     }
   });
 
+  it("keeps the list of readable names fixed at runtime", () => {
+    expect(Object.isFrozen(INDEX_FILE_NAMES)).toBe(true);
+    expect(Object.isFrozen(INDEX_FILE_TYPES)).toBe(true);
+    expect(() => boundaryCast<string[]>(INDEX_FILE_NAMES, "host").push("index.html")).toThrow(TypeError);
+    expect(isIndexFileName("index.html")).toBe(false);
+  });
+
   it("answers 503 TRANSIENT when the blob store cannot be read", async () => {
     const failing: Blobstore = {
       put: async () => ok(),
@@ -197,6 +204,34 @@ describe("delivery.readIndexFile", () => {
     const run = await s.read("sitemap.xml");
     expect(run.status).toBe(503);
     expect(run.code).toBe("TRANSIENT");
+  });
+
+  it("hashes a file of several megabytes in slices, letting other work run in between", async () => {
+    const data = new Uint8Array(3 * 1024 * 1024 + 7).map((_, index) => index % 251);
+    const store: Blobstore = {
+      put: async () => ok(),
+      get: async () => ok(data),
+      remove: async () => ok(),
+      move: async () => ok(),
+      list: async () => ok([]),
+    };
+    const s = await setUp({ blobs: store });
+    let done = false;
+    let turns = 0;
+    const tick = (): void => {
+      if (done) return;
+      turns += 1;
+      setImmediate(tick);
+    };
+    const reading = s.read("llms-full.txt");
+    setImmediate(tick);
+    const run = await reading;
+    done = true;
+    expect(run.status).toBe(200);
+    const result = run.result;
+    if (!isBinaryResult(result)) throw new Error("the result is not a file");
+    expect(result.headers?.etag).toBe(`"${sha256(data)}"`);
+    expect(turns).toBeGreaterThanOrEqual(3);
   });
 
   it("answers 404 when the blob store reports the key as not found", async () => {

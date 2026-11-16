@@ -16,11 +16,11 @@ export const SITEMAP_CONTENT_TYPE = "application/xml; charset=utf-8";
 export const ROBOTS_CONTENT_TYPE = "text/plain; charset=utf-8";
 
 /** The content type each index file is written with, keyed by its name under the prefix. */
-export const INDEX_FILE_TYPES = { [SITEMAP_KEY]: SITEMAP_CONTENT_TYPE, [ROBOTS_KEY]: ROBOTS_CONTENT_TYPE, [LLMS_KEY]: LLMS_CONTENT_TYPE, [LLMS_FULL_KEY]: LLMS_CONTENT_TYPE } as const;
+export const INDEX_FILE_TYPES = Object.freeze({ [SITEMAP_KEY]: SITEMAP_CONTENT_TYPE, [ROBOTS_KEY]: ROBOTS_CONTENT_TYPE, [LLMS_KEY]: LLMS_CONTENT_TYPE, [LLMS_FULL_KEY]: LLMS_CONTENT_TYPE } as const);
 
 export type IndexFileName = keyof typeof INDEX_FILE_TYPES;
 
-export const INDEX_FILE_NAMES: readonly IndexFileName[] = [SITEMAP_KEY, ROBOTS_KEY, LLMS_KEY, LLMS_FULL_KEY];
+export const INDEX_FILE_NAMES: readonly IndexFileName[] = Object.freeze([SITEMAP_KEY, ROBOTS_KEY, LLMS_KEY, LLMS_FULL_KEY]);
 
 export function isIndexFileName(name: string): name is IndexFileName {
   return INDEX_FILE_NAMES.some((known) => known === name);
@@ -41,7 +41,7 @@ export async function readIndexFile(blobs: Blobstore, prefix: string, name: Inde
   const read = await blobs.get(`${prefix}${name}`);
   if (isErr(read)) return read.error.code === "NOT_FOUND" ? ok(null) : read;
   if (read.value === null) return ok(null);
-  return ok({ name, data: read.value, contentType: INDEX_FILE_TYPES[name], sha256: sha256(read.value) });
+  return ok({ name, data: read.value, contentType: INDEX_FILE_TYPES[name], sha256: await sha256InSlices(read.value) });
 }
 
 export type RobotsPolicy = "allow" | "disallow";
@@ -183,6 +183,7 @@ export interface IndexFiles {
 const REMOVED = "-";
 const READ_BATCH = 50;
 const ENCODE_CHARS = 1 << 18;
+const HASH_SLICE_BYTES = 1 << 20;
 
 function nextTurn(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
@@ -190,6 +191,15 @@ function nextTurn(): Promise<void> {
 
 function sha256(body: Uint8Array): string {
   return createHash("sha256").update(body).digest("hex");
+}
+
+async function sha256InSlices(body: Uint8Array): Promise<string> {
+  const hash = createHash("sha256");
+  for (let offset = 0; offset < body.byteLength; offset += HASH_SLICE_BYTES) {
+    if (offset > 0) await nextTurn();
+    hash.update(body.subarray(offset, offset + HASH_SLICE_BYTES));
+  }
+  return hash.digest("hex");
 }
 
 async function joined(parts: readonly Uint8Array[]): Promise<Uint8Array> {
