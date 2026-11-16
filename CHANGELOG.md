@@ -4,7 +4,7 @@
 
 ## 6.0.0 – 2026-11-16
 
-Net changes since 5.8.2.
+Net changes since 5.8.2. 5.8.2 was not published; upgrading from 5.8.1 brings its fixes as well.
 
 ### Breaking
 
@@ -2471,6 +2471,8 @@ Net changes since 5.8.2.
   presentation attributes.
 
 ## 5.8.2 – 2026-09-27
+
+Not published. These fixes ship in 6.0.0.
 
 ### Fixed
 
