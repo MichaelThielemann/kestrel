@@ -24,7 +24,7 @@ afterEach(async () => {
 
 describe("kestrel-upgrade check against the minimal-5.8 fixture", () => {
   it("sees the source tier only while the 5.x packages are installed, and lists every known break", async () => {
-    const { code, report } = await runJson(["check", "--root", FIXTURE, "--json"]);
+    const { code, report } = await runJson(["check", "--root", FIXTURE, "--json"], 5);
     expect(report.tiers.source).toBe("done");
     expect(report.tiers.load).toBe("not-run");
     expect(report.tiers.boot).toBe("not-run");
@@ -82,9 +82,9 @@ describe("kestrel-upgrade fix --write against a copy of the fixture", () => {
   it("makes no further edit on a second run", async () => {
     const scratch = await createScratchCopy(FIXTURE);
     cleanupDirs.push(scratch.dir);
-    await runCli(["fix", "--root", scratch.dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined });
+    await runCli(["fix", "--root", scratch.dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined, forceInstalledMajor: 5 });
     const before = readFileSync(join(scratch.dir, "kestrel.config.ts"), "utf8");
-    const code = await runCli(["fix", "--root", scratch.dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined });
+    const code = await runCli(["fix", "--root", scratch.dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined, forceInstalledMajor: 5 });
     const after = readFileSync(join(scratch.dir, "kestrel.config.ts"), "utf8");
     expect(after).toBe(before);
     expect(code).toBe(0);
@@ -109,7 +109,7 @@ describe("kestrel-upgrade fix preview (no --write)", () => {
 
   it("never prints a remaining-errors count when no boot tier ran at all", async () => {
     const lines: string[] = [];
-    await runCli(["fix", "--root", FIXTURE], { stdout: (line) => lines.push(line), stderr: () => undefined });
+    await runCli(["fix", "--root", FIXTURE], { stdout: (line) => lines.push(line), stderr: () => undefined, forceInstalledMajor: 5 });
     expect(lines.some((l) => l.startsWith("after these edits:"))).toBe(false);
     expect(lines).toContain("could not verify the boot result: no boot check ran; upgrade @michaelthielemann/kestrel to 6 first, then run `fix` again to verify");
   });

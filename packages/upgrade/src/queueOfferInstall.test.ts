@@ -216,7 +216,7 @@ describe("offer/event-queue when kestrel itself is not yet on 6 (no boot tier at
   it("reports manual, could-not-verify on an explicit yes, naming the kestrel upgrade first", async () => {
     dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-queue-offer-no-boot-tier-"));
     await buildDirectProject(dir, true);
-    const { lines } = await runInCleanProcess(dir, ["fix", "--root", dir, "--json"], { "switch-to-queue": "yes", "idempotent:onNoteCreated": "yes", "relay-pipelines": "" }, undefined);
+    const { lines } = await runInCleanProcess(dir, ["fix", "--root", dir, "--json"], { "switch-to-queue": "yes", "idempotent:onNoteCreated": "yes", "relay-pipelines": "" }, 5);
     const reportLine = lines.find((l) => l.startsWith("{"));
     const report = boundaryCast<{ findings: Array<{ rule: string; message: string; suggestion: string; fix: { kind: string } }> }>(JSON.parse(reportLine ?? "{}"), "json");
     const offer = report.findings.find((f) => f.rule === "offer/event-queue");
@@ -228,7 +228,7 @@ describe("offer/event-queue when kestrel itself is not yet on 6 (no boot tier at
   it("writes nothing under --yes, since the offer has no default", async () => {
     dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-queue-offer-no-boot-tier-yes-"));
     await buildDirectProject(dir, true);
-    await runInCleanProcess(dir, ["fix", "--root", dir, "--write", "--yes"], undefined, undefined);
+    await runInCleanProcess(dir, ["fix", "--root", dir, "--write", "--yes"], undefined, 5);
     const configText = await readFile(join(dir, "kestrel.config.ts"), "utf8");
     expect(configText).toContain("@michaelthielemann/kestrel-events-direct");
     expect(configText).not.toContain("@michaelthielemann/kestrel-events-queue");

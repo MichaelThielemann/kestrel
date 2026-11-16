@@ -79,10 +79,10 @@ describe("kestrel-upgrade against the queue-offer-5.8 fixture, with the installe
   });
 });
 
-describe("kestrel-upgrade check against the queue-offer-5.8 fixture, unforced", () => {
+describe("kestrel-upgrade check against the queue-offer-5.8 fixture, with the installed major forced to 5", () => {
   it("leaves the checked-in fixture on the source tier only", async () => {
     const lines: string[] = [];
-    const code = await runCli(["check", "--root", FIXTURE, "--json"], { stdout: (line) => lines.push(line), stderr: () => undefined });
+    const code = await runCli(["check", "--root", FIXTURE, "--json"], { stdout: (line) => lines.push(line), stderr: () => undefined, forceInstalledMajor: 5 });
     const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
     expect(report.tiers.load).toBe("not-run");
     expect(report.tiers.boot).toBe("not-run");
