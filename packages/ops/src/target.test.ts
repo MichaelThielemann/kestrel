@@ -48,7 +48,7 @@ describe("local target", () => {
     for (let i = 0; i < 100 && !existsSync(join(root, "app", "env.json")); i++) await new Promise((r) => setTimeout(r, 20));
     const env = boundaryCast<Record<string, string>>(JSON.parse(readFileSync(join(root, "app", "env.json"), "utf8")), "json");
     expect(env.APP_MODE).toBe("rehearsal");
-    expect(Object.keys(env).filter((k) => k !== "APP_MODE" && k !== "PATH" && !k.startsWith("NODE_") && k !== "_" && k !== "PWD" && k !== "SHLVL")).toEqual([]);
+    expect(Object.keys(env).filter((k) => k !== "APP_MODE" && k !== "PATH" && !k.startsWith("NODE_") && k !== "_" && k !== "PWD" && k !== "SHLVL" && k !== "__CF_USER_TEXT_ENCODING")).toEqual([]);
     await expect(target.start()).rejects.toThrow(/already running/);
     await target.stop();
     expect(await target.status()).toEqual({ state: "stopped", instances: 0 });

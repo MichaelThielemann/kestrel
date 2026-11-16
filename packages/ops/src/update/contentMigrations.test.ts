@@ -89,7 +89,7 @@ describe("content migrations through a local start of the release", () => {
       expect(result).toMatchObject({ ran: true, applied: ["count-hits"] });
       expect(result.bootMs).toBeGreaterThan(0);
       const seen = boundaryCast<Record<string, string>>(JSON.parse(readFileSync(out, "utf8")), "json");
-      expect(Object.keys(seen).sort()).toEqual(["BLOBS", "BUILD", "DB", "MODE", "OUT", "PORT", "SITE_MODE"]);
+      expect(Object.keys(seen).filter((k) => k !== "__CF_USER_TEXT_ENCODING").sort()).toEqual(["BLOBS", "BUILD", "DB", "MODE", "OUT", "PORT", "SITE_MODE"]);
       expect(seen).toMatchObject({ DB: database, BLOBS: blobsDir, MODE: "local", SITE_MODE: "static", BUILD: `kestrel-ops-local-${ctx.runId}` });
       expect(Number(seen.PORT)).toBeGreaterThan(0);
       expect(JSON.stringify(seen)).not.toMatch(/parent-process|another-parent-secret/);

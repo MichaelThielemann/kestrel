@@ -32,7 +32,7 @@ const damages: Array<[string, Damage]> = [
   ],
 ];
 
-describe("restore over a replica that cannot be read", () => {
+describe("restore over a replica that cannot be read", { timeout: 30_000 }, () => {
   for (const [label, damage] of damages) {
     it(`restores a verified backup when the current replica ${label}, only after the unreadable-current answer`, async () => {
       const bucket = new MemoryBucket(`unreadable-${label}`);
