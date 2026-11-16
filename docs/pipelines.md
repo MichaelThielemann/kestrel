@@ -309,7 +309,8 @@ set headers of its own. They add to the mandatory ones and never replace `X-Cont
 `Content-Type`, `Content-Length`, `Content-Disposition` or the sandboxing
 `Content-Security-Policy`, which are written last. `Cache-Control` is the one header a binary result
 decides itself: when it sets one, that value is sent (`media.serve` marks an original
-`immutable`); when it does not, the response stays `no-store`. A step may also leave
+`immutable`, `delivery.readIndexFile` sends `no-cache` next to an `ETag`); when it does not, the response
+stays `no-store`. A step may also leave
 `responseHeaders` (a `Record<string, string>`, declared in its `writes`) on the context; the headers
 it holds after the last step go out with the response the same way, under the same mandatory ones —
 this is how `authn.login` sets the session cookie. A response that needs more than one cookie takes

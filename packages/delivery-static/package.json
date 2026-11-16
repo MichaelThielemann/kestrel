@@ -45,6 +45,7 @@
   },
   "devDependencies": {
     "@michaelthielemann/kestrel": "workspace:*",
+    "@michaelthielemann/kestrel-blobstore-filesystem": "workspace:*",
     "@michaelthielemann/kestrel-content-default": "workspace:*",
     "@michaelthielemann/kestrel-contracts": "workspace:*",
     "@michaelthielemann/kestrel-persistence-sqlite": "workspace:*",

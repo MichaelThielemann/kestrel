@@ -13,7 +13,7 @@ import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import { observeReads, type ObservedRead } from "@michaelthielemann/kestrel/reads";
 import { canonicalJson, normalizeReads, type DependencySpec } from "./dependencies.ts";
 import { dependencyPrefix, dependencyRowId, scan, setIdOf, statusIdOf, type DependencyKind, type OutputRef } from "./keys.ts";
-import { createIndexFiles, ROBOTS_KEY, SITEMAP_KEY, type ExportCount, type IndexCandidate } from "./indexes.ts";
+import { createIndexFiles, INDEX_FILE_NAMES, isIndexFileName, readIndexFile, ROBOTS_KEY, SITEMAP_KEY, type ExportCount, type IndexCandidate, type IndexFile, type IndexFileName } from "./indexes.ts";
 import { LLMS_KEY, validateLlmsConfig } from "./llms.ts";
 import { normalizeSiteUrl } from "./site-url.ts";
 import { createBackgroundLoop, type BackgroundLoop, type PassOutcome } from "./loop.ts";
@@ -32,6 +32,7 @@ export const INDEXES_STALE = "delivery.indexesStale";
 /** Raised through `events@1` with `dependencies.render: "events"` and `llms.full`, by `delivery.requestIndexes` and after a re-render; its data carries `coalesceKey: "llms"`. */
 export const LLMS_STALE = "delivery.llmsStale";
 export { normalizeSiteUrl, pageUrl } from "./site-url.ts";
+export { INDEX_FILE_NAMES, INDEX_FILE_TYPES, isIndexFileName, type IndexFile, type IndexFileName } from "./indexes.ts";
 
 export type Config = z.output<typeof configSchema>;
 export type TypeConfig = Config["types"][string];
@@ -138,6 +139,8 @@ export interface Delivery {
   resumeStale(): Promise<Result<{ released: number; swept: number; dispatched: number; aged: number; orphans: number }, DeliveryError>>;
   retryStale(): Promise<Result<{ retried: number }, DeliveryError>>;
   readStaleStatus(): Promise<Result<StaleStatus, DeliveryError>>;
+  /** Reads one index file under the prefix as the last export stored it, `null` when none is there; it never starts an export. */
+  readIndexFile(name: IndexFileName): Promise<Result<IndexFile | null, DeliveryError>>;
   /** Stops the background loop; exports that start afterwards answer `TRANSIENT`. */
   close(): Promise<void>;
 }
@@ -1691,6 +1694,12 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     },
     exportIndexes: exportIndexesNow,
     exportLlmsFull: exportLlmsFullNow,
+    async readIndexFile(name) {
+      if (!isIndexFileName(name)) throw new Error(`delivery/static: "${String(name)}" is not an index file (${INDEX_FILE_NAMES.join(", ")})`);
+      const read = await readIndexFile(blobs, config.prefix, name);
+      if (isErr(read)) return err(transientOnly(read.error, "blobstore@1"));
+      return read;
+    },
     markDependents,
     markMoved,
     markAll,

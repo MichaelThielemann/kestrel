@@ -6,10 +6,11 @@ import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { RENDERER } from "@michaelthielemann/kestrel-contracts/renderer";
 import { SITE } from "@michaelthielemann/kestrel-contracts/site";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { stepFactory, type Context } from "@michaelthielemann/kestrel/context";
+import { binaryResult, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule, type Introspection } from "@michaelthielemann/kestrel/defineModule";
+import { KestrelBootError } from "@michaelthielemann/kestrel/errors";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { createDeliveryStatic, INDEXES_STALE, LLMS_STALE, normalizeSiteUrl, OUTPUT_STALE, type Delivery, type MovedPath } from "./impl.ts";
+import { createDeliveryStatic, INDEX_FILE_NAMES, INDEXES_STALE, isIndexFileName, LLMS_STALE, normalizeSiteUrl, OUTPUT_STALE, type Delivery, type MovedPath } from "./impl.ts";
 
 const dependenciesSchema = z
   .object({
@@ -272,6 +273,17 @@ export default defineModule({
       if (isErr(status)) return ctx.fail(status.error);
       return ok({ ...ctx, result: status.value });
     },
+    readIndexFile: stepFactory((name: string) => {
+      if (!isIndexFileName(name)) throw new KestrelBootError("delivery/static", `delivery.readIndexFile reads one of ${INDEX_FILE_NAMES.join(", ")}, not "${name}"`, "step-argument");
+      return async (ctx: Context) => {
+        const file = await delivery.readIndexFile(name);
+        if (isErr(file)) return ctx.fail(file.error);
+        if (file.value === null) return ctx.fail("NOT_FOUND", `delivery.readIndexFile: no ${name} has been exported`);
+        const result = binaryResult(file.value.data, file.value.contentType, name);
+        result.headers = { etag: `"${file.value.sha256}"`, "cache-control": "no-cache" };
+        return ok({ ...ctx, result });
+      };
+    }),
   }),
 
   describe: () => ({
@@ -375,5 +387,12 @@ export default defineModule({
       output: STALE_STATUS_SCHEMA,
       atomicSafe: true,
     },
+    readIndexFile: (name: string) => ({
+      summary: `Answer ${name} as the last export stored it under the prefix, with the content type the export writes it with, its sha256 as ETag and \`cache-control: no-cache\`; no permission check (the file is public) and it never starts an export`,
+      reads: [],
+      writes: ["result"],
+      binary: true,
+      errors: { 404: `no ${name} has been exported`, 503: "the blob store could not be read" },
+    }),
   }),
 });

@@ -56,6 +56,7 @@ published. Only wiring bugs throw (unknown type, unconfigured type, an asset pat
 | `delivery.resumeStale` | – | `result` | TRANSIENT |
 | `delivery.retryStale` | – | `result.retried` | TRANSIENT |
 | `delivery.readStaleStatus` | – | `result` | TRANSIENT |
+| `delivery.readIndexFile:<file>` | – | `result` (the file) | NOT_FOUND (not exported), TRANSIENT |
 
 Status rows (`readStatus`, `_delivery`) also carry `stale` (marked for a re-render), `staleSince`, `staleFailed`
 (the re-render failed `dependencies.maxAttempts` times), `staleError` and `dependencies` (how many dependencies the
@@ -150,6 +151,32 @@ the first export after a start always writes. The result gains `_indexes: { entr
 `_llmsFull: { entries }`; the outcome of each export (`at`, `entries`, `error`, `skipped`) is stored in `delivery_state`
 and answered by `delivery.readStaleStatus` as `exports: { indexes, llmsFull }`. Both exports answer
 `TRANSIENT` once the process is stopping.
+
+**Reading a file back.** `delivery.readIndexFile:<file>` answers one of the four files, named by its argument
+(`sitemap.xml`, `robots.txt`, `llms.txt` or `llms-full.txt`), as a binary result: the bytes stored at
+`<prefix><file>`, the content type listed above for that file, the sha256 of the bytes as a strong `ETag` and
+`Cache-Control: no-cache`. Any other argument fails boot with `step-argument`, so no request can name another key.
+A file that is not there (no export has run yet, `sitemap: false` or no `siteUrl`, `llms.full` off) answers
+`NOT_FOUND` (404), and a failed blob store read `TRANSIENT` (503). A file of the site's own at one of these keys is
+answered the same way. The step reads the blob store and nothing else: it checks no permission, since the files
+are public on the static host anyway, and it never starts an export. An origin that serves the site without a
+static host in front answers the four paths with it, byte for byte what the static host would serve:
+
+```ts
+triggers: [
+  { http: "GET /sitemap.xml", pipeline: "sitemapXml" },
+  { http: "GET /robots.txt", pipeline: "robotsTxt" },
+],
+```
+
+```ts
+definePipeline({ name: "sitemapXml", steps: ["delivery.readIndexFile:sitemap.xml"] });
+definePipeline({ name: "robotsTxt", steps: ["delivery.readIndexFile:robots.txt"] });
+```
+
+The HTTP trigger sends a binary result with `Content-Disposition: attachment` unless its media type is in
+`http.inlineTypes`. To send them `inline`, as a static host does, list `application/xml` and `text/plain` there, or
+in the `inlineTypes` of an h3 handler that serves only these routes.
 
 **siteUrl** must be an absolute `http` or `https` URL without credentials, query or fragment. It is
 normalized by lower-casing the host, dropping a default port and stripping trailing slashes; a base path
@@ -472,6 +499,7 @@ Not included: CDN invalidation, a sitemap index for more than 50 000 URLs.
 | `delivery.resumeStale` | Release expired render claims, remove old tombstones and orphaned dependency sets, start the re-renders a stopped process or a lost job left marked, and ask for an index export | – | `result` | – | { released: integer, swept: integer, dispatched: integer, aged: integer, orphans: integer, … } | – | – | no |
 | `delivery.retryStale` | Reset the attempts of every output whose re-render failed maxAttempts times and start it again (adds `retried` to the result) | – | `result` | – | { retried: integer, … } | – | – | no |
 | `delivery.readStaleStatus` | How many outputs wait for a re-render, failed it, are rendering or have unknown dependencies, the oldest mark, the renders this process abandoned at the timeout, and the last index and llms-full.txt exports | – | `result` | – | { stale: integer, failed: integer, rendering: integer, unknown: integer, oldestStaleAt: number \| null, abandoned: integer, exports: object, … } | – | – | yes |
+| `delivery.readIndexFile:<arg>` | Answer <arg> as the last export stored it under the prefix, with the content type the export writes it with, its sha256 as ETag and `cache-control: no-cache`; no permission check (the file is public) and it never starts an export | – | `result` | – | – | 404 no <arg> has been exported; 503 the blob store could not be read | – | no |
 
 Pipelines in `examples/minimal` using these steps:
 

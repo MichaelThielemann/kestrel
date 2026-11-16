@@ -15,6 +15,35 @@ export const ROBOTS_KEY = "robots.txt";
 export const SITEMAP_CONTENT_TYPE = "application/xml; charset=utf-8";
 export const ROBOTS_CONTENT_TYPE = "text/plain; charset=utf-8";
 
+/** The content type each index file is written with, keyed by its name under the prefix. */
+export const INDEX_FILE_TYPES = { [SITEMAP_KEY]: SITEMAP_CONTENT_TYPE, [ROBOTS_KEY]: ROBOTS_CONTENT_TYPE, [LLMS_KEY]: LLMS_CONTENT_TYPE, [LLMS_FULL_KEY]: LLMS_CONTENT_TYPE } as const;
+
+export type IndexFileName = keyof typeof INDEX_FILE_TYPES;
+
+export const INDEX_FILE_NAMES: readonly IndexFileName[] = [SITEMAP_KEY, ROBOTS_KEY, LLMS_KEY, LLMS_FULL_KEY];
+
+export function isIndexFileName(name: string): name is IndexFileName {
+  return INDEX_FILE_NAMES.some((known) => known === name);
+}
+
+/** One index file as an export stored it under the prefix. */
+export interface IndexFile {
+  name: IndexFileName;
+  data: Uint8Array;
+  /** The content type the export writes this file with. */
+  contentType: string;
+  /** The sha256 of `data`, hex. */
+  sha256: string;
+}
+
+/** Reads `<prefix><name>` as an export stored it; `null` when there is none. Writes nothing and starts no export. */
+export async function readIndexFile(blobs: Blobstore, prefix: string, name: IndexFileName): Promise<Result<IndexFile | null, KestrelError>> {
+  const read = await blobs.get(`${prefix}${name}`);
+  if (isErr(read)) return read.error.code === "NOT_FOUND" ? ok(null) : read;
+  if (read.value === null) return ok(null);
+  return ok({ name, data: read.value, contentType: INDEX_FILE_TYPES[name], sha256: sha256(read.value) });
+}
+
 export type RobotsPolicy = "allow" | "disallow";
 
 export function escapeXml(value: string): string {

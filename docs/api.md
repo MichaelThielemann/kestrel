@@ -785,7 +785,9 @@ it itself before the document reaches `content.create`/`content.update`.
 ### sitemap.xml, robots.txt, llms.txt and llms-full.txt
 
 `delivery-static` writes four files next to `redirects.json` in the blob store (`site/sitemap.xml`,
-`site/robots.txt`, `site/llms.txt`, `site/llms-full.txt`); nginx serves them statically. No editor
+`site/robots.txt`, `site/llms.txt`, `site/llms-full.txt`); nginx serves them statically. An origin without
+nginx in front answers them with the same bytes and content type through `delivery.readIndexFile:<file>` (see
+the delivery-static README, "Index files"); that step only reads, so it never starts an export. No editor
 request writes them: after a page save, a page delete, a settings change and `publishAllPages`,
 `delivery.requestIndexes` asks for an export, which in the example instance the background loop runs
 about a second later, before its next batch of re-renders. `delivery.resumeStale` asks again on every

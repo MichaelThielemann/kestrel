@@ -393,6 +393,9 @@ importers:
       '@michaelthielemann/kestrel':
         specifier: workspace:*
         version: link:../core
+      '@michaelthielemann/kestrel-blobstore-filesystem':
+        specifier: workspace:*
+        version: link:../blobstore-filesystem
       '@michaelthielemann/kestrel-content-default':
         specifier: workspace:*
         version: link:../content-default

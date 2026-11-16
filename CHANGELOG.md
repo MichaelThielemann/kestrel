@@ -1962,6 +1962,16 @@ Net changes since 5.8.2. 5.8.2 was not published; upgrading from 5.8.1 brings it
   `skippedRules` entry is declared as an enumeration of these values and `row` is required, in the manifest and
   in the OpenAPI description. A stored row whose `status` is neither text nor a number is skipped as
   `invalid-status` instead of making the list unreadable.
+- `delivery-static`: `delivery.readIndexFile:<file>` answers one exported index file (`sitemap.xml`, `robots.txt`,
+  `llms.txt` or `llms-full.txt`) as a binary result: the bytes stored at `<prefix><file>`, the content type the
+  export writes it with (`application/xml; charset=utf-8` for sitemap.xml, `text/plain; charset=utf-8` for the
+  others), the sha256 of the bytes as `ETag` and `Cache-Control: no-cache`. A file that is not there answers
+  `NOT_FOUND` (404), a failed blob store read `TRANSIENT` (503). Any other argument fails boot with
+  `step-argument`, so no request can name another key. The step checks no permission, since the files are public,
+  and never starts an export. An origin without a static host in front answers `/sitemap.xml`, `/robots.txt`,
+  `/llms.txt` and `/llms-full.txt` with it, byte for byte what the static host would serve.
+  `@michaelthielemann/kestrel-delivery-static/impl` exports `INDEX_FILE_NAMES`, `INDEX_FILE_TYPES`,
+  `isIndexFileName` and the types `IndexFile` and `IndexFileName`, and `Delivery` gains `readIndexFile(name)`.
 
 ### Changed
 

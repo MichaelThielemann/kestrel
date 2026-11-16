@@ -247,7 +247,7 @@ describe("delivery/static: atomicSafe is pinned", () => {
   it("matches the shipped table", async () => {
     const { instance } = await boot();
     const describeMap = boundaryCast<Record<string, StepDescription | ((arg: string) => StepDescription)>>(module.describe!(instance), "host");
-    const expected: Record<string, boolean> = { readStatus: true, publish: false, unpublish: false, publishAll: false, exportIndexes: false, exportLlmsFull: false, markDependents: false, markAll: false, checkBuild: false, republishOutput: false, requestIndexes: false, resumeStale: false, retryStale: false, readStaleStatus: true };
+    const expected: Record<string, boolean> = { readStatus: true, publish: false, unpublish: false, publishAll: false, exportIndexes: false, exportLlmsFull: false, markDependents: false, markAll: false, checkBuild: false, republishOutput: false, requestIndexes: false, resumeStale: false, retryStale: false, readStaleStatus: true, readIndexFile: false };
     for (const [name, expect_] of Object.entries(expected)) {
       const description = describeMap[name];
       const resolved = typeof description === "function" ? description("pages") : description;

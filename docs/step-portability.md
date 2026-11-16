@@ -160,6 +160,7 @@ prefix).
 | `delivery.resumeStale` | none |
 | `delivery.retryStale` | none |
 | `delivery.readStaleStatus` | none |
+| `delivery.readIndexFile` | none |
 | `redirects.validate` | none |
 | `redirects.recordMoves` | none |
 | `redirects.lookup` | none |

@@ -3278,7 +3278,8 @@
         "delivery.requestIndexes",
         "delivery.resumeStale",
         "delivery.retryStale",
-        "delivery.readStaleStatus"
+        "delivery.readStaleStatus",
+        "delivery.readIndexFile"
       ],
       "eventHook": false,
       "atomicScope": false,
@@ -12487,6 +12488,23 @@
           ]
         },
         "atomicSafe": true
+      }
+    },
+    {
+      "name": "delivery.readIndexFile",
+      "module": "delivery/static",
+      "factory": true,
+      "description": {
+        "summary": "Answer <arg> as the last export stored it under the prefix, with the content type the export writes it with, its sha256 as ETag and `cache-control: no-cache`; no permission check (the file is public) and it never starts an export",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "binary": true,
+        "errors": {
+          "404": "no <arg> has been exported",
+          "503": "the blob store could not be read"
+        }
       }
     },
     {
