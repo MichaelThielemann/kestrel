@@ -41,7 +41,11 @@ major stops the restore with exit 1 unless the answer `other-major` accepts it, 
 back to the release before an upgrade, run `kestrel update rollback`, which brings back the cutover state together
 with the previous release; to read a 5.x backup under 6, copy it with `kestrel restore --to local <dir> --backup
 <id> --with-media` and convert the copy with `kestrel upgrade migrate`. When neither the journal nor the target
-tells the running major, or the backup names none, the restore warns and goes on.
+tells the running major, or the backup names none, the restore warns and goes on. A cutover backup records the
+versions the run started from; any other backup records those of the project the command runs from and those the
+target reports, which for the Cloud Foundry target are the packages installed in its `dir`. The check therefore
+reads the right major only for backups taken from a checkout of the deployed release: a `backup create` run from a
+checkout of the new release against the old one is labelled with the new major.
 
 ## Permissions of the tool's credentials
 

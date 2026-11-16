@@ -357,7 +357,7 @@ migrations through `update.localBoot` with an environment of exactly its configu
 | `prune-delete` | before prune deletes | answers yes |
 | `break-lock` | `--break-lock` finds a lock another run holds | never |
 | `update-stop` | before a deploy stops the app | answers yes |
-| `rollback-accepted` | `update rollback` or `update abort` after accept, or before it once the stopped new release holds what it wrote since its start; the answer is the environment's name | never |
+| `rollback-accepted` | `update rollback` or `update abort` after accept, or before it once the stopped new release holds what it wrote since its start; `update resume`, `update rollback` or `update abort` of a rollback that already started the previous release, once the stopped replica holds what that release wrote since; the answer is the environment's name | never |
 | `cleanup-delete` | before `update cleanup` removes originals | never |
 | `other-major` | a restore of a backup another Kestrel major wrote than the environment runs | never |
 

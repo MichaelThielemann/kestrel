@@ -97,6 +97,6 @@ describe("restore of a backup of another Kestrel major", () => {
     const ctx = await s.h.context({ command: "restore", answers: { "unsealed-stop": "accept", "access-changes": "accept" } });
     const result = await restoreBackup(ctx, { backupId: backup.id });
     expect(result.backupId).toBe(backup.id);
-    expect(s.h.output.warn.join("\n")).toContain("cannot tell which Kestrel major the environment runs");
+    expect(s.h.output.warn.join("\n")).toContain("cannot tell which Kestrel major the environment runs (no update run, and the target names no Kestrel version)");
   });
 });

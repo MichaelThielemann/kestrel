@@ -176,7 +176,7 @@ export async function runningMajor(ctx: OpsContext): Promise<{ major: number; fr
   if (recorded !== null) return { major: recorded, from: fixedText`as update run ${literal(run?.runId ?? "")} left it` };
   const reported = kestrelMajor((await ctx.target.describe()).packages);
   if (reported !== null) return { major: reported, from: fixedText`as the target reports it` };
-  return { major: null, unknown: run === null ? fixedText`no update run and the target name its Kestrel version` : fixedText`update run ${literal(run.runId)} is ${literal(run.state)} and the target names no Kestrel version` };
+  return { major: null, unknown: run === null ? fixedText`no update run, and the target names no Kestrel version` : fixedText`update run ${literal(run.runId)} is ${literal(run.state)} and the target names no Kestrel version` };
 }
 
 async function checkMajor(ctx: OpsContext, manifest: Manifest): Promise<void> {
