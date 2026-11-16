@@ -1,4 +1,4 @@
-FROM nginx:1.30-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a
+FROM nginx:1.31-alpine@sha256:fed7e14be83cbd2661a75cdc5b872d936cf155d46c327084d30b8df19ae88d72
 
 # nginx-module-njs: ships ngx_http_js_module.so, requires njs >= 0.8.1 for js_periodic.
 # gettext: provides envsubst, used at start to bake REDIRECTS_INTERVAL_MS into nginx.conf
