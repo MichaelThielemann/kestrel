@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 6.0.1 – 2026-11-18
+
 ### Fixed
 
 - `images-default`: **`./storage` loads without `sharp`.** The storage entry no longer imports the renderer, so

@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-events-direct",
-  "version": "6.0.0",
+  "version": "6.0.1",
   "description": "Inline event delivery: subscribes event-trigger pipelines to events@1 and runs them within the emitting request.",
   "type": "module",
   "license": "Apache-2.0",

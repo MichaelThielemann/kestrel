@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-upgrade",
-  "version": "6.0.0",
+  "version": "6.0.1",
   "description": "The 5.8 -> 6.0 upgrade engine behind `kestrel upgrade`: check, fix, data and the offline storage migration of a database and blob copy (migrate), an exported sandbox helper and the plugin API host packages register their rules and project loader through.",
   "type": "module",
   "license": "Apache-2.0",

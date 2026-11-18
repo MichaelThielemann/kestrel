@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-mfa-totp",
-  "version": "6.0.0",
+  "version": "6.0.1",
   "description": "A second factor for any authn@1 module: time-based one-time codes (RFC 6238) with recovery codes, stored via persistence@1.",
   "type": "module",
   "license": "Apache-2.0",
