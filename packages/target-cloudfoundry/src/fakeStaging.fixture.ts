@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { fakeFailure, fakeJson, type FakeCloudFoundry, type FakeCfApp } from "./fakeCloudFoundry.fixture.ts";
+import { fakeFailure, fakeJson, passesCreatedAts, type FakeCloudFoundry, type FakeCfApp } from "./fakeCloudFoundry.fixture.ts";
 
 /** One package the fake created from a directory. */
 export interface FakePackage {
@@ -62,7 +62,8 @@ export function installStaging(cf: FakeCloudFoundry): FakeStaging {
     const target = cf.all.find((a) => a.guid === url.searchParams.get("target_guids"));
     if (target === undefined) return fakeJson({ resources: [] });
     const crashes = staging.crashes.filter((c) => c.app === target.name).map(({ type, created_at, data }) => ({ type, created_at, data }));
-    return fakeJson({ resources: [...crashes, ...target.events.map((e) => ({ ...e, data: {} }))].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)) });
+    const events = [...crashes, ...target.events.map((e) => ({ ...e, data: {} }))].filter((e) => passesCreatedAts(url, e.created_at));
+    return fakeJson({ resources: events.sort((a, b) => (a.created_at < b.created_at ? 1 : -1)) });
   });
   return staging;
 }

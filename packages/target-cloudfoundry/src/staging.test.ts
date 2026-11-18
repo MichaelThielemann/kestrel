@@ -127,6 +127,26 @@ describe("timestamps in Cloud Foundry filters", () => {
   });
 });
 
+describe("timestamp filters of the fake Cloud Foundry API", () => {
+  const curl = async (path: string): Promise<unknown> => JSON.parse((await cfRunner(cf.env({ ...process.env }))(["curl", path])).stdout);
+  const refused = { errors: [expect.objectContaining({ code: 10005, title: "CF-BadQueryParameter" })] };
+
+  it("refuses a created_ats or updated_ats value with milliseconds, a time zone offset or no time, as the Cloud Controller does", async () => {
+    for (const value of ["2026-11-15T01:00:05.770Z", "2026-11-15T01:00:05+01:00", "2026-11-15"]) {
+      expect(await curl(`/v3/audit_events?target_guids=${API.guid}&created_ats[gte]=${value}`)).toEqual(refused);
+      expect(await curl(`/v3/apps/${API.guid}/droplets?updated_ats[lt]=${value}`)).toEqual(refused);
+      expect(await curl(`/v3/audit_events?created_ats=2026-11-15T01:00:05Z,${value}`)).toEqual(refused);
+    }
+    expect(await curl(`/v3/audit_events?created_ats[after]=2026-11-15T01:00:05Z`)).toEqual(refused);
+  });
+
+  it("answers audit events within the created_ats bounds of whole seconds", async () => {
+    cf.app(API.name).events.push({ type: "audit.app.start", created_at: "2026-11-15T01:00:04Z" }, { type: "audit.app.stop", created_at: "2026-11-15T01:00:05Z" });
+    expect(await curl(`/v3/audit_events?target_guids=${API.guid}&created_ats[gte]=2026-11-15T01:00:05Z`)).toEqual({ resources: [{ type: "audit.app.stop", created_at: "2026-11-15T01:00:05Z", data: {} }] });
+    expect(await curl(`/v3/audit_events?target_guids=${API.guid}&created_ats[lt]=2026-11-15T01:00:05Z`)).toEqual({ resources: [{ type: "audit.app.start", created_at: "2026-11-15T01:00:04Z", data: {} }] });
+  });
+});
+
 describe("the readiness probe of the Cloud Foundry target", () => {
   let server: Server;
   let base: string;

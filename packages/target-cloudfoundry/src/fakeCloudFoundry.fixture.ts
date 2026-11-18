@@ -89,6 +89,42 @@ export const fakeJson = (value: unknown): FakeCfAnswer => ({ code: 0, stdout: JS
 /** A failed cf call with `stderr` on standard error. */
 export const fakeFailure = (stderr: string): FakeCfAnswer => ({ code: 1, stdout: "FAILED\n", stderr });
 
+const TIMESTAMP_FILTER = /^(created|updated)_ats(?:\[([^\]]*)\])?$/;
+const CF_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+const RELATIONS = new Set(["gt", "gte", "lt", "lte"]);
+
+/**
+ * Why the Cloud Controller refuses the timestamp filters of `url`, or null: a `created_ats` or `updated_ats` value
+ * must be `YYYY-MM-DDThh:mm:ssZ`, a list of them without a relational operator, and an operator one of gt, gte, lt, lte.
+ */
+export function timestampFilterError(url: URL): string | null {
+  for (const [name, value] of url.searchParams) {
+    const match = TIMESTAMP_FILTER.exec(name);
+    if (match === null) continue;
+    const field = match[1] === "created" ? "Created ats" : "Updated ats";
+    const relation = match[2];
+    if (relation !== undefined && !RELATIONS.has(relation)) return `The query parameter is invalid: ${field} has an invalid relational operator '${relation}'`;
+    const values = relation === undefined ? value.split(",") : [value];
+    if (!values.every((v) => CF_TIMESTAMP.test(v))) return `The query parameter is invalid: ${field} has an invalid timestamp format. Timestamps should be formatted as 'YYYY-MM-DDThh:mm:ssZ'`;
+  }
+  return null;
+}
+
+/** Whether a resource created at `createdAt` passes the `created_ats` filters of `url`, as the Cloud Controller applies them. */
+export function passesCreatedAts(url: URL, createdAt: string): boolean {
+  const at = Date.parse(createdAt);
+  return [...url.searchParams].every(([name, value]) => {
+    const relation = TIMESTAMP_FILTER.exec(name);
+    if (relation === null || relation[1] !== "created") return true;
+    const bound = Date.parse(value);
+    if (relation[2] === "gt") return at > bound;
+    if (relation[2] === "gte") return at >= bound;
+    if (relation[2] === "lt") return at < bound;
+    if (relation[2] === "lte") return at <= bound;
+    return value.split(",").some((v) => Date.parse(v) === at);
+  });
+}
+
 interface StubRequest {
   argv: string[];
   color: string | null;
@@ -310,6 +346,8 @@ export class FakeCloudFoundry {
     if (this.failingPaths.has(url.pathname)) return fail(`Request error: ${url.pathname}\n`);
     if (this.takeOne(this.killedPaths, url.pathname)) return { ...fail(""), signal: "SIGKILL" };
     if (this.takeOne(this.hungPaths, url.pathname)) return { ...fail(""), hangMs: 60_000 };
+    const refused = timestampFilterError(url);
+    if (refused !== null) return json({ errors: [{ code: 10005, title: "CF-BadQueryParameter", detail: refused }] });
     const parts = url.pathname.split("/").filter((p) => p !== "");
     const named = parts[1] === "apps" ? this.byGuid(parts[2] ?? "") : undefined;
     for (const route of this.routes) {
@@ -325,7 +363,7 @@ export class FakeCloudFoundry {
     }
     if (parts[1] === "audit_events") {
       const app = this.byGuid(url.searchParams.get("target_guids") ?? "");
-      return json({ resources: app?.events ?? [] });
+      return json({ resources: (app?.events ?? []).filter((e) => passesCreatedAts(url, e.created_at)) });
     }
     if (parts[1] !== "apps") return notFound;
     const app = this.byGuid(parts[2] ?? "");
