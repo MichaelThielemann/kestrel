@@ -7,6 +7,8 @@
 - `images-default`: **`./storage` loads without `sharp`.** The storage entry no longer imports the renderer, so
   `kestrel update prepare` and `deploy` from a bundle written on another platform (for example a Linux x64 build
   run on macOS arm64) plan and migrate image storage without that platform's `sharp` binaries.
+- `ops`: when a module's storage export cannot load, the exit 2 error names the platform of the machine that runs
+  the update, such as `darwin-arm64`, next to the package and the cause.
 
 ## 6.0.0 – 2026-11-16
 

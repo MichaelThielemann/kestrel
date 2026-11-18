@@ -58,7 +58,7 @@ export async function importReleasePackage(ctx: Pick<UpdateContext, "release">, 
   try {
     return await import(pathToFileURL(join(dir, entry)).href);
   } catch (cause) {
-    throw new OpsError(`cannot load ${name}${subpath.slice(1)} of the release: ${messageOf(cause)}`, 2, name);
+    throw new OpsError(`cannot load ${name}${subpath.slice(1)} of the release on ${process.platform}-${process.arch}: ${messageOf(cause)}`, 2, name);
   }
 }
 

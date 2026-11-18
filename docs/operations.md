@@ -201,6 +201,11 @@ written: with the default output the directory that holds `.kestrel-ops/`; with 
 the project's layout around `<dir>`. Run one deploy job at a time per environment: the lock trace cannot exclude
 two runs that start in the same moment.
 
+A module's `./storage` export loads no native package, so the storage migrations of a bundle written on one
+platform run on another; the image module's storage does not need `sharp`. A storage export that cannot load
+ends the update command with exit 2, and the error names the package, the platform of the machine that runs it
+(such as `darwin-arm64`) and the cause.
+
 ### Deploy steps
 
 | Step | App | What happens |

@@ -52,6 +52,14 @@ describe("the storages of the release", () => {
     expect(error instanceof OpsError ? [error.exitCode, error.message] : error).toEqual([2, expect.stringContaining("exports no storage()")]);
   });
 
+  it("refuses with exit 2 a storage export that cannot load, naming the package, the platform and the cause", async () => {
+    const h = createUpdateHarness();
+    harnesses.push(h);
+    fakePackage(h, "@michaelthielemann/kestrel-native", { "storage.mjs": 'import "native-addon-that-is-not-installed";\nexport function storage() {}\n' }, { "./storage": "./storage.mjs" });
+    const error = await releaseStorages(await contextWith(h, { "@michaelthielemann/kestrel-native": "6.0.0" })).catch((caught: unknown) => caught);
+    expect(error instanceof OpsError ? [error.exitCode, error.message] : error).toEqual([2, expect.stringMatching(new RegExp(`^cannot load @michaelthielemann/kestrel-native/storage of the release on ${process.platform}-${process.arch}: .*native-addon-that-is-not-installed`))]);
+  });
+
   it("cleans an SVG with the release's sanitize package and has no sanitizer without it", async () => {
     const h = createUpdateHarness();
     harnesses.push(h);
