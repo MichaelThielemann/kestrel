@@ -1,7 +1,7 @@
 import type { Document, Filter, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { Detection, MigrationContext, MigrationNote, ModuleStorage, ShapeMigration, ShapeMigrationError } from "@michaelthielemann/kestrel-contracts/helpers/shape-migrations";
 import { isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
-import { RETIRED, RETIRED_SCHEMA, VARIANTS, VARIANTS_SCHEMA } from "./impl.ts";
+import { RETIRED, RETIRED_SCHEMA, VARIANTS, VARIANTS_SCHEMA } from "./collections.ts";
 
 /** The module name the storage version row is kept under. */
 export const MODULE = "images/default";

@@ -12,6 +12,7 @@ import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import type { z } from "zod";
+import { FRAMING, HIDDEN, ITEMS, JOBS, RETIRED, RETIRED_SCHEMA, SIZES, VARIANTS, VARIANTS_SCHEMA } from "./collections.ts";
 import { framingView, type FramingView } from "./framed.ts";
 import { EMPTY_FRAMING, effectiveCrop, formatCrop, parseCrop, parseFraming, type Framing, type PixelCrop, type Rect } from "./framing.ts";
 import { contentTypeOf, eligible, ELIGIBLE, render } from "./generate.ts";
@@ -21,22 +22,7 @@ import { DEFAULT_SIZES, mergeSizes, sizeSchema, spec } from "./sizes.ts";
 import type { Size, SizeRow } from "./sizes.ts";
 import type { configSchema } from "./module.ts";
 
-export const SIZES = "images_sizes";
-export const VARIANTS = "images_variants";
-export const JOBS = "images_jobs";
-export const RETIRED = "images_retired";
-export const HIDDEN = "images_hidden";
-export const FRAMING = "images_framing";
-export const ITEMS = "images_items";
-
-/** The schema of {@link VARIANTS} this release reads and writes. */
-export const VARIANTS_SCHEMA: Schema = { mediaId: "string", size: "string", slot: { type: "string", unique: true }, spec: "string", width: "number", height: "number", format: "string", key: "string", bytes: "number", state: "string", error: "json", attempts: "number", updatedAt: "number", crop: "string", renderedCrop: "string", renders: "number", originalWidth: "number", originalHeight: "number" };
-
-/** The schema of {@link RETIRED} this release reads and writes. */
-export const RETIRED_SCHEMA: Schema = { mediaId: "string", file: "string", slot: { type: "string", unique: true }, retiredAt: "number" };
-
-/** Every collection this module stores; the persistence handle it is given reaches these and no other. */
-export const COLLECTIONS: readonly string[] = [SIZES, VARIANTS, JOBS, RETIRED, HIDDEN, FRAMING, ITEMS];
+export { COLLECTIONS, FRAMING, HIDDEN, ITEMS, JOBS, RETIRED, RETIRED_SCHEMA, SIZES, VARIANTS, VARIANTS_SCHEMA } from "./collections.ts";
 
 export const DEFAULT_MAX_ATTEMPTS = 5;
 export const DEFAULT_RENDER_TIMEOUT_MS = 30000;

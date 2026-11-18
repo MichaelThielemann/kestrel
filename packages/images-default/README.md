@@ -429,7 +429,8 @@ Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered
 ## Storage migrations
 
 `@michaelthielemann/kestrel-images-default/storage` exports `storage()`, the module's storage for
-`helpers/shape-migrations` of `kestrel-contracts`, and `migrations`. Its one migration,
+`helpers/shape-migrations` of `kestrel-contracts`, and `migrations`. It loads without `sharp`, so a
+storage migration also runs on a machine that has no `sharp` build for its platform. Its one migration,
 `images-default:variant-slots` (introduced in 6.0.0, after `media-default:id-key-layout`), fills in
 the `slot` that 5.x rows lack: `<mediaId>/<size>` on each `images_variants` row and
 `<mediaId>/<file>` on each `images_retired` row. Where several variant rows share a slot, the newest

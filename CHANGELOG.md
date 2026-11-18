@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+
+- `images-default`: **`./storage` loads without `sharp`.** The storage entry no longer imports the renderer, so
+  `kestrel update prepare` and `deploy` from a bundle written on another platform (for example a Linux x64 build
+  run on macOS arm64) plan and migrate image storage without that platform's `sharp` binaries.
+
 ## 6.0.0 – 2026-11-16
 
 Net changes since 5.8.2. 5.8.2 was not published; upgrading from 5.8.1 brings its fixes as well.
