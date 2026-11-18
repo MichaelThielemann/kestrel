@@ -15,6 +15,15 @@ export class CfApiError extends OpsError {
 }
 
 /**
+ * `at`, in milliseconds since the epoch, as the value of a Cloud Foundry v3 timestamp filter such as
+ * `created_ats[gte]`. The Cloud Controller accepts only `YYYY-MM-DDThh:mm:ssZ` there, so the time is rounded down to
+ * its whole second: a `[gte]` filter still includes `at`, and the caller narrows the answer to the exact time.
+ */
+export function cfTimestamp(at: number): string {
+  return `${new Date(Math.floor(at / 1000) * 1000).toISOString().slice(0, 19)}Z`;
+}
+
+/**
  * What the steps of the target share for one app: the cf runner, the v3 API through `cf curl` with a schema for each
  * answer, the app's guid (resolved once and checked against `cf target`), and the reads every step starts from.
  */

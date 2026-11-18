@@ -11,6 +11,7 @@ import { FakeCloudFoundry } from "./fakeCloudFoundry.fixture.ts";
 import { installStaging, type FakeStaging } from "./fakeStaging.fixture.ts";
 import { parseConfig } from "./config.ts";
 import { probeReady } from "./staging.ts";
+import { cfTimestamp } from "./session.ts";
 
 const API = { name: "site-api", guid: "6f0c2a8e-1b7d-4c3e-9a51-0d2e8f4b7a10" };
 
@@ -106,6 +107,23 @@ describe("crash events of the Cloud Foundry app", () => {
     staging.crashes.push({ app: API.name, type: "audit.app.process.crash", created_at: "2026-11-15T01:02:00Z", data: { exit_description: "APP/PROC/WEB: Exited with status 1" } });
     cf.app(API.name).events.push({ type: "audit.app.start", created_at: "2026-11-15T01:01:00Z" });
     expect(await (await target()).crashEvents(since)).toEqual([{ at: Date.parse("2026-11-15T01:02:00Z"), type: "audit.app.process.crash", reason: "APP/PROC/WEB: Exited with status 1" }]);
+  });
+
+  it("asks for events from the whole second of a time with milliseconds and keeps only those at or after the exact time", async () => {
+    const since = Date.parse("2026-11-15T01:00:05.770Z");
+    staging.crashes.push({ app: API.name, type: "audit.app.process.crash", created_at: "2026-11-15T01:00:05.500Z", data: { exit_description: "before" } });
+    staging.crashes.push({ app: API.name, type: "audit.app.process.crash", created_at: "2026-11-15T01:00:05.900Z", data: { exit_description: "APP/PROC/WEB: Exited with status 1" } });
+    expect(await (await target()).crashEvents(since)).toEqual([{ at: Date.parse("2026-11-15T01:00:05.900Z"), type: "audit.app.process.crash", reason: "APP/PROC/WEB: Exited with status 1" }]);
+    const query = cf.calls.find((argv) => argv[0] === "curl" && (argv[1] ?? "").startsWith("/v3/audit_events"))?.[1] ?? "";
+    expect(new URL(query, "https://api.example.test").searchParams.get("created_ats[gte]")).toBe("2026-11-15T01:00:05Z");
+  });
+});
+
+describe("timestamps in Cloud Foundry filters", () => {
+  it("are whole seconds in UTC, rounded down", () => {
+    expect(cfTimestamp(Date.parse("2026-11-15T01:00:05.999Z"))).toBe("2026-11-15T01:00:05Z");
+    expect(cfTimestamp(Date.parse("2026-11-15T01:00:05Z"))).toBe("2026-11-15T01:00:05Z");
+    expect(cfTimestamp(Date.parse("2026-11-15T02:00:05.001+01:00"))).toBe("2026-11-15T01:00:05Z");
   });
 });
 

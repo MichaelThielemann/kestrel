@@ -9,6 +9,11 @@
   run on macOS arm64) plan and migrate image storage without that platform's `sharp` binaries.
 - `ops`: when a module's storage export cannot load, the exit 2 error names the platform of the machine that runs
   the update, such as `darwin-arm64`, next to the package and the cause.
+- `target-cloudfoundry`: `update deploy` halted at `verify` on every Cloud Foundry deploy, and `update resume`
+  halted the same way, because reading the app's crash events since the start sent `created_ats[gte]` with
+  milliseconds, which the Cloud Controller refuses with `CF-BadQueryParameter`. A timestamp in a Cloud Foundry
+  filter is sent as `YYYY-MM-DDThh:mm:ssZ`, rounded down to its whole second; crash events from before the exact
+  start time within that second are still left out.
 
 ## 6.0.0 – 2026-11-16
 

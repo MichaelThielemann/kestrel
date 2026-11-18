@@ -4,7 +4,7 @@ import type { CrashEvent, ReadyProbe, ReleaseSource, StagedDroplet, TargetPrefli
 // eslint-disable-next-line no-restricted-imports -- a target adapter reports failures as the errors of the kestrel-ops run that loads it
 import { OpsError } from "@michaelthielemann/kestrel-ops";
 import { CfUnfinished, type CfResult } from "./cf.ts";
-import type { CfSession } from "./session.ts";
+import { cfTimestamp, type CfSession } from "./session.ts";
 
 /** How long one readiness check may take before it counts as unverifiable, in milliseconds. */
 export const PROBE_TIMEOUT_MS = 5000;
@@ -122,7 +122,7 @@ const text = (data: Record<string, unknown> | null | undefined, name: string): s
 /** The app's crash events (`audit.app.process.crash` and failed starts) at or after `since`. */
 export async function crashEvents(session: CfSession, since: number): Promise<CrashEvent[]> {
   const guid = await session.appGuid();
-  const events = await session.api(`/v3/audit_events?target_guids=${guid}&created_ats[gte]=${new Date(since).toISOString()}&order_by=-created_at&per_page=100`, eventsSchema);
+  const events = await session.api(`/v3/audit_events?target_guids=${guid}&created_ats[gte]=${cfTimestamp(since)}&order_by=-created_at&per_page=100`, eventsSchema);
   return events.resources
     .filter((e) => CRASH_EVENT.test(e.type) && Date.parse(e.created_at) >= since)
     .map((e) => ({ at: Date.parse(e.created_at), type: e.type, reason: text(e.data, "exit_description") ?? text(e.data, "reason") }))
